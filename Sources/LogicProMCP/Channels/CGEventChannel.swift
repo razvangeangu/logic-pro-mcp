@@ -139,7 +139,18 @@ actor CGEventChannel: Channel {
             }
             let sent = postShortcutSequence(sequence, pid: pid)
             if sent {
-                return .success("{\"operation\":\"\(operation)\",\"sent\":true,\"position\":\"\(position)\"}")
+                // v3.1.1 (P2-2) — State B envelope. CGEvent sends keystrokes
+                // fire-and-forget; we cannot read back the playhead position
+                // from this channel, so success is `readback_unavailable`.
+                return .success(HonestContract.encodeStateB(
+                    reason: .readbackUnavailable,
+                    extras: [
+                        "operation": operation,
+                        "method": "cgevent",
+                        "position": position,
+                        "sent": true
+                    ]
+                ))
             } else {
                 return .error("Failed to post CGEvent sequence for \(operation)")
             }
@@ -151,7 +162,16 @@ actor CGEventChannel: Channel {
 
         let sent = runtime.postKeyEvent(shortcut.keyCode, shortcut.flags, pid)
         if sent {
-            return .success("{\"operation\":\"\(operation)\",\"sent\":true}")
+            // v3.1.1 (P2-2) — same rationale as above. Single key chord
+            // delivered; no read-back possible from this channel.
+            return .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: [
+                    "operation": operation,
+                    "method": "cgevent",
+                    "sent": true
+                ]
+            ))
         } else {
             return .error("Failed to post CGEvent for \(operation)")
         }

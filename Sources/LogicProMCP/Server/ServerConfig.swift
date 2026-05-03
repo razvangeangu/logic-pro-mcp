@@ -5,7 +5,7 @@ import Foundation
 struct ServerConfig: Sendable {
     // MARK: - Server Identity
     static let serverName = "logic-pro-mcp"
-    static let serverVersion = "3.1.1"
+    static let serverVersion = "3.1.2"
 
     // MARK: - MIDI
     // NOTE: source name uses *-Internal suffix for consistency with KeyCmd/Scripter/MCU
@@ -25,12 +25,13 @@ struct ServerConfig: Sendable {
 
     // MARK: - Polling
     //
-    // 2 s tradeoff: shorter intervals make post-mutation state reads fresh
+    // 3 s tradeoff: shorter intervals make post-mutation state reads fresh
     // (5 s required a manual refresh_cache call after every arm/mute/etc to
-    // see the change — confusing for agents). 2 s keeps CPU overhead low
+    // see the change — confusing for agents). 3 s keeps CPU overhead low
     // while giving users near-real-time state via resource reads. Agents
     // can still force-refresh via logic_system refresh_cache when they
-    // need sub-2s freshness.
+    // need sub-3s freshness. (Comment was previously "2 s" — value/comment
+    // drift fixed in v3.1.2 P2.)
     static let statePollingIntervalNs: UInt64 = 3_000_000_000 // 3 seconds
 
     // MARK: - Enterprise Safety

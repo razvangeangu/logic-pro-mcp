@@ -272,6 +272,87 @@ import Testing
     #expect(result.message.contains("Unknown MCU operation"))
 }
 
+// MARK: - v3.1.2 P0-1 — Honest Contract envelope on remaining MCU surfaces.
+// Pre-v3.1.2 these returned free-form `"select on for track 56"` /
+// `"Transport: play"` / `"Automation mode: read"` strings; agents had to
+// regex-parse to know whether the press landed. Now every MCU mutating op
+// returns the same 3-state contract every other channel honors, with
+// `readback_unavailable` because the MCU button surface is LED-only and the
+// echo isn't yet plumbed to StateCache.
+
+private func decodeMCUJSON(_ s: String) -> [String: Any] {
+    (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
+}
+
+@Test func testStripButtonReturnsHonestContractEnvelope() async {
+    let channel = MCUChannel(transport: MockMCUTransport(), cache: StateCache())
+
+    let result = await channel.execute(
+        operation: "track.select",
+        params: ["index": "56"]
+    )
+    #expect(result.isSuccess)
+    let obj = decodeMCUJSON(result.message)
+    #expect(obj["success"] as? Bool == true, "envelope must carry success:true")
+    #expect(obj["verified"] as? Bool == false, "MCU button echo is LED-only — never State A")
+    #expect(
+        obj["reason"] as? String == "readback_unavailable",
+        "MCU button surface has no read-back — must use readback_unavailable"
+    )
+    #expect(obj["track"] as? Int == 56)
+    #expect(obj["function"] as? String == "select")
+    // track.select forces enabled:true regardless of the inbound flag (it's
+    // not a toggle); the envelope mirrors that decision so callers can audit.
+    #expect(obj["enabled"] as? Bool == true)
+
+    // Mute / Solo / Arm honor the inbound enabled flag.
+    let mute = await channel.execute(
+        operation: "track.set_mute",
+        params: ["index": "3", "enabled": "false"]
+    )
+    let muteObj = decodeMCUJSON(mute.message)
+    #expect(muteObj["function"] as? String == "mute")
+    #expect(muteObj["enabled"] as? Bool == false)
+    #expect(muteObj["reason"] as? String == "readback_unavailable")
+}
+
+@Test func testSendTransportReturnsHonestContractEnvelope() async {
+    let channel = MCUChannel(transport: MockMCUTransport(), cache: StateCache())
+
+    for op in [
+        "transport.play", "transport.stop", "transport.record",
+        "transport.rewind", "transport.fast_forward", "transport.toggle_cycle"
+    ] {
+        let result = await channel.execute(operation: op, params: [:])
+        #expect(result.isSuccess, "\(op) should produce State B envelope")
+        let obj = decodeMCUJSON(result.message)
+        #expect(obj["success"] as? Bool == true, "\(op): envelope success:true")
+        #expect(obj["verified"] as? Bool == false, "\(op): MCU transport buttons are press-only")
+        #expect(
+            obj["reason"] as? String == "readback_unavailable",
+            "\(op): expected readback_unavailable, got \(obj["reason"] ?? "nil")"
+        )
+        #expect(obj["function"] as? String == "transport")
+        #expect((obj["command"] as? String)?.isEmpty == false)
+    }
+}
+
+@Test func testSetAutomationReturnsHonestContractEnvelope() async {
+    let channel = MCUChannel(transport: MockMCUTransport(), cache: StateCache())
+
+    let result = await channel.execute(
+        operation: "track.set_automation",
+        params: ["mode": "write"]
+    )
+    #expect(result.isSuccess)
+    let obj = decodeMCUJSON(result.message)
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["reason"] as? String == "readback_unavailable")
+    #expect(obj["mode"] as? String == "write")
+    #expect(obj["function"] as? String == "set_automation")
+}
+
 // MARK: - Mock Transport
 
 actor MockMCUTransport: MCUTransportProtocol {

@@ -137,7 +137,22 @@ actor MIDIKeyCommandsChannel: Channel {
             return .error("Failed to send key command for \(operation): \(error)")
         }
 
-        return .success("Key command triggered: \(operation) (CC \(cc) CH 16)")
+        // v3.1.1 (P2-3) — wrap success in a Honest Contract State B envelope
+        // so the wire format matches AX / MCU / AppleScript channels. MIDI
+        // Key Commands fire CCs blindly into Logic; we can't read back what
+        // (if anything) Logic actually did with them, so all successes are
+        // `verified:false / readback_unavailable`. Free-text legacy form is
+        // preserved inside the `raw` field for diagnostic continuity.
+        return .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: [
+                "operation": operation,
+                "method": "midi_key_command",
+                "cc": Int(cc),
+                "channel": 16,
+                "raw": "Key command triggered: \(operation) (CC \(cc) CH 16)"
+            ]
+        ))
     }
 
     func healthCheck() async -> ChannelHealth {

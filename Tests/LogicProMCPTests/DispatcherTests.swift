@@ -686,8 +686,17 @@ private actor FailingExecuteChannel: Channel {
 }
 
 @Test func testTrackDispatcherDeleteAndDuplicateRespectSelectionFlow() async {
+    // v3.1.2 P1-5 — `track.delete` now requires that the preceding
+    // `track.select` returns a State A envelope (`verified:true`). The
+    // generic `MockChannel` returns the plain string `"Mock: track.select"`,
+    // which is intentionally rejected by the new gate, so we use the
+    // envelope-returning `VerifiedSelectMockChannel` for the MCU
+    // (track.select goes to MCU here per the routing table). `duplicate`
+    // remains gated only on `isSuccess` for backwards compatibility, so the
+    // generic mock still works for that path; we use the verified mock for
+    // both calls to keep the test a single router setup.
     let successRouter = ChannelRouter()
-    let mcu = MockChannel(id: .mcu)
+    let mcu = VerifiedSelectMockChannel(id: .mcu)
     let keyCmd = MockChannel(id: .midiKeyCommands)
     await successRouter.register(mcu)
     await successRouter.register(keyCmd)
@@ -729,6 +738,38 @@ private actor FailingExecuteChannel: Channel {
     )
 
     #expect(failureResult.isError!)
+}
+
+/// Mock channel that returns a State A envelope (`success:true`,
+/// `verified:true`) for `track.select` so the v3.1.2 P1-5 gate in
+/// `TrackDispatcher.delete` accepts the selection. All other operations
+/// fall through to the generic `"Mock: <op>"` reply, matching `MockChannel`.
+actor VerifiedSelectMockChannel: Channel {
+    nonisolated let id: ChannelID
+    var executedOps: [(String, [String: String])] = []
+
+    init(id: ChannelID) {
+        self.id = id
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        executedOps.append((operation, params))
+        if operation == "track.select" {
+            let extras: [String: Any] = [
+                "requested": Int(params["index"] ?? "0") ?? 0,
+                "observed": Int(params["index"] ?? "0") ?? 0,
+            ]
+            return .success(HonestContract.encodeStateA(extras: extras))
+        }
+        return .success("Mock: \(operation)")
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "verified select mock")
+    }
 }
 
 @Test func testTrackDispatcherDuplicateReturnsSelectionFailure() async {
@@ -902,9 +943,11 @@ private actor FailingExecuteChannel: Channel {
     #expect(dispatcherText(result).contains("No project open"))
 }
 
-/// Mock channel that simulates Logic creating a new MIDI track on import —
-/// appends a TrackState to the cache when midi.import_file is routed, so
-/// record_sequence's track-confirmation polling returns success.
+/// Mock channel that records the operations it sees. v3.1.2 P0-2 moved
+/// record_sequence's verification from `cache.getTracks().count` (3-second
+/// poll lag) to `AXLogicProElements.allTrackHeaders().count` (live read), so
+/// inserting tracks into the cache no longer satisfies verification — the
+/// previous `TrackInsertingMockChannel` was renamed and gutted accordingly.
 private actor TrackInsertingMockChannel: Channel {
     nonisolated let id: ChannelID
     let cache: StateCache
@@ -921,20 +964,19 @@ private actor TrackInsertingMockChannel: Channel {
 
     func execute(operation: String, params: [String: String]) async -> ChannelResult {
         executedOps.append((operation, params))
-        if operation == "midi.import_file" {
-            let tracks = await cache.getTracks()
-            let newTrack = TrackState(
-                id: tracks.count,
-                name: "MIDI Region",
-                type: .softwareInstrument
-            )
-            await cache.updateTracks(tracks + [newTrack])
-        }
         return .success("Mock: \(operation)")
     }
 }
 
-@Test func testRecordSequenceSMFImportHappyPath() async {
+@Test func testRecordSequenceSMFImportRoutingSequence() async {
+    // v3.1.2 P0-2 — under the new live-AX verification path the headless
+    // test sandbox has 0 track headers, so record_sequence will report the
+    // post-import live-AX delta failure. We can no longer assert a happy-path
+    // success in unit tests without a real Logic instance, but we CAN still
+    // verify the routing sequence is correct (goto_position bar=1 is sent
+    // before midi.import_file) and that the SMF temp file path is forwarded.
+    // Happy-path success coverage moves to live verification per the v3.1.2
+    // CHANGELOG discipline.
     let router = ChannelRouter()
     let cache = StateCache()
     await cache.updateDocumentState(true)
@@ -949,13 +991,13 @@ private actor TrackInsertingMockChannel: Channel {
     )
 
     let text = dispatcherText(result)
-    #expect(!result.isError!, "expected success, got: \(text)")
-    #expect(text.contains("\"method\":\"smf_import\""))
-    #expect(text.contains("\"note_count\":3"))
-    #expect(text.contains("\"bar\":5"))
-    #expect(text.contains("\"created_track\":0"))
+    // In sandbox: live AX returns 0, so we expect the new error wording.
+    #expect(
+        text.contains("live AX still shows"),
+        "expected new live-AX verification wording, got: \(text)"
+    )
 
-    // Verify routing sequence.
+    // Verify routing sequence regardless of verification outcome.
     let ops = await ax.executedOps
     let importOps = ops.filter { $0.0 == "midi.import_file" }
     #expect(importOps.count == 1, "expected 1 midi.import_file call, got \(importOps.count)")
@@ -992,11 +1034,13 @@ private actor TrackInsertingMockChannel: Channel {
 }
 
 @Test func testRecordSequenceFailsWhenTrackDoesNotAppear() async {
-    // If the AX cache never sees the new track within the polling window,
-    // the import may have silently misbehaved — returning a fabricated
-    // created_track index would lie to the caller.
+    // v3.1.2 P0-2 — if live AX shows no new track header after import claims
+    // success, we must surface that as a verification failure rather than
+    // fabricate a `created_track` index. (Pre-v3.1.2 this used the cache
+    // poll loop with the misleading "never appeared" wording — see CHANGELOG
+    // for why that path was wrong.)
     let router = ChannelRouter()
-    let ax = MockChannel(id: .accessibility)  // returns success without touching cache
+    let ax = MockChannel(id: .accessibility)  // returns success without touching AX
     await router.register(ax)
     let cache = StateCache()
     await cache.updateDocumentState(true)
@@ -1009,7 +1053,11 @@ private actor TrackInsertingMockChannel: Channel {
     )
 
     #expect(result.isError!)
-    #expect(dispatcherText(result).contains("never appeared"))
+    let text = dispatcherText(result)
+    #expect(
+        text.contains("live AX still shows"),
+        "expected new live-AX failure wording, got: \(text)"
+    )
 }
 
 @Test func testRecordSequenceCleansUpTempFileOnError() async {

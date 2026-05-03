@@ -41,6 +41,16 @@ struct ProjectDispatcher {
         switch command {
         case "new":
             let result = await router.route(operation: "project.new")
+            // v3.1.2 (P0-3) — clear cache on lifecycle success so the next
+            // resource read / name-based routing decision sees the fresh
+            // project's tracks instead of the previous project's stale list.
+            // Without this, `cache.getTracks()` returned 38 tracks for over
+            // a minute after `project.new` (live-witnessed); the StatePoller
+            // takes up to 3s to overwrite, and resource consumers assumed
+            // the data was current. clearProjectState() is idempotent and
+            // mutation-free on actor state — safe to call on every success
+            // even if the poller would have caught up eventually.
+            await invalidateOnSuccess(result, cache: cache)
             return toolTextResult(result)
 
         case "open":
@@ -58,6 +68,8 @@ struct ProjectDispatcher {
                 operation: "project.open",
                 params: ["path": path]
             )
+            // v3.1.2 (P0-3) — same cache stale-after-lifecycle bug as `new`.
+            await invalidateOnSuccess(result, cache: cache)
             return toolTextResult(result)
 
         case "save":
@@ -97,6 +109,10 @@ struct ProjectDispatcher {
                 operation: "project.close",
                 params: ["saving": saving]
             )
+            // v3.1.2 (P0-3) — closing the project leaves the cache stuffed
+            // with the just-closed tracks/regions/markers. Clear so resource
+            // reads honestly reflect "no project" until the next open.
+            await invalidateOnSuccess(result, cache: cache)
             return toolTextResult(result)
 
         case "bounce":
@@ -153,6 +169,15 @@ struct ProjectDispatcher {
                 isError: true
             )
         }
+    }
+
+    /// v3.1.2 (P0-3) — invalidate cache on successful project lifecycle
+    /// transition (`new` / `open` / `close`). Defensive: only fires when the
+    /// underlying channel reports success, so a failed AppleScript leaves
+    /// the cache untouched (preserves whatever truth the poller had).
+    private static func invalidateOnSuccess(_ result: ChannelResult, cache: StateCache) async {
+        guard result.isSuccess else { return }
+        await cache.clearProjectState()
     }
 
     private static func runLifecycleScript(

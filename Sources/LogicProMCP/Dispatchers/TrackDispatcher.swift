@@ -80,6 +80,24 @@ struct TrackDispatcher {
             guard selectResult.isSuccess else {
                 return toolTextResult(selectResult.message, isError: true)
             }
+            // v3.1.2 P1-5 — `track.select` can return State B (`verified:false`,
+            // e.g. `reason:"retry_exhausted"` or `"readback_mismatch"`) while
+            // the outer ChannelResult is still `.success`. State B means
+            // "the AX write was issued but the read-back could not confirm
+            // selection landed on the requested track". Following State B
+            // with `track.delete` is unsafe: the previously-selected track
+            // (whatever it was) gets deleted instead of the requested target,
+            // an irrecoverable data-loss scenario. Refuse the delete and
+            // require the caller to re-issue selection (or accept that the
+            // selection is uncertain and abort).
+            guard let data = selectResult.message.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let verified = json["verified"] as? Bool, verified == true else {
+                return toolTextResult(
+                    "track.delete refused: track \(index) selection unverified (State B). Cannot safely delete unverified target — re-select or fix Logic Pro AX state and retry. select_response=\(selectResult.message)",
+                    isError: true
+                )
+            }
             let result = await router.route(operation: "track.delete")
             return toolTextResult(result)
 
@@ -309,6 +327,19 @@ struct TrackDispatcher {
                 isError: true
             )
         }
+        // v3.1.2 P1-4 — enforce the 1024-note SMF-import upper bound that
+        // `NoteSequenceParser`'s docstring already advertises. Without this
+        // guard, a malformed (or adversarial) caller could hand SMFWriter an
+        // arbitrarily large event list, which would produce an oversize
+        // .mid file and slow Logic's MIDI File Import dialog enough to
+        // appear hung. The 1024 limit matches the documented upper bound and
+        // leaves a comfortable margin under SMFWriter's tick-encoding bounds.
+        guard events.count <= 1024 else {
+            return toolTextResult(
+                "record_sequence: too many notes (\(events.count) > 1024 max for SMF import)",
+                isError: true
+            )
+        }
 
         let tempDir = "/tmp/LogicProMCP"
         try? FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
@@ -356,7 +387,23 @@ struct TrackDispatcher {
             )
         }
 
-        let tracksBefore = await cache.getTracks().count
+        // v3.1.2 (P0-2) — verify track creation against LIVE AX, not the
+        // 3-second StatePoller cache. The previous cache-poll loop (2s
+        // window, 100ms granularity) was strictly shorter than the poller
+        // interval (3s, see ServerConfig.statePollingIntervalNs), so on a
+        // healthy import the track count delta would not propagate to
+        // `cache.getTracks()` until *after* the verification deadline,
+        // false-failing every successful run on first call. Live-witnessed
+        // 3× in production sessions.
+        //
+        // The downstream import handler (AccessibilityChannel
+        // `defaultImportMIDIFile`) already validates the count delta against
+        // `AXLogicProElements.allTrackHeaders()` before returning success,
+        // so an `importResult.isSuccess` is itself a proof of new-track
+        // creation. We re-read the same live AX surface here only to
+        // discover the track index for the response payload — and we still
+        // ask the poller to refresh so the next cache read is fresh too.
+        let tracksBefore = AXLogicProElements.allTrackHeaders().count
         let importResult = await router.route(
             operation: "midi.import_file",
             params: ["path": path]
@@ -368,21 +415,19 @@ struct TrackDispatcher {
             )
         }
 
-        // Poll for the new track to appear (AX cache lag averages ~300-400ms;
-        // we wait up to 2s with 100ms granularity so slower machines still
-        // succeed while fast imports return quickly). If the cache never sees
-        // the new track within the window, treat this as a verification
-        // failure — the import may have silently misbehaved, and returning
-        // success with a fabricated track index would lie to the caller.
-        var tracksAfter = tracksBefore
-        for _ in 0..<20 {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            tracksAfter = await cache.getTracks().count
+        // Re-read live AX to confirm the new track index. Import handler has
+        // already verified the delta, so we expect tracksAfter > tracksBefore
+        // immediately; the small retry loop is purely defensive against AX
+        // tree settle latency on slow machines (≤500ms total).
+        var tracksAfter = AXLogicProElements.allTrackHeaders().count
+        for _ in 0..<5 {
             if tracksAfter > tracksBefore { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            tracksAfter = AXLogicProElements.allTrackHeaders().count
         }
         guard tracksAfter > tracksBefore else {
             return toolTextResult(
-                "record_sequence: new track never appeared in Logic (tracks before: \(tracksBefore), after: \(tracksAfter) over 2s). Import may have failed silently; check Logic Pro UI and retry.",
+                "record_sequence: import handler reported success but live AX still shows \(tracksBefore) tracks (no delta within 500ms). Check Logic Pro UI and retry.",
                 isError: true
             )
         }

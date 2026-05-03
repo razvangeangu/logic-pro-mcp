@@ -8,6 +8,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.1.2] — 2026-04-30
+
+**Honest Contract closure on remaining MCU surfaces + lifecycle cache hygiene.** Post-v3.1.1 transverse audit (3 independent agents converged) surfaced four production-blocking gaps that v3.1.1's AX-side promotion did not reach: three MCU responders still emitted free-form strings instead of the 3-state envelope, `record_sequence` had a verification-window vs. poll-interval mismatch that false-failed every successful import, project lifecycle ops left a stale tracks list in the cache for up to a minute, and `ChannelRouter` would silently fall through a terminal AX `element_not_found` State C into a vacuous MCU success.
+
+### P0 — fixed
+
+- **MCU `track.set_mute` / `set_solo` / `set_arm` / `set_select` raw-string responses → State B `readback_unavailable`.** The MCU button surface is LED-only; Logic does not echo button state back through the MIDI stream that StateCache subscribes to. Wrapping in `HonestContract.encodeStateB` lets agents distinguish "press delivered, can't confirm" from "press confirmed" — the same contract every other MCU op already honors. Closes the last raw-string responders identified in the v3.1.1 release audit.
+- **MCU `transport.play / stop / record / rewind / fast_forward / toggle_cycle` → State B `readback_unavailable`** for the same LED-only reason. AX-primary transport routing is unchanged; this only affects the MCU fallback path.
+- **MCU `track.set_automation` → State B `readback_unavailable`.** Automation mode buttons (Read / Write / Touch / Latch / Trim) are LED-only writes too. AX-side automation-mode read-back is still backlogged (PRD §4.2 G).
+- **`record_sequence` no longer false-fails on successful imports.** The verification window (2s) was strictly shorter than `ServerConfig.statePollingIntervalNs` (3s), so a healthy import's track-count delta never propagated to `cache.getTracks()` before the deadline — the dispatcher then declared "import may have failed silently" on every first call (witnessed live 3×). Verification now reads `AXLogicProElements.allTrackHeaders().count` directly (the same surface the AX import handler already validates against), removing the cache/poll race entirely.
+- **`project.new / open / close` now invalidate the cache on success.** Previously the just-created/opened/closed project's tracks list lingered for up to one full poll cycle (3s minimum, observed >60s in practice), so resource reads and name-based routing decisions made against a phantom 38-track project that had been closed minutes ago. New `invalidateOnSuccess` helper calls `StateCache.clearProjectState()` only when the underlying channel reported success — failures leave the existing cache intact.
+
+### P1 — fixed
+
+- **`ChannelRouter` no longer falls through terminal State C envelopes.** When a primary channel returned `element_not_found`, `invalid_params`, or `not_implemented` (errors that no other channel can improve on), the router used to advance to the next channel in the chain — and on `track.select` / `set_instrument` against an out-of-range index that meant a press-only MCU button could fire on the wrong strip, masking the honest AX failure with a vacuous success. New `HonestContract.isTerminalStateC` helper inspects the State C envelope; matching errors short-circuit the fallback chain and preserve the original AX response. `ax_write_failed` and `permission_denied` are intentionally NOT terminal — those *can* be retried on a different channel.
+- **`record_sequence` now enforces the 1024-note SMF-import upper bound** that `NoteSequenceParser`'s docstring already advertised (P1-4). Without the guard, a malformed (or adversarial) caller could hand `SMFWriter` an arbitrarily large event list — producing an oversize .mid file that slowed Logic's MIDI File Import dialog enough to appear hung. Returns an explicit `record_sequence: too many notes (N > 1024 max for SMF import)` error, immediately after the empty-events check and before any file-system or AX side-effects.
+- **`track.delete` now refuses to proceed on State B (`verified:false`) selection** (P1-5). `track.select` can return State A (read-back confirmed selection landed on the requested track) or State B (write delivered but read-back inconclusive — `retry_exhausted`, `readback_mismatch`, etc.). Following State B with `track.delete` is a data-loss vector: whichever track was previously selected gets deleted instead of the requested target, with no UI signal that the operation hit the wrong row. `delete` now JSON-parses the select envelope and refuses unless `verified == true`, surfacing the original select response in the error detail so the caller can debug. `track.duplicate` keeps the prior `isSuccess`-only gate (no new behavior pending broader review of the duplicate path).
+
+### P2 — fixed
+
+- **`ServerConfig.statePollingIntervalNs` comment updated** from "2 s" to "3 s" to match the actual 3,000,000,000 ns value. Pure documentation drift.
+- **`track.set_color` now returns an explicit State C `not_implemented` envelope** (P2-1) instead of the free-form `"Track color setting not supported via AX"` string. Callers (and the new router terminal-error gate) can now distinguish a structural "this surface does not exist" from a transient AX write failure. Logic Pro 12.0.1 does not expose track-color mutation through the Accessibility API — the color swatch in the inspector is a custom-drawn AppKit control with no AX children or settable attributes. `not_implemented` is also added to `HonestContract.FailureError` as a first-class enum case (the string was already in `terminalErrorCodes`).
+
+### Verification
+
+- **Build**: `swift build` clean.
+- **Tests**: 824 → **862** passing (initial 8 P0/P1 regression tests + 4 follow-up tests for P1-4 / P1-5 / P2-1 in `TrackDispatcherDeleteTests` and `HonestContractOpTests`; pre-existing `testTrackDispatcherDeleteAndDuplicateRespectSelectionFlow` updated to use a verified-select envelope mock now that `delete` enforces State A; pre-existing AX-channel set_color expectation updated to match the new `not_implemented` envelope substring).
+- **Live verification**: deferred to user-driven session — same discipline as v3.1.0 / v3.1.1 (`docs/HONEST-CONTRACT.md` §Live verification policy).
+
+### Out-of-scope (deferred)
+
+- AX-side automation-mode read-back (would promote `set_automation` to State A).
+- V-Pot LED-ring CC 0x30..0x37 decoder for `mixer.set_pan` State A (PRD §4.2).
+- `transport.pause` (no Logic op for it).
+
 ## [3.1.1] — 2026-04-26
 
 **Honest Contract Extension.** v3.1.0 introduced the 3-state contract (State A confirmed / State B uncertain w/ reason / State C failed w/ error) for 4 ops. Guardian's v3.1.0 production-readiness review identified 22 mutating `.success("…")` ad-hoc shapes still in `AccessibilityChannel.swift` plus the `transport/state` resource lacking the cache envelope. v3.1.1 closes those gaps for the AX-channel ops; MCU-routed `track.set_automation` and the V-Pot pan State-A enabler are deferred to v3.1.2 (PRD §2.1 group F + G).

@@ -208,6 +208,105 @@ actor FailingStartChannel: Channel {
     #expect(table.count > 80, "Expected 80+ operations, got \(table.count)")
 }
 
+// v3.1.2 P1-1 — terminal State C from a primary channel must not fall
+// through to the next channel. Pre-v3.1.2, an AX `element_not_found` on
+// `track.select { index: 99999 }` bubbled into the MCU fallback, which then
+// pressed a press-only LED button and reported State B `readback_unavailable`
+// — masking the honest "this index does not exist" answer with what looked
+// like a successful press.
+actor TerminalStateCChannel: Channel {
+    nonisolated let id: ChannelID
+    let envelope: String
+
+    init(id: ChannelID, envelope: String) {
+        self.id = id
+        self.envelope = envelope
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        .error(envelope)
+    }
+
+    func healthCheck() async -> ChannelHealth { .healthy(detail: "Mock OK") }
+}
+
+@Test func testTerminalStateCDoesNotFallThrough() async {
+    // Primary channel returns terminal State C `element_not_found`. Router
+    // must surface that envelope verbatim instead of advancing to the MCU
+    // fallback (which would press a button on the wrong strip and lie about it).
+    let router = ChannelRouter()
+    let terminalEnvelope = HonestContract.encodeStateC(
+        error: .elementNotFound,
+        hint: "no track at index 99999"
+    )
+    let ax = TerminalStateCChannel(id: .accessibility, envelope: terminalEnvelope)
+    let mcu = MockChannel(id: .mcu)
+    await router.register(ax)
+    await router.register(mcu)
+
+    let result = await router.route(
+        operation: "track.select",
+        params: ["index": "99999"]
+    )
+    #expect(!result.isSuccess, "terminal State C must surface as router error")
+    #expect(
+        result.message == terminalEnvelope,
+        "router must preserve the original State C envelope, got: \(result.message)"
+    )
+    let mcuOps = await mcu.executedOps
+    #expect(
+        mcuOps.isEmpty,
+        "MCU fallback must NOT execute when AX returned terminal State C"
+    )
+}
+
+@Test func testNonTerminalStateCStillFallsThrough() async {
+    // `ax_write_failed` is non-terminal: the AX write may have failed for
+    // reasons (focus stolen, plugin window grabbing input) that the next
+    // channel down can route around. Router must keep the existing fallback
+    // behavior in that case so we don't over-correct the P1-1 fix.
+    let router = ChannelRouter()
+    let nonTerminalEnvelope = HonestContract.encodeStateC(
+        error: .axWriteFailed,
+        hint: "AX write returned -25212"
+    )
+    let ax = TerminalStateCChannel(id: .accessibility, envelope: nonTerminalEnvelope)
+    let mcu = MockChannel(id: .mcu)
+    await router.register(ax)
+    await router.register(mcu)
+
+    let result = await router.route(
+        operation: "track.set_mute",
+        params: ["index": "0", "enabled": "true"]
+    )
+    #expect(result.isSuccess, "non-terminal State C should advance to MCU fallback")
+    let mcuOps = await mcu.executedOps
+    #expect(mcuOps.count == 1, "MCU fallback should fire on ax_write_failed")
+}
+
+@Test func testFreeFormErrorStillFallsThrough() async {
+    // Plain non-JSON error strings (legacy channels that haven't been
+    // promoted to the contract yet) must keep the existing fallback
+    // behavior — `isTerminalStateC` only short-circuits on real State C
+    // envelopes with a known terminal error code.
+    let router = ChannelRouter()
+    let ax = TerminalStateCChannel(id: .accessibility, envelope: "free-form: something went wrong")
+    let mcu = MockChannel(id: .mcu)
+    await router.register(ax)
+    await router.register(mcu)
+
+    let result = await router.route(
+        operation: "track.set_arm",
+        params: ["index": "1", "enabled": "true"]
+    )
+    #expect(result.isSuccess, "free-form error should not be treated as terminal")
+    let mcuOps = await mcu.executedOps
+    #expect(mcuOps.count == 1)
+}
+
 @Test func testRouterStartAllReportsChannelFailures() async {
     let router = ChannelRouter()
     await router.register(MockChannel(id: .coreMIDI))

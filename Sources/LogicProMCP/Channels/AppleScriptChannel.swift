@@ -53,26 +53,31 @@ actor AppleScriptChannel: Channel {
     func execute(operation: String, params: [String: String]) async -> ChannelResult {
         switch operation {
         case "project.new":
-            return await runScript(newProjectScript())
+            let raw = await runScript(newProjectScript())
+            return Self.wrapMutatingResult(raw, operation: operation)
 
         case "project.open":
             guard let path = params["path"] else {
                 return .error("Missing 'path' parameter for project.open")
             }
-            return await openProjectViaWorkspace(path: path)
+            let raw = await openProjectViaWorkspace(path: path)
+            return Self.wrapMutatingResult(raw, operation: operation, extras: ["path": path])
 
         case "project.close":
             let saving = params["saving"] ?? "yes"
-            return await runScript(closeProjectScript(saving: saving))
+            let raw = await runScript(closeProjectScript(saving: saving))
+            return Self.wrapMutatingResult(raw, operation: operation, extras: ["saving": saving])
 
         case "project.save":
-            return await runScript(saveProjectScript())
+            let raw = await runScript(saveProjectScript())
+            return Self.wrapMutatingResult(raw, operation: operation)
 
         case "project.save_as":
             guard let path = params["path"] else {
                 return .error("Missing 'path' parameter for project.save_as")
             }
-            return await runScript(saveProjectAsScript(path: path))
+            let raw = await runScript(saveProjectAsScript(path: path))
+            return Self.wrapMutatingResult(raw, operation: operation, extras: ["path": path])
 
         // Transport fallbacks — AppleScript is only authoritative for commands
         // confirmed to exist in Logic Pro's scripting dictionary.
@@ -81,14 +86,16 @@ actor AppleScriptChannel: Channel {
             guard AppleScriptSafety.isAllowedTransportAction(action) else {
                 return .error("Transport action not in whitelist: \(action)")
             }
-            return await runtime.executeTransportAction(action)
+            let raw = await runtime.executeTransportAction(action)
+            return Self.wrapMutatingResult(raw, operation: operation)
 
         case "transport.record":
             let action = operation.replacingOccurrences(of: "transport.", with: "")
             guard AppleScriptSafety.isAllowedTransportAction(action) else {
                 return .error("Transport action not in whitelist: \(action)")
             }
-            return await runtime.executeTransportAction(action)
+            let raw = await runtime.executeTransportAction(action)
+            return Self.wrapMutatingResult(raw, operation: operation)
 
         case "transport.play", "transport.pause":
             return .error("Unsupported AppleScript operation: \(operation)")
@@ -96,6 +103,36 @@ actor AppleScriptChannel: Channel {
         default:
             return .error("Unsupported AppleScript operation: \(operation)")
         }
+    }
+
+    /// v3.1.1 (P2-2) — wrap a successful AppleScript-driven mutation in a
+    /// Honest Contract State B envelope so the wire format matches the AX /
+    /// MCU channels. AppleScript mutations cannot read back the resulting
+    /// state via the same script path (we'd need a follow-up `tell ... return
+    /// ...` round-trip plus a deterministic schema), so all successes here
+    /// are `verified:false / readback_unavailable`. Errors stay as
+    /// `ChannelResult.error` — the router treats those as terminal.
+    static func wrapMutatingResult(
+        _ result: ChannelResult,
+        operation: String,
+        extras: [String: Any] = [:]
+    ) -> ChannelResult {
+        guard result.isSuccess else { return result }
+        // If the script body already produced an HC envelope (open-project's
+        // verifyOpenedProject path returns plain "Opened: <path>" but a future
+        // refactor could return an HC envelope directly), leave it alone.
+        if HonestContractEnvelopeDetector.isAlreadyEnvelope(result.message) {
+            return result
+        }
+        var merged: [String: Any] = [
+            "operation": operation,
+            "method": "applescript",
+            "raw": result.message
+        ]
+        for (k, v) in extras { merged[k] = v }
+        return .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable, extras: merged
+        ))
     }
 
     func healthCheck() async -> ChannelHealth {

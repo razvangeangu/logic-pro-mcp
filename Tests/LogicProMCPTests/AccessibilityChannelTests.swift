@@ -169,7 +169,9 @@ private func makeAXBackedAccessibilityChannel(
     let channel = AccessibilityChannel(runtime: makeAccessibilityRuntime())
 
     let expectations: [(String, String)] = [
-        ("track.set_color", "Track color setting not supported via AX"),
+        // v3.1.2 P2-1: track.set_color now returns a State C envelope with
+        // `error:"not_implemented"` instead of a plain free-form string.
+        ("track.set_color", "\"error\":\"not_implemented\""),
         ("mixer.set_send", "Send adjustment not yet implemented via AX"),
         ("mixer.set_input", "I/O routing not yet implemented via AX"),
         ("mixer.set_output", "I/O routing not yet implemented via AX"),

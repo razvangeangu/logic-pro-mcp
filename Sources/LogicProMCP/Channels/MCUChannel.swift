@@ -295,7 +295,16 @@ actor MCUChannel: Channel {
     private func sendTransport(_ command: MCUProtocol.TransportCommand) async -> ChannelResult {
         let bytes = MCUProtocol.encodeTransport(command)
         await transport.send(bytes)
-        return .success("Transport: \(command)")
+        // v3.1.2 (P0-1) — MCU transport buttons are press-only triggers; Logic
+        // does not echo a transport state back over the same MIDI surface, so
+        // every send is honestly `readback_unavailable`. Wrap in HC envelope
+        // so downstream agents stop seeing free-form `"Transport: ..."`
+        // strings (the last raw-string responder identified in the v3.1.1
+        // post-release audit alongside `track.select` and `track.set_automation`).
+        return .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: ["function": "transport", "command": "\(command)"]
+        ))
     }
 
     private func executeStripButton(_ function: MCUProtocol.ButtonFunction, params: [String: String]) async -> ChannelResult {
@@ -313,7 +322,19 @@ actor MCUChannel: Channel {
         return await withBanking(targetTrack: track) { strip in
             let bytes = MCUProtocol.encodeButton(function, strip: strip, on: enabled)
             await self.transport.send(bytes)
-            return .success("\(function) \(enabled ? "on" : "off") for track \(track)")
+            // v3.1.2 (P0-1) — MCU button echo is LED-only, no AX-side mirror
+            // wired into StateCache yet. The press lands but cannot be read
+            // back, so honestly: State B `readback_unavailable`. Wrapping
+            // here also closes the only remaining raw-string responder on
+            // mute / solo / arm / select that v3.1.1's audit caught.
+            return .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: [
+                    "function": "\(function)",
+                    "track": track,
+                    "enabled": enabled
+                ]
+            ))
         }
     }
 
@@ -330,7 +351,15 @@ actor MCUChannel: Channel {
         }
         let bytes = MCUProtocol.encodeButton(function, on: true)
         await transport.send(bytes)
-        return .success("Automation mode: \(mode)")
+        // v3.1.2 (P0-1) — Automation mode buttons (Read / Write / Touch / Latch
+        // / Trim) are MCU LED-only writes; Logic does not surface the active
+        // mode back through the MCU echo stream that StateCache subscribes to.
+        // Until an AX-side automation-mode read-back is added (PRD §4.2 G), the
+        // honest envelope is State B `readback_unavailable`.
+        return .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: ["function": "set_automation", "mode": mode]
+        ))
     }
 
     // MARK: - Banking (Proper Queue)

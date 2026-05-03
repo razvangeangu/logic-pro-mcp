@@ -120,7 +120,16 @@ private func makeAppleScriptRuntime(
 
     let opened = await channel.execute(operation: "project.open", params: ["path": path])
     #expect(opened.isSuccess)
-    #expect(opened.message == "Opened: \(path)")
+    // v3.1.1 (P2-2) — successes from mutating ops are now wrapped in a
+    // Honest Contract State B envelope (`verified:false /
+    // readback_unavailable`). The legacy free-text "Opened: <path>" is
+    // preserved inside `raw` for diagnostic continuity.
+    #expect(opened.message.contains("\"success\":true"))
+    #expect(opened.message.contains("\"verified\":false"))
+    #expect(opened.message.contains("\"reason\":\"readback_unavailable\""))
+    #expect(opened.message.contains("\"operation\":\"project.open\""))
+    #expect(opened.message.contains("\"method\":\"applescript\""))
+    #expect(opened.message.contains("Opened: \\/tmp\\/session.logicx"))
     #expect(openRecorder.snapshot() == [path])
     let scripts = await scriptRecorder.snapshot()
     #expect(scripts.count == 1)
@@ -166,7 +175,11 @@ private func makeAppleScriptRuntime(
 
     let result = await channel.execute(operation: "project.open", params: ["path": path])
     #expect(result.isSuccess)
-    #expect(result.message == "Opened: \(path)")
+    // v3.1.1 (P2-2) — wrapped HC State B envelope; raw legacy text inside.
+    #expect(result.message.contains("\"success\":true"))
+    #expect(result.message.contains("\"verified\":false"))
+    #expect(result.message.contains("\"operation\":\"project.open\""))
+    #expect(result.message.contains("Opened: \\/tmp\\/reopen.logicx"))
     #expect(openRecorder.snapshot() == [path, path])
 }
 
@@ -315,7 +328,14 @@ private func makeAppleScriptRuntime(
     let result = await channel.execute(operation: "project.save", params: [:])
 
     #expect(result.isSuccess)
-    #expect(result.message == "{\"result\":\"hello\"}")
+    // v3.1.1 (P2-2) — `project.save` is a mutating op so the response is now
+    // wrapped in HC State B. The original `{"result":"hello"}` payload is
+    // preserved verbatim inside the `raw` field of the envelope.
+    #expect(result.message.contains("\"success\":true"))
+    #expect(result.message.contains("\"verified\":false"))
+    #expect(result.message.contains("\"operation\":\"project.save\""))
+    #expect(result.message.contains("\"method\":\"applescript\""))
+    #expect(result.message.contains("\"raw\":\"{\\\"result\\\":\\\"hello\\\"}\""))
 }
 
 @Test func testAppleScriptExecuteAppleScriptSurfacesCompileErrors() async {

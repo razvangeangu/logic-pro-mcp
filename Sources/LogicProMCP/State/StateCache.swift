@@ -36,6 +36,22 @@ actor StateCache {
     /// cannot masquerade as a fresh echo and produce a false `verified:true`.
     private var faderUpdatedAt: [Int: Date] = [:]
 
+    /// v3.1.1 (P1-3) — consecutive empty-track polls observed while
+    /// `hasDocument == true`. Logic Pro sporadically returns an empty track
+    /// list when a modal dialog is over the arrange (file-open panel,
+    /// Bounce, tempo alert, etc.) because `mainWindow` is briefly the
+    /// dialog's window and the AX subtree carries no track headers. The P1-2
+    /// dialog filter mitigates that, but a window-state race can still send
+    /// `[]` through `updateTracks`. Without the guard the cache then reports
+    /// "empty project" to clients for one poll cycle and every track tool
+    /// silently degrades. We absorb the first two such polls (skip the
+    /// update, keep the prior cache) and only commit `[]` once the count
+    /// reaches 3 — at which point the empty state is treated as genuine
+    /// (project really is empty / closed). Counter resets on any non-empty
+    /// update.
+    private var consecutiveEmptyPolls: Int = 0
+    private static let emptyPollThreshold = 3
+
     // MARK: - Read access (tools call these)
 
     func getTransport() -> TransportState { transport }
@@ -109,9 +125,33 @@ actor StateCache {
     }
 
     func updateTracks(_ newTracks: [TrackState]) {
+        // v3.1.1 (P1-3) — debounce empty-list overwrites caused by a modal
+        // dialog briefly occluding the arrange window. While `hasDocument`
+        // is true and the prior cache was non-empty, the first two empty
+        // polls are absorbed (cache preserved, fetchedAt left untouched so
+        // `cache_age_sec` keeps growing — clients can still see staleness).
+        // After `emptyPollThreshold` consecutive empties we commit `[]` so
+        // a genuinely closed/empty project is eventually reflected.
+        if newTracks.isEmpty && hasDocument && !tracks.isEmpty {
+            consecutiveEmptyPolls += 1
+            if consecutiveEmptyPolls < Self.emptyPollThreshold {
+                return
+            }
+            // Threshold reached — let the empty update through and reset so
+            // we don't permanently suppress the next empty/non-empty cycle.
+            consecutiveEmptyPolls = 0
+        } else if !newTracks.isEmpty {
+            consecutiveEmptyPolls = 0
+        }
         tracks = newTracks
         tracksFetchedAt = Date()
     }
+
+    /// v3.1.1 (P1-3) — exposed for diagnostics and tests. Returns the number
+    /// of consecutive empty `updateTracks([])` calls suppressed since the
+    /// last non-empty update. Resets to 0 once any non-empty update lands or
+    /// once an empty update finally commits at the threshold.
+    func getConsecutiveEmptyPolls() -> Int { consecutiveEmptyPolls }
 
     func getTracksFetchedAt() -> Date { tracksFetchedAt }
     func getMixerFetchedAt() -> Date { mixerFetchedAt }

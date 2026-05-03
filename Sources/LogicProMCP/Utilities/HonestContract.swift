@@ -43,6 +43,11 @@ enum HonestContract {
         case logicNotRunning
         case invalidParams
         case readbackMismatch
+        /// Operation explicitly not implemented via this channel / build of
+        /// Logic. Distinct from `.elementNotFound` (target absent) and
+        /// `.axWriteFailed` (write attempt rejected): the surface itself does
+        /// not exist. Terminal — no other channel can do better. v3.1.2 P2-1.
+        case notImplemented
 
         var rawValue: String {
             switch self {
@@ -52,6 +57,7 @@ enum HonestContract {
             case .logicNotRunning: return "logic_not_running"
             case .invalidParams: return "invalid_params"
             case .readbackMismatch: return "readback_mismatch"
+            case .notImplemented: return "not_implemented"
             }
         }
     }
@@ -91,6 +97,42 @@ enum HonestContract {
         if let hint { dict["hint"] = hint }
         for (k, v) in extras { dict[k] = v }
         return jsonString(dict)
+    }
+
+    // MARK: - Terminal-state inspection (router fallback gate)
+
+    /// Errors that mean "no other channel will do better either" — invalid
+    /// caller input, missing element, explicit not-implemented. The router
+    /// uses this to short-circuit the fallback chain so an AX honest State C
+    /// does not silently regress into a vacuous MCU success on the next
+    /// channel down (v3.1.2 P1-1).
+    ///
+    /// `ax_write_failed` and `permission_denied` are intentionally NOT
+    /// terminal: a different channel (CGEvent, AppleScript, MCU) may still
+    /// be able to deliver the operation.
+    static let terminalErrorCodes: Set<String> = [
+        FailureError.elementNotFound.rawValue,
+        FailureError.invalidParams.rawValue,
+        "not_implemented",
+    ]
+
+    /// Returns true if the given message is a State-C envelope whose `error`
+    /// is in `terminalErrorCodes`. Free-form (non-JSON) messages and State A
+    /// / State B envelopes always return false. Used by `ChannelRouter` to
+    /// suppress fallback when the primary channel has already reported an
+    /// error the next channel cannot improve on.
+    static func isTerminalStateC(_ message: String) -> Bool {
+        guard let data = message.data(using: .utf8),
+              let raw = try? JSONSerialization.jsonObject(with: data),
+              let obj = raw as? [String: Any] else {
+            return false
+        }
+        // State A / B both carry `success:true`; only State C is `false`.
+        guard let success = obj["success"] as? Bool, success == false else {
+            return false
+        }
+        guard let errorCode = obj["error"] as? String else { return false }
+        return terminalErrorCodes.contains(errorCode)
     }
 
     // MARK: - JSON serialization

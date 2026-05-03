@@ -22,9 +22,98 @@ enum AXLogicProElements {
     }
 
     /// Get the main window element.
+    ///
+    /// v3.1.1 (P1-2) — dialog-resilient lookup. When Logic has a modal dialog
+    /// open (file-open panel, Bounce, tempo alert, save sheet, etc.) the
+    /// system reports the dialog window as `kAXMainWindowAttribute`. Pre-3.1.1
+    /// callers (`getTrackHeaders`, `getMixerArea`, `getControlBar`, …) walked
+    /// down from that dialog and saw zero tracks / no transport — which the
+    /// StatePoller then wrote into the cache as a phantom "empty project"
+    /// state, breaking every track/mixer tool until the dialog was dismissed.
+    ///
+    /// New behavior:
+    ///   1. Read every window via `kAXWindowsAttribute`.
+    ///   2. Skip windows whose `AXSubrole` is `AXDialog` / `AXSystemDialog`
+    ///      (modal sheets/panels).
+    ///   3. Prefer a non-dialog window that contains the "트랙 헤더" /
+    ///      "Track Headers" group (the real arrange window).
+    ///   4. Fall back to the first non-dialog window.
+    ///   5. Only fall back to `kAXMainWindowAttribute` if no windows are
+    ///      enumerable — preserves test-double behavior that builds a minimal
+    ///      AX tree without a windows array.
     static func mainWindow(runtime: Runtime = .production) -> AXUIElement? {
         guard let app = appRoot(runtime: runtime) else { return nil }
-        return AXHelpers.getAttribute(app, kAXMainWindowAttribute, runtime: runtime.ax)
+
+        // Step 1 — enumerate all windows (test doubles may not implement this;
+        // falls back to legacy mainWindow for those).
+        let windows: [AXUIElement] = AXHelpers.getAttribute(
+            app, kAXWindowsAttribute, runtime: runtime.ax
+        ) ?? []
+        guard !windows.isEmpty else {
+            return AXHelpers.getAttribute(app, kAXMainWindowAttribute, runtime: runtime.ax)
+        }
+
+        // Step 2 — partition into dialog vs non-dialog.
+        let nonDialogs = windows.filter { !isDialogWindow($0, runtime: runtime.ax) }
+        guard !nonDialogs.isEmpty else {
+            // Every window is a dialog — fall through to the legacy main-window
+            // lookup so callers that expect *something* still get an element.
+            // Downstream `getTrackHeaders` will return nil → empty tracks, and
+            // the StateCache empty-poll guard (P1-3) absorbs the transient.
+            return AXHelpers.getAttribute(app, kAXMainWindowAttribute, runtime: runtime.ax)
+        }
+
+        // Step 3 — prefer the arrange window (has Track Headers group).
+        if let arrange = nonDialogs.first(where: { hasTrackHeadersGroup($0, runtime: runtime.ax) }) {
+            return arrange
+        }
+
+        // Step 4 — fallback: first non-dialog window.
+        return nonDialogs.first
+    }
+
+    /// Returns true when at least one of Logic's windows is currently a modal
+    /// dialog (subrole `AXDialog` / `AXSystemDialog`). v3.1.1 (P1-2) — used
+    /// by `StatePoller` and any caller that wants to short-circuit cache
+    /// updates while a blocking sheet is up.
+    static func dialogPresent(runtime: Runtime = .production) -> Bool {
+        guard let app = appRoot(runtime: runtime) else { return false }
+        let windows: [AXUIElement] = AXHelpers.getAttribute(
+            app, kAXWindowsAttribute, runtime: runtime.ax
+        ) ?? []
+        return windows.contains { isDialogWindow($0, runtime: runtime.ax) }
+    }
+
+    /// True when `window` carries an AXSubrole indicating a modal dialog/sheet.
+    /// Logic 12 commonly tags Bounce/Save/Open/tempo-alert windows with one of:
+    ///   AXDialog, AXSystemDialog, AXFloatingWindow (rare).
+    /// We treat the first two as "dialog" — AXFloatingWindow stays a regular
+    /// window because Logic uses it for the Library/Mixer detached panes.
+    private static func isDialogWindow(
+        _ window: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        let subrole: String? = AXHelpers.getAttribute(window, kAXSubroleAttribute, runtime: runtime)
+        guard let subrole else { return false }
+        return subrole == (kAXDialogSubrole as String)
+            || subrole == (kAXSystemDialogSubrole as String)
+    }
+
+    /// True when `window` contains an AXGroup whose description matches
+    /// Logic's track-header rail (`트랙 헤더` / `Track Headers`). Used by
+    /// `mainWindow()` to disambiguate the arrange window from auxiliary
+    /// non-dialog windows (Library, Mixer detached pane, plugin windows).
+    private static func hasTrackHeadersGroup(
+        _ window: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        let groups = AXHelpers.findAllDescendants(
+            of: window, role: kAXGroupRole, maxDepth: 8, runtime: runtime
+        )
+        return groups.contains { group in
+            let desc = (AXHelpers.getDescription(group, runtime: runtime) ?? "").lowercased()
+            return desc == "track headers" || desc == "트랙 헤더"
+        }
     }
 
     // MARK: - Transport

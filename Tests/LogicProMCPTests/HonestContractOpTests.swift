@@ -233,3 +233,47 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     #expect(!result.isSuccess)
     #expect(result.message.contains("Cannot find Mute button"))
 }
+
+// MARK: - T-4 (v3.1.2 P2-1): track.set_color — explicit State C `not_implemented`
+
+@Test func testTrackSetColorReturnsNotImplemented() async {
+    // The set_color path short-circuits inside the AccessibilityChannel
+    // operation switch and never touches the AX tree, so the FakeAX
+    // builder can be empty. Only the trust + Logic-running gates need to
+    // pass for `execute(...)` to reach the switch statement.
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(900)
+    let window = builder.element(901)
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [])
+    let runtime = AccessibilityChannel.Runtime.axBacked(
+        isTrusted: { true },
+        isLogicProRunning: { true },
+        logicRuntime: builder.makeLogicRuntime(appElement: app)
+    )
+    let channel = AccessibilityChannel(runtime: runtime)
+
+    let result = await channel.execute(
+        operation: "track.set_color",
+        params: ["index": "2", "color": "12"]
+    )
+
+    // Outer ChannelResult is .error (set_color uses .error for State C),
+    // and the embedded message must be a State C envelope with the
+    // canonical `not_implemented` error code + a hint.
+    #expect(!result.isSuccess)
+    let obj = decodeJSON(result.message)
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "not_implemented")
+    let hint = obj["hint"] as? String ?? ""
+    #expect(hint.contains("Track color"), "expected hint to mention Track color, got: \(hint)")
+
+    // The router uses isTerminalStateC to suppress fallback when the
+    // primary channel reports an error no other channel can improve on.
+    // `not_implemented` is in `terminalErrorCodes`, so this must be true.
+    #expect(
+        HonestContract.isTerminalStateC(result.message),
+        "set_color State C must be classified as terminal so router skips fallback"
+    )
+}
+

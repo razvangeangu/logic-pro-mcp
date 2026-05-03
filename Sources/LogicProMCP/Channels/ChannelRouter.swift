@@ -294,6 +294,21 @@ actor ChannelRouter {
                 Log.debug("\(operation) succeeded via \(channelID.rawValue)", subsystem: "router")
                 return result
             case .error(let msg):
+                // v3.1.2 (P1-1) — terminal State C means no other channel can
+                // improve on this answer (`element_not_found`, `invalid_params`,
+                // `not_implemented`). Falling through to the next channel
+                // would risk a vacuous success on a press-only MCU button or
+                // a CGEvent shortcut that targets the wrong UI, masking the
+                // honest AX failure. Preserve the original State C envelope
+                // in that case instead of wrapping it in the generic
+                // "All channels exhausted" message.
+                if HonestContract.isTerminalStateC(msg) {
+                    Log.debug(
+                        "\(operation) terminal State C via \(channelID.rawValue), suppressing fallback",
+                        subsystem: "router"
+                    )
+                    return result
+                }
                 Log.debug("\(operation) failed via \(channelID.rawValue): \(msg), trying next", subsystem: "router")
                 lastError = msg
             }
