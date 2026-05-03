@@ -177,6 +177,8 @@ struct MCUProtocol {
     // MARK: - V-Pot
 
     /// Encode V-Pot rotation → CC bytes.
+    /// TX (host → Logic): MCU V-Pot rotate uses CC 0x10..0x17 (strip 0..7).
+    /// Value byte: bit 6 (0x40) = direction (0 CW, 1 CCW), bits 0..3 = speed 1..15.
     static func encodeVPot(strip: Int, direction: VPotDirection, speed: UInt8 = 1) -> [UInt8] {
         let cc = UInt8(0x10 + min(max(strip, 0), 7))
         let clampedSpeed = min(max(speed, 1), 15)
@@ -186,6 +188,83 @@ struct MCUProtocol {
         case .counterClockwise: value = 0x40 | clampedSpeed
         }
         return [0xB0, cc, value]
+    }
+
+    // MARK: - V-Pot LED Ring (RX from Logic)
+
+    /// LED-ring display mode bits (value byte bits 4..5). The MCU surface
+    /// shows the V-Pot's current value through one of four ring patterns.
+    /// We expose the mode for diagnostic completeness even though pan
+    /// decode only needs the position.
+    enum VPotRingMode: Sendable, Equatable {
+        case singleDot   // 0x00 — one LED lit at `position`
+        case boostCut    // 0x10 — symmetric around centre, "VU" style
+        case wrap        // 0x20 — fills 0..position
+        case spread      // 0x30 — symmetric spread from centre
+
+        static func from(bits: UInt8) -> VPotRingMode {
+            switch bits & 0x30 {
+            case 0x00: return .singleDot
+            case 0x10: return .boostCut
+            case 0x20: return .wrap
+            case 0x30: return .spread
+            default:   return .singleDot
+            }
+        }
+    }
+
+    /// Decoded V-Pot LED ring state.
+    struct VPotLEDState: Sendable, Equatable {
+        let strip: Int      // 0..7 within the current bank
+        let position: Int   // 0..11 (LED ring index; 6 = centre)
+        let center: Bool    // bit 6 of value byte — centre LED on
+        let mode: VPotRingMode
+    }
+
+    /// Decode an MCU V-Pot LED-ring CC frame from Logic.
+    /// RX: CC 0x30..0x37 carries the ring state for strips 0..7.
+    /// Value byte layout: bit 6 = centre LED, bits 4..5 = mode, bits 0..3 = position 0..11.
+    static func decodeVPotLEDRing(cc: UInt8, value: UInt8) -> VPotLEDState? {
+        guard (0x30...0x37).contains(cc) else { return nil }
+        let strip = Int(cc - 0x30)
+        let position = Int(value & 0x0F)
+        // Position is documented as 0..11; clamp anything beyond 11 (some
+        // Logic builds emit 0x0C/0x0D briefly during boot) so the decoder
+        // never produces an out-of-range index for callers.
+        let clampedPos = min(max(position, 0), 11)
+        let center = (value & 0x40) != 0
+        let mode = VPotRingMode.from(bits: value)
+        return VPotLEDState(strip: strip, position: clampedPos, center: center, mode: mode)
+    }
+
+    /// Convert a V-Pot LED ring `position` (0..11, centre=6) to a normalised
+    /// pan in [-1.0, +1.0]. Mirrors the API surface of `executeSetPan`.
+    /// The MCU ring is asymmetric (6 left LEDs vs 5 right LEDs); we map each
+    /// half independently so position 0 → -1.0, 6 → 0.0, 11 → +1.0.
+    static func vpotPositionToPan(_ position: Int) -> Double {
+        let p = min(max(position, 0), 11)
+        if p == 6 { return 0.0 }
+        if p < 6 {
+            // 0..5 → -1.0 .. -1/6
+            return Double(p - 6) / 6.0
+        } else {
+            // 7..11 → +1/5 .. +1.0
+            return Double(p - 6) / 5.0
+        }
+    }
+
+    /// Inverse mapping for tests / round-trip checks. Discrete: returns the
+    /// LED position closest to the given normalised pan value.
+    static func panToVPotPosition(_ pan: Double) -> Int {
+        let clamped = min(max(pan, -1.0), 1.0)
+        if clamped == 0 { return 6 }
+        if clamped < 0 {
+            // -1.0 .. 0 → 0 .. 6
+            return min(max(Int((clamped * 6.0).rounded() + 6.0), 0), 6)
+        } else {
+            // 0 .. +1.0 → 6 .. 11
+            return min(max(Int((clamped * 5.0).rounded() + 6.0), 6), 11)
+        }
     }
 
     // MARK: - Jog Wheel

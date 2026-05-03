@@ -397,9 +397,9 @@ actor AccessibilityChannel: Channel {
         case "region.get_regions":
             return AccessibilityChannel.defaultGetRegions(runtime: runtime.logicRuntime)
         case "region.move_to_playhead":
-            return await AccessibilityChannel.defaultMoveSelectedRegionToPlayhead()
+            return await AccessibilityChannel.defaultMoveSelectedRegionToPlayhead(runtime: runtime.logicRuntime)
         case "region.select_last":
-            return await AccessibilityChannel.defaultSelectLastRegion()
+            return await AccessibilityChannel.defaultSelectLastRegion(runtime: runtime.logicRuntime)
         case "region.select", "region.loop", "region.set_name", "region.move", "region.resize":
             return .error("Region operations not yet implemented via AX")
 
@@ -2419,13 +2419,48 @@ actor AccessibilityChannel: Channel {
     /// Y-midpoint. If no track headers can be read (e.g. scrolled offscreen), returns
     /// index -1 so the caller can still see the regions.
     private static func defaultGetRegions(runtime: AXLogicProElements.Runtime = .production) -> ChannelResult {
-        guard let window = AXLogicProElements.mainWindow(runtime: runtime) else {
-            return .error("Cannot locate Logic Pro main window")
+        switch enumerateRegionItems(runtime: runtime) {
+        case .failure(let err):
+            return .error(err.message)
+        case .success(let result):
+            // When the array is empty, surface traversal counters so we can tell
+            // "no regions exist" from "parser missed them" without re-running a probe.
+            if result.regions.isEmpty {
+                return .success("{\"regions\":[],\"_debug\":{\"layoutItems\":\(result.layoutItemCount),\"nonRegion\":\(result.nonRegionCount)}}")
+            }
+            // Tuple-element keypath inference fails in some Swift versions; map
+            // explicitly to the RegionInfo array instead of `\.info`.
+            return encodeResult(result.regions.map { $0.info })
         }
-        // Find the "Track Content" container — it holds all region AXLayoutItems as
-        // descendants. Logic's arrange area may have multiple AXGroups so match by description.
-        // Increase maxDepth to 14 — production Logic trees can run deeper than 10 under
-        // the arrange area once plugin/library panels are open.
+    }
+
+    /// Result of region traversal. `regions` contains both the AX element
+    /// (for read-back like AXSelected) and the parsed RegionInfo.
+    struct RegionEnumerationResult {
+        let regions: [(item: AXUIElement, info: RegionInfo)]
+        let layoutItemCount: Int
+        let nonRegionCount: Int
+    }
+
+    /// Lightweight error wrapper so `enumerateRegionItems` can carry the
+    /// existing diagnostic strings through `Result` without forcing every
+    /// caller to define a typed enum. `String` itself does not conform to
+    /// `Error`, so this minimal wrapper is the smallest viable adapter.
+    struct RegionEnumerationError: Error {
+        let message: String
+        init(_ message: String) { self.message = message }
+    }
+
+    /// Walk the arrange area's "Track Content" group, collect every
+    /// AXLayoutItem region with parsed bar positions and its underlying AX
+    /// element handle. Shared across `defaultGetRegions`,
+    /// `selectedRegionInfo`, and `lastRegionInfo`.
+    static func enumerateRegionItems(
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> Result<RegionEnumerationResult, RegionEnumerationError> {
+        guard let window = AXLogicProElements.mainWindow(runtime: runtime) else {
+            return .failure(RegionEnumerationError("Cannot locate Logic Pro main window"))
+        }
         let candidates = AXHelpers.findAllDescendants(
             of: window, role: kAXGroupRole, maxDepth: 14, runtime: runtime.ax
         )
@@ -2434,9 +2469,6 @@ actor AccessibilityChannel: Channel {
         for g in candidates {
             let desc = AXHelpers.getDescription(g, runtime: runtime.ax) ?? ""
             if !desc.isEmpty { groupDescSamples.append(desc) }
-            // Logic's localized strings have varied over versions: "트랙 콘텐츠" (12.0),
-            // just "콘텐츠" (some builds), "Track Content" (en). Accept any that contains
-            // the stem — regions are the only content elements we care about underneath.
             let lower = desc.lowercased()
             if desc.contains("트랙 콘텐츠") || desc == "콘텐츠"
                 || lower == "track content" || lower == "content" {
@@ -2445,18 +2477,13 @@ actor AccessibilityChannel: Channel {
             }
         }
         guard let content = contentGroup else {
-            // Return diagnostic so the caller can see what group descriptions WERE found.
-            // Prevents silent "empty array" failures when Logic's localization differs.
-            // Emit each sample with Unicode code-point count + hex bytes so whitespace/
-            // hidden chars surface (was the problem chasing "콘텐츠" matching).
             let detailed = groupDescSamples.prefix(20).map { s -> String in
                 let bytes = s.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: ",")
                 return "'\(s)'(\(s.unicodeScalars.count)=\(bytes))"
             }.joined(separator: " | ")
-            return .error("Track Content group not found (scanned \(candidates.count) AXGroups; samples: \(detailed))")
+            return .failure(RegionEnumerationError("Track Content group not found (scanned \(candidates.count) AXGroups; samples: \(detailed))"))
         }
 
-        // Track headers for Y→index mapping.
         let headers = AXLogicProElements.allTrackHeaders(runtime: runtime)
         let headerYs: [(index: Int, y: CGFloat)] = headers.enumerated().compactMap { pair in
             guard let p = AXHelpers.getPosition(pair.element, runtime: runtime.ax),
@@ -2464,27 +2491,19 @@ actor AccessibilityChannel: Channel {
             return (pair.offset, p.y + s.height / 2)
         }
 
-        // Collect all AXLayoutItems under content — regions look like:
-        //   AXLayoutItem [d="<region name>" | h="리전은 N 마디 에서 시작하여 M 마디 에서 끝납니다., MIDI 리전. …"]
-        // maxDepth=10 covers nested AXLayoutArea→AXLayoutItem structure seen in production.
         let items = AXHelpers.findAllDescendants(
             of: content, role: "AXLayoutItem", maxDepth: 10, runtime: runtime.ax
         )
-        var regions: [RegionInfo] = []
+        var regions: [(item: AXUIElement, info: RegionInfo)] = []
         var nonRegionCount = 0
         for item in items {
             let help = AXHelpers.getHelp(item, runtime: runtime.ax) ?? ""
-            // Heuristic: region help always contains "리전" (Korean) or "Region" (English).
-            // Track-content-lane headers and other AXLayoutItems don't.
             let isRegion = help.contains("리전") || help.lowercased().contains("region")
             guard isRegion else { nonRegionCount += 1; continue }
 
             let name = AXHelpers.getDescription(item, runtime: runtime.ax) ?? ""
-            // Parse "리전은 N 마디 에서 시작하여 M 마디 에서 끝납니다" or
-            // "Region starts at bar N and ends at bar M".
             let (startBar, endBar) = parseRegionBars(from: help)
 
-            // Detect kind from help text.
             let lower = help.lowercased()
             let kind: String
             if help.contains("MIDI") || lower.contains("midi") {
@@ -2495,7 +2514,6 @@ actor AccessibilityChannel: Channel {
                 kind = "unknown"
             }
 
-            // Determine track index by Y match.
             var trackIndex = -1
             if let pos = AXHelpers.getPosition(item, runtime: runtime.ax),
                let size = AXHelpers.getSize(item, runtime: runtime.ax),
@@ -2505,21 +2523,73 @@ actor AccessibilityChannel: Channel {
                 trackIndex = best?.index ?? -1
             }
 
-            regions.append(RegionInfo(
-                name: name,
-                trackIndex: trackIndex,
-                startBar: startBar,
-                endBar: endBar,
-                kind: kind,
-                rawHelp: help
+            regions.append((
+                item,
+                RegionInfo(
+                    name: name,
+                    trackIndex: trackIndex,
+                    startBar: startBar,
+                    endBar: endBar,
+                    kind: kind,
+                    rawHelp: help
+                )
             ))
         }
-        // When the array is empty, surface traversal counters so we can tell
-        // "no regions exist" from "parser missed them" without re-running a probe.
-        if regions.isEmpty {
-            return .success("{\"regions\":[],\"_debug\":{\"layoutItems\":\(items.count),\"nonRegion\":\(nonRegionCount)}}")
+        return .success(RegionEnumerationResult(
+            regions: regions,
+            layoutItemCount: items.count,
+            nonRegionCount: nonRegionCount
+        ))
+    }
+
+    /// Currently selected region (AXLayoutItem with AXSelected=true) inside
+    /// the arrange area. Returns nil when no AXLayoutItem reports
+    /// `kAXSelectedAttribute = true`. Used by `region.move_to_playhead` for
+    /// pre/post startBar diff.
+    static func selectedRegionInfo(
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> RegionInfo? {
+        guard case .success(let result) = enumerateRegionItems(runtime: runtime) else {
+            return nil
         }
-        return encodeResult(regions)
+        for entry in result.regions {
+            if let value: AnyObject = AXHelpers.getAttribute(entry.item, kAXSelectedAttribute, runtime: runtime.ax),
+               let n = value as? NSNumber, n.boolValue {
+                return entry.info
+            }
+        }
+        return nil
+    }
+
+    /// Right-most / latest region. "Last" = the entry with the largest
+    /// `startBar`; ties broken by larger `trackIndex`. Used by
+    /// `region.select_last` post-state verification.
+    static func lastRegionInfo(
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> RegionInfo? {
+        guard case .success(let result) = enumerateRegionItems(runtime: runtime),
+              !result.regions.isEmpty else {
+            return nil
+        }
+        let sorted = result.regions.map { $0.info }.sorted { a, b in
+            if a.startBar != b.startBar { return a.startBar < b.startBar }
+            return a.trackIndex < b.trackIndex
+        }
+        return sorted.last
+    }
+
+    /// Parse the integer bar from `TransportState.position`
+    /// ("Bar.Beat.Division.Tick"). Returns nil when the transport bar is not
+    /// reachable or the position string can't be parsed.
+    static func currentPlayheadBar(
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> Int? {
+        guard let transport = AXLogicProElements.getTransportBar(runtime: runtime) else {
+            return nil
+        }
+        let state = AXValueExtractors.extractTransportState(from: transport, runtime: runtime.ax)
+        let head = state.position.split(separator: ".").first.map(String.init) ?? ""
+        return Int(head)
     }
 
     /// Extract (startBar, endBar) from Logic's localized region help text.
@@ -2673,8 +2743,22 @@ actor AccessibilityChannel: Channel {
 
     /// Move the currently selected region to the playhead position via the
     /// `편집 → 이동 → 재생헤드로` menu (Edit → Move → To Playhead).
-    /// Assumes a region is already selected; otherwise the menu item is a no-op.
-    static func defaultMoveSelectedRegionToPlayhead() async -> ChannelResult {
+    ///
+    /// State A path (v3.1.3): pre-snapshot the selected region's startBar via
+    /// direct AX, run the menu click, settle, then re-read the same region's
+    /// startBar AND the transport playhead bar. If post.startBar matches the
+    /// playhead bar (±1 tolerance) → State A `verified:true`. If pre==post
+    /// (no movement) or post≠playhead → State B `readback_mismatch`. If we
+    /// can't read a selected region pre/post → State B `readback_unavailable`.
+    static func defaultMoveSelectedRegionToPlayhead(
+        runtime: AXLogicProElements.Runtime = .production,
+        executeScript: @Sendable (String) async -> ChannelResult = { await AppleScriptChannel.executeAppleScript($0) },
+        settle: @Sendable () async -> Void = { try? await Task.sleep(nanoseconds: 350_000_000) }
+    ) async -> ChannelResult {
+        // Pre-state: snapshot the currently selected region (may be nil if
+        // nothing is selected or the AX surface is unreadable).
+        let pre = selectedRegionInfo(runtime: runtime)
+
         let script = """
         tell application "Logic Pro" to activate
         delay 0.1
@@ -2693,7 +2777,7 @@ actor AccessibilityChannel: Channel {
         end tell
         return "OK"
         """
-        let result = await AppleScriptChannel.executeAppleScript(script)
+        let result = await executeScript(script)
         switch result {
         case .success(let output):
             if output.hasPrefix("MENU_ERROR") {
@@ -2702,14 +2786,68 @@ actor AccessibilityChannel: Channel {
                     hint: "region.move_to_playhead menu click failed: \(output)"
                 ))
             }
-            // No deterministic AX read-back for region position diff — would
-            // require capturing the selected region's startBar before/after
-            // through the regions resource (which is StatePoller-cached and
-            // races with this mutation per v3.1.1 §4.1 race policy). State B
-            // honest until v3.1.2 region-state pre/post snapshot via direct AX.
+            // Settle window so Logic's AX tree updates before we re-read.
+            await settle()
+
+            let post = selectedRegionInfo(runtime: runtime)
+            let playheadBar = currentPlayheadBar(runtime: runtime)
+
+            // Without a pre-state we can't diff. State B readback_unavailable.
+            guard let pre = pre else {
+                return .success(HonestContract.encodeStateB(
+                    reason: .readbackUnavailable,
+                    extras: [
+                        "via": "applescript_menu",
+                        "note": "no selected region pre-state",
+                        "post_start_bar": post?.startBar ?? -1,
+                        "playhead_bar": playheadBar ?? -1
+                    ]
+                ))
+            }
+
+            // Post readback unavailable (region disappeared / parser miss).
+            guard let post = post, post.startBar > 0 else {
+                return .success(HonestContract.encodeStateB(
+                    reason: .readbackUnavailable,
+                    extras: [
+                        "via": "applescript_menu",
+                        "pre_start_bar": pre.startBar,
+                        "playhead_bar": playheadBar ?? -1,
+                        "note": "post startBar not readable"
+                    ]
+                ))
+            }
+
+            let extrasBase: [String: Any] = [
+                "via": "applescript_menu",
+                "region_name": pre.name,
+                "pre_start_bar": pre.startBar,
+                "post_start_bar": post.startBar,
+                "playhead_bar": playheadBar ?? NSNull()
+            ]
+
+            // Verified: post.startBar landed on the playhead bar (±1 tolerance
+            // for snap rounding). State A.
+            if let head = playheadBar, abs(post.startBar - head) <= 1 {
+                var extras = extrasBase
+                extras["requested"] = head
+                extras["observed"] = post.startBar
+                return .success(HonestContract.encodeStateA(extras: extras))
+            }
+
+            // Position changed but didn't match playhead — Logic moved it
+            // somewhere unexpected (snap behaviour / wrong target).
+            if pre.startBar != post.startBar {
+                return .success(HonestContract.encodeStateB(
+                    reason: .readbackMismatch,
+                    extras: extrasBase
+                ))
+            }
+
+            // pre == post → menu was a no-op (asked to move, nothing moved).
             return .success(HonestContract.encodeStateB(
-                reason: .readbackUnavailable,
-                extras: ["via": "applescript_menu", "note": "region position not read back"]
+                reason: .readbackMismatch,
+                extras: extrasBase.merging(["note": "no position change"]) { _, new in new }
             ))
         case .error(let msg):
             return .error(HonestContract.encodeStateC(
@@ -2723,7 +2861,16 @@ actor AccessibilityChannel: Channel {
     /// region in the arrange area by locating it via AX element position.
     /// Newly imported regions are usually already selected by Logic, but this
     /// provides a fallback when selection state is lost between operations.
-    static func defaultSelectLastRegion() async -> ChannelResult {
+    ///
+    /// State A path (v3.1.3): after the AppleScript sets selection, re-read
+    /// the AX tree to find the currently selected region and the "last"
+    /// region (largest startBar). If they match → State A `verified:true`;
+    /// otherwise State B `readback_mismatch` / `readback_unavailable`.
+    static func defaultSelectLastRegion(
+        runtime: AXLogicProElements.Runtime = .production,
+        executeScript: @Sendable (String) async -> ChannelResult = { await AppleScriptChannel.executeAppleScript($0) },
+        settle: @Sendable () async -> Void = { try? await Task.sleep(nanoseconds: 350_000_000) }
+    ) async -> ChannelResult {
         let script = """
         tell application "Logic Pro" to activate
         delay 0.1
@@ -2773,7 +2920,7 @@ actor AccessibilityChannel: Channel {
             end tell
         end tell
         """
-        let result = await AppleScriptChannel.executeAppleScript(script)
+        let result = await executeScript(script)
         switch result {
         case .success(let output):
             if output.contains("NO_REGION") {
@@ -2782,16 +2929,61 @@ actor AccessibilityChannel: Channel {
                     hint: "region.select_last: no region found in arrange area"
                 ))
             }
-            // The AppleScript already attempted `set selected of target to true`
-            // (returns SELECTED) or fell back to a click (returns CLICKED). The
-            // `set selected` path is itself an AX read-then-write — the
-            // SELECTED sentinel implies the AX setter accepted the value, but
-            // we did not poll AXSelected back. State B until v3.1.2 adds a
-            // direct AXSelected re-read.
+            // Settle window so Logic's AX tree reflects the new selection
+            // before we re-read AXSelected.
+            await settle()
+
             let method = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let expected = lastRegionInfo(runtime: runtime)
+            let selected = selectedRegionInfo(runtime: runtime)
+
+            // Without a "last" region we can't even define the target.
+            guard let expected = expected else {
+                return .success(HonestContract.encodeStateB(
+                    reason: .readbackUnavailable,
+                    extras: [
+                        "via": method.isEmpty ? "applescript" : method,
+                        "note": "could not enumerate regions for last-region target"
+                    ]
+                ))
+            }
+
+            // No selected region readback (AXSelected never came back true).
+            guard let selected = selected else {
+                return .success(HonestContract.encodeStateB(
+                    reason: .readbackUnavailable,
+                    extras: [
+                        "via": method.isEmpty ? "applescript" : method,
+                        "expected_name": expected.name,
+                        "expected_start_bar": expected.startBar,
+                        "note": "no AXSelected region post-action"
+                    ]
+                ))
+            }
+
+            let extrasBase: [String: Any] = [
+                "via": method.isEmpty ? "applescript" : method,
+                "expected_name": expected.name,
+                "expected_start_bar": expected.startBar,
+                "expected_track_index": expected.trackIndex,
+                "selected_name": selected.name,
+                "selected_start_bar": selected.startBar,
+                "selected_track_index": selected.trackIndex
+            ]
+
+            // Match by (name, startBar, trackIndex) triple — the same region
+            // identity the resource exposes. State A on full match.
+            if selected.name == expected.name
+                && selected.startBar == expected.startBar
+                && selected.trackIndex == expected.trackIndex {
+                return .success(HonestContract.encodeStateA(extras: extrasBase))
+            }
+
+            // Selected ≠ last region (AppleScript heuristic picked a
+            // different AXLayoutItem than our parsed-bar "last").
             return .success(HonestContract.encodeStateB(
-                reason: .readbackUnavailable,
-                extras: ["via": method.isEmpty ? "applescript" : method]
+                reason: .readbackMismatch,
+                extras: extrasBase
             ))
         case .error(let msg):
             return .error(HonestContract.encodeStateC(

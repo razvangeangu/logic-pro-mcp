@@ -93,6 +93,62 @@ actor MCUChannel: Channel {
         return await cache.getChannelStrip(at: strip)?.volume
     }
 
+    /// v3.1.3 (#1) — poll StateCache for a matching V-Pot pan echo. Mirrors
+    /// `pollFaderEcho` but reads the LED-ring-derived pan written by
+    /// `MCUFeedbackParser` on CC 0x30..0x37.
+    ///
+    /// `tolerance` is normalised to the [-1, +1] pan range. The MCU LED ring
+    /// has 11 discrete positions across the full range (asymmetric: 6 left,
+    /// 5 right). A single LED step is ~0.167 units on the left and ~0.2 on
+    /// the right; we default to ±0.1 (≈ ±0.5 LED) which is tight enough to
+    /// reject obvious mismatches but tolerant of the LED-ring quantisation.
+    ///
+    /// `requireFreshAfter`, when non-nil, demands the cache write timestamp
+    /// (`cache.getPanUpdatedAt(strip:)`) be strictly newer than that deadline,
+    /// so a previously-cached pan value cannot masquerade as a fresh echo on
+    /// an identical-target re-send (same anti-stale guard as Ralph-2 / C1
+    /// applied to `set_volume`).
+    ///
+    /// Returns the observed pan if a fresh matching echo arrived, or nil on
+    /// timeout / stale-only.
+    func pollPanEcho(
+        strip: Int,
+        target: Double,
+        timeoutMs: Int,
+        tolerance: Double = 0.1,
+        requireFreshAfter: Date? = nil
+    ) async -> Double? {
+        let pollIntervalNs: UInt64 = 25_000_000
+        let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+        while Date() < deadline {
+            if let observed = await cache.getPanValue(strip: strip),
+               abs(observed - target) <= tolerance {
+                if let sendAt = requireFreshAfter {
+                    if let writtenAt = await cache.getPanUpdatedAt(strip: strip),
+                       writtenAt > sendAt {
+                        return observed
+                    }
+                    // Stale — keep polling until a fresh write arrives or
+                    // the deadline elapses.
+                } else {
+                    return observed
+                }
+            }
+            try? await Task.sleep(nanoseconds: pollIntervalNs)
+        }
+        // Deadline hit: surface the most-recent fresh observation when
+        // freshness is required, else fall back to the raw cached value
+        // (parity with pollFaderEcho's backward-compat behaviour).
+        if let sendAt = requireFreshAfter {
+            if let writtenAt = await cache.getPanUpdatedAt(strip: strip),
+               writtenAt > sendAt {
+                return await cache.getPanValue(strip: strip)
+            }
+            return nil
+        }
+        return await cache.getPanValue(strip: strip)
+    }
+
     func start() async throws {
         // Pass bank offset getter to feedback parser
         await feedbackParser.setBankOffsetProvider { [weak self] in
@@ -242,24 +298,37 @@ actor MCUChannel: Channel {
     private func executeSetPan(_ params: [String: String]) async -> ChannelResult {
         let track = Int(params["index"] ?? "0") ?? 0
         let value = Double(params["pan"] ?? "0") ?? 0.0
+        let timeoutMs = Self.echoTimeoutMs
 
         return await withBanking(targetTrack: track) { strip in
+            // v3.1.3 (#1) — stamp the send moment *before* the write so
+            // pollPanEcho can reject stale cache values that pre-date this
+            // call. Same anti-stale guard as set_volume's Ralph-2 / C1 fix.
+            let sendAt = Date()
             let speed: UInt8 = max(1, min(15, UInt8(abs(value) * 15)))
             let direction: MCUProtocol.VPotDirection = value >= 0 ? .clockwise : .counterClockwise
             let bytes = MCUProtocol.encodeVPot(strip: strip, direction: direction, speed: speed)
-            await self.transport.send(bytes)
-            // v3.1.0 (T4) — V-Pot feedback is relative (CW/CCW nudges) and
-            // Logic echoes position as a different event (CC 0x30+strip LED
-            // ring, not pitch-bend). Until that parser is plumbed through
-            // to StateCache, treat every pan write as `readback_unavailable`
-            // so the contract stays honest.
+            await self.sendCommand(bytes)
+            // v3.1.3 (#1) — V-Pot LED-ring CC 0x30..0x37 echoes the absolute
+            // pan position back from Logic. MCUFeedbackParser writes the
+            // decoded pan into StateCache; pollPanEcho polls until a fresh
+            // matching value arrives or the timeout elapses. Confirmed
+            // fresh echo → State A. Timeout / stale-only → State B
+            // `echo_timeout_<ms>ms`.
+            let observed = await self.pollPanEcho(
+                strip: track, target: value, timeoutMs: timeoutMs,
+                requireFreshAfter: sendAt
+            )
             let extras: [String: Any] = [
                 "requested": value,
-                "observed": NSNull(),
+                "observed": observed ?? NSNull(),
                 "track": track
             ]
+            if let observed, abs(observed - value) <= 0.1 {
+                return .success(HonestContract.encodeStateA(extras: extras))
+            }
             return .success(HonestContract.encodeStateB(
-                reason: .readbackUnavailable, extras: extras
+                reason: .echoTimeout(ms: timeoutMs), extras: extras
             ))
         }
     }

@@ -8,6 +8,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.1.3] — 2026-05-04
+
+**State A coverage extension: `mixer.set_pan` + `region.move_to_playhead` + `region.select_last`.** v3.1.2's audit identified three mutating ops still chronically stuck at State B `readback_unavailable` despite Logic Pro emitting the underlying signal. v3.1.3 picks them up:
+
+### Promoted to State A
+
+- **`mixer.set_pan` State A via V-Pot LED-ring decoder** (backlog #1; PRD-v311 §4.2 G). Logic broadcasts pan position via MCU CC 0x30..0x37 (V-Pot LED ring readout) — the protocol was already documented in `MCUProtocol`, but the feedback parser was a no-op `break`. New decoder reads bits 6 (centre-LED), 4-5 (mode: singleDot / boostCut / wrap / spread), and 0-3 (position 0..11) and converts to `-1.0..+1.0` pan units via the asymmetric ring mapping (6 left LEDs, 5 right LEDs, position 6 = centre). `StateCache.panUpdatedAt` + `getPanValue(strip:)` mirror the fader echo cache; `pollPanEcho` mirrors `pollFaderEcho`'s Ralph-2/C1 freshness guard (`requireFreshAfter: sendAt`) so a stale-cache value cannot masquerade as a fresh echo. `executeSetPan` now sends the V-Pot relative-rotation TX bytes, polls for the LED-ring echo, and routes State A on `±0.1` tolerance match or State B `echo_timeout_<MS>ms` on miss. `MCU_ECHO_TIMEOUT_MS` env var (250 / 500 / 1000) controls the deadline.
+
+- **`region.move_to_playhead` State A via pre/post startBar + playhead diff** (backlog #3a). Pre-snapshot the selected region's startBar (existing `parseRegionBars`), execute the menu action, settle 350ms, post-read the region's new startBar and the transport playhead. State A when post.startBar matches playhead within ±1 bar tolerance; State B `readback_mismatch` on no-change or off-by-more; State B `readback_unavailable` only when the AX pre-snapshot itself fails (no selected region, AX broken). New `enumerateRegionItems` factor + `selectedRegionInfo` / `currentPlayheadBar` / `lastRegionInfo` helpers serve both this op and `select_last`.
+
+- **`region.select_last` State A via post-action AXSelected re-read** (backlog #3b). Execute the menu action, settle, then read AXSelected on regions container and match against the largest-startBar region (ties broken by trackIndex). State A on full match (name + startBar + trackIndex), State B `readback_mismatch` with both expected and observed in extras when mismatched. Both ops now accept dependency-injected `executeScript` + `settle` for deterministic test isolation.
+
+### Verification
+
+- **Build**: `swift build` clean.
+- **Tests**: 862 → **884** passing (+22 net: 9 V-Pot — encode/decode, parser ingestion, pollPanEcho match/timeout/staleness, set_pan State A/B/stale routing; 14 region — move/select-last on match/mismatch/no-change/no-selection/menu-error + helper coverage; 2 HC envelope pinning tests; 1 pre-existing test updated for the new `set_pan` contract).
+- **Live verification**: deferred to user-driven session. Scenarios documented per agent reports — `set_pan` State A across banks, `MCU_ECHO_TIMEOUT_MS=1000` scaling, region position diff against a 1→9 bar move.
+
+### Out-of-scope (deferred)
+
+- Library nested-folder navigation (`Synthesizer/Bass/Sine Sub` 3-segment paths) — `set_instrument`'s `selectPath` requires a folder/leaf discriminator before clicking intermediate segments. Backlog item #2.
+- StatePoller plugin-window silent-failure (when a plugin window grabs AX focus, the poller's "no document" path freezes the cache for ~9 s). Backlog item #4.
+- `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env override path allowlist (currently any `.json` under user filesystem). Backlog item #5.
+- `track.set_automation` State A (would require an MCU button-LED echo decoder analogous to V-Pot). Backlog from v3.1.2.
+
 ## [3.1.2] — 2026-04-30
 
 **Honest Contract closure on remaining MCU surfaces + lifecycle cache hygiene.** Post-v3.1.1 transverse audit (3 independent agents converged) surfaced four production-blocking gaps that v3.1.1's AX-side promotion did not reach: three MCU responders still emitted free-form strings instead of the 3-state envelope, `record_sequence` had a verification-window vs. poll-interval mismatch that false-failed every successful import, project lifecycle ops left a stale tracks list in the cache for up to a minute, and `ChannelRouter` would silently fall through a terminal AX `element_not_found` State C into a vacuous MCU success.

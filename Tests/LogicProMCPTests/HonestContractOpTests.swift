@@ -277,3 +277,151 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
 }
 
+// MARK: - v3.1.3 backlog #3 — region.move_to_playhead / region.select_last
+// State A envelope contract. Detailed pre/post diff scenarios live in
+// `AccessibilityChannelRegionStateATests.swift`; this file pins the
+// envelope shape (success/verified/required-keys) for the contract review.
+
+private func axPointHC(_ x: CGFloat, _ y: CGFloat) -> AXValue {
+    var p = CGPoint(x: x, y: y); return AXValueCreate(.cgPoint, &p)!
+}
+private func axSizeHC(_ w: CGFloat, _ h: CGFloat) -> AXValue {
+    var s = CGSize(width: w, height: h); return AXValueCreate(.cgSize, &s)!
+}
+
+@Test func testRegionMoveToPlayheadStateAEnvelope() async {
+    let preHelp = "리전은 1 마디 에서 시작하여 3 마디 에서 끝납니다., MIDI 리전."
+    let postHelp = "리전은 9 마디 에서 시작하여 11 마디 에서 끝납니다., MIDI 리전."
+
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(1_500)
+    let window = builder.element(1_501)
+    let headerRail = builder.element(1_502)
+    let trackHeader = builder.element(1_503)
+    let contentGroup = builder.element(1_504)
+    let region = builder.element(1_505)
+    let transport = builder.element(1_506)
+    let positionText = builder.element(1_507)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [headerRail, transport, contentGroup])
+
+    builder.setAttribute(headerRail, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(headerRail, kAXDescriptionAttribute as String, "트랙 헤더")
+    builder.setChildren(headerRail, [trackHeader])
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(trackHeader, kAXPositionAttribute as String, axPointHC(0, 100))
+    builder.setAttribute(trackHeader, kAXSizeAttribute as String, axSizeHC(200, 40))
+
+    builder.setAttribute(contentGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(contentGroup, kAXDescriptionAttribute as String, "트랙 콘텐츠")
+    builder.setChildren(contentGroup, [region])
+    builder.setAttribute(region, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(region, kAXDescriptionAttribute as String, "RegionA")
+    builder.setAttribute(region, kAXHelpAttribute as String, preHelp)
+    builder.setAttribute(region, kAXPositionAttribute as String, axPointHC(240, 108))
+    builder.setAttribute(region, kAXSizeAttribute as String, axSizeHC(320, 24))
+    builder.setAttribute(region, kAXSelectedAttribute as String, true)
+
+    builder.setAttribute(transport, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(transport, kAXIdentifierAttribute as String, "Transport")
+    builder.setChildren(transport, [positionText])
+    builder.setAttribute(positionText, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(positionText, kAXDescriptionAttribute as String, "Position")
+    builder.setAttribute(positionText, kAXValueAttribute as String, "9.1.1.1")
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    let result = await AccessibilityChannel.defaultMoveSelectedRegionToPlayhead(
+        runtime: runtime,
+        executeScript: { _ in
+            builder.setAttribute(region, kAXHelpAttribute as String, postHelp)
+            return .success("OK")
+        },
+        settle: { }
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeJSON(result.message)
+    // State A envelope contract.
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["reason"] == nil, "State A must not carry a reason field")
+    #expect(obj["error"] == nil, "State A must not carry an error field")
+    // Pre/post diff fields the contract requires.
+    #expect(obj["requested"] != nil)
+    #expect(obj["observed"] != nil)
+    #expect(obj["via"] as? String == "applescript_menu")
+}
+
+@Test func testRegionSelectLastStateAEnvelope() async {
+    let regionAHelp = "리전은 1 마디 에서 시작하여 3 마디 에서 끝납니다., MIDI 리전."
+    let regionBHelp = "리전은 5 마디 에서 시작하여 7 마디 에서 끝납니다., MIDI 리전."
+
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(1_600)
+    let window = builder.element(1_601)
+    let headerRail = builder.element(1_602)
+    let trackHeader = builder.element(1_603)
+    let contentGroup = builder.element(1_604)
+    let regionA = builder.element(1_605)
+    let regionB = builder.element(1_606)
+    let transport = builder.element(1_607)
+    let positionText = builder.element(1_608)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [headerRail, transport, contentGroup])
+
+    builder.setAttribute(headerRail, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(headerRail, kAXDescriptionAttribute as String, "트랙 헤더")
+    builder.setChildren(headerRail, [trackHeader])
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(trackHeader, kAXPositionAttribute as String, axPointHC(0, 100))
+    builder.setAttribute(trackHeader, kAXSizeAttribute as String, axSizeHC(200, 40))
+
+    builder.setAttribute(contentGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(contentGroup, kAXDescriptionAttribute as String, "트랙 콘텐츠")
+    builder.setChildren(contentGroup, [regionA, regionB])
+    builder.setAttribute(regionA, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(regionA, kAXDescriptionAttribute as String, "A")
+    builder.setAttribute(regionA, kAXHelpAttribute as String, regionAHelp)
+    builder.setAttribute(regionA, kAXPositionAttribute as String, axPointHC(100, 108))
+    builder.setAttribute(regionA, kAXSizeAttribute as String, axSizeHC(160, 24))
+    builder.setAttribute(regionA, kAXSelectedAttribute as String, false)
+    builder.setAttribute(regionB, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(regionB, kAXDescriptionAttribute as String, "B")
+    builder.setAttribute(regionB, kAXHelpAttribute as String, regionBHelp)
+    builder.setAttribute(regionB, kAXPositionAttribute as String, axPointHC(400, 108))
+    builder.setAttribute(regionB, kAXSizeAttribute as String, axSizeHC(160, 24))
+    builder.setAttribute(regionB, kAXSelectedAttribute as String, false)
+
+    builder.setAttribute(transport, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(transport, kAXIdentifierAttribute as String, "Transport")
+    builder.setChildren(transport, [positionText])
+    builder.setAttribute(positionText, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(positionText, kAXDescriptionAttribute as String, "Position")
+    builder.setAttribute(positionText, kAXValueAttribute as String, "1.1.1.1")
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    let result = await AccessibilityChannel.defaultSelectLastRegion(
+        runtime: runtime,
+        executeScript: { _ in
+            builder.setAttribute(regionB, kAXSelectedAttribute as String, true)
+            return .success("SELECTED")
+        },
+        settle: { }
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeJSON(result.message)
+    // State A envelope contract.
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["reason"] == nil)
+    #expect(obj["error"] == nil)
+    #expect(obj["expected_name"] as? String == "B")
+    #expect(obj["selected_name"] as? String == "B")
+    #expect(obj["expected_start_bar"] as? Int == 5)
+    #expect(obj["selected_start_bar"] as? Int == 5)
+}

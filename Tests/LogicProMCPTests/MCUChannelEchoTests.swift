@@ -75,10 +75,12 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
 }
 
-@Test func testMCUSetPanReturnsStateBReadbackUnavailable() async {
-    // V-Pot feedback (CC 0x30+strip) is not yet plumbed to StateCache, so
-    // pan writes cannot be read back. Contract: State B with
-    // `readback_unavailable` until echo wiring is done in a later phase.
+@Test func testMCUSetPanReturnsStateBEchoTimeoutWhenNoFeedback() async {
+    // v3.1.3 (#1) — V-Pot LED-ring decoding (CC 0x30+strip) is now wired
+    // into StateCache via MCUFeedbackParser. With no feedback dispatched
+    // the poll window elapses and we surface State B `echo_timeout_<ms>ms`
+    // (the same envelope set_volume uses) instead of the legacy
+    // `readback_unavailable`. State A coverage lives in MCUVPotTests.
     let transport = MockMCUTransport()
     let cache = StateCache()
     let channel = MCUChannel(transport: transport, cache: cache)
@@ -90,7 +92,9 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
     #expect(obj["verified"] as? Bool == false)
-    #expect(obj["reason"] as? String == "readback_unavailable")
+    let reason = obj["reason"] as? String ?? ""
+    #expect(reason.hasPrefix("echo_timeout_"),
+            "expected echo_timeout_<ms>ms post-v3.1.3, got \(reason)")
     #expect(obj["track"] as? Int == 0)
 }
 

@@ -36,6 +36,13 @@ actor StateCache {
     /// cannot masquerade as a fresh echo and produce a false `verified:true`.
     private var faderUpdatedAt: [Int: Date] = [:]
 
+    /// v3.1.3 (#1) — per-strip V-Pot LED-ring echo write timestamp. Mirrors
+    /// `faderUpdatedAt` for the pan path. `MCUChannel.pollPanEcho` compares
+    /// this to the send-time stamp so a previously-cached pan value cannot
+    /// masquerade as a fresh Logic echo and false-positively flip a pan
+    /// write to State A.
+    private var panUpdatedAt: [Int: Date] = [:]
+
     /// v3.1.1 (P1-3) — consecutive empty-track polls observed while
     /// `hasDocument == true`. Logic Pro sporadically returns an empty track
     /// list when a modal dialog is over the arrange (file-open panel,
@@ -214,6 +221,29 @@ actor StateCache {
     /// observed on this strip this session.
     func getFaderUpdatedAt(strip: Int) -> Date? {
         faderUpdatedAt[strip]
+    }
+
+    /// v3.1.3 (#1) — write a pan value (-1.0..+1.0) for the given strip and
+    /// stamp the moment the echo arrived. Decoded from MCU V-Pot LED-ring
+    /// CC 0x30..0x37 frames by `MCUFeedbackParser`.
+    func updatePan(strip: Int, value: Double) {
+        ensureChannelStripExists(at: strip)
+        guard channelStrips.indices.contains(strip) else { return }
+        channelStrips[strip].pan = min(max(value, -1.0), 1.0)
+        panUpdatedAt[strip] = Date()
+    }
+
+    /// v3.1.3 (#1) — last time a V-Pot LED-ring echo wrote a pan into this
+    /// strip. Returns nil when no echo has been observed this session.
+    func getPanUpdatedAt(strip: Int) -> Date? {
+        panUpdatedAt[strip]
+    }
+
+    /// v3.1.3 (#1) — current cached pan for the strip, or nil when the
+    /// strip hasn't been initialised. Convenience for `pollPanEcho`.
+    func getPanValue(strip: Int) -> Double? {
+        guard let cs = getChannelStrip(at: strip) else { return nil }
+        return cs.pan
     }
 
     func updateMCUConnection(_ state: MCUConnectionState) {

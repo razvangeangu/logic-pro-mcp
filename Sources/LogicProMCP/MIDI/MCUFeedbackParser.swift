@@ -65,8 +65,21 @@ actor MCUFeedbackParser {
                 )
             }
 
-        case .controlChange(_, _, _):
-            break // V-Pot LED ring, timecode
+        case .controlChange(_, let cc, let value):
+            // v3.1.3 (#1) — V-Pot LED ring (CC 0x30..0x37) carries the
+            // current pan position for strips 0..7 within the active bank.
+            // Decode and persist the normalised pan so `MCUChannel.pollPanEcho`
+            // can flip `mixer.set_pan` from State B `readback_unavailable` to
+            // State A `verified:true` when Logic echoes a matching position.
+            if let led = MCUProtocol.decodeVPotLEDRing(cc: cc, value: value) {
+                let trackIndex = led.strip + offset
+                let pan = MCUProtocol.vpotPositionToPan(led.position)
+                await cache.updatePan(strip: trackIndex, value: pan)
+                break
+            }
+            // Other CC frames (timecode @ 0x40..0x49, jog wheel @ 0x3C, etc.)
+            // are not yet plumbed into StateCache.
+            break
 
         default:
             break
