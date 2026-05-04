@@ -9,6 +9,20 @@ import Foundation
 actor StatePoller {
     struct Runtime: Sendable {
         let hasVisibleWindow: @Sendable () -> Bool
+        /// v3.1.4 (#4) — true when Logic currently has a modal dialog/sheet
+        /// over the arrange (Bounce, file-open panel, tempo alert, save sheet)
+        /// or when AX focus has been pulled away from the arrange window
+        /// (typically by a plugin window grabbing focus). When this returns
+        /// true the AX-driven `project.get_info` / `track.get_tracks` walks
+        /// can transiently fail even though Logic's document is still open;
+        /// the poll cycle treats those failures as occlusion (preserve cache,
+        /// don't tick toward `hasDocument=false`) instead of as document
+        /// closure. Production wires this to `AXLogicProElements.dialogPresent`,
+        /// which already covers AXDialog/AXSystemDialog subroles. Plugin
+        /// floating windows are observationally equivalent: while focused,
+        /// the arrange-window AX subtree can return empty, so `pollOnce`
+        /// also flags the corresponding cache state via `axOccluded`.
+        let dialogPresent: @Sendable () -> Bool
         /// Inter-poll sleep. Injectable so tests can drive the loop at
         /// microsecond cadence instead of waiting out the production 3s
         /// interval — the original reason both lifecycle tests took
@@ -18,18 +32,23 @@ actor StatePoller {
         /// Source-compatible init: if `sleep` isn't supplied, use
         /// `Task.sleep(nanoseconds:)` so existing callers (mostly tests that
         /// only override `hasVisibleWindow`) keep compiling without change.
+        /// `dialogPresent` defaults to `{ false }` so existing tests behave
+        /// identically to pre-v3.1.4 — they exercise the non-occluded path.
         init(
             hasVisibleWindow: @Sendable @escaping () -> Bool,
+            dialogPresent: @Sendable @escaping () -> Bool = { false },
             sleep: @Sendable @escaping (UInt64) async throws -> Void = { ns in
                 try await Task.sleep(nanoseconds: ns)
             }
         ) {
             self.hasVisibleWindow = hasVisibleWindow
+            self.dialogPresent = dialogPresent
             self.sleep = sleep
         }
 
         static let production = Runtime(
-            hasVisibleWindow: { ProcessUtils.hasVisibleWindow() }
+            hasVisibleWindow: { ProcessUtils.hasVisibleWindow() },
+            dialogPresent: { AXLogicProElements.dialogPresent() }
         )
 
         /// Test-friendly runtime for lifecycle-only coverage. Short-circuits
@@ -41,6 +60,7 @@ actor StatePoller {
         /// cadence while touching no AX surface.
         static let fastTest = Runtime(
             hasVisibleWindow: { false },
+            dialogPresent: { false },
             sleep: { _ in try await Task.sleep(nanoseconds: 1_000) }  // 1 µs
         )
     }
@@ -119,6 +139,7 @@ actor StatePoller {
             consecutiveWindowMisses += 1
             if consecutiveWindowMisses >= Self.failureThreshold {
                 await cache.updateDocumentState(false)
+                await cache.updateAXOccluded(false)
             }
             return
         }
@@ -130,10 +151,33 @@ actor StatePoller {
         if hasDocument {
             consecutivePollMisses = 0
             await cache.updateDocumentState(true)
+            await cache.updateAXOccluded(false)
         } else {
+            // v3.1.4 (#4) — silent-failure mode. When both `project.get_info`
+            // and `track.get_tracks` fail while a Logic window is still
+            // on-screen, distinguish "document genuinely closed" from
+            // "AX subtree transiently occluded by a plugin window / modal
+            // dialog grabbing focus". In the occluded case the StatePoller
+            // used to hold `hasDocument=true` but tick `consecutivePollMisses`
+            // toward 3, so resource reads served stale data for ~9s before
+            // the cache was wrongly cleared. With `dialogPresent()==true`
+            // we now: (a) skip the miss-counter increment so the cache is
+            // never cleared mid-occlusion, and (b) tag the cache with
+            // `axOccluded=true` so downstream readers (resource envelope
+            // wiring tracked separately) can surface a stale-by-occlusion
+            // signal instead of silently returning prior values.
+            if runtime.dialogPresent() {
+                await cache.updateAXOccluded(true)
+                // Preserve cache: do NOT increment consecutivePollMisses,
+                // do NOT clear hasDocument. fetchedAt timestamps continue
+                // ageing so `cache_age_sec` keeps growing — clients that
+                // treat freshness as a contract still see staleness.
+                return
+            }
             consecutivePollMisses += 1
             if consecutivePollMisses >= Self.failureThreshold {
                 await cache.updateDocumentState(false)
+                await cache.updateAXOccluded(false)
             }
         }
 

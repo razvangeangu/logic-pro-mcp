@@ -16,6 +16,16 @@ actor StateCache {
     /// Defaults to true (optimistic) — StatePoller sets to false when no document detected.
     private(set) var hasDocument: Bool = true
 
+    /// v3.1.4 (#4) — true when the StatePoller's last cycle observed AX
+    /// occlusion (modal dialog or plugin floating window holding focus). In
+    /// this state the cache is intentionally NOT cleared even if the AX
+    /// project/track polls failed, because the failures are caused by the
+    /// occluding window — not by a closed document. Resource readers that
+    /// want a stale-by-occlusion signal can read this alongside
+    /// `cache_age_sec` to render an accurate freshness explanation rather
+    /// than silently returning prior values.
+    private(set) var axOccluded: Bool = false
+
     /// Timestamp of last tool call — drives adaptive poll intervals.
     private(set) var lastToolAccess: Date = .distantPast
 
@@ -81,6 +91,12 @@ actor StateCache {
     func getMCUDisplay() -> MCUDisplayState { mcuDisplay }
     func getHasDocument() -> Bool { hasDocument }
 
+    /// v3.1.4 (#4) — current AX occlusion flag. See field comment for
+    /// semantics; flips to true when StatePoller detects a dialog/plugin
+    /// window suppressing AX project/track reads, false on the next clean
+    /// poll or when the document is genuinely closed.
+    func getAXOccluded() -> Bool { axOccluded }
+
     // MARK: - Document state
 
     func updateDocumentState(_ hasDoc: Bool) {
@@ -88,6 +104,12 @@ actor StateCache {
         if !hasDoc {
             clearProjectState()
         }
+    }
+
+    /// v3.1.4 (#4) — set the AX occlusion flag. Idempotent; called every
+    /// poll cycle by `StatePoller.pollOnce`.
+    func updateAXOccluded(_ occluded: Bool) {
+        axOccluded = occluded
     }
 
     func clearProjectState() {

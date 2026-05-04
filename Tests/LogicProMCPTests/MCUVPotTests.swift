@@ -83,15 +83,20 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     let cache = StateCache()
     let channel = MCUChannel(transport: MockMCUTransport(), cache: cache)
 
-    // Drive a fresh echo into the cache after a short delay so the poller
-    // sees it inside its 500ms window.
-    Task.detached {
-        try? await Task.sleep(nanoseconds: 30_000_000)
-        await cache.updatePan(strip: 1, value: 0.5)
-    }
+    // Capture sendAt BEFORE the echo write so the freshness stamp is
+    // unambiguously after sendAt. Then yield a clock tick so updatePan's
+    // internal Date() lands strictly later (millisecond clock can otherwise
+    // produce equal timestamps under heavy parallel load — that's the
+    // flake we observed in --parallel runs).
+    let sendAt = Date()
+    try? await Task.sleep(nanoseconds: 10_000_000)
+    // Seed the echo deterministically — no Task.detached race with the
+    // poll loop. pollPanEcho's first iteration must observe the cache
+    // hit + freshness stamp > sendAt and return immediately.
+    await cache.updatePan(strip: 1, value: 0.5)
 
     let observed = await channel.pollPanEcho(
-        strip: 1, target: 0.5, timeoutMs: 500, requireFreshAfter: Date()
+        strip: 1, target: 0.5, timeoutMs: 500, requireFreshAfter: sendAt
     )
     #expect(observed != nil, "fresh matching echo must return a non-nil pan")
     #expect(abs((observed ?? -99) - 0.5) <= 0.1)

@@ -93,7 +93,8 @@ If you also maintain a private Homebrew tap, publish the formula update there.
 |----------|-------|---------|
 | `LOG_LEVEL` | Server | `debug`/`info`/`warn`/`error`. Default `info`. |
 | `LOG_FORMAT` | Server | `json` for one-line structured logs (machine-parseable), otherwise plain text (default). |
-| `LOGIC_PRO_MCP_LIBRARY_INVENTORY` | Server | Absolute path to a pre-scanned `library-inventory.json`. Overrides the `<CWD>/Resources/…` and `~/Library/Application Support/LogicProMCP/…` lookup order. Symlinks are resolved and validated (must be a regular `.json` file ≤ 64 MiB) before reading. |
+| `LOGIC_PRO_MCP_LIBRARY_INVENTORY` | Server | Absolute path to a pre-scanned `library-inventory.json`. Overrides the `<CWD>/Resources/…` and `~/Library/Application Support/LogicProMCP/…` lookup order. Symlinks are resolved and validated (must be a regular `.json` file ≤ 64 MiB) before reading. **Path must sit under one of the allowlist roots** (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); arbitrary user-readable JSON files (e.g. Keychain exports, third-party config) are rejected even if the suffix matches. Extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST`. |
+| `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` | Server | **Additive** colon-separated extension to the inventory path allowlist (`PATH`-style). Use when the inventory legitimately lives outside the default roots — e.g. a shared team mount at `/Volumes/Music/inventory/`. Paths are symlink-resolved and prefix-matched; the safe defaults always remain. |
 | `LOGIC_PRO_MCP_SHA256` | Installer | Pin the expected binary SHA256 out-of-band (do not rely on same-origin `SHA256SUMS.txt`). |
 | `LOGIC_PRO_MCP_TEAM_ID` | Installer | Pin the expected codesign Team Identifier (e.g. `ADHOC` or a 10-char Apple Team ID). |
 | `LOGIC_PRO_MCP_VERSION` | Installer | Override the pinned release tag (default is the installer's baked-in version). |

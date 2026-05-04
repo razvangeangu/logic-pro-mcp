@@ -20,8 +20,21 @@ struct ResourceHandlers {
     }
 
     /// Wrap an already-encoded JSON body (e.g. `[{...}]` or `{...}`) in the
-    /// T7 cache envelope. Returns `{"cache_age_sec":…,"fetched_at":…,"data":<body>}`.
-    static func wrapWithCacheEnvelope(bodyJSON: String, fetchedAt: Date?) -> String {
+    /// T7 cache envelope. Returns
+    /// `{"cache_age_sec":…,"fetched_at":…,"ax_occluded":…,"data":<body>}`.
+    ///
+    /// `ax_occluded` (v3.1.4): true when the StatePoller most recently observed
+    /// a modal dialog or plugin floating window stealing AX focus from the
+    /// arrange window. While occluded, cache values are deliberately preserved
+    /// (no zero-out flap) — clients should treat the cache as "frozen at last
+    /// non-occluded read" and decide whether to act on potentially-stale data.
+    /// Defaults to false when `axOccluded` is omitted (caller didn't have
+    /// access to the cache flag, e.g. when wrapping a synthesized body).
+    static func wrapWithCacheEnvelope(
+        bodyJSON: String,
+        fetchedAt: Date?,
+        axOccluded: Bool = false
+    ) -> String {
         let (age, iso) = cacheEnvelope(fetchedAt: fetchedAt)
         let agePart: String = {
             if let a = age as? Double { return "\(a)" }
@@ -31,7 +44,7 @@ struct ResourceHandlers {
             if let s = iso as? String { return "\"\(s)\"" }
             return "null"
         }()
-        return "{\"cache_age_sec\":\(agePart),\"fetched_at\":\(isoPart),\"data\":\(bodyJSON)}"
+        return "{\"cache_age_sec\":\(agePart),\"fetched_at\":\(isoPart),\"ax_occluded\":\(axOccluded),\"data\":\(bodyJSON)}"
     }
 }
 
@@ -122,18 +135,16 @@ extension ResourceHandlers {
     private static func readTransportState(cache: StateCache, uri: String) async throws -> ReadResource.Result {
         let state = await cache.getTransport()
         let hasDocument = await cache.getHasDocument()
+        let axOccluded = await cache.getAXOccluded()
         // v3.1.1 (T-9) — unified `{cache_age_sec, fetched_at, data}` envelope.
-        // `data` carries the prior shape (`state` / `has_document`) so existing
-        // clients that already navigated through the wrapper (`tracks`,
-        // `inventory`) can apply the same indexing here. Legacy callers
-        // reading top-level `transport_age_sec` must migrate to
-        // `cache_age_sec`. CHANGELOG v3.1.1 documents this as a breaking
-        // resource-envelope change scoped to one resource.
+        // v3.1.4 — `ax_occluded` added so clients can detect when the
+        // StatePoller is preserving cache through a modal-dialog or
+        // plugin-window AX occlusion.
         let inner = encodeJSON(state)
         let body = """
             {"state":\(inner),"has_document":\(hasDocument)}
             """
-        let json = wrapWithCacheEnvelope(bodyJSON: body, fetchedAt: state.lastUpdated)
+        let json = wrapWithCacheEnvelope(bodyJSON: body, fetchedAt: state.lastUpdated, axOccluded: axOccluded)
         return ReadResource.Result(
             contents: [.text(json, uri: uri, mimeType: "application/json")]
         )
@@ -142,12 +153,10 @@ extension ResourceHandlers {
     private static func readTracks(cache: StateCache, uri: String) async throws -> ReadResource.Result {
         let tracks = await cache.getTracks()
         let fetchedAt = await cache.getTracksFetchedAt()
+        let axOccluded = await cache.getAXOccluded()
         let body = encodeJSON(tracks)
-        // v3.1.0 (T7) — cache envelope. Legacy consumers that decoded the
-        // plain array must now read `.data`. The envelope is additive at the
-        // resource URI level (not at the tool response level), so
-        // mutating-op clients are unaffected.
-        let json = wrapWithCacheEnvelope(bodyJSON: body, fetchedAt: fetchedAt)
+        // v3.1.0 (T7) — cache envelope. v3.1.4 — `ax_occluded` flag.
+        let json = wrapWithCacheEnvelope(bodyJSON: body, fetchedAt: fetchedAt, axOccluded: axOccluded)
         return ReadResource.Result(
             contents: [.text(json, uri: uri, mimeType: "application/json")]
         )
@@ -167,12 +176,13 @@ extension ResourceHandlers {
         let strips = await cache.getChannelStrips()
         let conn = await cache.getMCUConnection()
         let fetchedAt = await cache.getMixerFetchedAt()
+        let axOccluded = await cache.getAXOccluded()
         let stripsJSON = encodeJSON(strips)
         let (age, iso) = cacheEnvelope(fetchedAt: fetchedAt)
         let agePart = (age as? Double).map { "\($0)" } ?? "null"
         let isoPart = (iso as? String).map { "\"\($0)\"" } ?? "null"
         let json = """
-            {"cache_age_sec":\(agePart),"fetched_at":\(isoPart),"mcu_connected":\(conn.isConnected),"registered":\(conn.registeredAsDevice),"strips":\(stripsJSON)}
+            {"cache_age_sec":\(agePart),"fetched_at":\(isoPart),"ax_occluded":\(axOccluded),"mcu_connected":\(conn.isConnected),"registered":\(conn.registeredAsDevice),"strips":\(stripsJSON)}
             """
         return ReadResource.Result(
             contents: [.text(json, uri: uri, mimeType: "application/json")]
@@ -274,7 +284,7 @@ extension ResourceHandlers {
     /// scan is typically <1 MiB; this cap exists so a maliciously-large file
     /// (e.g. via a hostile `LOGIC_PRO_MCP_LIBRARY_INVENTORY` symlink target)
     /// can't OOM the server.
-    private static let libraryInventoryMaxBytes: Int = 64 * 1024 * 1024  // 64 MiB
+    static let libraryInventoryMaxBytes: Int = 64 * 1024 * 1024  // 64 MiB
 
     /// Resolve the library-inventory cache file. Checks (in order):
     /// 1. `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env override (absolute path; symlinks resolved + validated)
@@ -297,6 +307,64 @@ extension ResourceHandlers {
         return paths
     }
 
+    /// Default directory prefixes the library-inventory cache file is allowed
+    /// to live under. Computed at call time (not a static let) because tests
+    /// rely on `HOME` being mutable and because `<CWD>/Resources/` is itself
+    /// a moving target across the test runner / dev shell / launchd contexts.
+    ///
+    /// All prefixes are normalised via `URL(...).resolvingSymlinksInPath()`
+    /// and are guaranteed to end in `/` so a path comparison of the form
+    /// `resolved.hasPrefix(prefix)` cannot be tricked by a sibling like
+    /// `/Users/isaac/Music/Logic-evil/x.json` matching `/Users/isaac/Music/Logic`.
+    static func defaultLibraryInventoryAllowedPrefixes() -> [String] {
+        var prefixes: [String] = []
+
+        // (1) ~/Library/Application Support/LogicProMCP/  — production location
+        if let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first {
+            prefixes.append(
+                appSupport.appendingPathComponent("LogicProMCP", isDirectory: true).path
+            )
+        }
+
+        // (2) <CWD>/Resources/  — repo-root dev/CLI launches
+        let cwd = FileManager.default.currentDirectoryPath
+        prefixes.append(URL(fileURLWithPath: cwd).appendingPathComponent("Resources", isDirectory: true).path)
+
+        // (3) ~/Music/Logic/  — Logic Pro's own user library directory; users
+        //     reasonably stash a hand-built inventory beside their patches.
+        let home = NSHomeDirectory()
+        prefixes.append(URL(fileURLWithPath: home).appendingPathComponent("Music/Logic", isDirectory: true).path)
+
+        // (4) Operator-extended allowlist via env. ADDITIVE (not replacement)
+        //     so the safe defaults can never be removed by a misconfigured
+        //     daemon. Colon-separated, matching `PATH` conventions.
+        if let extra = ProcessInfo.processInfo.environment["LOGIC_PRO_MCP_INVENTORY_ALLOWLIST"],
+           !extra.isEmpty {
+            for raw in extra.split(separator: ":") {
+                let s = String(raw)
+                guard !s.isEmpty else { continue }
+                prefixes.append(s)
+            }
+        }
+
+        // Normalise: resolve symlinks (so a prefix can't escape via its own
+        // symlink), expand `~`, and force a trailing `/` for safe prefix
+        // comparison. Empties / duplicates filtered out.
+        var seen = Set<String>()
+        var out: [String] = []
+        for p in prefixes {
+            let expanded = (p as NSString).expandingTildeInPath
+            var resolved = URL(fileURLWithPath: expanded).resolvingSymlinksInPath().path
+            if !resolved.hasSuffix("/") { resolved += "/" }
+            if seen.insert(resolved).inserted {
+                out.append(resolved)
+            }
+        }
+        return out
+    }
+
     /// Validate that the candidate path is safe to read as the library cache.
     /// Returns the resolved absolute path on success, or nil on rejection.
     /// Mitigations against a hostile `LOGIC_PRO_MCP_LIBRARY_INVENTORY` symlink
@@ -306,8 +374,17 @@ extension ResourceHandlers {
     ///   binary secrets won't be served raw)
     /// - Must be a regular file (not a directory)
     /// - Must be smaller than `libraryInventoryMaxBytes`
+    /// - Resolved path must sit under one of `allowedPrefixes` (post-symlink),
+    ///   so an env-var pointing at `/etc/passwd.json` or a symlink chain
+    ///   escaping a sandboxed dir is rejected before any bytes are read.
     /// Always logs the resolved path on reject so operators can audit.
-    private static func validateLibraryInventoryPath(_ rawPath: String) -> String? {
+    /// Internal (not private) so the test target can exercise it directly
+    /// with synthesised allowlists; production callers always use the default
+    /// allowlist computed by `defaultLibraryInventoryAllowedPrefixes()`.
+    static func validateLibraryInventoryPath(
+        _ rawPath: String,
+        allowedPrefixes: [String]? = nil
+    ) -> String? {
         let resolved = URL(fileURLWithPath: rawPath).resolvingSymlinksInPath().path
         guard resolved.hasSuffix(".json") else {
             Log.warn(
@@ -328,13 +405,37 @@ extension ResourceHandlers {
             )
             return nil
         }
+        // Path-prefix allowlist. The previous validation only enforced the
+        // `.json` suffix, which left any user-readable JSON file (Keychain
+        // export, app config, third-party token caches) reachable through a
+        // hostile `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env var. We now require
+        // the post-symlink-resolution path to live inside an allowlisted
+        // directory tree, defaulting to the inventory's natural homes
+        // (~/Library/Application Support/LogicProMCP/, <CWD>/Resources/,
+        // ~/Music/Logic/) plus an optional additive `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST`.
+        let prefixes = allowedPrefixes ?? defaultLibraryInventoryAllowedPrefixes()
+        let resolvedDir: String = {
+            // Use the resolved file's parent dir + "/" so a file *exactly at*
+            // a prefix boundary (e.g. `prefix=/foo/`, `file=/foo/x.json`)
+            // matches via standard hasPrefix.
+            return resolved
+        }()
+        let inAllowlist = prefixes.contains { resolvedDir.hasPrefix($0) }
+        guard inAllowlist else {
+            Log.warn(
+                "library-inventory path rejected (outside allowlist): raw=\(rawPath), resolved=\(resolved), allowlist=\(prefixes.joined(separator: ", "))",
+                subsystem: Log.Subsystem.library
+            )
+            return nil
+        }
         return resolved
     }
 
     private static func readLibraryInventory(uri: String) async throws -> ReadResource.Result {
         let candidates = libraryInventoryCandidatePaths()
+        let allowlist = defaultLibraryInventoryAllowedPrefixes()
         for path in candidates {
-            guard let resolved = validateLibraryInventoryPath(path) else { continue }
+            guard let resolved = validateLibraryInventoryPath(path, allowedPrefixes: allowlist) else { continue }
             guard let data = FileManager.default.contents(atPath: resolved) else { continue }
             // Parse before serving: we advertise this resource as
             // `application/json`, so corrupt or attacker-shaped bytes must
@@ -362,7 +463,7 @@ extension ResourceHandlers {
         // No cache found at any candidate — warn loudly so daemon deployments
         // where CWD=/ don't silently return an empty placeholder forever.
         Log.warn(
-            "library-inventory cache missing at candidate paths: \(candidates.joined(separator: ", ")). Run logic_library scan, or set LOGIC_PRO_MCP_LIBRARY_INVENTORY to an absolute path.",
+            "library-inventory cache missing at candidate paths: \(candidates.joined(separator: ", ")). Run logic_library scan, or set LOGIC_PRO_MCP_LIBRARY_INVENTORY to an absolute path under the allowlist (extend via LOGIC_PRO_MCP_INVENTORY_ALLOWLIST if needed).",
             subsystem: Log.Subsystem.library
         )
         let json = #"{"cached":false,"note":"Run logic_library scan to populate (or set LOGIC_PRO_MCP_LIBRARY_INVENTORY env var)"}"#

@@ -42,7 +42,7 @@ All tool invocations use:
 | `logic://project/info` | `ProjectInfo` JSON | Cache (3s AX poll) |
 | `logic://midi/ports` | `{ sources, destinations }` | CoreMIDI live query |
 | `logic://mcu/state` | `{ connection, display }` — MCU handshake + LCD state | Cache |
-| `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`) |
+| `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`). All candidates must sit under the path allowlist (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` (colon-separated, additive). |
 | `logic://tracks/{index}` | Single `TrackState` JSON | Cache — template |
 | `logic://tracks/{index}/regions` | `RegionState[]` JSON filtered by `trackIndex` | Cache — template |
 | `logic://mixer/{strip}` | Single `ChannelStripState` JSON | Cache — template |

@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.1.4] — 2026-05-04
+
+**Resilience hardening: AX occlusion recovery + library inventory path allowlist + flaky-test elimination.** v3.1.3's regression suite under parallel execution exposed a single timing-flake in the new V-Pot pollPanEcho test, plus two latent backlog items the v3.1.2 audit flagged but didn't ship: StatePoller silent-failure when plugin floating windows steal AX focus, and the `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env override allowing arbitrary `.json` reads outside Logic-relevant directories.
+
+### Hardening
+
+- **StatePoller plugin-window resilience.** When both `project.get_info` and `track.get_tracks` fail in a poll cycle, the poller now consults `AXLogicProElements.dialogPresent()` (defined in v3.1.1, previously unused) before incrementing the consecutive-miss counter. If a modal dialog or plugin floating window is on screen, the cache is preserved verbatim — no zero-out flap, no `hasDocument=false` flip — and a new `axOccluded=true` flag propagates through every `wrapWithCacheEnvelope`-built resource (transport state, tracks, mixer). Genuine document-closed paths (no dialog present) keep their existing 3-strike clear behavior. New `Runtime.dialogPresent` injection point keeps the test surface clean.
+
+- **Resource envelope: `ax_occluded` field added.** `wrapWithCacheEnvelope` now emits `{"cache_age_sec":…,"fetched_at":…,"ax_occluded":<bool>,"data":…}`. Clients can branch on the flag to treat occluded reads as "frozen at last non-occluded state" rather than acting on potentially-stale snapshots. Default false when the wrapper is invoked without a cache reference (e.g. file-based library inventory). The mixer resource gains the field too; library inventory keeps it false (file-mtime based, not affected by AX state).
+
+- **`LOGIC_PRO_MCP_LIBRARY_INVENTORY` path allowlist.** Previously any `.json` file the MCP server process could read was a valid override target — Keychain exports, dotfile JSON, anything under `$HOME`. The validator now requires the symlink-resolved path to sit under one of: `~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`, plus optional additive prefixes from a new `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` env var (colon-separated, tilde-expanded, symlink-resolved). Symlink escapes are rejected because resolution happens before the prefix check. Documented in `docs/MAINTAINERS.md` and `docs/API.md`.
+
+### Flaky test eliminated
+
+- **`testPollPanEchoMatchesValue` now deterministic.** The original test seeded the cache via `Task.detached { sleep(30ms); cache.updatePan(...) }` and called `pollPanEcho(requireFreshAfter: Date())` — under heavy parallel load, the detached task's wakeup could land near or before `sendAt` (millisecond-resolution clock can produce equal stamps), making `writtenAt > sendAt` race-prone. Fix: capture `sendAt` first, yield 10ms to guarantee monotonic clock advance, then write the echo synchronously before `pollPanEcho` runs. No production-code change; the test now validates the same contract without the timing window.
+
+### Verification
+
+- **Build**: `swift build` clean (debug + release).
+- **Tests**: 884 → **897** passing (+13: 4 StatePoller occlusion + 9 LibraryInventory allowlist; previously-flaky V-Pot test now deterministic). `--parallel` and `--no-parallel` both green.
+- **Live verification**: deferred to user-driven session. `ax_occluded:true` should appear in `logic://transport/state` / `logic://tracks` / `logic://mixer` while a Logic plugin GUI has focus, and clear back to `false` once the arrange window regains AX focus.
+
+### Known issue (deferred)
+
+- **GitHub Issue #1** (`xaexx1`): MIDIKeyCommands setup broken on Logic Pro 12.2 — `keycmd-preset.plist` not importable (Logic 12 expects `.logikcs` schema), and `logic_midi.send_cc` routes through `MIDI-Internal` instead of `KeyCmd-Internal` so manual MIDI Learn captures the wrong port. Triaged for v3.1.5: docs cleanup + `send_cc {port: ...}` parameter + Homebrew formula `xcode` dependency review. Channel surface is unchanged in v3.1.4 — `logic_edit.*` / `logic_project.*` / `logic_navigate.*` / `logic_transport.*` already cover the documented keycmd preset operations via CGEvent / AppleScript / CoreMIDI MMC.
+
 ## [3.1.3] — 2026-05-04
 
 **State A coverage extension: `mixer.set_pan` + `region.move_to_playhead` + `region.select_last`.** v3.1.2's audit identified three mutating ops still chronically stuck at State B `readback_unavailable` despite Logic Pro emitting the underlying signal. v3.1.3 picks them up:
