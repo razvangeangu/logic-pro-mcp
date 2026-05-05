@@ -293,18 +293,7 @@ actor CoreMIDIChannel: Channel {
             case .success(let parsed):
                 events = parsed
             case .failure(let err):
-                let hint: String
-                switch err {
-                case .channelOutOfRange(let segment, let value):
-                    hint = "play_sequence: channel \(value) out of range (must be 1..16) in segment '\(segment)'"
-                case .invalidPitch(let segment):
-                    hint = "play_sequence: invalid pitch (must be 0..127) in segment '\(segment)'"
-                case .invalidTiming(let segment):
-                    hint = "play_sequence: invalid timing (offset>=0, duration 1..30000) in segment '\(segment)'"
-                case .malformed(let segment):
-                    hint = "play_sequence: malformed segment '\(segment)' (expected 'pitch,offsetMs,durMs[,vel[,ch]]')"
-                }
-                return .error(hint)
+                return .error("play_sequence: \(err.hint)")
             }
             guard !events.isEmpty else {
                 return .error("play_sequence 'notes' must be 'note,offset,dur[,vel[,ch]];...'")
