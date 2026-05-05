@@ -61,7 +61,10 @@ actor CGEventChannel: Channel {
 
     /// Mapping from operation strings to keyboard shortcuts.
     /// Key codes: https://developer.apple.com/documentation/coregraphics/cgkeycode
-    private static let keyMap: [String: Shortcut] = [
+    /// Internal (not private) so the routing-audit invariant test in
+    /// `RoutingAuditInvariantTests` can cross-check this table against
+    /// `ChannelRouter.routingTable` and `MIDIKeyCommandsChannel.mappingTable`.
+    static let keyMap: [String: Shortcut] = [
         // Transport
         "transport.play":             .key(49),         // Space
         "transport.stop":             .key(49),         // Space (toggles)

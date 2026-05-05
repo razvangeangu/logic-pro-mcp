@@ -35,19 +35,35 @@ private func t7StartedChannel(tag: String) async throws -> ChannelHealth {
 
 @Test func testKeyCmdChannelDetailMentionsCoverageMatrix() async throws {
     let health = try await t7StartedChannel(tag: "coverage")
-    #expect(health.detail.contains("audited coverage matrix"))
-    #expect(health.detail.contains("logic_edit"))
-    #expect(health.detail.contains("logic_transport"))
+    // v3.1.7: detail now points at SETUP.md §4 (the matrix lives there) and
+    // names the actual fallback channels rather than the dispatcher prefix
+    // strings. Both forms answer the same caller question — "where do I
+    // look to figure out which ops require a manual binding?"
+    #expect(health.detail.contains("docs/SETUP.md"))
+    #expect(health.detail.contains("AX/MCU/AppleScript/CGEvent fallback"))
 }
 
 @Test func testKeyCmdChannelDetailListsKeycmdOnlyOps() async throws {
     let health = try await t7StartedChannel(tag: "keycmd-only")
+    // v3.1.7: SETUP.md §4.1 audit revealed seven additional user-facing ops
+    // are also effectively keycmd-only because their nominal cgEvent
+    // fallback has no `CGEventChannel.keyMap` entry. The full set must be
+    // surfaced in the runtime health detail so an LLM agent reading the
+    // channel state knows exactly which ops will fail without a binding.
+    #expect(health.detail.contains("Effectively keycmd-only"))
     #expect(health.detail.contains("transport.capture_recording"))
-    #expect(health.detail.contains("cgEvent fallback unmapped"))
+    #expect(health.detail.contains("edit.duplicate"))
+    #expect(health.detail.contains("edit.normalize"))
+    #expect(health.detail.contains("edit.toggle_step_input"))
+    #expect(health.detail.contains("nav.goto_marker"))
+    #expect(health.detail.contains("nav.delete_marker"))
+    #expect(health.detail.contains("nav.set_zoom_level"))
+    #expect(health.detail.contains("project.bounce"))
 }
 
 @Test func testKeyCmdChannelDetailListsOrphanOps() async throws {
     let health = try await t7StartedChannel(tag: "orphan")
+    #expect(health.detail.contains("automation.set_mode"))
     #expect(health.detail.contains("note.up_semitone"))
     #expect(health.detail.contains("note.up_octave"))
     #expect(health.detail.contains("note.down_semitone"))
@@ -58,6 +74,7 @@ private func t7StartedChannel(tag: String) async throws -> ChannelHealth {
     #expect(health.detail.contains("CC 57"))
     #expect(health.detail.contains("automation.toggle_view"))
     #expect(health.detail.contains("CC 85"))
+    #expect(health.detail.contains("track.create_stack"))
 }
 
 @Test func testKeyCmdChannelDetailUnderOneKB() async throws {

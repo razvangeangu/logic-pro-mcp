@@ -524,9 +524,18 @@ actor MIDIKeyCommandsChannel: Channel {
         )
     }
 
-    private static let manualValidationDetailSuffix =
-        "Manual MIDI Learn required — see docs/SETUP.md §4 (Install Key Commands Preset). " +
-        "Most preset operations are covered by logic_edit / logic_project / logic_navigate / logic_tracks / logic_transport — see audited coverage matrix in SETUP.md. " +
-        "Effectively keycmd-only (cgEvent fallback unmapped): transport.capture_recording. Manual MIDI Learn binding required for actual function activation. " +
-        "Orphan ops in mappingTable (no MCP tool currently exposes call path): note.up_semitone, note.up_octave, note.down_semitone, note.down_octave, view.toggle_smart_controls, view.toggle_plugin_windows, view.toggle_automation (CC 57; distinct from automation.toggle_view CC 85). Manual binding possible but MCP has no caller path; tracked in NG6 follow-up."
+    /// Internal (not private) so `RoutingAuditInvariantTests` can assert it
+    /// enumerates the same op set as `expectedKeycmdOnlyOps` — the runtime
+    /// health string and the docs SETUP.md §4.1 matrix must agree.
+    static let manualValidationDetailSuffix =
+        "Manual MIDI Learn required — see docs/SETUP.md §4. " +
+        "Effectively keycmd-only (no working non-keycmd fallback on Logic 12.2): " +
+        "edit.duplicate, edit.normalize, edit.toggle_step_input, " +
+        "nav.goto_marker, nav.delete_marker, nav.set_zoom_level, " +
+        "project.bounce, transport.capture_recording. " +
+        "Other preset ops have an AX/MCU/AppleScript/CGEvent fallback and do not require keycmd binding. " +
+        "Orphans (in mappingTable + routingTable but no MCP tool exposes a call path): " +
+        "automation.set_mode, note.up_semitone, note.up_octave, note.down_semitone, note.down_octave, " +
+        "view.toggle_smart_controls, view.toggle_plugin_windows, view.toggle_automation (CC 57; distinct from automation.toggle_view CC 85), " +
+        "track.create_stack. Tracked in NG6 follow-up."
 }

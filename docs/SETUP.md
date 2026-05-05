@@ -114,34 +114,46 @@ In v3.1.6 most preset operations are routed via the regular tools — you do **n
 
 ### 4.1 Audited coverage matrix
 
-Audited against `MIDIKeyCommandsChannel.swift` mappingTable + every dispatcher's routing table. **"requires keycmd binding?"** answers whether you actually have to do MIDI Learn for the op to work.
+> ⚠️ **v3.1.7 honest correction.** v3.1.6's matrix understated keycmd dependence. A v3.1.7 audit reading every channel's actual handler list against `ChannelRouter.routingTable` and `CGEventChannel.keyMap` found 7 user-facing ops where the routing chain advertises a `cgEvent` fallback **but the fallback has no `keyMap` entry** — meaning the keycmd channel is the only path that actually fires the action on Logic 12.2. The matrix below reflects the audited reality. The set is now enforced as a unit-test invariant (`RoutingAuditInvariantTests`), so future drift fails the build.
 
-| `mappingTable` op (CC#)                                                                                    | Dispatcher entry exposing it           | Router primary fallback                  | Requires keycmd binding? |
-|------------------------------------------------------------------------------------------------------------|----------------------------------------|------------------------------------------|--------------------------|
-| `edit.undo (30)` / `redo (31)`                                                                             | `logic_edit.undo` / `.redo`            | accessibility, applescript               | NO — optional            |
-| `edit.cut/copy/paste/select_all`                                                                           | `logic_edit`                           | accessibility, cgevent                   | NO — optional            |
-| `edit.quantize/join/duplicate/split/normalize/delete/bounce_in_place`                                      | `logic_edit`                           | accessibility, cgevent                   | NO — optional            |
-| `edit.toggle_step_input`                                                                                   | `logic_edit.toggle_step_input`         | midiKeyCommands, cgevent                 | RECOMMENDED              |
-| `project.save / save_as / bounce`                                                                          | `logic_project`                        | applescript                              | NO — optional            |
-| `transport.toggle_cycle (72)`                                                                              | `logic_transport.toggle_cycle`         | midiKeyCommands, accessibility           | RECOMMENDED              |
-| `transport.capture_recording (73)`                                                                         | (no other dispatcher entry)            | midiKeyCommands only                     | YES                      |
-| `transport.toggle_metronome / toggle_count_in (98/99)`                                                     | `logic_transport`                      | midiKeyCommands, accessibility           | RECOMMENDED              |
-| `track.create_audio / create_instrument / create_external_midi / duplicate / delete / create_stack / create_drummer` | `logic_tracks`               | midiKeyCommands, cgevent                 | RECOMMENDED              |
-| `view.toggle_mixer/piano_roll/library/inspector/score_editor/step_editor (50-51, 55-56, 59, 48)`           | `logic_navigate.toggle_view`           | midiKeyCommands, cgevent                 | RECOMMENDED              |
-| `nav.goto_marker / create_marker / delete_marker / zoom_to_fit / set_zoom_level`                           | `logic_navigate`                       | midiKeyCommands, cgevent                 | RECOMMENDED              |
-| `automation.set_mode (84)`                                                                                 | `logic_tracks.set_automation`          | mcu (primary), midiKeyCommands, cgevent  | RECOMMENDED              |
-| `automation.toggle_view (85)`                                                                              | `logic_navigate.toggle_view {automation}` | midiKeyCommands, cgevent (`.key(0)`) | RECOMMENDED              |
+Read this column-by-column. **"requires keycmd binding?"** is the question that decides whether you need MIDI Learn for the op.
 
-#### Orphan ops (in mappingTable but no MCP tool currently exposes a call path)
+| `mappingTable` op (CC#)                                                          | MCP tool                                       | Working non-keycmd channel                  | Requires keycmd binding? |
+|----------------------------------------------------------------------------------|------------------------------------------------|---------------------------------------------|--------------------------|
+| `edit.undo (30)`                                                                 | `logic_edit.undo`                              | CGEvent `Cmd+Z`                             | NO                       |
+| `edit.redo (31)`                                                                 | `logic_edit.redo`                              | CGEvent `Cmd+Shift+Z`                       | NO                       |
+| `edit.cut/copy/paste/select_all (32-35)`                                         | `logic_edit.{cut,copy,paste,select_all}`       | CGEvent `Cmd+{X,C,V,A}`                     | NO                       |
+| `edit.quantize/join/split/delete/bounce_in_place (40,43,95,94,37)`               | `logic_edit`                                   | CGEvent (mapped)                            | NO                       |
+| **`edit.duplicate (97)`**                                                        | `logic_edit.duplicate`                         | _none — cgEvent fallback unmapped_          | **YES**                  |
+| **`edit.normalize (96)`**                                                        | `logic_edit.normalize`                         | _none — cgEvent fallback unmapped_          | **YES**                  |
+| **`edit.toggle_step_input (44)`**                                                | `logic_edit.toggle_step_input`                 | _none — cgEvent fallback unmapped_          | **YES**                  |
+| `project.save (60)`                                                              | `logic_project.save`                           | AppleScript / CGEvent `Cmd+S`               | NO                       |
+| `project.save_as (61)`                                                           | `logic_project.save_as`                        | AppleScript / Accessibility                 | NO                       |
+| **`project.bounce (62)`**                                                        | `logic_project.bounce`                         | _none — cgEvent fallback unmapped_          | **YES**                  |
+| `transport.toggle_cycle (72)`                                                    | `logic_transport.toggle_cycle`                 | Accessibility / MCU / CGEvent `C`           | NO                       |
+| **`transport.capture_recording (73)`**                                           | `logic_transport.capture_recording` _(none today; orphan)_ | _none — cgEvent fallback unmapped_ | **YES**                  |
+| `transport.toggle_metronome (98)`                                                | `logic_transport.toggle_metronome`             | Accessibility / CGEvent `K`                 | NO                       |
+| `transport.toggle_count_in (99)`                                                 | `logic_transport.toggle_count_in`              | Accessibility                               | NO                       |
+| `track.create_audio/instrument/drummer/external_midi/delete (20,21,26,22,24)`    | `logic_tracks.create_*` / `.delete`            | Accessibility (primary)                     | NO                       |
+| `track.duplicate (23)`                                                           | `logic_tracks.duplicate`                       | CGEvent `Cmd+D`                             | NO                       |
+| `view.toggle_mixer/piano_roll/library/inspector/score_editor/step_editor (50,51,55,56,59,48)` | `logic_navigate.toggle_view`        | CGEvent (all 6 mapped)                      | NO                       |
+| `nav.create_marker (39)`                                                         | `logic_navigate.create_marker`                 | CGEvent (mapped)                            | NO                       |
+| `nav.zoom_to_fit (46)`                                                           | `logic_navigate.zoom_to_fit`                   | CGEvent `Z`                                 | NO                       |
+| **`nav.goto_marker (38)`**                                                       | `logic_navigate.goto_marker {index}`           | _none — cgEvent fallback unmapped_          | **YES**                  |
+| **`nav.delete_marker (45)`**                                                     | `logic_navigate.delete_marker {index}`         | _none — cgEvent fallback unmapped_          | **YES**                  |
+| **`nav.set_zoom_level (47)`**                                                    | `logic_navigate.set_zoom_level`                | _none — cgEvent fallback unmapped_          | **YES**                  |
+| `automation.toggle_view (85)`                                                    | `logic_navigate.toggle_view {automation}`      | CGEvent `A`                                 | NO                       |
 
-These can be MIDI-Learned but no `logic_*` tool currently routes to them. Tracked as a follow-up issue; binding them today is purely speculative.
+**Bolded rows are the 8 effectively-keycmd-only paths.** Skip the rest of this section if you don't need any of them.
 
+#### Orphan ops (in mappingTable + routingTable but no MCP tool currently routes to them)
+
+These can be MIDI-Learned but no `logic_*` tool dispatches to them today. Tracked as NG6 follow-up. Binding them is purely speculative until a tool path is added.
+
+- `automation.set_mode (84)` — MCU does NOT actually handle this operation key (it handles `track.set_automation` instead), so the keycmd channel is the only mappingTable hit.
 - `note.up_semitone (90)` / `note.down_semitone (91)` / `note.up_octave (92)` / `note.down_octave (93)`
 - `view.toggle_smart_controls (54)` / `view.toggle_plugin_windows (58)` / `view.toggle_automation (CC 57 — distinct from CC 85 `automation.toggle_view`)`
-
-#### Effectively-keycmd-only (cgEvent fallback unmapped)
-
-- `transport.capture_recording (CC 73)` — `CGEventChannel` has no entry. Routing table reads `[.midiKeyCommands, .cgEvent]` but cgEvent is a no-op for this op, so manual MIDI Learn is the *only* way to make it fire.
+- `track.create_stack (25)`
 
 ### 4.2 Manual MIDI Learn — Example 1: `Edit > Undo` (CC 30, Ch 16)
 

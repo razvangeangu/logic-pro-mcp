@@ -8,6 +8,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.1.7] — 2026-05-05
+
+**Honest correction of the v3.1.6 audited coverage matrix + post-release simplify pass.** A v3.1.7 verification audit reading every channel's actual handler list against `ChannelRouter.routingTable` and `CGEventChannel.keyMap` found that the v3.1.6 SETUP.md §4.1 matrix understated keycmd dependence — it listed only `transport.capture_recording` as effectively-keycmd-only when in fact **8 user-facing ops** have the same property: their nominal `cgEvent` fallback has no `keyMap` entry, so the keycmd channel is the only path that actually fires the action on Logic 12.2. v3.1.7 ships the corrected matrix, updates the runtime `MIDIKeyCommandsChannel.healthCheck` detail to match, and adds `RoutingAuditInvariantTests` so future drift fails the build.
+
+### Honest corrections
+
+The following ops were misclassified as `RECOMMENDED` or `NO — optional` in v3.1.6 but in fact **require** a manual MIDI Learn binding to function on Logic 12.2:
+
+| MCP tool                                  | mappingTable op (CC#)              | v3.1.6 said                  | v3.1.7 says                                 |
+|-------------------------------------------|------------------------------------|------------------------------|---------------------------------------------|
+| `logic_edit.duplicate`                    | `edit.duplicate (97)`              | NO — optional                | YES — keycmd-only                           |
+| `logic_edit.normalize`                    | `edit.normalize (96)`              | NO — optional                | YES — keycmd-only                           |
+| `logic_edit.toggle_step_input`            | `edit.toggle_step_input (44)`      | RECOMMENDED                  | YES — keycmd-only                           |
+| `logic_navigate.goto_marker`              | `nav.goto_marker (38)`             | RECOMMENDED                  | YES — keycmd-only                           |
+| `logic_navigate.delete_marker`            | `nav.delete_marker (45)`           | RECOMMENDED                  | YES — keycmd-only                           |
+| `logic_navigate.set_zoom_level`           | `nav.set_zoom_level (47)`          | RECOMMENDED                  | YES — keycmd-only                           |
+| `logic_project.bounce`                    | `project.bounce (62)`              | NO — optional                | YES — keycmd-only                           |
+| `logic_transport.capture_recording`       | `transport.capture_recording (73)` | YES (orphan, no MCP tool)    | YES (unchanged)                             |
+
+If you depend on any of these eight ops and were skipping the §4 manual binding flow because v3.1.6 said it was optional, you need to bind those ops now. SETUP.md §4 has updated walkthroughs.
+
+`automation.set_mode (84)` is also moved into the **orphan** list because MCU does not actually handle that operation key (it handles `track.set_automation` instead — verified by inspection of `MCUChannel.execute`), so the keycmd path would be the only mappingTable hit if a future tool routes to it.
+
+### Added
+
+- `RoutingAuditInvariantTests` (`Tests/LogicProMCPTests/RoutingAuditInvariantTests.swift`) — six unit tests that programmatically assert (a) every declared keycmd-only op has no `CGEventChannel.keyMap` shortcut, (b) every declared keycmd-only op IS in `MIDIKeyCommandsChannel.mappingTable`, (c) every declared keycmd-only op routes via `.midiKeyCommands` in `routingTable`, (d) the runtime health detail enumerates every op in the declared set, (e) every `mappingTable` op has a `routingTable` entry, (f) the health detail stays under the 1 KB UTF-8 budget. The build now fails the moment any of these invariants drifts.
+
+### Changed
+
+- `docs/SETUP.md §4.1` audited coverage matrix rewritten — bolded the 8 keycmd-only rows, expanded the orphan list to include `automation.set_mode` and `track.create_stack`, replaced the "Effectively-keycmd-only" subsection with a per-row "Working non-keycmd channel" column so the answer is computable from the table alone.
+- `MIDIKeyCommandsChannel.manualValidationDetailSuffix` enumerates all 8 keycmd-only ops + 9 orphans (was 1 + 7 in v3.1.6).
+- `CGEventChannel.keyMap` and `MIDIKeyCommandsChannel.manualValidationDetailSuffix` lifted from `private static let` to `static let` so the audit invariant test can read them via `@testable import`.
+
+### Internal cleanup (no behaviour change)
+
+The /loop verification work also folded these post-v3.1.6 commits into `main`:
+
+- `NoteSequenceParseError.hint` computed property — `TrackDispatcher`, `MIDIKeyCommandsChannel.play_sequence.keycmd`, and `CoreMIDIChannel.play_sequence` now share one source of truth (was three duplicate four-case switches).
+- `MIDIDispatcher.validPorts` set + `MIDIKeyCommandsChannel.manualValidationDetailSuffix` promoted to static storage to remove per-call allocations.
+- `HonestContract.isTerminalStateC` short-circuits non-`{` messages before JSON parse.
+- `ChannelRouter.route()` hoists `let isBypass` outside the `for channelID in chain` loop.
+- `dispatchSendOp` in `MIDIDispatcher` drops its unused `command:` parameter (six call-site arg lines removed).
+- `JSONHelper.swift` drops the now-redundant `nonisolated(unsafe)` modifier from three Sendable codecs (clears three Swift 6 build warnings).
+
+### Tests
+
+`swift test --no-parallel` → **1019 / 1019 PASS** (was 1013 in v3.1.6; +6 from `RoutingAuditInvariantTests`).
+
+### Research
+
+- `docs/research/issue1-option1-feasibility.md` — escalation note on xaexx1's "Option 1" recommendation (`LogicProMCP --install-keycmds` programmatic `.logikcs` installer). Conclusion: not autonomous-safe because Logic 12.2 stores actual key/MIDI assignments inside an undocumented base64 `LogicBinaryPreferences` blob (~840 lines of XML's body) whose layout shifts between Logic point releases.
+
 ## [3.1.6] — 2026-04-30
 
 **Issue #1 closure: KeyCmd port routing + Manual MIDI Learn docs + Homebrew CLT-only install.** Pre-v3.1.6 the `MIDIKeyCommands` channel had two systemic gaps that made [Issue #1](https://github.com/MongLong0214/logic-pro-mcp/issues/1) (xaexx1) reproducible end-to-end: (1) `logic_midi.send_cc` had no way to address the `LogicProMCP-KeyCmd-Internal` virtual port, so manual MIDI Learn captured CCs on the wrong port (`MIDI-Internal`) and the binding looked dead; (2) `docs/SETUP.md` instructed users to `Logic Pro → Key Commands → Import…` the legacy `.plist`, which Logic 12.2 silently rejects (Import menu is grayed out, `.logikcs` schema mismatch). v3.1.6 introduces a `port` selector across 7 dispatcher entry points, normalizes `channel` to 1-based, removes the `.plist` Import instruction from every user-facing surface, replaces it with an audited coverage matrix + manual MIDI Learn walk-through, and removes `depends_on xcode:` from the Homebrew formula so CLT-only hosts install cleanly.
