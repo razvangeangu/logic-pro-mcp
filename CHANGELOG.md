@@ -8,6 +8,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.1.8] — 2026-05-06
+
+**Issue #7 (`thomas-doesburg`) — Logic Pro 12.x read-path recovery via project-file fallback + AX hardening.** v3.1.5 / v3.1.6 / v3.1.7 closed Issues #3 / #4 / #5 by routing `logic://tracks` / `logic://markers` / `logic://project/info` through `tell front document → tracks/markers/tempo/time signature` AppleScript reads. Logic Pro 12.x ships an AppleScript scripting dictionary that does not expose any of those terms — every call returns `-2753` ("variable is not defined") or `-1700` ("Can't make tempo of document 1 into type reference") at runtime, and the AX fallback is the panel-focus-dependent scrape that prompted the original bug reports. End-to-end behaviour was identical to v3.1.4 on every Logic 12.x install. v3.1.8 ships a project-file (`MetaData.plist`) tier-merge at the resource layer + a hardened AX walker, and removes the now-dead AppleScript-primary code paths.
+
+### Issue #7 reproduction (verified locally on Logic Pro 12.0.1, build 6590)
+
+```
+$ osascript -e 'tell application "Logic Pro" to tell front document to return count of tracks'
+→ -2753: tracks 변수를 정의하지 않았습니다.
+$ osascript -e 'tell application "Logic Pro" to tell front document to return count of markers'
+→ -2753: markers 변수를 정의하지 않았습니다.
+$ osascript -e 'tell application "Logic Pro" to return tempo of front document'
+→ -1700: Can't make tempo of document 1 into type reference.
+```
+
+`path of front document` still works on 12.x — that's the only AppleScript surface this fix relies on.
+
+### Issue fixes
+
+- **#7 / #4 — `logic://project/info` defaults stuck on Logic 12.x.** `ResourceHandlers.readProjectInfo` now performs **per-field tier merge**: cached values (live AX poll via `StatePoller`) win for any field where the cache holds a non-default value; otherwise the field is filled from `<bundle>/Alternatives/000/MetaData.plist` (`BeatsPerMinute`, `SongSignatureNumerator/Denominator`, `NumberOfTracks`). Whole-record freshness was rejected because `defaultGetProjectInfo` only writes `name + lastUpdated` to the cache — leaving tempo / tsig / trackCount at struct defaults — so a "fresh AX cache wins" rule would block the file's correct values forever. The merge is **read-only with respect to cache** (the poller is the sole writer) so file values cannot leak into shared mutable state. Envelope gains `source: "ax_live"|"cache"|"project_file"|"default"` and (when sourced from file) `last_saved_age_sec`.
+
+- **#7 / #3 — `logic://tracks` returns either `[]` or Inspector field labels (`Mute:`, `Loop:`, …) when the Mixer panel is focused.** Two-part fix:
+  - `AXLogicProElements.getTrackHeaders` outline/table fallback (lines 325-330 in v3.1.7) now requires the candidate to have at least one `kAXLayoutItemRole` direct child. The pre-v3.1.8 unconditional "first outline/table" fallback was the silent matcher that surfaced the Inspector subtree as if it were the track-header rail.
+  - `ResourceHandlers.readTracks` consults the cache for the live tier; when the cache is empty (or all-suffix-`:` Inspector contamination passes through), the resource layer synthesises **placeholder** rows from `MetaData.plist`'s `NumberOfTracks` (`name: "Track 1".."Track N"`, `placeholder: true`). Placeholder rows are never written back to `StateCache` — `track.select { name: "Track 5" }` (which reads `cache.getTracks()` in `TrackDispatcher.swift:44`) cannot match a placeholder name and route a write to the wrong track. Envelope `source: "ax_live"|"ax_live_with_file_count"|"project_file"|"default"`.
+
+- **#7 / #5 — `logic://markers` always empty on Logic 12.x.** `AXLogicProElements.enumerateMarkers` now resolves the marker ruler via `kAXRulerRole` + structural position (the second AXRuler in the arrange area subtree is the marker ruler; the first is the timeline). The pre-v3.1.8 keyword match (`marker` / `마커` substring on AXGroup id/desc/title) is preserved as a fallback for older Logic versions that still expose the keyword. Envelope `source: "ax_live"|"cache"|"default"`; `ax_occluded:true` continues to flag untrusted-empty when a plugin / modal window has focus.
+
+### Removed
+
+- **`AccessibilityChannel.markersViaAppleScript` / `projectInfoViaAppleScript` / `tracksViaAppleScript`** (~270 LOC) and their `AccessibilityChannel.Runtime` wiring (`markersAppleScript` / `projectInfoAppleScript` / `tracksAppleScript` closures + initialiser parameters). Dead on every Logic 12.x install (the dictionary terms they query don't exist); kept only added a wasted `-2753` IPC round-trip per poll. The follow-on parse helpers (`parseAppleScriptResult`, `parseMarkerRecords`, `formatBeatsAsBarPosition`, `appleScriptBool`, US/RS in-band delimiters) are removed too — no surviving callers.
+
+- **`Tests/LogicProMCPTests/AccessibilityChannelAppleScriptReadsTests.swift`** (369 LOC, 16 tests). Validated wire-format of the deleted helpers; obsolete.
+
+- `axBackedRuntimeWiresAppleScriptHelpers` test that asserted the deleted Runtime fields were wired in `axBacked()`.
+
+- `StatePoller.pollProjectInfo` no longer passes `cached_tempo` / `cached_track_count` params (the AppleScript helper that consumed them is removed).
+
+### Added
+
+- **`Sources/LogicProMCP/Utilities/LogicProjectFileReader.swift`** — actor-free module that reads `<bundle>/Alternatives/000/MetaData.plist` for the project-file tier. Path validation per PRD §6.3:
+  1. Reject paths whose `pathComponents` contain `..` (defensive — pre-`resolvingSymlinksInPath` and post-).
+  2. Require `.logicx` directory.
+  3. Resolve leaf symlinks (`Alternatives/000/MetaData.plist`).
+  4. Verify leaf real-path strict-prefix-matches the resolved bundle root (anti symlink-escape).
+  5. Cap read at 10 MB.
+  6. **mtime-jitter retry**: read mtime, parse, re-read mtime; on diff sleep 50 ms + retry once. Persistent jitter → return nil. Mitigates the Logic-mid-save atomic-write window flagged by guardian review.
+
+- **`ResourceHandlers.wrapWithCacheEnvelope` `extras: [String: Any]?`** parameter (default nil → byte-identical envelope shape to v3.1.7). Used by tier-merging readers to expose `source` / `last_saved_age_sec` / `placeholder` flags. Keys serialised in deterministic (sorted) order; unsupported value types (NSDate, custom classes) silently filtered. Mixer's hand-rolled envelope (`readMixer:184`) migrated to share the same shape.
+
+- **`StateModels.TrackState.placeholder: Bool?`** — true on file-count placeholder rows. Optional (Codable backward-compat with v3.1.7 JSON snapshots that lack the field).
+
+- **`StateModels.ProjectInfo.source: String?` / `lastSavedAgeSec: Double?`** — optional Codable additions. v3.1.7 envelopes decode cleanly with `nil` defaults.
+
+- **`AppleScriptChannel.currentDocumentPath()`** — `@Sendable` static helper extracted from the existing instance method. Lets `LogicProjectFileReader.Runtime.production` resolve the open project's path without instantiating a channel.
+
+### Tests
+
+- `Tests/LogicProMCPTests/LogicProjectFileReaderTests.swift` (15 tests) — synthetic `.logicx` bundles, binary + XML plist, missing keys, corrupt bytes, 10 MB cap, `..` rejection, symlink-escape rejection, `/private/Users/...` normalisation, Korean filename, future-mtime clamp, mtime-jitter retry recover + persistent-fail.
+- `Tests/LogicProMCPTests/ResourceProjectInfoTierMergeTests.swift` (7 tests) — cache-fresh tempo wins, file-only tempo, defaults, cache-vs-file divergence (95 vs 80), envelope source presence, last_saved_age_sec only on `project_file` source, **G5 cache-no-poison invariant**.
+- `Tests/LogicProMCPTests/ResourceTracksTierMergeTests.swift` (8 tests) — live tracks pass-through, placeholder synthesis, default empty, **G5 placeholder-not-cached**, Inspector contamination heuristic strict + lenient, cache-wins-over-file, poller-empty-but-file-present.
+- `Tests/LogicProMCPTests/ResourceEnvelopeExtrasTests.swift` (9 tests) — extras nil byte-identical, sorted order, numeric / bool / nested values, unsupported type filtered, axOccluded preserved.
+- `Tests/LogicProMCPTests/Issue7IntegrationTests.swift` (5 scenarios) — S1 Tracks panel live, S2 Mixer panel placeholder fallback, S3 no document defaults, S4 cache-vs-file divergence, S5 multi-call no-poison.
+- `Tests/LogicProMCPTests/Issue7BackwardCompatTests.swift` (5 tests) — v3.1.7 ProjectInfo / TrackState JSON decodes into v3.1.8 models with new fields nil; v3.1.8 encode emits new fields when set.
+- 4 v3.1.7 fixtures (`AccessibilityChannelTests.swift`, `AXLogicProElementsTests.swift`) gained explicit `kAXLayoutItemRole` on track-header elements to match the strict v3.1.8 contract.
+
+`swift test --no-parallel` → **1047 / 1047 PASS** (was 1019 in v3.1.7; +28 net = +49 new — 21 deleted: 16 from `AccessibilityChannelAppleScriptReadsTests` + axBackedRuntimeWiresAppleScriptHelpers + 4 fixture fix-ups). `swift build -c release` clean.
+
+### Live verification
+
+- **Automated** (this commit): `Scripts/issue7_live_verify.sh` — runs against any open Logic project, prints `path of front document`, `MetaData.plist` mtime, and the four fields v3.1.8 reads. Confirms the AppleScript path-acquisition + plist-parse pipeline works on Logic Pro 12.0.1.
+- **Manual L1 (deferred to user)**: open `Lofi-Dreamscape-80.logicx` (BPM 80, 31 tracks, 4/4) in Logic Pro 12.x, focus the Tracks panel → `logic://project/info` should return `tempo: 80`, `timeSignature: "4/4"`, `trackCount: 31`, `source: "project_file"` or `"ax_live"`.
+- **Manual L2 (deferred)**: same project, focus the Mixer panel (the originally-#3 case) → `logic://tracks` should return ≥ 31 entries (placeholder names acceptable; **must not be 0 and must not be Inspector field labels**), `source: "project_file"` or `"ax_live_with_file_count"`.
+- **Manual L3 (deferred)**: close all documents → all three resources return defaults / empty without crash.
+
+### Out-of-scope (deferred per PRD NG)
+
+- **Track names via project file** (NG1). `Alternatives/000/ProjectData` is a custom binary blob (verified `file` output `data` with header `#G\xc0\xab\xd0\x09`), not the XML the issue reporter conjectured. Reverse-engineering deferred to a future PRD.
+- **Marker positions / names via project file** (NG2). Same reason as NG1. Trigger to revisit (PRD OQ-5): 3+ user reports of `ax_occluded:true` on real markers, OR Logic 13 ships removing `markers` AX surface entirely.
+- **Per-section document-identity contract** (NG8 / boomer P1). Existing cache invalidation on `hasDocument:false` is sufficient for v3.1.8. Trigger to revisit (PRD OQ-6): user reports of cross-project state contamination.
+- **Tri-state marker result** (NG9 / boomer P1). Empty `[]` with `ax_occluded:true` is the existing untrusted-empty signal; preserved.
+
 ## [3.1.7] — 2026-05-05
 
 **Honest correction of the v3.1.6 audited coverage matrix + post-release simplify pass.** A v3.1.7 verification audit reading every channel's actual handler list against `ChannelRouter.routingTable` and `CGEventChannel.keyMap` found that the v3.1.6 SETUP.md §4.1 matrix understated keycmd dependence — it listed only `transport.capture_recording` as effectively-keycmd-only when in fact **8 user-facing ops** have the same property: their nominal `cgEvent` fallback has no `keyMap` entry, so the keycmd channel is the only path that actually fires the action on Logic 12.2. v3.1.7 ships the corrected matrix, updates the runtime `MIDIKeyCommandsChannel.healthCheck` detail to match, and adds `RoutingAuditInvariantTests` so future drift fails the build.

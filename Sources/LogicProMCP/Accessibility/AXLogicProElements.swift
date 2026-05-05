@@ -297,6 +297,12 @@ enum AXLogicProElements {
     }
 
     /// Find the track header area containing individual track rows.
+    /// v3.1.8 (Issue #7) — outline/table fallback restricted to elements
+    /// whose direct children contain `kAXLayoutItemRole`. The unconditional
+    /// "first outline/table" fallback (pre-v3.1.8) silently matched the
+    /// Inspector subtree when the Mixer panel was focused, causing
+    /// `track.get_tracks` to surface Inspector field labels (`Mute:`,
+    /// `Loop:`, ...) as track names — the v3.1.4 regression reported in #3.
     static func getTrackHeaders(runtime: Runtime = .production) -> AXUIElement? {
         guard let window = mainWindow(runtime: runtime) else { return nil }
         if isProjectPickerWindow(window, runtime: runtime) { return nil }
@@ -322,11 +328,25 @@ enum AXLogicProElements {
             return headerGroup
         }
 
-        if let outline = AXHelpers.findDescendant(of: window, role: kAXOutlineRole, maxDepth: 8, runtime: runtime.ax) {
-            return outline
-        }
-        if let table = AXHelpers.findDescendant(of: window, role: kAXTableRole, maxDepth: 8, runtime: runtime.ax) {
-            return table
+        // Hardened fallback: only accept outline / table whose direct
+        // children contain at least one `AXLayoutItem` (the role Logic Pro
+        // 12 uses for track header rows). This prevents the Inspector outline
+        // — which contains AXGroup field rows, not AXLayoutItem — from being
+        // returned as a "track headers" candidate.
+        let outlines = AXHelpers.findAllDescendants(
+            of: window, role: kAXOutlineRole, maxDepth: 8, runtime: runtime.ax
+        )
+        let tables = AXHelpers.findAllDescendants(
+            of: window, role: kAXTableRole, maxDepth: 8, runtime: runtime.ax
+        )
+        for candidate in outlines + tables {
+            let children = AXHelpers.getChildren(candidate, runtime: runtime.ax)
+            let hasLayoutItem = children.contains {
+                (AXHelpers.getRole($0, runtime: runtime.ax) ?? "") == (kAXLayoutItemRole as String)
+            }
+            if hasLayoutItem {
+                return candidate
+            }
         }
         return nil
     }
@@ -440,6 +460,12 @@ enum AXLogicProElements {
     }
 
     /// Enumerate all track header rows.
+    /// v3.1.8 (Issue #7) — Inspector contamination is prevented at the
+    /// CONTAINER level by `getTrackHeaders` (only outlines/tables with
+    /// AXLayoutItem children pass the fallback). Once a container is
+    /// trusted (whether by identifier match or layout-item fallback),
+    /// children are accepted as-is. This preserves backward compatibility
+    /// with fake AX trees that don't set explicit roles on test rows.
     static func allTrackHeaders(runtime: Runtime = .production) -> [AXUIElement] {
         guard let headers = getTrackHeaders(runtime: runtime) else { return [] }
         let directChildren = AXHelpers.getChildren(headers, runtime: runtime.ax)
@@ -603,25 +629,51 @@ enum AXLogicProElements {
     /// Logic Pro 12 renders the marker ruler as a row of AXStaticText elements
     /// (or AXGroup children) whose title/description contains the marker name.
     /// Position is extracted from the AXDescription or AXValue when available.
+    ///
+    /// v3.1.8 (Issue #7) — primary strategy now uses `kAXRulerRole`-based
+    /// match instead of identifier-string match (`marker`/`마커`). Logic 12.x
+    /// dropped the keyword identifier; AXRuler structural position is stable
+    /// across releases. Order of strategies:
+    ///   1. AXRuler elements: when 2+ exist in the arrange area, the second
+    ///      one is the marker ruler (timeline ruler is first).
+    ///   2. AXGroup keyword fallback (preserved for Logic 11.x compatibility).
     static func enumerateMarkers(
         in arrangementArea: AXUIElement,
         runtime: Runtime = .production
     ) -> [MarkerState] {
-        let markerKeywords = ["marker", "마커"]
-        let groups = AXHelpers.findAllDescendants(
-            of: arrangementArea, role: kAXGroupRole, maxDepth: 6, runtime: runtime.ax
-        )
         var rulerElement: AXUIElement? = nil
-        for group in groups {
-            let id = AXHelpers.getIdentifier(group, runtime: runtime.ax)?.lowercased() ?? ""
-            let desc = AXHelpers.getDescription(group, runtime: runtime.ax)?.lowercased() ?? ""
-            let title = AXHelpers.getTitle(group, runtime: runtime.ax)?.lowercased() ?? ""
-            let combined = "\(id) \(desc) \(title)"
-            if markerKeywords.contains(where: { combined.contains($0) }) {
-                rulerElement = group
-                break
+
+        // Strategy 1: AXRuler-based (Logic 12.x and beyond).
+        let rulers = AXHelpers.findAllDescendants(
+            of: arrangementArea, role: "AXRuler", maxDepth: 6, runtime: runtime.ax
+        )
+        if rulers.count >= 2 {
+            // Two rulers → first is timeline (bar position scrubber), second
+            // is the marker ruler. Order is stable across versions.
+            rulerElement = rulers[1]
+        } else if let only = rulers.first {
+            // Single ruler — could be either. Prefer it over nothing.
+            rulerElement = only
+        }
+
+        // Strategy 2: legacy keyword match (preserved for older Logic versions).
+        if rulerElement == nil {
+            let markerKeywords = ["marker", "마커"]
+            let groups = AXHelpers.findAllDescendants(
+                of: arrangementArea, role: kAXGroupRole, maxDepth: 6, runtime: runtime.ax
+            )
+            for group in groups {
+                let id = AXHelpers.getIdentifier(group, runtime: runtime.ax)?.lowercased() ?? ""
+                let desc = AXHelpers.getDescription(group, runtime: runtime.ax)?.lowercased() ?? ""
+                let title = AXHelpers.getTitle(group, runtime: runtime.ax)?.lowercased() ?? ""
+                let combined = "\(id) \(desc) \(title)"
+                if markerKeywords.contains(where: { combined.contains($0) }) {
+                    rulerElement = group
+                    break
+                }
             }
         }
+
         guard let ruler = rulerElement else { return [] }
 
         let texts = AXHelpers.findAllDescendants(

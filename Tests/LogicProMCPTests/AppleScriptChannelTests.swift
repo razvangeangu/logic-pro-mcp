@@ -343,3 +343,32 @@ private func makeAppleScriptRuntime(
     #expect(!result.isSuccess)
     #expect(result.message.contains("AppleScript error"))
 }
+
+// MARK: - v3.1.8 (Issue #7) — currentDocumentPath static helper
+
+@Test func testCurrentDocumentPath_parseEmpty_returnsNil() {
+    let parsed = AppleScriptChannel.parseCurrentDocumentPath(
+        from: .success("{\"result\":\"\"}")
+    )
+    #expect(parsed == nil)
+}
+
+@Test func testCurrentDocumentPath_parseTrimmed_returnsTrimmed() {
+    let parsed = AppleScriptChannel.parseCurrentDocumentPath(
+        from: .success("{\"result\":\"  /Users/x/A.logicx \\n\"}")
+    )
+    #expect(parsed == "/Users/x/A.logicx")
+}
+
+@Test func testCurrentDocumentPath_parseError_returnsNil() {
+    let parsed = AppleScriptChannel.parseCurrentDocumentPath(
+        from: .error("AppleScript error: TCC denied")
+    )
+    #expect(parsed == nil)
+}
+
+@Test func testCurrentDocumentPathScript_isStableShape() {
+    let script = AppleScriptChannel.currentDocumentPathScript()
+    #expect(script.contains("path of front document"))
+    #expect(script.contains("count of documents"))
+}

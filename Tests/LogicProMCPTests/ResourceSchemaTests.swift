@@ -256,12 +256,17 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     let router = ChannelRouter()
 
     let result = try! await ResourceHandlers.read(uri: "logic://project/info", cache: cache, router: router)
-    let json = try! sharedParseJSON(resourceText(result)) as! [String: Any]
+    let envelope = try! sharedParseJSON(resourceText(result)) as! [String: Any]
+    // v3.1.8 (Issue #7) — readProjectInfo now wraps in cache envelope. The
+    // ProjectInfo body lives inside `data`. `source` is "ax_live" because the
+    // cache was just written.
+    let json = envelope["data"] as! [String: Any]
     #expect(json["name"] as? String == "Commercial Mix")
     #expect(json["sampleRate"] as? Int == 48000)
     #expect(json["bitDepth"] as? Int == 32)
     #expect(json["trackCount"] as? Int == 42)
     #expect(json["filePath"] as? String == "/tmp/commercial.logicx")
+    #expect(envelope["source"] != nil)
 }
 
 @Test func testMIDIPortsResourcePassesThroughRouterListing() async {

@@ -21,7 +21,7 @@ struct ResourceHandlers {
 
     /// Wrap an already-encoded JSON body (e.g. `[{...}]` or `{...}`) in the
     /// T7 cache envelope. Returns
-    /// `{"cache_age_sec":…,"fetched_at":…,"ax_occluded":…,"data":<body>}`.
+    /// `{"cache_age_sec":…,"fetched_at":…,"ax_occluded":…[,extras…],"data":<body>}`.
     ///
     /// `ax_occluded` (v3.1.4): true when the StatePoller most recently observed
     /// a modal dialog or plugin floating window stealing AX focus from the
@@ -30,10 +30,19 @@ struct ResourceHandlers {
     /// non-occluded read" and decide whether to act on potentially-stale data.
     /// Defaults to false when `axOccluded` is omitted (caller didn't have
     /// access to the cache flag, e.g. when wrapping a synthesized body).
+    ///
+    /// `extras` (v3.1.8 — Issue #7): optional map of additional fields injected
+    /// between `ax_occluded` and `data`. Used by tier-merging readers
+    /// (`readProjectInfo`, `readTracks`, `readMixer`) to expose `source` (data
+    /// provenance) and `last_saved_age_sec` (file mtime delta). When nil or
+    /// empty, the envelope shape is byte-identical to v3.1.7. Keys are
+    /// serialised in deterministic (sorted) order; unsupported value types
+    /// (NSDate, custom classes, etc.) are skipped silently.
     static func wrapWithCacheEnvelope(
         bodyJSON: String,
         fetchedAt: Date?,
-        axOccluded: Bool = false
+        axOccluded: Bool = false,
+        extras: [String: Any]? = nil
     ) -> String {
         let (age, iso) = cacheEnvelope(fetchedAt: fetchedAt)
         let agePart: String = {
@@ -44,7 +53,27 @@ struct ResourceHandlers {
             if let s = iso as? String { return "\"\(s)\"" }
             return "null"
         }()
-        return "{\"cache_age_sec\":\(agePart),\"fetched_at\":\(isoPart),\"ax_occluded\":\(axOccluded),\"data\":\(bodyJSON)}"
+        let extrasPart = encodeExtrasFragment(extras)
+        return "{\"cache_age_sec\":\(agePart),\"fetched_at\":\(isoPart),\"ax_occluded\":\(axOccluded)\(extrasPart),\"data\":\(bodyJSON)}"
+    }
+
+    /// Serialise the optional extras map into a fragment that splices between
+    /// `ax_occluded` and `data`. Returns an empty string when nil/empty so the
+    /// envelope shape is byte-identical to v3.1.7 for callers passing nil.
+    static func encodeExtrasFragment(_ extras: [String: Any]?) -> String {
+        guard let extras, !extras.isEmpty else { return "" }
+        // Filter unsupported types defensively; sortedKeys for determinism.
+        let safe = extras.filter { _, value in JSONSerialization.isValidJSONObject(["v": value]) }
+        guard !safe.isEmpty else { return "" }
+        guard let data = try? JSONSerialization.data(withJSONObject: safe, options: [.sortedKeys]),
+              var s = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        // Strip outer braces, prefix with ","
+        guard s.hasPrefix("{"), s.hasSuffix("}") else { return "" }
+        s.removeFirst()
+        s.removeLast()
+        return s.isEmpty ? "" : ",\(s)"
     }
 }
 
@@ -59,10 +88,13 @@ extension ISO8601DateFormatter {
 extension ResourceHandlers {
 
     /// Handle a ReadResource request by URI.
+    /// `fileReader` (v3.1.8): injectable LogicProjectFileReader.Runtime for
+    /// project-info / tracks tier-merge fallback. Defaults to production.
     static func read(
         uri: String,
         cache: StateCache,
-        router: ChannelRouter
+        router: ChannelRouter,
+        fileReader: LogicProjectFileReader.Runtime = .production
     ) async throws -> ReadResource.Result {
         // Health must be side-effect free so the resource stays aligned with the tool contract.
         if uri == "logic://system/health" {
@@ -105,7 +137,7 @@ extension ResourceHandlers {
             return try await readTransportState(cache: cache, uri: uri)
 
         case "logic://tracks":
-            return try await readTracks(cache: cache, uri: uri)
+            return try await readTracks(cache: cache, uri: uri, fileReader: fileReader)
 
         case "logic://mixer":
             return try await readMixer(cache: cache, uri: uri)
@@ -114,7 +146,7 @@ extension ResourceHandlers {
             return try await readMarkers(cache: cache, uri: uri)
 
         case "logic://project/info":
-            return try await readProjectInfo(cache: cache, uri: uri)
+            return try await readProjectInfo(cache: cache, uri: uri, fileReader: fileReader)
 
         case "logic://midi/ports":
             return try await readMIDIPorts(router: router, uri: uri)
@@ -150,13 +182,76 @@ extension ResourceHandlers {
         )
     }
 
-    private static func readTracks(cache: StateCache, uri: String) async throws -> ReadResource.Result {
-        let tracks = await cache.getTracks()
-        let fetchedAt = await cache.getTracksFetchedAt()
+    /// v3.1.8 (Issue #7) — tier-merged track list read.
+    ///
+    /// Tier order:
+    ///   1. Cache (live AX poll). If non-empty AND not Inspector-contaminated,
+    ///      surface as-is, source: "ax_live".
+    ///   2. LogicProjectFileReader's `NumberOfTracks`. Synthesise placeholder
+    ///      rows (`name: "Track 1".."Track \(N)"`, `placeholder: true`).
+    ///      Source: "ax_live_with_file_count" if poller has run before but
+    ///      came up empty; "project_file" if poller never ran.
+    ///   3. Empty array. Source: "default".
+    ///
+    /// Inspector contamination guard (boomer P0 / E10): when AX traversal
+    /// returns >= 3 entries whose names ALL end in `:`, treat the data as the
+    /// Inspector subtree leaking through (Logic Pro 12.x failure mode where a
+    /// non-arrange panel is focused). Drop those rows and fall to Tier 2/3.
+    /// The threshold of 3 prevents a legitimate single track named "MyMix:"
+    /// from triggering false-positive contamination detection.
+    ///
+    /// **Critical (G5)**: this function is read-only with respect to cache.
+    /// Placeholder rows are NEVER written back via `cache.updateTracks(...)`.
+    /// Doing so would poison name-routed write actions like
+    /// `track.select { name: "Track 5" }` in `TrackDispatcher.swift:44`.
+    private static func readTracks(
+        cache: StateCache,
+        uri: String,
+        fileReader: LogicProjectFileReader.Runtime
+    ) async throws -> ReadResource.Result {
+        var liveTracks = await cache.getTracks()
+        let cacheFetchedAt = await cache.getTracksFetchedAt()
         let axOccluded = await cache.getAXOccluded()
-        let body = encodeJSON(tracks)
-        // v3.1.0 (T7) — cache envelope. v3.1.4 — `ax_occluded` flag.
-        let json = wrapWithCacheEnvelope(bodyJSON: body, fetchedAt: fetchedAt, axOccluded: axOccluded)
+
+        // Inspector contamination guard.
+        if liveTracks.count >= 3,
+           liveTracks.allSatisfy({ $0.name.hasSuffix(":") }) {
+            liveTracks = []
+        }
+
+        var tracksOut: [TrackState] = []
+        var source: String
+
+        if !liveTracks.isEmpty {
+            tracksOut = liveTracks
+            source = "ax_live"
+        } else {
+            // Tier 2: synthesise placeholders from file count.
+            let metadata = await LogicProjectFileReader.read(runtime: fileReader)
+            if let count = metadata?.trackCount, count > 0 {
+                tracksOut = (0..<count).map { idx in
+                    TrackState(
+                        id: idx,
+                        name: "Track \(idx + 1)",
+                        type: .unknown,
+                        placeholder: true
+                    )
+                }
+                source = cacheFetchedAt > .distantPast
+                    ? "ax_live_with_file_count"
+                    : "project_file"
+            } else {
+                source = "default"
+            }
+        }
+
+        let body = encodeJSON(tracksOut)
+        let json = wrapWithCacheEnvelope(
+            bodyJSON: body,
+            fetchedAt: cacheFetchedAt,
+            axOccluded: axOccluded,
+            extras: ["source": source]
+        )
         return ReadResource.Result(
             contents: [.text(json, uri: uri, mimeType: "application/json")]
         )
@@ -189,13 +284,111 @@ extension ResourceHandlers {
         )
     }
 
-    private static func readProjectInfo(cache: StateCache, uri: String) async throws -> ReadResource.Result {
-        // hasDocument gate removed (post-hardening). Cache returns an empty
-        // ProjectInfo when state is genuinely empty; clients distinguish.
-        let info = await cache.getProject()
-        let json = encodeJSON(info)
+    /// v3.1.8 (Issue #7) — tier-merged project info read.
+    ///
+    /// Tier order:
+    ///   1. Cache (live AX poll) — preferred when `lastUpdated > .distantPast`
+    ///      (poller has written real data). Source: "ax_live" if recent
+    ///      (< 5s), else "cache".
+    ///   2. LogicProjectFileReader — reads MetaData.plist for tempo / tsig /
+    ///      trackCount when cache is at struct defaults. Source:
+    ///      "project_file" + last_saved_age_sec extra.
+    ///   3. Struct defaults (ProjectInfo()). Source: "default".
+    ///
+    /// **Critical**: this function is read-only — it MUST NOT call
+    /// `cache.updateProject(...)`. The poller is the sole writer to cache
+    /// for project state. Mixing file values into cache would poison live
+    /// reads from other resource paths (cache is a shared mutable surface).
+    private static func readProjectInfo(
+        cache: StateCache,
+        uri: String,
+        fileReader: LogicProjectFileReader.Runtime
+    ) async throws -> ReadResource.Result {
+        let cached = await cache.getProject()
+        let projectFetchedAt = await cache.getProjectFetchedAt()
+        // Cache is "fresh" if either (a) the poller has timestamped a write,
+        // or (b) ProjectInfo's own lastUpdated is non-default. Either signal
+        // means downstream consumers wrote real data.
+        let cacheFresh = projectFetchedAt > .distantPast || cached.lastUpdated > .distantPast
+
+        // Per-field merge (boomer P0): the existing AX `defaultGetProjectInfo`
+        // populates ONLY `name` + `lastUpdated`; tempo / timeSignature /
+        // trackCount stay at struct defaults (120, "4/4", 0). A whole-record
+        // "cache fresh wins" rule would therefore mask the file's correct
+        // values whenever the poller has run at least once. Instead, we:
+        //   1. Start with cached values (preserves the AX-only `name`).
+        //   2. For each field, if cache is default AND file has a non-nil
+        //      value, the file fills it.
+        //   3. `source` is "ax_live"/"cache" if any non-default field came
+        //      from cache; otherwise "project_file"; otherwise "default".
+        let metadata = await LogicProjectFileReader.read(runtime: fileReader)
+
+        var info = cacheFresh ? cached : ProjectInfo()
+
+        var fileContributed = false
+        var cacheContributedNonDefault = false
+
+        // tempo
+        if cacheFresh && cached.tempo != 120.0 {
+            cacheContributedNonDefault = true
+        } else if let tempo = metadata?.tempo {
+            info.tempo = tempo
+            fileContributed = true
+        }
+        // timeSignature
+        if cacheFresh && cached.timeSignature != "4/4" {
+            cacheContributedNonDefault = true
+        } else if let tsig = metadata?.timeSignatureString {
+            info.timeSignature = tsig
+            fileContributed = true
+        }
+        // trackCount
+        if cacheFresh && cached.trackCount != 0 {
+            cacheContributedNonDefault = true
+        } else if let count = metadata?.trackCount {
+            info.trackCount = count
+            fileContributed = true
+        }
+        // filePath / name from cache wins; if cache empty, file supplies
+        if !cacheFresh, let bp = metadata?.bundlePath {
+            info.filePath = bp.path
+            info.lastUpdated = metadata?.metadataMTime ?? .distantPast
+        }
+
+        var source: String
+        var lastSavedAgeSec: Double?
+        if !cacheFresh && !fileContributed {
+            source = "default"
+        } else if cacheContributedNonDefault {
+            // Cache supplied at least one real value — promote to ax_live/cache.
+            let referenceDate = cached.lastUpdated > .distantPast ? cached.lastUpdated : projectFetchedAt
+            let age = Date().timeIntervalSince(referenceDate)
+            source = age < 5 ? "ax_live" : "cache"
+        } else if fileContributed {
+            source = "project_file"
+            if let mt = metadata?.metadataMTime {
+                lastSavedAgeSec = max(0, Date().timeIntervalSince(mt))
+            }
+        } else {
+            // Edge: cache fresh but every field is at default (e.g. project just
+            // opened, AX poller wrote name="Untitled" only, file unreadable).
+            source = "ax_live"
+        }
+        info.source = source
+        info.lastSavedAgeSec = lastSavedAgeSec
+
+        var extras: [String: Any] = ["source": source]
+        if let age = lastSavedAgeSec { extras["last_saved_age_sec"] = age }
+
+        let body = encodeJSON(info)
+        let envelope = wrapWithCacheEnvelope(
+            bodyJSON: body,
+            fetchedAt: cacheFresh ? cached.lastUpdated : nil,
+            axOccluded: await cache.getAXOccluded(),
+            extras: extras
+        )
         return ReadResource.Result(
-            contents: [.text(json, uri: uri, mimeType: "application/json")]
+            contents: [.text(envelope, uri: uri, mimeType: "application/json")]
         )
     }
 
@@ -234,11 +427,33 @@ extension ResourceHandlers {
         throw MCPError.invalidParams("No channel strip at index \(index)")
     }
 
+    /// v3.1.8 (Issue #7) — markers wrapped in cache envelope with source attribution.
+    /// Markers come from cache (populated by StatePoller's hardened AX walker).
+    /// Source: "ax_live" if cache populated, "default" if empty/unread.
+    /// `ax_occluded` flag in the envelope flags untrusted-empty (Logic UI focus
+    /// stole AX away from the arrange area mid-poll).
     private static func readMarkers(cache: StateCache, uri: String) async throws -> ReadResource.Result {
         let markers = await cache.getMarkers()
-        let json = encodeJSON(markers)
+        let fetchedAt = await cache.getMarkersFetchedAt()
+        let axOccluded = await cache.getAXOccluded()
+        let body = encodeJSON(markers)
+        let source: String
+        if !markers.isEmpty {
+            source = "ax_live"
+        } else if fetchedAt > .distantPast {
+            // Poller has run, came up empty — could be no markers OR occluded.
+            source = axOccluded ? "cache" : "ax_live"
+        } else {
+            source = "default"
+        }
+        let envelope = wrapWithCacheEnvelope(
+            bodyJSON: body,
+            fetchedAt: fetchedAt,
+            axOccluded: axOccluded,
+            extras: ["source": source]
+        )
         return ReadResource.Result(
-            contents: [.text(json, uri: uri, mimeType: "application/json")]
+            contents: [.text(envelope, uri: uri, mimeType: "application/json")]
         )
     }
 

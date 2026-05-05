@@ -532,6 +532,10 @@ private func makeAXBackedAccessibilityChannel(
     builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
     builder.setChildren(trackList, [header])
 
+    // v3.1.8 (Issue #7) — strict allTrackHeaders requires AXLayoutItem role
+    // on track row elements (Logic 12 contract). Without this, the strict
+    // filter rejects the row to prevent Inspector subtree contamination.
+    builder.setAttribute(header, kAXRoleAttribute as String, kAXLayoutItemRole as String)
     builder.setAttribute(header, kAXTitleAttribute as String, "Audio Track")
     builder.setAttribute(header, kAXDescriptionAttribute as String, "Audio color blue")
     builder.setAttribute(header, kAXSelectedAttribute as String, true)
@@ -602,6 +606,9 @@ private func makeAXBackedAccessibilityChannel(
     builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
     builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
     builder.setChildren(trackList, [firstHeader, secondHeader])
+    // v3.1.8 (Issue #7) — strict allTrackHeaders contract.
+    builder.setAttribute(firstHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(secondHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
     builder.setAttribute(firstHeader, kAXTitleAttribute as String, "Track 1")
     builder.setAttribute(firstHeader, kAXSelectedAttribute as String, true)
     builder.setAttribute(secondHeader, kAXTitleAttribute as String, "Track 2")
@@ -646,6 +653,9 @@ private func makeAXBackedAccessibilityChannel(
     builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
     builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
     builder.setChildren(trackList, [firstHeader, secondHeader])
+    // v3.1.8 (Issue #7) — strict allTrackHeaders contract.
+    builder.setAttribute(firstHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(secondHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
     builder.setAttribute(firstHeader, kAXTitleAttribute as String, "Track 1")
     builder.setAttribute(firstHeader, kAXSelectedAttribute as String, true)
     builder.setAttribute(secondHeader, kAXTitleAttribute as String, "Track 2")
@@ -695,6 +705,8 @@ private func makeAXBackedAccessibilityChannel(
     builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
     builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
     builder.setChildren(trackList, [header])
+    // v3.1.8 (Issue #7) — strict allTrackHeaders contract.
+    builder.setAttribute(header, kAXRoleAttribute as String, kAXLayoutItemRole as String)
     builder.setAttribute(header, kAXTitleAttribute as String, "Track 1")
 
     let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)

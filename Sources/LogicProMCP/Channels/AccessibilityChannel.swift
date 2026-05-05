@@ -68,15 +68,11 @@ actor AccessibilityChannel: Channel {
         let projectInfo: @Sendable () -> ChannelResult
         let markers: @Sendable () -> ChannelResult
         let importMIDIFile: @Sendable (String) async -> ChannelResult
-        // v3.1.5 — AppleScript-primary read closures for Issues #3 / #4 / #5.
-        // Returning `nil` falls back to the AX-backed `tracks` / `markers` /
-        // `projectInfo` closures above. Tests that build a Runtime by hand
-        // get the nil-returning defaults below, preserving pre-v3.1.5
-        // behaviour; production wires up the live AppleScript path via
-        // `axBacked()`.
-        let markersAppleScript: @Sendable () async -> ChannelResult?
-        let projectInfoAppleScript: @Sendable (Double?, Int) async -> ChannelResult?
-        let tracksAppleScript: @Sendable () async -> ChannelResult?
+        // v3.1.5 AppleScript-primary helpers (markersAppleScript /
+        // projectInfoAppleScript / tracksAppleScript) removed in v3.1.8 —
+        // see Issue #7. The dictionary terms they relied on (tracks /
+        // markers / tempo) don't exist in Logic 12.x; the project-file
+        // fallback now lives in `ResourceHandlers.read*`.
         let logicRuntime: AXLogicProElements.Runtime
 
         init(
@@ -98,9 +94,6 @@ actor AccessibilityChannel: Channel {
             projectInfo: @escaping @Sendable () -> ChannelResult,
             markers: @escaping @Sendable () -> ChannelResult = { .success("[]") },
             importMIDIFile: @escaping @Sendable (String) async -> ChannelResult = { _ in .error("importMIDIFile not wired") },
-            markersAppleScript: @escaping @Sendable () async -> ChannelResult? = { nil },
-            projectInfoAppleScript: @escaping @Sendable (Double?, Int) async -> ChannelResult? = { _, _ in nil },
-            tracksAppleScript: @escaping @Sendable () async -> ChannelResult? = { nil },
             logicRuntime: AXLogicProElements.Runtime = .production
         ) {
             self.isTrusted = isTrusted
@@ -121,9 +114,6 @@ actor AccessibilityChannel: Channel {
             self.projectInfo = projectInfo
             self.markers = markers
             self.importMIDIFile = importMIDIFile
-            self.markersAppleScript = markersAppleScript
-            self.projectInfoAppleScript = projectInfoAppleScript
-            self.tracksAppleScript = tracksAppleScript
             self.logicRuntime = logicRuntime
         }
 
@@ -154,18 +144,6 @@ actor AccessibilityChannel: Channel {
                 projectInfo: { AccessibilityChannel.defaultGetProjectInfo(runtime: logicRuntime) },
                 markers: { AccessibilityChannel.defaultGetMarkers(runtime: logicRuntime) },
                 importMIDIFile: { await AccessibilityChannel.defaultImportMIDIFile(path: $0, runtime: logicRuntime) },
-                markersAppleScript: {
-                    await AccessibilityChannel.markersViaAppleScript()
-                },
-                projectInfoAppleScript: { tempo, trackCount in
-                    await AccessibilityChannel.projectInfoViaAppleScript(
-                        cachedTransportTempo: tempo,
-                        cachedTrackCount: trackCount
-                    )
-                },
-                tracksAppleScript: {
-                    await AccessibilityChannel.tracksViaAppleScript()
-                },
                 logicRuntime: logicRuntime
             )
         }
@@ -232,15 +210,13 @@ actor AccessibilityChannel: Channel {
 
         // MARK: - Track reads
         case "track.get_tracks":
-            // v3.1.5 (Issue #3) — AppleScript primary, AX fallback. AX
-            // alone scrapes whichever subtree the active panel exposes,
-            // so a focused Mixer returns `[]` and a focused Tracks panel
-            // can return Inspector field labels in place of real tracks.
-            // AppleScript reads the project model directly via
-            // `tell front document → tracks`, independent of UI focus.
-            if let result = await runtime.tracksAppleScript() {
-                return result
-            }
+            // v3.1.8 (Issue #7) — AX-only at the channel layer. The v3.1.5
+            // AppleScript-primary fallback was removed because Logic 12.x
+            // dropped `tracks` from its scripting dictionary (always
+            // returned -2753). The project-file count fallback now lives
+            // in `ResourceHandlers.readTracks` where placeholder rows can
+            // be emitted to resource consumers without poisoning the
+            // shared StateCache.
             return runtime.tracks()
         case "track.get_selected":
             return runtime.selectedTrack()
@@ -422,31 +398,23 @@ actor AccessibilityChannel: Channel {
         // MARK: - Navigation
         case "nav.get_markers":
             // v3.1.5 (Issue #5) — AppleScript primary, AX fallback. The
-            // AX scrape required an arrange-area subtree whose marker
-            // ruler was tagged with description / identifier containing
-            // "marker" / "마커"; Logic 12.2 no longer surfaces that tag,
-            // so the AX path returns `[]` even when the project has
-            // markers. AppleScript exposes `markers of front document`
-            // unconditionally.
-            if let result = await runtime.markersAppleScript() {
-                return result
-            }
+            // v3.1.8 (Issue #7) — AppleScript-primary fallback removed
+            // (Logic 12.x dropped the `markers` term). The AX walker has
+            // been hardened in T6: AXRuler-based structural match
+            // (`enumerateMarkers`) now finds the marker ruler without
+            // needing the language-specific `marker`/`마커` keyword.
             return runtime.markers()
         case "nav.rename_marker":
             return .error("Marker renaming not yet implemented via AX")
 
         // MARK: - Project
         case "project.get_info":
-            // v3.1.5 (Issue #4) — AppleScript primary, AX fallback. The
-            // AX path only filled `name` (window title) and left tempo /
-            // timeSignature / trackCount at struct defaults. AppleScript
-            // exposes `tempo`, `time signature`, and `count of tracks`
-            // on the front document directly.
-            let cachedTempo = Double(params["cached_tempo"] ?? "")
-            let cachedTrackCount = Int(params["cached_track_count"] ?? "") ?? 0
-            if let result = await runtime.projectInfoAppleScript(cachedTempo, cachedTrackCount) {
-                return result
-            }
+            // v3.1.8 (Issue #7) — AppleScript-primary fallback removed
+            // (Logic 12.x dropped the `tempo` / `time signature` /
+            // `count of tracks` terms). The AX path returns the window
+            // title only; `ResourceHandlers.readProjectInfo` performs
+            // per-field merge with `MetaData.plist` for tempo / tsig /
+            // trackCount.
             return runtime.projectInfo()
 
         // MARK: - Regions
@@ -3059,276 +3027,26 @@ actor AccessibilityChannel: Channel {
         return encodeResult(markers)
     }
 
-    // MARK: - AppleScript-backed reads (v3.1.5 — Issues #3, #4, #5)
+    // MARK: - Removed in v3.1.8 (Issue #7)
     //
-    // Logic Pro 12.2's AX tree exposes markers / project metadata / tracks
-    // through subtrees rooted in the *currently focused panel*. Open the
-    // Mixer (or Score, or Library, etc.) and the AX scrape either returns
-    // an empty array or a wildly wrong subtree (Track Inspector parameter
-    // labels in place of tracks; nothing for markers). Logic's AppleScript
-    // dictionary exposes the project model directly via `front document`,
-    // independent of UI focus. These helpers prefer the AppleScript path
-    // and fall back to the AX scrape on failure (no Logic running, TCC
-    // denial, dictionary parse miss). Worst-case behaviour matches v3.1.4.
+    // The v3.1.5 AppleScript-primary read helpers (`markersViaAppleScript`,
+    // `projectInfoViaAppleScript`, `tracksViaAppleScript`) have been removed.
     //
-    // ASCII control characters are used as in-band delimiters so user
-    // content (track / marker names containing `|`, `,`, `\n`, etc.)
-    // round-trips intact:
-    //   - `\u{1F}` (US, unit separator) splits fields within a record
-    //   - `\u{1E}` (RS, record separator) splits records within a payload
+    // Background: v3.1.5 introduced these helpers because AX scrapes were
+    // panel-focus dependent on Logic 12.x. The intent was to query
+    // `tell front document → tracks / markers / tempo` directly. Logic Pro
+    // 12.0+ ships an AppleScript scripting dictionary that does NOT expose
+    // any of those terms — every call returns -2753 ("variable is not
+    // defined"). The helpers therefore added a wasted IPC round-trip on
+    // every poll without ever supplying real data on the targeted platform.
+    //
+    // The Issue #3/#4/#5 fix has moved to the resource layer
+    // (`ResourceHandlers.readProjectInfo` / `readTracks`) which now reads
+    // `MetaData.plist` directly via `LogicProjectFileReader` for the
+    // project-file tier. The AX path stays as the live tier (hardened in
+    // T6: strict `getTrackHeaders` / `allTrackHeaders`; AXRuler-based
+    // `enumerateMarkers`).
 
-    static let appleScriptFieldSep = "\u{1F}"
-    static let appleScriptRecordSep = "\u{1E}"
-
-    /// AppleScript-driven marker enumeration. Returns `nil` on AppleScript
-    /// failure / empty payload so the caller can fall back to AX.
-    static func markersViaAppleScript(
-        executeScript: @Sendable (String) async -> ChannelResult = {
-            await AppleScriptChannel.executeAppleScript($0)
-        }
-    ) async -> ChannelResult? {
-        let script = """
-        tell application "Logic Pro"
-            if (count of documents) = 0 then return ""
-            set fs to (character id 31)
-            set rs to (character id 30)
-            set out to ""
-            tell front document
-                try
-                    set markerList to markers
-                on error
-                    return ""
-                end try
-                repeat with i from 1 to count of markerList
-                    set m to item i of markerList
-                    set mname to ""
-                    try
-                        set mname to (name of m) as text
-                    end try
-                    set mpos to ""
-                    try
-                        set mpos to (position of m) as text
-                    end try
-                    set out to out & mname & fs & mpos & rs
-                end repeat
-            end tell
-            return out
-        end tell
-        """
-        let raw = await executeScript(script)
-        guard case .success(let json) = raw,
-              let payload = parseAppleScriptResult(json),
-              !payload.isEmpty else {
-            return nil
-        }
-        let markers = parseMarkerRecords(payload)
-        return encodeResult(markers)
-    }
-
-    /// AppleScript-driven project metadata. Returns `nil` on failure.
-    /// `cachedTransportTempo` / `cachedTrackCount` provide fallback values
-    /// from the StatePoller's transport / tracks reads when the dictionary
-    /// doesn't expose the property (older Logic builds, scripting bridge
-    /// glitches).
-    static func projectInfoViaAppleScript(
-        cachedTransportTempo: Double? = nil,
-        cachedTrackCount: Int = 0,
-        executeScript: @Sendable (String) async -> ChannelResult = {
-            await AppleScriptChannel.executeAppleScript($0)
-        }
-    ) async -> ChannelResult? {
-        let script = """
-        tell application "Logic Pro"
-            if (count of documents) = 0 then return ""
-            set fs to (character id 31)
-            tell front document
-                set docName to ""
-                try
-                    set docName to (name as text)
-                end try
-                set docTempo to ""
-                try
-                    set docTempo to (tempo as text)
-                end try
-                set docTSig to ""
-                try
-                    set docTSig to (time signature as text)
-                end try
-                set docTrackCount to "0"
-                try
-                    set docTrackCount to ((count of tracks) as text)
-                end try
-                return docName & fs & docTempo & fs & docTSig & fs & docTrackCount
-            end tell
-        end tell
-        """
-        let raw = await executeScript(script)
-        guard case .success(let json) = raw,
-              let payload = parseAppleScriptResult(json),
-              !payload.isEmpty else {
-            return nil
-        }
-        let fields = payload
-            .split(separator: Character(appleScriptFieldSep), omittingEmptySubsequences: false)
-            .map(String.init)
-        guard fields.count >= 4 else { return nil }
-        var info = ProjectInfo()
-        let nameField = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
-        info.name = nameField
-        let tempoField = fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
-        if let tempo = Double(tempoField), tempo > 0 {
-            info.tempo = tempo
-        } else if let tempo = cachedTransportTempo, tempo > 0 {
-            info.tempo = tempo
-        }
-        let tsig = fields[2].trimmingCharacters(in: .whitespacesAndNewlines)
-        if !tsig.isEmpty {
-            info.timeSignature = tsig
-        }
-        let countField = fields[3].trimmingCharacters(in: .whitespacesAndNewlines)
-        if let count = Int(countField), count >= 0 {
-            info.trackCount = count
-        } else if cachedTrackCount > 0 {
-            info.trackCount = cachedTrackCount
-        }
-        info.lastUpdated = Date()
-        return encodeResult(info)
-    }
-
-    /// AppleScript-driven track enumeration. Returns `nil` on failure.
-    /// AppleScript exposes `name`, `mute`, `solo`, `record enabled`, and
-    /// `selected` per track but no volume / pan (those live on the channel
-    /// strip, not the track object) — so volume/pan stay at the StateModel
-    /// defaults, matching the prior AX behaviour for those fields.
-    static func tracksViaAppleScript(
-        executeScript: @Sendable (String) async -> ChannelResult = {
-            await AppleScriptChannel.executeAppleScript($0)
-        }
-    ) async -> ChannelResult? {
-        let script = """
-        tell application "Logic Pro"
-            if (count of documents) = 0 then return ""
-            set fs to (character id 31)
-            set rs to (character id 30)
-            set out to ""
-            tell front document
-                try
-                    set trackList to tracks
-                on error
-                    return ""
-                end try
-                repeat with i from 1 to count of trackList
-                    set t to item i of trackList
-                    set tName to ""
-                    try
-                        set tName to (name of t) as text
-                    end try
-                    set tMute to "false"
-                    try
-                        set tMute to ((mute of t) as text)
-                    end try
-                    set tSolo to "false"
-                    try
-                        set tSolo to ((solo of t) as text)
-                    end try
-                    set tArmed to "false"
-                    try
-                        set tArmed to ((record enabled of t) as text)
-                    end try
-                    set tSelected to "false"
-                    try
-                        set tSelected to ((selected of t) as text)
-                    end try
-                    set out to out & tName & fs & tMute & fs & tSolo & fs & tArmed & fs & tSelected & rs
-                end repeat
-            end tell
-            return out
-        end tell
-        """
-        let raw = await executeScript(script)
-        guard case .success(let json) = raw,
-              let payload = parseAppleScriptResult(json),
-              !payload.isEmpty else {
-            return nil
-        }
-        let records = payload.split(
-            separator: Character(appleScriptRecordSep),
-            omittingEmptySubsequences: true
-        )
-        var tracks: [TrackState] = []
-        tracks.reserveCapacity(records.count)
-        for (index, record) in records.enumerated() {
-            let fields = record
-                .split(separator: Character(appleScriptFieldSep), omittingEmptySubsequences: false)
-                .map(String.init)
-            guard !fields.isEmpty else { continue }
-            let name = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { continue }
-            tracks.append(TrackState(
-                id: index,
-                name: name,
-                type: .unknown,
-                isMuted: appleScriptBool(fields, at: 1),
-                isSoloed: appleScriptBool(fields, at: 2),
-                isArmed: appleScriptBool(fields, at: 3),
-                isSelected: appleScriptBool(fields, at: 4)
-            ))
-        }
-        return encodeResult(tracks)
-    }
-
-    /// `executeAppleScript` wraps stdout as `{"result":"<escaped>"}`.
-    /// Decode the wrapper so callers operate on the raw payload bytes.
-    static func parseAppleScriptResult(_ json: String) -> String? {
-        guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let result = obj["result"] as? String else {
-            return nil
-        }
-        return result
-    }
-
-    private static func parseMarkerRecords(_ payload: String) -> [MarkerState] {
-        let records = payload.split(
-            separator: Character(appleScriptRecordSep),
-            omittingEmptySubsequences: true
-        )
-        var markers: [MarkerState] = []
-        markers.reserveCapacity(records.count)
-        for (index, record) in records.enumerated() {
-            let fields = record
-                .split(separator: Character(appleScriptFieldSep), omittingEmptySubsequences: false)
-                .map(String.init)
-            guard !fields.isEmpty else { continue }
-            let name = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { continue }
-            let positionRaw = fields.count > 1
-                ? fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
-                : ""
-            let position = formatBeatsAsBarPosition(positionRaw) ?? "\(index + 1).1.1.1"
-            markers.append(MarkerState(id: index, name: name, position: position))
-        }
-        return markers
-    }
-
-    /// Logic's AppleScript dictionary returns marker positions as a real
-    /// number measured in beats (1 = beat 1 of bar 1). Convert to the
-    /// `bar.beat.div.tick` string used everywhere else in the resource
-    /// model. Without project time-signature context we assume 4/4 here;
-    /// callers that have richer state can format more precisely.
-    static func formatBeatsAsBarPosition(_ raw: String) -> String? {
-        guard !raw.isEmpty, let beats = Double(raw), beats >= 0 else { return nil }
-        let zeroBased = max(0, beats - 1)
-        let beatsPerBar = 4.0
-        let bar = Int(zeroBased / beatsPerBar) + 1
-        let beatInBar = Int(zeroBased.truncatingRemainder(dividingBy: beatsPerBar)) + 1
-        return "\(bar).\(beatInBar).1.1"
-    }
-
-    private static func appleScriptBool(_ fields: [String], at index: Int) -> Bool {
-        guard index < fields.count else { return false }
-        return fields[index].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "true"
-    }
 
     // MARK: - JSON encoding
 

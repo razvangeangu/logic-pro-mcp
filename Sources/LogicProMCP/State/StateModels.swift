@@ -39,6 +39,12 @@ struct TrackState: Sendable, Codable, Identifiable {
     var pan: Double = 0.0      // -1.0 (L) to 1.0 (R)
     var automationMode: AutomationMode = .off
     var color: String?
+    /// v3.1.8 (Issue #7) — true when this row was synthesised from
+    /// MetaData.plist's `NumberOfTracks` because the AX walker returned
+    /// empty. Names are placeholders ("Track 1", "Track 2", ...). Live
+    /// rows from the AX scrape have this nil/absent (Codable backward
+    /// compat: pre-v3.1.8 JSON snapshots lacking the field decode cleanly).
+    var placeholder: Bool?
 }
 
 /// Mixer channel strip state (extends track with routing info).
@@ -121,6 +127,13 @@ struct ProjectInfo: Sendable, Codable {
     var trackCount: Int = 0
     var filePath: String?
     var lastUpdated: Date = .distantPast
+    /// v3.1.8 (Issue #7) — provenance of the read. One of: "ax_live",
+    /// "project_file", "cache", "default". Optional for forward/back compat
+    /// (v3.1.7 envelopes deserialise with `source: nil`).
+    var source: String?
+    /// v3.1.8 (Issue #7) — set when sourced from project_file; mtime delta
+    /// in seconds. Clamped to ≥ 0.
+    var lastSavedAgeSec: Double?
 }
 
 /// A Logic arrange-area region (MIDI or audio) as exposed by AX.

@@ -64,6 +64,8 @@ import Testing
     builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
     builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
     builder.setChildren(trackList, [trackHeader])
+    // v3.1.8 (Issue #7) — strict allTrackHeaders requires AXLayoutItem role.
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
     builder.setChildren(trackHeader, [muteButton, soloButton, armButton, nameField])
     builder.setAttribute(muteButton, kAXRoleAttribute as String, kAXButtonRole as String)
     builder.setAttribute(muteButton, kAXDescriptionAttribute as String, "Mute Track 1")
@@ -134,6 +136,8 @@ import Testing
     builder.setAttribute(tracksScroll, kAXRoleAttribute as String, kAXScrollAreaRole as String)
     builder.setAttribute(tracksScroll, kAXIdentifierAttribute as String, "Tracks")
     builder.setChildren(tracksScroll, [trackHeader])
+    // v3.1.8 (Issue #7) — strict allTrackHeaders contract.
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
 
     builder.setAttribute(mixerScroll, kAXRoleAttribute as String, kAXScrollAreaRole as String)
     builder.setAttribute(mixerScroll, kAXIdentifierAttribute as String, "Mixer")
@@ -180,6 +184,9 @@ import Testing
     builder.setChildren(window, [outline])
     builder.setAttribute(outline, kAXRoleAttribute as String, kAXOutlineRole as String)
     builder.setChildren(outline, [header])
+    // v3.1.8 (Issue #7) — outline fallback only matches when children
+    // contain AXLayoutItem (anti Inspector-contamination).
+    builder.setAttribute(header, kAXRoleAttribute as String, kAXLayoutItemRole as String)
     builder.setChildren(header, [nameField])
     builder.setAttribute(nameField, kAXRoleAttribute as String, kAXTextFieldRole as String)
     builder.setAttribute(nameField, kAXValueAttribute as String, "Keys")

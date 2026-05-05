@@ -296,7 +296,7 @@ actor AppleScriptChannel: Channel {
         """
     }
 
-    private func currentDocumentPathScript() -> String {
+    static func currentDocumentPathScript() -> String {
         """
         tell application "Logic Pro"
             if (count of documents) > 0 then
@@ -311,14 +311,26 @@ actor AppleScriptChannel: Channel {
         """
     }
 
+    /// v3.1.8 (Issue #7) — file-scoped helper for `LogicProjectFileReader` so it
+    /// can resolve the open project's path without instantiating a channel.
+    /// Returns nil when no document is open, TCC is denied, or AppleScript
+    /// fails for any reason.
+    @Sendable
+    static func currentDocumentPath() async -> String? {
+        let result = await Self.executeAppleScript(currentDocumentPathScript())
+        return Self.parseCurrentDocumentPath(from: result)
+    }
+
+    static func parseCurrentDocumentPath(from result: ChannelResult) -> String? {
+        guard result.isSuccess else { return nil }
+        let raw = Self.appleScriptResultText(from: result)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? nil : raw
+    }
+
     private func logicCurrentDocumentPath() async -> String? {
-        let result = await runScript(currentDocumentPathScript())
-        guard result.isSuccess,
-              let rawValue = appleScriptResultText(from: result)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !rawValue.isEmpty else {
-            return nil
-        }
-        return rawValue
+        let result = await runScript(Self.currentDocumentPathScript())
+        return Self.parseCurrentDocumentPath(from: result)
     }
 
     private func projectPathsMatch(_ lhs: String, _ rhs: String) -> Bool {
@@ -338,7 +350,7 @@ actor AppleScriptChannel: Channel {
         return normalized
     }
 
-    private func appleScriptResultText(from result: ChannelResult) -> String? {
+    static func appleScriptResultText(from result: ChannelResult) -> String? {
         guard result.isSuccess else { return nil }
         let message = result.message
         guard let data = message.data(using: .utf8),
