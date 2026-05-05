@@ -308,6 +308,7 @@ actor ChannelRouter {
         }
 
         var lastError: String = "No channels available"
+        let isBypass = Self.bypassReadinessOps.contains(operation)
 
         for channelID in chain {
             guard let channel = channels[channelID] else {
@@ -316,7 +317,6 @@ actor ChannelRouter {
             }
 
             let health = await channel.healthCheck()
-            let isBypass = Self.bypassReadinessOps.contains(operation)
             guard health.available else {
                 // PRD Issue #1 §4.1 step 7: a bypass op (KeyCmd MIDI send)
                 // whose channel reports `available:false` means the virtual

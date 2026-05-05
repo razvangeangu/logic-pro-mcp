@@ -342,7 +342,7 @@ struct TrackDispatcher {
             events = parsed
         case .failure(let error):
             return toolTextResult(
-                "record_sequence: invalid 'notes' — \(describeParseError(error))",
+                "record_sequence: invalid 'notes' — \(error.hint)",
                 isError: true
             )
         }
@@ -558,20 +558,4 @@ struct TrackDispatcher {
         }
     }
 
-    /// Translate the parser's error case into a one-line human-readable hint
-    /// suitable for embedding in a `toolTextResult` error. Keep wording
-    /// stable: tests grep for the lower-case word "channel" / "parse" /
-    /// "invalid" to assert the parser hint propagated correctly.
-    private static func describeParseError(_ error: NoteSequenceParser.NoteSequenceParseError) -> String {
-        switch error {
-        case .channelOutOfRange(let segment, let value):
-            return "channel \(value) out of range (must be 1..16) in segment '\(segment)'"
-        case .invalidPitch(let segment):
-            return "invalid pitch (must be 0..127) in segment '\(segment)'"
-        case .invalidTiming(let segment):
-            return "invalid timing (offset>=0, duration 1..30000) in segment '\(segment)'"
-        case .malformed(let segment):
-            return "malformed segment '\(segment)' (expected 'pitch,offsetMs,durMs[,vel[,ch]]')"
-        }
-    }
 }

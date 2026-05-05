@@ -38,6 +38,22 @@ enum NoteSequenceParser {
         case invalidTiming(segment: String)
         /// Insufficient fields, non-numeric values, or velocity outside 0..127.
         case malformed(segment: String)
+
+        /// One-line human-readable hint suitable for embedding in a State C
+        /// envelope. Tests grep for the lower-case words "channel" / "pitch"
+        /// / "timing" / "malformed" — keep wording stable.
+        var hint: String {
+            switch self {
+            case .channelOutOfRange(let segment, let value):
+                return "channel \(value) out of range (must be 1..16) in segment '\(segment)'"
+            case .invalidPitch(let segment):
+                return "invalid pitch (must be 0..127) in segment '\(segment)'"
+            case .invalidTiming(let segment):
+                return "invalid timing (offset>=0, duration 1..30000) in segment '\(segment)'"
+            case .malformed(let segment):
+                return "malformed segment '\(segment)' (expected 'pitch,offsetMs,durMs[,vel[,ch]]')"
+            }
+        }
     }
 
     static func parse(_ notes: String) -> Result<[ParsedNote], NoteSequenceParseError> {

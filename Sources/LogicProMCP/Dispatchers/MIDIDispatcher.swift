@@ -17,7 +17,6 @@ struct MIDIDispatcher {
         switch command {
         case "send_note":
             return await dispatchSendOp(
-                command: command,
                 baseOp: "midi.send_note",
                 params: params,
                 additionalParams: [
@@ -30,7 +29,6 @@ struct MIDIDispatcher {
 
         case "send_chord":
             return await dispatchSendOp(
-                command: command,
                 baseOp: "midi.send_chord",
                 params: params,
                 additionalParams: [
@@ -59,7 +57,6 @@ struct MIDIDispatcher {
 
         case "send_cc":
             return await dispatchSendOp(
-                command: command,
                 baseOp: "midi.send_cc",
                 params: params,
                 additionalParams: [
@@ -71,7 +68,6 @@ struct MIDIDispatcher {
 
         case "send_program_change":
             return await dispatchSendOp(
-                command: command,
                 baseOp: "midi.send_program_change",
                 params: params,
                 additionalParams: [
@@ -82,7 +78,6 @@ struct MIDIDispatcher {
 
         case "send_pitch_bend":
             return await dispatchSendOp(
-                command: command,
                 baseOp: "midi.send_pitch_bend",
                 params: params,
                 additionalParams: [
@@ -93,7 +88,6 @@ struct MIDIDispatcher {
 
         case "send_aftertouch":
             return await dispatchSendOp(
-                command: command,
                 baseOp: "midi.send_aftertouch",
                 params: params,
                 additionalParams: [
@@ -193,7 +187,6 @@ struct MIDIDispatcher {
     /// this helper because its per-event channels live inside the notes string;
     /// it inlines just the `validatePort` half above.
     private static func dispatchSendOp(
-        command: String,
         baseOp: String,
         params: [String: Value],
         additionalParams: [String: String],
@@ -259,13 +252,14 @@ struct MIDIDispatcher {
     /// - Returns: `.success("midi")` if missing (default for backward compat),
     ///   `.success("midi"|"keycmd")` if explicitly set to a supported value,
     ///   `.failure(...)` for any other string (including `""`, `"scripter"`).
+    private static let validPorts: Set<String> = ["midi", "keycmd"]
+
     internal static func validatePort(_ params: [String: Value]) -> Result<String, ValidationFailure> {
         // Empty string `""` is explicitly rejected (does not fall through to default).
         guard let raw = params["port"]?.stringValue else {
             return .success("midi") // missing = default
         }
-        let validPorts: Set<String> = ["midi", "keycmd"]
-        guard validPorts.contains(raw) else {
+        guard Self.validPorts.contains(raw) else {
             return .failure("port must be one of: midi, keycmd")
         }
         return .success(raw)

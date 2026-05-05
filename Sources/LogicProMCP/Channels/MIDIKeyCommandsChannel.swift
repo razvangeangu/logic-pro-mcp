@@ -440,20 +440,9 @@ actor MIDIKeyCommandsChannel: Channel {
         case .success(let parsed):
             events = parsed
         case .failure(let err):
-            let segmentHint: String
-            switch err {
-            case .channelOutOfRange(let segment, let value):
-                segmentHint = "channel \(value) out of range (1..16) in segment '\(segment)'"
-            case .invalidPitch(let segment):
-                segmentHint = "invalid pitch (must be 0..127) in segment '\(segment)'"
-            case .invalidTiming(let segment):
-                segmentHint = "invalid timing (offset>=0, duration 1..30000) in segment '\(segment)'"
-            case .malformed(let segment):
-                segmentHint = "malformed segment '\(segment)' (expected 'pitch,offsetMs,durMs[,vel[,ch]]')"
-            }
             return .error(HonestContract.encodeStateC(
                 error: .invalidParams,
-                hint: "play_sequence.keycmd: \(segmentHint)",
+                hint: "play_sequence.keycmd: \(err.hint)",
                 extras: ["operation": "midi.play_sequence.keycmd"]
             ))
         }
@@ -526,18 +515,18 @@ actor MIDIKeyCommandsChannel: Channel {
                 verificationStatus: .runtimeReady
             )
         }
-        // T7 (PRD-issue1-keycmd-port-routing §3 AC-5): emit an honest health
-        // detail covering virtual port status, manual MIDI Learn requirement,
-        // audited coverage matrix pointer, effectively keycmd-only ops, and
-        // orphan ops in mappingTable. Total length must stay < 1 KB (UTF-8).
-        let detail = "Port: LogicProMCP-KeyCmd-Internal — \(readiness.detail). " +
-            "Manual MIDI Learn required — see docs/SETUP.md §4 (Install Key Commands Preset). " +
-            "Most preset operations are covered by logic_edit / logic_project / logic_navigate / logic_tracks / logic_transport — see audited coverage matrix in SETUP.md. " +
-            "Effectively keycmd-only (cgEvent fallback unmapped): transport.capture_recording. Manual MIDI Learn binding required for actual function activation. " +
-            "Orphan ops in mappingTable (no MCP tool currently exposes call path): note.up_semitone, note.up_octave, note.down_semitone, note.down_octave, view.toggle_smart_controls, view.toggle_plugin_windows, view.toggle_automation (CC 57; distinct from automation.toggle_view CC 85). Manual binding possible but MCP has no caller path; tracked in NG6 follow-up."
+        // Honest health detail: virtual port status, manual MIDI Learn
+        // requirement, audited coverage matrix pointer, effectively keycmd-only
+        // ops, and orphan ops in mappingTable. Total length must stay < 1 KB.
         return .healthy(
-            detail: detail,
+            detail: "Port: LogicProMCP-KeyCmd-Internal — \(readiness.detail). \(Self.manualValidationDetailSuffix)",
             verificationStatus: .manualValidationRequired
         )
     }
+
+    private static let manualValidationDetailSuffix =
+        "Manual MIDI Learn required — see docs/SETUP.md §4 (Install Key Commands Preset). " +
+        "Most preset operations are covered by logic_edit / logic_project / logic_navigate / logic_tracks / logic_transport — see audited coverage matrix in SETUP.md. " +
+        "Effectively keycmd-only (cgEvent fallback unmapped): transport.capture_recording. Manual MIDI Learn binding required for actual function activation. " +
+        "Orphan ops in mappingTable (no MCP tool currently exposes call path): note.up_semitone, note.up_octave, note.down_semitone, note.down_octave, view.toggle_smart_controls, view.toggle_plugin_windows, view.toggle_automation (CC 57; distinct from automation.toggle_view CC 85). Manual binding possible but MCP has no caller path; tracked in NG6 follow-up."
 }

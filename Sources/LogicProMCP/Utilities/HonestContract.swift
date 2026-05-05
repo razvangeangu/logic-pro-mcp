@@ -129,6 +129,7 @@ enum HonestContract {
     /// suppress fallback when the primary channel has already reported an
     /// error the next channel cannot improve on.
     static func isTerminalStateC(_ message: String) -> Bool {
+        guard message.hasPrefix("{") else { return false }
         guard let data = message.data(using: .utf8),
               let raw = try? JSONSerialization.jsonObject(with: data),
               let obj = raw as? [String: Any] else {
