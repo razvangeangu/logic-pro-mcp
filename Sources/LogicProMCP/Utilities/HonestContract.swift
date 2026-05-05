@@ -48,6 +48,11 @@ enum HonestContract {
         /// `.axWriteFailed` (write attempt rejected): the surface itself does
         /// not exist. Terminal — no other channel can do better. v3.1.2 P2-1.
         case notImplemented
+        /// The requested transport/port for a channel is not configured or
+        /// available (e.g. CoreMIDI virtual port absent, KeyCmd not yet
+        /// published). Terminal — falling back to another channel cannot
+        /// recover the missing port. v3.1.6 T1 (PRD Issue#1 R7).
+        case portUnavailable
 
         var rawValue: String {
             switch self {
@@ -58,6 +63,7 @@ enum HonestContract {
             case .invalidParams: return "invalid_params"
             case .readbackMismatch: return "readback_mismatch"
             case .notImplemented: return "not_implemented"
+            case .portUnavailable: return "port_unavailable"
             }
         }
     }
@@ -113,7 +119,8 @@ enum HonestContract {
     static let terminalErrorCodes: Set<String> = [
         FailureError.elementNotFound.rawValue,
         FailureError.invalidParams.rawValue,
-        "not_implemented",
+        FailureError.notImplemented.rawValue,
+        FailureError.portUnavailable.rawValue,
     ]
 
     /// Returns true if the given message is a State-C envelope whose `error`

@@ -78,7 +78,8 @@ private func manualValidationStoreURL(prefix: String) -> URL {
     let afterStart = await channel.healthCheck()
     #expect(afterStart.available == true)
     #expect(afterStart.verificationStatus == .manualValidationRequired)
-    #expect(afterStart.detail.contains("not verifiable"))
+    // T7 (v3.1.6): detail "not verifiable" → "Manual MIDI Learn required" (audited matrix + orphan ops)
+    #expect(afterStart.detail.contains("Manual MIDI Learn required"))
 }
 
 @Test func testKeyCommandHealthBecomesRuntimeReadyAfterApproval() async throws {

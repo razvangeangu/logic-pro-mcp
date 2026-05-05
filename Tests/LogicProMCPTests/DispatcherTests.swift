@@ -1757,12 +1757,17 @@ private actor SelectiveFailChannel: Channel {
     #expect(!bendResult.isError!)
     #expect(!aftertouchResult.isError!)
     let ops = await coreMidi.executedOps
+    // T5 (PRD Issue#1): channel inputs are 1-based; the dispatcher now
+    // encodes them to wire byte (ch-1) before forwarding to the channel,
+    // unifying the previously-divergent send_cc / send_program_change /
+    // send_pitch_bend / send_aftertouch paths that used to hand the raw
+    // 1-based int through (silent UInt8 corruption on out-of-range input).
     expectExecutedOps(ops, equals: [
-        ("midi.send_note", ["note": "64", "velocity": "90", "channel": "2", "duration_ms": "750"]),
-        ("midi.send_cc", ["controller": "74", "value": "127", "channel": "3"]),
-        ("midi.send_program_change", ["program": "8", "channel": "4"]),
-        ("midi.send_pitch_bend", ["value": "-512", "channel": "5"]),
-        ("midi.send_aftertouch", ["value": "55", "channel": "6"]),
+        ("midi.send_note", ["note": "64", "velocity": "90", "channel": "1", "duration_ms": "750"]),
+        ("midi.send_cc", ["controller": "74", "value": "127", "channel": "2"]),
+        ("midi.send_program_change", ["program": "8", "channel": "3"]),
+        ("midi.send_pitch_bend", ["value": "-512", "channel": "4"]),
+        ("midi.send_aftertouch", ["value": "55", "channel": "5"]),
     ])
 }
 
@@ -1826,9 +1831,11 @@ private actor SelectiveFailChannel: Channel {
 
     let coreOps = await coreMidi.executedOps
     let mcuOps = await mcu.executedOps
+    // T5: send_chord channel is 1-based on input; wire byte = ch-1.
+    // Both calls omit `channel` so they default to ch 1 → wire 0.
     expectExecutedOps(coreOps, equals: [
-        ("midi.send_chord", ["notes": "60,64,67", "velocity": "80", "channel": "1", "duration_ms": "500"]),
-        ("midi.send_chord", ["notes": "72,76,79", "velocity": "100", "channel": "1", "duration_ms": "500"]),
+        ("midi.send_chord", ["notes": "60,64,67", "velocity": "80", "channel": "0", "duration_ms": "500"]),
+        ("midi.send_chord", ["notes": "72,76,79", "velocity": "100", "channel": "0", "duration_ms": "500"]),
         ("midi.send_sysex", ["data": "F0 42 F7"]),
         ("midi.create_virtual_port", ["name": "LogicProMCP-Test"]),
         ("mmc.play", [:]),

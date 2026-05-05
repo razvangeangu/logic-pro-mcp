@@ -1,7 +1,20 @@
 #!/bin/bash
-# LogicProMCP Key Commands Installer
-# Backs up existing key commands, then installs MCP preset.
-# Reference: PRD §6.3
+# LogicProMCP Key Commands Installer (v3.1.6)
+#
+# Backs up existing key commands and stages the legacy MCP preset reference.
+#
+# IMPORTANT: Logic Pro 12.2+ no longer accepts plist-based Key Commands
+# Import (the Import menu is gray on 12.2). The .plist file is retained
+# only as a CC→command MAPPING REFERENCE — copy values from it during
+# manual MIDI Learn in Logic. See docs/SETUP.md §MIDIKeyCommands for the
+# step-by-step manual MIDI Learn flow.
+#
+# Most preset operations are now covered by logic_edit / logic_project /
+# logic_navigate / logic_tracks / logic_transport without any binding.
+# Manual MIDI Learn is only required for channel-only ops such as
+# transport.capture_recording.
+#
+# Reference: PRD §6.3 (legacy) + PRD-issue1-keycmd-port-routing §3
 
 set -euo pipefail
 
@@ -41,18 +54,29 @@ echo ""
 echo "Checking for MIDI CC conflicts..."
 # Logic Pro stores key commands in binary/proprietary format.
 # We can only warn — actual conflict detection requires Logic Pro to be running.
-echo "  Note: Install the preset via Logic Pro > Key Commands > Edit (⌥K)."
-echo "  Use 'MIDI Learn' to verify no conflicts with CC 20-93 on Channel 16."
+echo "  Note: Logic 12.2+ does not import this .plist. Use it only as a"
+echo "  CC→Command mapping reference. Use 'MIDI Learn' in Logic Pro >"
+echo "  Key Commands > Edit (⌥K) to bind any commands you actually need."
 
-# Copy preset
+# Stage preset reference (NOT importable on Logic 12.2+)
 cp "$PRESET_SRC" "$KEYCMD_DIR/LogicProMCP-KeyCommands.plist"
 echo ""
-echo "✓ Preset installed: $KEYCMD_DIR/LogicProMCP-KeyCommands.plist"
+echo "✓ Mapping reference staged: $KEYCMD_DIR/LogicProMCP-KeyCommands.plist"
 echo ""
 echo "=== Next Steps ==="
-echo "1. Open Logic Pro"
-echo "2. Go to Logic Pro > Key Commands > Edit (⌥K)"
-echo "3. Import the preset or manually assign MIDI CC 20-93 on Channel 16"
-echo "4. Reference: Scripts/keycmd-preset.plist for CC→Command mapping"
+echo "Logic Pro 12.2+ does NOT accept this .plist via Import (the menu is gray)."
+echo "The file is staged only as a CC→Command mapping reference."
 echo ""
-echo "To restore: Scripts/uninstall-keycmds.sh"
+echo "If you need any of the channel-only ops (e.g. transport.capture_recording):"
+echo "  1. Open Logic Pro"
+echo "  2. Logic Pro > Key Commands > Edit (⌥K)"
+echo "  3. Search for the command, click [Learn New Assignment],"
+echo "     and send the matching CC on Channel 16 from your MCP client"
+echo "     (use port:\"keycmd\" so the CC arrives on LogicProMCP-KeyCmd-Internal)."
+echo "  4. Click [Save Assignments]"
+echo ""
+echo "Most preset ops are already routed via logic_edit / logic_project /"
+echo "logic_navigate / logic_tracks / logic_transport without any manual"
+echo "binding — see docs/SETUP.md §MIDIKeyCommands for the audited matrix."
+echo ""
+echo "To restore previous Key Commands: Scripts/uninstall-keycmds.sh"

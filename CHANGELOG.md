@@ -56,7 +56,7 @@ Migration: callers that scripted against pre-v3.1.6 must shift `ch` values by +1
 ### Verification
 
 - **Build**: `swift build -c release` clean.
-- **Tests**: 1010 → **1014** passing (+4 new T8 tests: 1 MIDIDispatcher description contract + 1 TrackDispatcher description contract + 2 startup banner / version-bump regression locks; T1-T7 already-merged regression coverage continues to pass).
+- **Tests**: 917 (post-v3.1.5 thomas-doesburg baseline) → **1012** passing (+95 across T1-T8: 5 HC `.portUnavailable` + 19 dispatcher validation helpers + 13 NoteSequenceParser Result API + 9 ChannelRouter bypass + 21 MIDIDispatcher port routing + 13 KeyCmd direct send + 8 Health detail + 4 T8 description/version locks + 3 misc updates).
 - **Live verification (release-blocker — AC-12)**: deferred to user-driven session against Logic Pro 12.2. Three release-blocker scenarios from PRD §8.4 must PASS before the release tag is pushed:
   1. **Manual MIDI Learn capture** — Logic `Controller Assignments` → `Learn Mode` captures a CC sent via `port:"keycmd"` on `LogicProMCP-KeyCmd-Internal` (proves the new routing reaches the right virtual port).
   2. **1-based channel display** — `logic_midi.send_cc { channel:16, port:"keycmd" }` shows `Ch 16` in Logic's UI (proves the BREAKING #1 migration is correct on the wire).

@@ -5,7 +5,7 @@ REPO="MongLong0214/logic-pro-mcp"
 BINARY="LogicProMCP"
 INSTALL_DIR="${LOGIC_PRO_MCP_INSTALL_DIR:-/usr/local/bin}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION="${LOGIC_PRO_MCP_VERSION:-v3.1.4}"
+VERSION="${LOGIC_PRO_MCP_VERSION:-v3.1.6}"
 SHA256="${LOGIC_PRO_MCP_SHA256:-}"
 EXPECTED_TEAM_ID="${LOGIC_PRO_MCP_TEAM_ID:-}"
 REGISTER_CLAUDE="${LOGIC_PRO_MCP_REGISTER_CLAUDE:-1}"
@@ -91,7 +91,7 @@ fi
 
 if [ "$VERSION" = "latest" ]; then
     echo "  Error: mutable 'latest' installs are not allowed in enterprise mode."
-    echo "    Set LOGIC_PRO_MCP_VERSION to a pinned tag, e.g. v3.1.4."
+    echo "    Set LOGIC_PRO_MCP_VERSION to a pinned tag, e.g. v3.1.6."
     exit 1
 fi
 
@@ -232,7 +232,13 @@ echo "    2. Logic Pro > Control Surfaces > Setup"
 echo "    3. New > Install > Mackie Control > Add"
 echo "    4. Set MIDI In/Out to: LogicProMCP-MCU-Internal"
 echo "    5. Insert MIDI FX > Scripter and load: $SCRIPT_DIR/LogicProMCP-Scripter.js"
-echo "    6. Import the LogicProMCP Key Commands preset inside Logic Pro"
+echo "    6. (Optional) Manually MIDI-Learn a few Key Commands you actually need."
+echo "       Logic Pro 12.2+ no longer accepts the legacy .plist preset import"
+echo "       (the Import menu is gray on 12.2 — see docs/SETUP.md §MIDIKeyCommands)."
+echo "       Most preset operations are already covered by logic_edit /"
+echo "       logic_project / logic_navigate / logic_tracks / logic_transport;"
+echo "       manual binding is only required for channel-only ops like"
+echo "       transport.capture_recording. Audited coverage matrix in SETUP.md."
 echo "    7. Approve verified manual channels:"
 echo "       $INSTALL_DIR/$BINARY --approve-channel MIDIKeyCommands"
 echo "       $INSTALL_DIR/$BINARY --approve-channel Scripter"

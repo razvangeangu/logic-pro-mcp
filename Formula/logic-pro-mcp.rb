@@ -3,7 +3,7 @@ class LogicProMcp < Formula
   homepage "https://github.com/MongLong0214/logic-pro-mcp"
   # Single source of truth is Sources/LogicProMCP/Server/ServerConfig.swift
   # (ServerConfig.serverVersion). Bump both together.
-  version "3.1.4"
+  version "3.1.6"
   license "MIT"
 
   # arm64-native binary. Intel Macs run under Rosetta 2 — functional but
@@ -22,7 +22,13 @@ class LogicProMcp < Formula
   end
 
   depends_on :macos => :sonoma
-  depends_on xcode: ["15.0", :build]
+
+  # NOTE (v3.1.6): no `depends_on xcode:` — this Formula installs the
+  # ADHOC pre-built arm64 binary published in the GitHub release; it does
+  # not invoke `swift build` or any Apple toolchain. CLT-only hosts (macOS
+  # Command Line Tools without a full Xcode.app install) install cleanly.
+  # Source builds via `Package.swift` still require Xcode 15.0+ (Swift 6.0+),
+  # but that is not the supported install path — see CONTRIBUTING.md.
 
   def install
     bin.install "LogicProMCP"

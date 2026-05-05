@@ -12,8 +12,8 @@
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14+-000000.svg?style=flat-square&logo=apple" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
-  <img src="https://img.shields.io/badge/tests-897_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.1.4-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-1010+_passing-brightgreen.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.1.6-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 

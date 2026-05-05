@@ -107,6 +107,24 @@ actor ChannelRouter {
         "midi.create_virtual_port":   [.coreMIDI],
         "midi.step_input":            [.coreMIDI],  // §4.3.1 new command
 
+        // MIDI keycmd routing (T5 — PRD Issue#1 §4.3 AC-1.4). Each of the 7
+        // send-style ops gets a sibling `*.keycmd` entry that pins the route
+        // to MIDIKeyCommands. There is intentionally NO fallback chain: the
+        // KeyCmd virtual port is the only surface that can deliver these
+        // bytes once Logic's KeyCmd preset has been MIDI-Learned. A missing
+        // KeyCmd channel surfaces as State C `port_unavailable` (T1) rather
+        // than silently falling back to CoreMIDI, which would mask the
+        // operator's setup gap. Membership of the keycmd suffix set is
+        // mirrored in `bypassReadinessOps` below; the bidirectional
+        // invariant is locked by `testRoutingTableInvariantBypassMatchesKeycmdSuffix`.
+        "midi.send_cc.keycmd":             [.midiKeyCommands],
+        "midi.send_note.keycmd":           [.midiKeyCommands],
+        "midi.send_chord.keycmd":          [.midiKeyCommands],
+        "midi.send_program_change.keycmd": [.midiKeyCommands],
+        "midi.send_pitch_bend.keycmd":     [.midiKeyCommands],
+        "midi.send_aftertouch.keycmd":     [.midiKeyCommands],
+        "midi.play_sequence.keycmd":       [.midiKeyCommands],
+
         // MIDI file import — AX menu path only (AppleScript path abandoned:
         // NSWorkspace.open on .mid creates new project instead of importing)
         "midi.import_file":           [.accessibility],
@@ -209,8 +227,32 @@ actor ChannelRouter {
         "system.permissions":         [],
     ]
 
-    /// Active routing table (v2)
-    private static let routingTable = v2RoutingTable
+    /// Active routing table (v2). `internal` so test-targets can introspect
+    /// the table for invariant checks (T4: bypassReadinessOps ⇄ routingTable).
+    internal static let routingTable = v2RoutingTable
+
+    /// Operations that are exempt from the runtime-readiness gate
+    /// (`health.ready`). These ops live on the KeyCmd channel, whose
+    /// `verificationStatus` stays `manual_validation_required` until the
+    /// user completes one-time MIDI Learn — the chicken-and-egg lock-in
+    /// described in PRD Issue #1 §4.1. The bypass *only* skips the
+    /// readiness check; `health.available == false` (port not published)
+    /// still produces a `.portUnavailable` State C envelope (terminal,
+    /// no fallback).
+    ///
+    /// Membership is locked by `testBypassReadinessOpsContainsAllSevenKeycmdOps`
+    /// and the `routingTable` ⇄ `bypassReadinessOps` invariant in
+    /// `testRoutingTableInvariantBypassMatchesKeycmdSuffix` (T5 fully wires
+    /// the routingTable side).
+    internal static let bypassReadinessOps: Set<String> = [
+        "midi.send_cc.keycmd",
+        "midi.send_note.keycmd",
+        "midi.send_chord.keycmd",
+        "midi.send_program_change.keycmd",
+        "midi.send_pitch_bend.keycmd",
+        "midi.send_aftertouch.keycmd",
+        "midi.play_sequence.keycmd",
+    ]
 
     // MARK: - Lifecycle
 
@@ -274,12 +316,30 @@ actor ChannelRouter {
             }
 
             let health = await channel.healthCheck()
+            let isBypass = Self.bypassReadinessOps.contains(operation)
             guard health.available else {
+                // PRD Issue #1 §4.1 step 7: a bypass op (KeyCmd MIDI send)
+                // whose channel reports `available:false` means the virtual
+                // port itself is not published — no other channel can supply
+                // it. Surface a terminal `.portUnavailable` State C envelope
+                // so the LLM agent gets an actionable hint rather than a
+                // silent fallthrough into "All channels exhausted".
+                if isBypass {
+                    Log.debug(
+                        "\(operation) bypass op blocked: channel \(channelID.rawValue) unavailable (\(health.detail))",
+                        subsystem: "router"
+                    )
+                    return .error(HonestContract.encodeStateC(
+                        error: .portUnavailable,
+                        hint: health.detail,
+                        extras: ["operation": operation]
+                    ))
+                }
                 Log.debug("Channel \(channelID.rawValue) unhealthy: \(health.detail), trying next", subsystem: "router")
                 lastError = "Channel \(channelID.rawValue): \(health.detail)"
                 continue
             }
-            guard health.ready || ServerConfig.allowManualValidationChannels else {
+            guard isBypass || health.ready || ServerConfig.allowManualValidationChannels else {
                 Log.debug(
                     "Channel \(channelID.rawValue) requires manual validation: \(health.detail), trying next",
                     subsystem: "router"

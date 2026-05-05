@@ -191,18 +191,26 @@ LogicProMCP --list-approvals
 
 ### Key Commands don't trigger in Logic Pro
 
-**Cause:** Logic Pro's Key Commands window doesn't have the CC→shortcut mappings.
+**Cause (Logic 12.2+):** the `.plist` Key Commands import is **not supported** on Logic Pro 12.2. The `Logic Pro → Key Commands → Import…` menu item is grayed out — Logic 12 expects a different binary schema (`.logikcs`) and silently ignores legacy plist imports. This was historically misleading in our docs; if you followed a pre-v3.1.6 SETUP guide expecting the import to "just work", you would have been stuck here.
 
-**Fix:**
+**Migration (pre-v3.1.6 users):**
+
+1. Don't try to `Import…` the `.plist`. Treat the `Scripts/keycmd-preset.plist` file purely as a **CC→Command mapping reference**.
+2. Most Key Commands ops are now routed via the regular tools (`logic_edit`, `logic_project`, `logic_navigate`, `logic_tracks`, `logic_transport`) without any binding — see `docs/SETUP.md §4.1` for the audited coverage matrix.
+3. Bind only the channel-only ops you actually need (e.g. `transport.capture_recording`) via manual MIDI Learn — see `docs/SETUP.md §4.2` for a step-by-step walkthrough.
+
+**Fix (per binding, ~2 minutes):**
+
 1. Open **Logic Pro → Key Commands → Edit** (`⌥K`).
-2. Click the **"Learn by Key Label"** button.
-3. Select a command (e.g. "Undo").
-4. Press the corresponding CC button (refer to `Scripts/keycmd-preset.plist` for the CC→command mapping).
+2. Search for the target command (e.g. "Capture Recording").
+3. Click **Learn New Assignment**.
+4. Send the matching CC on Channel 16 from your MCP client using `port:"keycmd"`:
+   ```jsonc
+   logic_midi.send_cc { "controller": 73, "value": 127, "channel": 16, "port": "keycmd" }
+   ```
+5. Click **Save Assignments**.
 
-Alternatively, import the preset file:
-```bash
-Scripts/install-keycmds.sh
-```
+If nothing happens during Learn capture: confirm the keycmd port is approved (`LogicProMCP --approve-channel MIDIKeyCommands`) and that `LogicProMCP-KeyCmd-Internal` is selected as a MIDI input in Logic's Project Settings → MIDI → Inputs.
 
 ---
 

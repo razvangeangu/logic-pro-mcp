@@ -125,7 +125,40 @@ run "git push origin main"
 run "git push origin $VERSION"
 
 # 6. Create GitHub release (tag push already triggered CI; this attaches artifacts)
+#    Phase 6 Loop 1 P2-2 — version-specific BREAKING callout is inlined into
+#    the release notes when the tag matches a known BREAKING release. This
+#    is the channel #2 of PRD AC-2.6 / T8 AC-11's 5-channel BREAKING
+#    communication (CHANGELOG, GitHub release notes, tool description, docs,
+#    in-server health detail). Without this block the GitHub release page
+#    only said "See CHANGELOG.md", which violated AC-11.
 NOTES_FILE="$STAGE_DIR/release-notes.md"
+BREAKING_BLOCK=""
+case "$VERSION" in
+    v3.1.6|v3.1.6-*)
+        BREAKING_BLOCK=$(cat <<'BREAK_EOF'
+
+## ⚠️ BREAKING (v3.1.6)
+
+MIDI channel input is now **1-based (1..16)**; previously 0..16 with silent wrap.
+
+| Caller intent       | pre-v3.1.6 (0-based) | v3.1.6+ (1-based) | Migration |
+|---------------------|----------------------|-------------------|-----------|
+| Send on Logic Ch 1  | `"channel": 0`       | `"channel": 1`    | +1        |
+| Send on Logic Ch 16 | `"channel": 15`      | `"channel": 16`   | +1        |
+| `"channel": 0`      | wired to Ch 1        | rejected `invalid_params` | fix call site |
+| `"channel": 16`     | wrapped/corrupted    | wired to Ch 16    | unchanged intent, now correct |
+
+`record_sequence` / `play_sequence` `notes` `ch` field is also 1-based and a
+single invalid segment now fails the whole parse (was: silent partial-parse).
+
+Affected ops: `send_note`, `send_chord`, `send_cc`, `send_program_change`,
+`send_pitch_bend`, `send_aftertouch`, `play_sequence`. See CHANGELOG.md
+§3.1.6 for full migration tables.
+BREAK_EOF
+)
+        ;;
+esac
+
 if [ "$DRY_RUN" != "1" ]; then
     cat > "$NOTES_FILE" <<EOF
 ## $VERSION — ADHOC release
@@ -133,6 +166,7 @@ if [ "$DRY_RUN" != "1" ]; then
 arm64-native binary ($BINARY_SHA). Intel Macs run under Rosetta 2.
 Tarballs \`-arm64\` and \`-universal\` are bit-identical aliases ($TARBALL_SHA)
 for Homebrew-tap backward compatibility.
+$BREAKING_BLOCK
 
 ### Install
 
@@ -150,6 +184,18 @@ bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/$
 
 See CHANGELOG.md for the full change list.
 EOF
+else
+    # Dry-run: still build the file so the dry-run output reflects what
+    # would be uploaded (lets reviewers grep for "BREAKING" without
+    # actually executing the gh release create).
+    cat > "$NOTES_FILE" <<EOF
+## $VERSION — ADHOC release
+
+arm64-native binary ($BINARY_SHA). Intel Macs run under Rosetta 2.
+$BREAKING_BLOCK
+
+(See CHANGELOG.md for full change list.)
+EOF
 fi
 
 run "gh release create $VERSION \
@@ -161,6 +207,26 @@ run "gh release create $VERSION \
     '$STAGE_DIR/LogicProMCP-macOS-arm64.tar.gz' \
     '$STAGE_DIR/SHA256SUMS.txt' \
     '$STAGE_DIR/RELEASE-METADATA.json'"
+
+# 7. Auto-comment + close GitHub Issue #1 if it's still OPEN.
+#    (Issue #1: MIDIKeyCommands setup broken on Logic 12.2 — closed by v3.1.6.)
+#    Guarded by `gh issue view --json state` so a re-run won't spam the issue
+#    after it's been closed (R8). UNKNOWN state (gh failure / repo not found)
+#    is treated as "skip" rather than "retry" — we'd rather miss a comment
+#    than spam the issue.
+if [ "$DRY_RUN" = "1" ]; then
+    echo "→ [dry-run] gh issue view 1 --json state -q .state"
+    echo "→ [dry-run] if OPEN: gh issue comment 1 + gh issue close 1"
+else
+    ISSUE_STATE=$(gh issue view 1 --json state -q .state 2>/dev/null || echo "UNKNOWN")
+    if [ "$ISSUE_STATE" = "OPEN" ]; then
+        echo "→ Closing GitHub Issue #1 (state was OPEN)"
+        gh issue comment 1 --body "Resolved in $VERSION — see release notes: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/$VERSION"
+        gh issue close 1
+    else
+        echo "  Issue #1 state: $ISSUE_STATE (skipping auto-close)"
+    fi
+fi
 
 echo ""
 echo "  ✓ Released: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/$VERSION"

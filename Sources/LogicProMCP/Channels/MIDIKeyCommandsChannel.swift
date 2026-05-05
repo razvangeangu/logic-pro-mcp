@@ -121,6 +121,15 @@ actor MIDIKeyCommandsChannel: Channel {
     }
 
     func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        // T6 (PRD Issue#1 §4.3 / AC-1.1) — direct MIDI send path for the
+        // 7 "midi.*.keycmd" ops. These bypass the CC mapping table and
+        // push raw MIDI bytes through the KeyCmd virtual transport. The
+        // KeyCmd port is send-only with no echo, so every success is
+        // encoded as Honest Contract State B `readback_unavailable`.
+        if operation.hasSuffix(".keycmd"), operation.hasPrefix("midi.") {
+            return await executeDirectSend(operation: operation, params: params)
+        }
+
         guard let cc = Self.mappingTable[operation] else {
             return .error("No MIDI Key Command mapping for: \(operation)")
         }
@@ -155,6 +164,357 @@ actor MIDIKeyCommandsChannel: Channel {
         ))
     }
 
+    // MARK: - T6 direct-send path
+
+    /// Routes the 7 `midi.*.keycmd` ops to wire-byte construction + raw
+    /// transport.send. Channel param arriving here is already a wire byte
+    /// (0..15); the dispatcher (T5) handles the 1-based → 0-based shift.
+    /// All successes return Honest Contract State B `readback_unavailable`
+    /// because the KeyCmd port gives no echo back from Logic.
+    private func executeDirectSend(
+        operation: String,
+        params: [String: String]
+    ) async -> ChannelResult {
+        switch operation {
+        case "midi.send_cc.keycmd":
+            return await sendCCDirect(params: params)
+        case "midi.send_note.keycmd":
+            return await sendNoteDirect(params: params)
+        case "midi.send_chord.keycmd":
+            return await sendChordDirect(params: params)
+        case "midi.send_program_change.keycmd":
+            return await sendProgramChangeDirect(params: params)
+        case "midi.send_pitch_bend.keycmd":
+            return await sendPitchBendDirect(params: params)
+        case "midi.send_aftertouch.keycmd":
+            return await sendAftertouchDirect(params: params)
+        case "midi.play_sequence.keycmd":
+            return await playSequenceDirect(params: params)
+        default:
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "Unknown midi.*.keycmd operation: \(operation)",
+                extras: ["operation": operation]
+            ))
+        }
+    }
+
+    // MARK: Wire-byte builders
+
+    /// Build a 3-byte CC message: status (0xB0|ch), controller, value.
+    private func buildCCBytes(channel: UInt8, controller: UInt8, value: UInt8) -> [UInt8] {
+        [0xB0 | (channel & 0x0F), controller, value]
+    }
+
+    /// Build a 3-byte Note On: status (0x90|ch), note, velocity.
+    private func buildNoteOnBytes(channel: UInt8, note: UInt8, velocity: UInt8) -> [UInt8] {
+        [0x90 | (channel & 0x0F), note, velocity]
+    }
+
+    /// Build a 3-byte Note Off: status (0x80|ch), note, vel=0.
+    private func buildNoteOffBytes(channel: UInt8, note: UInt8) -> [UInt8] {
+        [0x80 | (channel & 0x0F), note, 0]
+    }
+
+    // MARK: Per-op handlers
+
+    private func sendCCDirect(params: [String: String]) async -> ChannelResult {
+        guard let controller = params["controller"].flatMap(UInt8.init), controller <= 127,
+              let value = params["value"].flatMap(UInt8.init), value <= 127,
+              let channel = params["channel"].flatMap(UInt8.init), channel <= 15 else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "send_cc.keycmd requires controller (0-127), value (0-127), channel (0-15 wire byte)",
+                extras: ["operation": "midi.send_cc.keycmd"]
+            ))
+        }
+        let bytes = buildCCBytes(channel: channel, controller: controller, value: value)
+        do {
+            try await transport.send(bytes)
+        } catch {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport send failed: \(error)",
+                extras: ["operation": "midi.send_cc.keycmd"]
+            ))
+        }
+        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+            "operation": "midi.send_cc.keycmd",
+            "via": "midi-keycmd-direct-send",
+            "controller": Int(controller),
+            "value": Int(value),
+            "channel_wire": Int(channel),
+        ]))
+    }
+
+    private func sendNoteDirect(params: [String: String]) async -> ChannelResult {
+        guard let note = params["note"].flatMap(UInt8.init), note <= 127,
+              let velocity = params["velocity"].flatMap(UInt8.init), velocity <= 127,
+              let channel = params["channel"].flatMap(UInt8.init), channel <= 15 else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "send_note.keycmd requires note (0-127), velocity (0-127), channel (0-15 wire byte)",
+                extras: ["operation": "midi.send_note.keycmd"]
+            ))
+        }
+        // duration_ms is capped at 30s to match CoreMIDIChannel send_note.
+        let durationMs = min(params["duration_ms"].flatMap(UInt64.init) ?? 250, 30_000)
+        do {
+            try await transport.send(buildNoteOnBytes(channel: channel, note: note, velocity: velocity))
+        } catch {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport send failed: \(error)",
+                extras: ["operation": "midi.send_note.keycmd"]
+            ))
+        }
+        // Note Off uses `try?` (Phase 6 Loop 1 P2-1): if Note On succeeded
+        // the note is already sounding in Logic. A subsequent transport.send
+        // throw on Note Off would leave a stuck note while the caller sees
+        // State C — a worse failure mode than silently best-effort'ing the
+        // Note Off. Same pattern as `playSequenceDirect`.
+        try? await Task.sleep(nanoseconds: durationMs * 1_000_000)
+        try? await transport.send(buildNoteOffBytes(channel: channel, note: note))
+        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+            "operation": "midi.send_note.keycmd",
+            "via": "midi-keycmd-direct-send",
+            "note": Int(note),
+            "velocity": Int(velocity),
+            "channel_wire": Int(channel),
+            "duration_ms": Int(durationMs),
+        ]))
+    }
+
+    private func sendChordDirect(params: [String: String]) async -> ChannelResult {
+        let notesStr = params["notes"] ?? ""
+        let parsed = notesStr
+            .split(separator: ",")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !parsed.isEmpty, parsed.count <= 24, parsed.allSatisfy({ (0...127).contains($0) }) else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "send_chord.keycmd 'notes' must be 1..24 ints in 0..127 (CSV)",
+                extras: ["operation": "midi.send_chord.keycmd"]
+            ))
+        }
+        guard let velocity = params["velocity"].flatMap(UInt8.init), velocity <= 127,
+              let channel = params["channel"].flatMap(UInt8.init), channel <= 15 else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "send_chord.keycmd requires velocity (0-127) and channel (0-15 wire byte)",
+                extras: ["operation": "midi.send_chord.keycmd"]
+            ))
+        }
+        let durationMs = min(params["duration_ms"].flatMap(UInt64.init) ?? 500, 30_000)
+        let notes = parsed.map { UInt8($0) }
+        do {
+            for n in notes {
+                try await transport.send(buildNoteOnBytes(channel: channel, note: n, velocity: velocity))
+            }
+        } catch {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport send failed: \(error)",
+                extras: ["operation": "midi.send_chord.keycmd"]
+            ))
+        }
+        // Note Off pass uses `try?` (Phase 6 Loop 1 P2-1): every Note On that
+        // succeeded above is sounding in Logic. A throw mid-Note-Off-pass
+        // would leave one or more stuck notes while the caller sees State C.
+        // Best-effort the Note Offs — same pattern as `playSequenceDirect`.
+        try? await Task.sleep(nanoseconds: durationMs * 1_000_000)
+        for n in notes {
+            try? await transport.send(buildNoteOffBytes(channel: channel, note: n))
+        }
+        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+            "operation": "midi.send_chord.keycmd",
+            "via": "midi-keycmd-direct-send",
+            "note_count": notes.count,
+            "channel_wire": Int(channel),
+            "duration_ms": Int(durationMs),
+        ]))
+    }
+
+    private func sendProgramChangeDirect(params: [String: String]) async -> ChannelResult {
+        guard let program = params["program"].flatMap(UInt8.init), program <= 127,
+              let channel = params["channel"].flatMap(UInt8.init), channel <= 15 else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "send_program_change.keycmd requires program (0-127) and channel (0-15 wire byte)",
+                extras: ["operation": "midi.send_program_change.keycmd"]
+            ))
+        }
+        // Program Change is 2 bytes: status (0xC0|ch), program.
+        let bytes: [UInt8] = [0xC0 | (channel & 0x0F), program]
+        do {
+            try await transport.send(bytes)
+        } catch {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport send failed: \(error)",
+                extras: ["operation": "midi.send_program_change.keycmd"]
+            ))
+        }
+        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+            "operation": "midi.send_program_change.keycmd",
+            "via": "midi-keycmd-direct-send",
+            "program": Int(program),
+            "channel_wire": Int(channel),
+        ]))
+    }
+
+    private func sendPitchBendDirect(params: [String: String]) async -> ChannelResult {
+        // PRD §4.3: value is 0..16383 absolute (center=8192), wire-encoded as
+        // LSB(value & 0x7F) + MSB(value >> 7).
+        guard let raw = params["value"].flatMap(Int.init), (0...16383).contains(raw),
+              let channel = params["channel"].flatMap(UInt8.init), channel <= 15 else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "send_pitch_bend.keycmd requires value (0..16383, center=8192) and channel (0-15 wire byte)",
+                extras: ["operation": "midi.send_pitch_bend.keycmd"]
+            ))
+        }
+        let lsb = UInt8(raw & 0x7F)
+        let msb = UInt8((raw >> 7) & 0x7F)
+        let bytes: [UInt8] = [0xE0 | (channel & 0x0F), lsb, msb]
+        do {
+            try await transport.send(bytes)
+        } catch {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport send failed: \(error)",
+                extras: ["operation": "midi.send_pitch_bend.keycmd"]
+            ))
+        }
+        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+            "operation": "midi.send_pitch_bend.keycmd",
+            "via": "midi-keycmd-direct-send",
+            "value": raw,
+            "channel_wire": Int(channel),
+        ]))
+    }
+
+    private func sendAftertouchDirect(params: [String: String]) async -> ChannelResult {
+        // Channel pressure (not poly aftertouch): 2-byte 0xD0|ch, pressure.
+        guard let pressure = (params["value"] ?? params["pressure"]).flatMap(UInt8.init),
+              pressure <= 127,
+              let channel = params["channel"].flatMap(UInt8.init), channel <= 15 else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "send_aftertouch.keycmd requires value (0-127) and channel (0-15 wire byte)",
+                extras: ["operation": "midi.send_aftertouch.keycmd"]
+            ))
+        }
+        let bytes: [UInt8] = [0xD0 | (channel & 0x0F), pressure]
+        do {
+            try await transport.send(bytes)
+        } catch {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport send failed: \(error)",
+                extras: ["operation": "midi.send_aftertouch.keycmd"]
+            ))
+        }
+        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+            "operation": "midi.send_aftertouch.keycmd",
+            "via": "midi-keycmd-direct-send",
+            "value": Int(pressure),
+            "channel_wire": Int(channel),
+        ]))
+    }
+
+    private func playSequenceDirect(params: [String: String]) async -> ChannelResult {
+        // T3 Result API — strict whole-parse-fail. Any malformed segment
+        // surfaces as State C invalid_params (no notes sent), so the agent
+        // gets a precise diagnostic instead of a partial dispatch.
+        let notesStr = params["notes"] ?? ""
+        guard !notesStr.isEmpty else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "play_sequence.keycmd 'notes' must be 'pitch,offsetMs,durMs[,vel[,ch]];...'",
+                extras: ["operation": "midi.play_sequence.keycmd"]
+            ))
+        }
+        let events: [NoteSequenceParser.ParsedNote]
+        switch NoteSequenceParser.parse(notesStr) {
+        case .success(let parsed):
+            events = parsed
+        case .failure(let err):
+            let segmentHint: String
+            switch err {
+            case .channelOutOfRange(let segment, let value):
+                segmentHint = "channel \(value) out of range (1..16) in segment '\(segment)'"
+            case .invalidPitch(let segment):
+                segmentHint = "invalid pitch (must be 0..127) in segment '\(segment)'"
+            case .invalidTiming(let segment):
+                segmentHint = "invalid timing (offset>=0, duration 1..30000) in segment '\(segment)'"
+            case .malformed(let segment):
+                segmentHint = "malformed segment '\(segment)' (expected 'pitch,offsetMs,durMs[,vel[,ch]]')"
+            }
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "play_sequence.keycmd: \(segmentHint)",
+                extras: ["operation": "midi.play_sequence.keycmd"]
+            ))
+        }
+        guard !events.isEmpty else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "play_sequence.keycmd 'notes' parsed empty",
+                extras: ["operation": "midi.play_sequence.keycmd"]
+            ))
+        }
+        guard events.count <= 256 else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "play_sequence.keycmd 'notes' count must be ≤ 256 (got \(events.count))",
+                extras: ["operation": "midi.play_sequence.keycmd"]
+            ))
+        }
+
+        // Tight-rhythm scheduler — same shape as CoreMIDIChannel.play_sequence.
+        // Note Off is fired in a detached task after each note's duration.
+        let startNs = DispatchTime.now().uptimeNanoseconds
+        let transport = self.transport
+        for event in events {
+            let targetNs = startNs + UInt64(event.offsetMs) * 1_000_000
+            let nowNs = DispatchTime.now().uptimeNanoseconds
+            if targetNs > nowNs {
+                try? await Task.sleep(nanoseconds: targetNs - nowNs)
+            }
+            let onBytes = buildNoteOnBytes(channel: event.channel, note: event.pitch, velocity: event.velocity)
+            do {
+                try await transport.send(onBytes)
+            } catch {
+                return .error(HonestContract.encodeStateC(
+                    error: .axWriteFailed,
+                    hint: "KeyCmd transport send failed: \(error)",
+                    extras: ["operation": "midi.play_sequence.keycmd"]
+                ))
+            }
+            let pitch = event.pitch
+            let ch = event.channel
+            let durNs = UInt64(event.durationMs) * 1_000_000
+            let offBytes = buildNoteOffBytes(channel: ch, note: pitch)
+            Task.detached {
+                try? await Task.sleep(nanoseconds: durNs)
+                try? await transport.send(offBytes)
+            }
+        }
+        if let lastEnd = events.map({ $0.offsetMs + $0.durationMs }).max() {
+            let endTargetNs = startNs + UInt64(lastEnd) * 1_000_000
+            let nowNs = DispatchTime.now().uptimeNanoseconds
+            if endTargetNs > nowNs {
+                try? await Task.sleep(nanoseconds: endTargetNs - nowNs)
+            }
+        }
+        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+            "operation": "midi.play_sequence.keycmd",
+            "via": "midi-keycmd-direct-send",
+            "note_count": events.count,
+        ]))
+    }
+
     func healthCheck() async -> ChannelHealth {
         let readiness = await transport.readiness()
         guard readiness.available else {
@@ -166,8 +526,17 @@ actor MIDIKeyCommandsChannel: Channel {
                 verificationStatus: .runtimeReady
             )
         }
+        // T7 (PRD-issue1-keycmd-port-routing §3 AC-5): emit an honest health
+        // detail covering virtual port status, manual MIDI Learn requirement,
+        // audited coverage matrix pointer, effectively keycmd-only ops, and
+        // orphan ops in mappingTable. Total length must stay < 1 KB (UTF-8).
+        let detail = "Port: LogicProMCP-KeyCmd-Internal — \(readiness.detail). " +
+            "Manual MIDI Learn required — see docs/SETUP.md §4 (Install Key Commands Preset). " +
+            "Most preset operations are covered by logic_edit / logic_project / logic_navigate / logic_tracks / logic_transport — see audited coverage matrix in SETUP.md. " +
+            "Effectively keycmd-only (cgEvent fallback unmapped): transport.capture_recording. Manual MIDI Learn binding required for actual function activation. " +
+            "Orphan ops in mappingTable (no MCP tool currently exposes call path): note.up_semitone, note.up_octave, note.down_semitone, note.down_octave, view.toggle_smart_controls, view.toggle_plugin_windows, view.toggle_automation (CC 57; distinct from automation.toggle_view CC 85). Manual binding possible but MCP has no caller path; tracked in NG6 follow-up."
         return .healthy(
-            detail: "\(readiness.detail). Logic Key Commands preset installation is not verifiable programmatically. Run `LogicProMCP --approve-channel MIDIKeyCommands` after manual validation",
+            detail: detail,
             verificationStatus: .manualValidationRequired
         )
     }

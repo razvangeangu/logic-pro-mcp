@@ -283,7 +283,29 @@ actor CoreMIDIChannel: Channel {
             // jittery at ±5 ms but far tighter than round-tripping 20+ MCP
             // send_note calls per bar from a client.
             // Example: "60,0,400;64,500,400;67,1000,400" = C-E-G arpeggio.
-            let events = NoteSequenceParser.parse(params["notes"] ?? "")
+            // T3 — strict whole-parse-fail. NoteSequenceParser now returns a
+            // Result, with ch field 1-based (1..16) on input → wire byte
+            // 0..15 computed inside the parser. A single bad segment fails
+            // the whole batch so the agent can self-correct rather than
+            // have N-1 notes mysteriously survive.
+            let events: [NoteSequenceParser.ParsedNote]
+            switch NoteSequenceParser.parse(params["notes"] ?? "") {
+            case .success(let parsed):
+                events = parsed
+            case .failure(let err):
+                let hint: String
+                switch err {
+                case .channelOutOfRange(let segment, let value):
+                    hint = "play_sequence: channel \(value) out of range (must be 1..16) in segment '\(segment)'"
+                case .invalidPitch(let segment):
+                    hint = "play_sequence: invalid pitch (must be 0..127) in segment '\(segment)'"
+                case .invalidTiming(let segment):
+                    hint = "play_sequence: invalid timing (offset>=0, duration 1..30000) in segment '\(segment)'"
+                case .malformed(let segment):
+                    hint = "play_sequence: malformed segment '\(segment)' (expected 'pitch,offsetMs,durMs[,vel[,ch]]')"
+                }
+                return .error(hint)
+            }
             guard !events.isEmpty else {
                 return .error("play_sequence 'notes' must be 'note,offset,dur[,vel[,ch]];...'")
             }

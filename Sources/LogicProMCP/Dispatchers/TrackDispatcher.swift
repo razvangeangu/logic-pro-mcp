@@ -4,7 +4,7 @@ import MCP
 struct TrackDispatcher {
     static let tool = Tool(
         name: "logic_tracks",
-        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\", tempo?: Float } v3.0.8 SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`. The new track keeps Logic's default Software Instrument (Studio Grand piano on a fresh project); callers that want a specific patch must follow up with an explicit `set_instrument` AFTER ensuring the intended track is selected. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
+        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment), tempo?: Float } v3.0.8 SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`. The new track keeps Logic's default Software Instrument (Studio Grand piano on a fresh project); callers that want a specific patch must follow up with an explicit `set_instrument` AFTER ensuring the intended track is selected. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
         inputSchema: commandParamsToolSchema(commandDescription: "Track command to execute")
     )
 
@@ -305,6 +305,16 @@ struct TrackDispatcher {
         router: ChannelRouter,
         cache: StateCache
     ) async -> CallTool.Result {
+        // T5 — record_sequence does not support `port` (no keycmd alternative
+        // for SMF-import + AX menu navigation). Reject up-front rather than
+        // silently dropping the argument, so a caller who mistakenly thinks
+        // `port:"keycmd"` would route this op gets an actionable hint instead
+        // of a misleading success at the wrong transport.
+        if params["port"] != nil {
+            return MIDIDispatcher.invalidParamsResult(
+                hint: "port parameter not supported for record_sequence"
+            )
+        }
         guard await cache.getHasDocument() else {
             return toolTextResult("record_sequence: No project open", isError: true)
         }
@@ -320,10 +330,25 @@ struct TrackDispatcher {
         let project = await cache.getProject()
         let cacheTempo = project.tempo > 0 ? project.tempo : 120.0
         let tempo = doubleParam(params, "tempo", default: cacheTempo)
-        let events = parseNotesToSMFEvents(notes: notes, tempo: tempo)
+        // T3 — strict whole-parse-fail. The previous silent-skip parser left
+        // callers unable to distinguish "user typed garbage" from "all
+        // segments happened to be invalid", so the error wording was vague
+        // ("could not parse any valid notes"). The new Result API surfaces
+        // the specific failure (channel out of range, malformed segment,
+        // etc.) so the LLM agent can self-correct on the next call.
+        let events: [SMFWriter.NoteEvent]
+        switch parseNotesToSMFEvents(notes: notes, tempo: tempo) {
+        case .success(let parsed):
+            events = parsed
+        case .failure(let error):
+            return toolTextResult(
+                "record_sequence: invalid 'notes' — \(describeParseError(error))",
+                isError: true
+            )
+        }
         guard !events.isEmpty else {
             return toolTextResult(
-                "record_sequence: could not parse any valid notes from '\(notes)'",
+                "record_sequence: 'notes' parsed to zero events (input: '\(notes)')",
                 isError: true
             )
         }
@@ -511,20 +536,42 @@ struct TrackDispatcher {
         return out
     }
 
-    private static func parseNotesToSMFEvents(notes: String, tempo: Double) -> [SMFWriter.NoteEvent] {
-        NoteSequenceParser.parse(notes).map { note in
-            let ticks = SMFWriter.msToTicks(
-                offsetMs: note.offsetMs,
-                durationMs: note.durationMs,
-                tempo: tempo
-            )
-            return SMFWriter.NoteEvent(
-                pitch: note.pitch,
-                offsetTicks: ticks.offsetTicks,
-                durationTicks: ticks.durationTicks,
-                velocity: note.velocity,
-                channel: note.channel
-            )
+    private static func parseNotesToSMFEvents(
+        notes: String,
+        tempo: Double
+    ) -> Result<[SMFWriter.NoteEvent], NoteSequenceParser.NoteSequenceParseError> {
+        NoteSequenceParser.parse(notes).map { parsed in
+            parsed.map { note in
+                let ticks = SMFWriter.msToTicks(
+                    offsetMs: note.offsetMs,
+                    durationMs: note.durationMs,
+                    tempo: tempo
+                )
+                return SMFWriter.NoteEvent(
+                    pitch: note.pitch,
+                    offsetTicks: ticks.offsetTicks,
+                    durationTicks: ticks.durationTicks,
+                    velocity: note.velocity,
+                    channel: note.channel
+                )
+            }
+        }
+    }
+
+    /// Translate the parser's error case into a one-line human-readable hint
+    /// suitable for embedding in a `toolTextResult` error. Keep wording
+    /// stable: tests grep for the lower-case word "channel" / "parse" /
+    /// "invalid" to assert the parser hint propagated correctly.
+    private static func describeParseError(_ error: NoteSequenceParser.NoteSequenceParseError) -> String {
+        switch error {
+        case .channelOutOfRange(let segment, let value):
+            return "channel \(value) out of range (must be 1..16) in segment '\(segment)'"
+        case .invalidPitch(let segment):
+            return "invalid pitch (must be 0..127) in segment '\(segment)'"
+        case .invalidTiming(let segment):
+            return "invalid timing (offset>=0, duration 1..30000) in segment '\(segment)'"
+        case .malformed(let segment):
+            return "malformed segment '\(segment)' (expected 'pitch,offsetMs,durMs[,vel[,ch]]')"
         }
     }
 }
