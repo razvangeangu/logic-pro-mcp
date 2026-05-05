@@ -53,21 +53,21 @@ private func decodeDate(from decoder: Decoder) throws -> Date {
 // is still cheaper than per-call encoder allocation under realistic loads.
 // `JSONDecoder.decode(_:from:)` has the same contract and is gated likewise.
 
-private nonisolated(unsafe) let sharedPrettyEncoder: JSONEncoder = {
+private let sharedPrettyEncoder: JSONEncoder = {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     encoder.dateEncodingStrategy = .custom(encodeDate)
     return encoder
 }()
 
-private nonisolated(unsafe) let sharedCompactEncoder: JSONEncoder = {
+private let sharedCompactEncoder: JSONEncoder = {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     encoder.dateEncodingStrategy = .custom(encodeDate)
     return encoder
 }()
 
-private nonisolated(unsafe) let sharedDecoder: JSONDecoder = {
+private let sharedDecoder: JSONDecoder = {
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .custom(decodeDate)
     return decoder
