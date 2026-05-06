@@ -38,8 +38,8 @@ All tool invocations use:
 | `logic://transport/state` | `{ state: TransportState, has_document, transport_age_sec }` JSON (v2.2+ wrapper; see below) | Cache (MCU feedback + AX poll) |
 | `logic://tracks` | `TrackState[]` JSON | Cache (MCU + AX) |
 | `logic://mixer` | `{ mcu_connected, registered, strips }` | Cache |
-| `logic://markers` | `MarkerState[]` JSON | Cache (AX poll, every 5 cycles) |
-| `logic://project/info` | `ProjectInfo` JSON | Cache (3s AX poll) |
+| `logic://markers` | `MarkerState[]` JSON | Cache (AX poll, every 5 cycles) — see [Marker semantics](#marker-semantics) |
+| `logic://project/info` | `ProjectInfo` JSON wrapped in cache envelope (v3.1.8+) — see [Tempo semantics](#tempo-semantics-projectinfo-vs-transportstate) | Tier-merge: cache → MetaData.plist → defaults (3s AX poll) |
 | `logic://midi/ports` | `{ sources, destinations }` | CoreMIDI live query |
 | `logic://mcu/state` | `{ connection, display }` — MCU handshake + LCD state | Cache |
 | `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`). All candidates must sit under the path allowlist (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` (colon-separated, additive). |
@@ -370,6 +370,17 @@ The state poller enumerates markers from the AX marker ruler every 3 seconds and
 { id: int, name: string, position: string }
 ```
 
+#### Marker semantics
+
+`logic://markers` resolves the marker ruler **only via AX** — there is no project-file fallback. Logic stores marker positions/names in `Alternatives/000/ProjectData` (an opaque binary blob; reverse-engineering deferred per PRD-issue7-logic12-read-paths.md NG2).
+
+Envelope `source` values:
+- `"ax_live"` — markers came from a successful AX walk of the marker ruler
+- `"cache"` — markers came from a prior poll; `ax_occluded:true` flags untrusted-empty (plugin window / modal stole AX focus)
+- `"default"` — empty array, no successful poll yet (cold-start) **or** the AX walker could not locate the marker ruler subtree
+
+On Logic Pro 12.x the new `AXRuler`-structural walker (v3.1.8) succeeds for typical projects but a 12.2-specific marker hierarchy variant has been observed where the walk fails; tracked separately. When `source: "default"` appears on a project that visibly has markers, the AX subtree on that Logic build hasn't been characterized yet.
+
 ---
 
 ## logic_project
@@ -394,7 +405,7 @@ The state poller enumerates markers from the AX marker ruler every 3 seconds and
 **Not a tool command.** Use `logic://project/info`:
 
 ```ts
-// ProjectInfo
+// ProjectInfo (v3.1.8+ wraps in cache envelope)
 {
   name: string,
   sampleRate: number,
@@ -403,9 +414,44 @@ The state poller enumerates markers from the AX marker ruler every 3 seconds and
   timeSignature: string,
   trackCount: int,
   filePath?: string,
-  lastUpdated: string   // ISO 8601
+  lastUpdated: string,            // ISO 8601
+  source?: "ax_live" | "cache" | "project_file" | "default",  // v3.1.8+
+  lastSavedAgeSec?: number        // v3.1.8+; present when source == "project_file"
 }
 ```
+
+#### Tempo semantics: `project/info` vs `transport/state`
+
+These two resources expose **two semantically different tempos** and callers must pick the right one:
+
+| Resource | Tempo semantic | When to use |
+|----------|----------------|-------------|
+| `logic://project/info.tempo` | **Saved/initial BPM** of the project — the "song identity" tempo from `Alternatives/000/MetaData.plist`'s `BeatsPerMinute`. Stable across the file's lifetime; doesn't change during playback. | Grid alignment, project metadata, song-identity tagging, sequence generation that targets the project's intended grid (`record_sequence`, `play_sequence`). |
+| `logic://transport/state.state.tempo` | **Live tempo at current playhead position** — read from Logic's transport bar (AX scrape). On projects with mid-song tempo automation, this changes as the playhead moves. | Live monitoring, "follow-along" UIs, tempo-sync visualizations. |
+
+**Worked example.** Project `Hope_master4.logicx` saves with `tempo: 64`, `timeSignature: "5/4"`, but contains a tempo automation that ramps to 70 BPM by bar 186. With the playhead parked at bar 186:
+
+```
+logic://project/info       → { tempo: 64,  timeSignature: "5/4", trackCount: 117, source: "project_file" }
+logic://transport/state    → { state: { tempo: 70, position: "186.1.1.1", ... } }
+```
+
+Both responses are correct given their semantics.
+
+**Out of scope (v3.1.8):** the full tempo map / time-signature change list is **not** exposed by either resource. `ProjectData` (the binary blob containing the automation curves) is not parsed — see PRD-issue7-logic12-read-paths.md §NG1/NG2. If you need the full curve, the path forward is project-file binary reverse-engineering; track a follow-up issue if this is on your critical path.
+
+#### Source attribution (v3.1.8+)
+
+The `source` field tells you which transport tier produced each response:
+
+| `source` | Meaning |
+|----------|---------|
+| `"ax_live"` | Cache value, refreshed within the last 5 seconds by the AX poller. |
+| `"cache"` | Cache value, older than 5 seconds. Treat as potentially stale. |
+| `"project_file"` | Read from `MetaData.plist`. Reflects last-saved state — `lastSavedAgeSec` shows how stale relative to the on-disk file. |
+| `"default"` | Struct defaults (`tempo: 120`, `timeSignature: "4/4"`, `trackCount: 0`). Logic not running, no document open, or all tiers unavailable. |
+
+The cache layer is the live tier; `MetaData.plist` is the saved-state tier. `ResourceHandlers.readProjectInfo` performs **per-field merge**: cache values win for any field where the cache holds a non-default value; otherwise the field falls through to `MetaData.plist`. Cache itself is read-only at this layer — `MetaData.plist` reads do not poison `StateCache`, so name-routed write actions (`track.select { name: ... }`) continue to consult only the live AX-derived state.
 
 ### Destructive Policy
 
