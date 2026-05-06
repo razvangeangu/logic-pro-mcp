@@ -3019,12 +3019,44 @@ actor AccessibilityChannel: Channel {
 
     // MARK: - Markers
 
+    /// v3.1.9 (Issue #8) — Logic 12.2 marker subtree path.
+    ///
+    /// Single delegating wrapper around `AXLogicProElements.enumerateMarkers`
+    /// (when the arrangement area exists) or its in-window scrape helper
+    /// (when 12.2 has dropped the arrangement-area identifier). Pre-v3.1.9
+    /// this function did its own copy of the marker-list-window strategy
+    /// AND then called `enumerateMarkers(in:)` which redundantly retried
+    /// the same lookup — boomer review flagged the double scrape.
+    /// v3.1.9-final puts strategy ordering in `enumerateMarkers` and uses
+    /// the in-window helper directly only when there is no arrangement
+    /// area to pass.
+    ///
+    /// Behaviour matrix:
+    ///
+    /// | arrange area | marker list window | strategy |
+    /// |--------------|--------------------|----------|
+    /// | non-nil      | open / closed      | `enumerateMarkers(in: area)` runs all 3 strategies |
+    /// | nil (12.2)   | open               | `enumerateMarkersFromListWindow` direct |
+    /// | nil          | closed             | empty (honest, cache stamped) |
+    ///
+    /// The "empty as success" return on the no-surface case is intentional:
+    /// it lets `StatePoller` write `[]` into the cache so resource handlers
+    /// report `source: "ax_live"` rather than `source: "default"` — telling
+    /// callers the poll ran and observed nothing rather than the poll
+    /// never having run.
     private static func defaultGetMarkers(runtime: AXLogicProElements.Runtime = .production) -> ChannelResult {
-        guard let area = AXLogicProElements.getArrangementArea(runtime: runtime) else {
-            return .error("Cannot locate arrangement area for marker enumeration")
+        if let area = AXLogicProElements.getArrangementArea(runtime: runtime) {
+            return encodeResult(AXLogicProElements.enumerateMarkers(in: area, runtime: runtime))
         }
-        let markers = AXLogicProElements.enumerateMarkers(in: area, runtime: runtime)
-        return encodeResult(markers)
+        // Logic 12.2 commonly has no arrangement area identifier; fall
+        // straight to the marker list window scrape without re-walking
+        // strategies that require an arrange-area root.
+        if let listWindow = AXLogicProElements.findMarkerListWindow(runtime: runtime) {
+            return encodeResult(AXLogicProElements.enumerateMarkersFromListWindow(
+                listWindow, runtime: runtime.ax
+            ))
+        }
+        return encodeResult([MarkerState]())
     }
 
     // MARK: - Removed in v3.1.8 (Issue #7)

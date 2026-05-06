@@ -216,9 +216,19 @@ actor StateCache {
     }
 
     func updateMarkers(_ newMarkers: [MarkerState]) {
-        guard markers != newMarkers else { return }
-        markers = newMarkers
+        // v3.1.9 (Issue #8) — always advance `markersFetchedAt`, even when
+        // the list is unchanged. Previously the equality short-circuit
+        // skipped the timestamp update, so a poller that successfully
+        // observed "still no markers" twice in a row left
+        // `markersFetchedAt == .distantPast` — and the resource handler
+        // reported `source: "default"` instead of `"ax_live"`, making
+        // "honest empty" indistinguishable from "never polled". The data
+        // assignment is still guarded so listeners that diff
+        // `cache.markers` directly don't see redundant publishes.
         markersFetchedAt = Date()
+        if markers != newMarkers {
+            markers = newMarkers
+        }
     }
 
     func updateProject(_ info: ProjectInfo) {

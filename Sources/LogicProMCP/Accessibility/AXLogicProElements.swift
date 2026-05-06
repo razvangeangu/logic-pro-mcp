@@ -625,38 +625,55 @@ enum AXLogicProElements {
     /// cost predictable even for pathological 10k-marker compositions.
     private static let markerLimit = 512
 
-    /// Enumerate markers visible in the arrangement area's marker ruler.
-    /// Logic Pro 12 renders the marker ruler as a row of AXStaticText elements
-    /// (or AXGroup children) whose title/description contains the marker name.
-    /// Position is extracted from the AXDescription or AXValue when available.
+    /// Enumerate user markers from the project. Strategy order reflects
+    /// Logic AX surface drift across major versions:
     ///
-    /// v3.1.8 (Issue #7) — primary strategy now uses `kAXRulerRole`-based
-    /// match instead of identifier-string match (`marker`/`마커`). Logic 12.x
-    /// dropped the keyword identifier; AXRuler structural position is stable
-    /// across releases. Order of strategies:
-    ///   1. AXRuler elements: when 2+ exist in the arrange area, the second
-    ///      one is the marker ruler (timeline ruler is first).
-    ///   2. AXGroup keyword fallback (preserved for Logic 11.x compatibility).
+    /// **v3.1.9 (Issue #8) — Logic 12.2+ primary**: scrape the dedicated
+    /// **Marker List** window's `AXTable`. Logic 12.2 removed user markers
+    /// from the main arrange window's AX subtree entirely (the `AXRuler`
+    /// strategy that v3.1.8 introduced returns empty on 12.2 because there
+    /// are zero `AXRuler` elements in the arrange window). The dedicated
+    /// Marker List window — opened via `탐색 → 마커 목록 열기` /
+    /// `Navigate → Open Marker List` — exposes markers as
+    /// `AXRow → AXCell` rows with name in cell column 2 and position in
+    /// cell column 1.
+    ///
+    /// **v3.1.8 — Logic 11.x fallback**: `AXRuler` structural position
+    /// inside the arrange area (the second `AXRuler` is the marker ruler;
+    /// the first is the timeline). Preserved for older builds whose marker
+    /// ruler is still in the arrange-window subtree.
+    ///
+    /// **legacy keyword fallback**: scan `AXGroup` descriptions for
+    /// `marker` / `마커`. Preserved for very old Logic versions.
+    ///
+    /// Strategy 1's data quality requires the user to keep the Marker List
+    /// window open. Callers that need first-class markers without a
+    /// pre-opened window can set `LOGIC_PRO_MCP_AUTO_OPEN_MARKER_LIST=1`
+    /// in the environment to trigger a one-time menu click on first
+    /// successful project poll (see `defaultGetMarkers` in
+    /// `AccessibilityChannel`).
     static func enumerateMarkers(
         in arrangementArea: AXUIElement,
         runtime: Runtime = .production
     ) -> [MarkerState] {
-        var rulerElement: AXUIElement? = nil
+        // Strategy 1 — Logic 12.2+: scrape the Marker List window's AXTable.
+        if let listWindow = findMarkerListWindow(runtime: runtime) {
+            let listMarkers = enumerateMarkersFromListWindow(listWindow, runtime: runtime.ax)
+            if !listMarkers.isEmpty { return listMarkers }
+        }
 
-        // Strategy 1: AXRuler-based (Logic 12.x and beyond).
+        // Strategy 2 — Logic 11.x: AXRuler-based.
+        var rulerElement: AXUIElement? = nil
         let rulers = AXHelpers.findAllDescendants(
             of: arrangementArea, role: "AXRuler", maxDepth: 6, runtime: runtime.ax
         )
         if rulers.count >= 2 {
-            // Two rulers → first is timeline (bar position scrubber), second
-            // is the marker ruler. Order is stable across versions.
             rulerElement = rulers[1]
         } else if let only = rulers.first {
-            // Single ruler — could be either. Prefer it over nothing.
             rulerElement = only
         }
 
-        // Strategy 2: legacy keyword match (preserved for older Logic versions).
+        // Strategy 3 — keyword fallback (oldest path).
         if rulerElement == nil {
             let markerKeywords = ["marker", "마커"]
             let groups = AXHelpers.findAllDescendants(
@@ -691,6 +708,178 @@ enum AXLogicProElements {
             markers.append(MarkerState(id: index, name: name, position: position ?? "\(index + 1).1.1.1"))
         }
         return markers
+    }
+
+    /// Locate the open Marker List window (Logic 12.2+ surface). Title
+    /// suffix matches:
+    ///   - `*- 마커 목록` (Korean localisation)
+    ///   - `*- Marker List` (English)
+    ///
+    /// Returns nil if no such window is open. Window enumeration uses the
+    /// `kAXWindowsAttribute` array on the application root; test doubles
+    /// that don't implement that attribute correctly fall through to nil.
+    /// Title-suffix patterns for the Logic Marker List window across the
+    /// localisations Apple ships. Match by suffix because the window title
+    /// is `"<project name> - <localized 'Marker List'>"`. Extending this
+    /// array is the safe path when a new locale surfaces; matching is
+    /// `O(suffixes × windows)` so keep the list focused on actual Logic
+    /// localisations.
+    static let markerListWindowSuffixes: [String] = [
+        "- 마커 목록",          // Korean
+        "- Marker List",         // English
+        "- マーカーリスト",      // Japanese
+        "- マーカー一覧",        // Japanese (alt — older Logic)
+        "- Liste des marqueurs", // French
+        "- Markerliste",         // German
+        "- Lista de marcadores", // Spanish
+        "- Elenco marker",       // Italian
+        "- 标记列表",            // Chinese (Simplified)
+        "- 標記列表",            // Chinese (Traditional)
+        "- Список меток",        // Russian
+        "- Lista de marcadores", // Portuguese (PT/BR same form)
+        "- Lijst met markers"    // Dutch
+    ]
+
+    static func findMarkerListWindow(runtime: Runtime = .production) -> AXUIElement? {
+        guard let app = appRoot(runtime: runtime) else { return nil }
+        let windows: [AXUIElement] = AXHelpers.getAttribute(
+            app, kAXWindowsAttribute, runtime: runtime.ax
+        ) ?? []
+        return windows.first { window in
+            guard let title = AXHelpers.getTitle(window, runtime: runtime.ax) else {
+                return false
+            }
+            return markerListWindowSuffixes.contains { title.hasSuffix($0) }
+        }
+    }
+
+    /// Read `MarkerState[]` from the Marker List window's `AXTable`.
+    ///
+    /// Observed structure on Logic Pro 12.2 (verified 2026-05-07 against
+    /// `무제 15.logicx` with 3 user markers):
+    /// ```
+    /// AXTable
+    ///   AXRow
+    ///     AXCell  (Lock column — empty)
+    ///     AXCell ─ AXGroup(desc="1 1 1 1 ")  ← position, space-separated B B D T
+    ///     AXCell ─ AXCell(desc="마커 1")     ← marker name
+    ///     AXCell ─ AXGroup(desc="∞")          ← length, ∞ for trailing marker
+    /// ```
+    /// We extract name from cell index 2's first child description, position
+    /// from cell index 1's first child description (parsed via
+    /// `parseMarkerListPosition` to the canonical `"bar.beat.div.tick"` form).
+    static func enumerateMarkersFromListWindow(
+        _ window: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> [MarkerState] {
+        let tables = AXHelpers.findAllDescendants(
+            of: window, role: kAXTableRole, maxDepth: 8, runtime: runtime
+        )
+        guard let table = tables.first else { return [] }
+
+        let rows: [AXUIElement] = AXHelpers.getAttribute(
+            table, "AXRows", runtime: runtime
+        ) ?? AXHelpers.getChildren(table, runtime: runtime).filter {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXRowRole as String)
+        }
+
+        var markers: [MarkerState] = []
+        markers.reserveCapacity(min(rows.count, markerLimit))
+        for (index, row) in rows.prefix(markerLimit).enumerated() {
+            let cells = AXHelpers.getChildren(row, runtime: runtime).filter {
+                (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXCellRole as String)
+            }
+            // Need at least 3 cells: [Lock, Position, Name, ...].
+            guard cells.count >= 3 else { continue }
+            let positionRaw = firstChildDescription(of: cells[1], runtime: runtime) ?? ""
+            let nameRaw = firstChildDescription(of: cells[2], runtime: runtime) ?? ""
+            let name = nameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let position = parseMarkerListPosition(positionRaw)
+                ?? "\(index + 1).1.1.1"
+            markers.append(MarkerState(id: index, name: name, position: position))
+        }
+        return markers
+    }
+
+    /// `AXCell`s in Logic's Marker List Table carry a placeholder
+    /// AXDescription that's always the localized word for "cell". Skip
+    /// these when extracting the meaningful child content. Extending this
+    /// set is the safe path when a new locale surfaces.
+    static let markerCellPlaceholders: Set<String> = [
+        "셀",       // Korean
+        "Cell",     // English
+        "セル",     // Japanese
+        "Cellule",  // French
+        "Zelle",    // German
+        "Celda",    // Spanish (also "Célula" in some locales)
+        "Cella",    // Italian
+        "单元格",   // Chinese (Simplified)
+        "儲存格",   // Chinese (Traditional)
+        "Ячейка",   // Russian
+        "Célula",   // Portuguese
+        "Cel"       // Dutch
+    ]
+
+    /// First non-empty `AXDescription` in `cell`'s direct children, skipping
+    /// the localized placeholder ("셀" / "Cell" / "セル" / etc.) that
+    /// `AXCell`s carry by default. Falls through to the cell's own
+    /// description / value if no child carries a meaningful one.
+    private static func firstChildDescription(
+        of cell: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> String? {
+        let placeholder = markerCellPlaceholders
+        for child in AXHelpers.getChildren(cell, runtime: runtime) {
+            if let desc = AXHelpers.getDescription(child, runtime: runtime),
+               !desc.isEmpty,
+               !placeholder.contains(desc) {
+                return desc
+            }
+            if let value = AXHelpers.getValue(child, runtime: runtime) as? String,
+               !value.isEmpty {
+                return value
+            }
+        }
+        if let cellDesc = AXHelpers.getDescription(cell, runtime: runtime),
+           !cellDesc.isEmpty,
+           !placeholder.contains(cellDesc) {
+            return cellDesc
+        }
+        if let value = AXHelpers.getValue(cell, runtime: runtime) as? String,
+           !value.isEmpty {
+            return value
+        }
+        return nil
+    }
+
+    /// Logic 12.2 Marker List position cells expose positions as
+    /// space-separated bar/beat/division/tick (e.g. `"1 1 1 1 "`). The rest of
+    /// the codebase uses dot-separated `"bar.beat.div.tick"` (e.g.
+    /// `"1.1.1.1"`). Convert one to the other; return nil for unparseable
+    /// inputs so the caller can fall back to a default.
+    ///
+    /// **Lenient by design** (v3.1.9 / boomer P1 — explicit policy
+    /// decision): this parser accepts 1-4 numeric components rather than
+    /// requiring all four. Rationale: future Logic releases may surface
+    /// shorter representations (e.g. just the bar number for header rows)
+    /// and we'd rather pass them through with the available precision than
+    /// drop them silently. Consumers that need the canonical 4-component
+    /// shape get it from the `\(index+1).1.1.1` fallback when this parser
+    /// returns nil. If Logic ever exposes non-positional content here that
+    /// happens to look numeric (e.g. tempo cells), tighten the guard to
+    /// `parts.count == 4`.
+    static func parseMarkerListPosition(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let parts = trimmed.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .map(String.init)
+        guard !parts.isEmpty,
+              parts.count <= 4,
+              parts.allSatisfy({ $0.allSatisfy(\.isNumber) }) else {
+            return nil
+        }
+        return parts.joined(separator: ".")
     }
 
     private static func axValueAsName(

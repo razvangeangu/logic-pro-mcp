@@ -8,6 +8,118 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.1.9] — 2026-05-07
+
+**Issue #8 (`thomas-doesburg`'s 12.2 verification follow-up to #5 / #7) — Logic Pro 12.2 marker walker via `Marker List` window AXTable.** v3.1.8's `AXRuler`-structural strategy assumed user markers lived in the arrange window's AX subtree. Verified live on Logic Pro 12.2 today: that subtree contains **zero `AXRuler` elements** at all. User markers only appear in the dedicated `*-마커 목록` / `*-Marker List` window's `AXTable`. v3.1.9 adds that scrape as the primary strategy and fixes a pre-existing `StateCache` invariant bug that was masking "honest empty" as "never polled".
+
+### Live diagnosis (2026-05-07, Logic Pro 12.2 + 무제 15.logicx)
+
+```
+osascript> tell application "System Events" to tell process "Logic Pro" \
+    to count of (every UI element of window 1 whose role is "AXRuler")
+→ 0
+```
+
+User markers (created via `탐색 → 마커 → 마커 생성`) appear in the `*-마커 목록` window only:
+
+```
+AXWindow desc="무제 15 - 마커 목록"
+  AXTable
+    AXRow
+      AXCell (Lock — empty)
+      AXCell ─ AXGroup(desc="1 1 1 1 ")    ← position, space-separated B B D T
+      AXCell ─ AXCell(desc="마커 1")        ← marker name
+      AXCell ─ AXGroup(desc="∞")            ← length
+    ...
+```
+
+### Fix
+
+- **`AXLogicProElements.findMarkerListWindow`** (new): enumerates `kAXWindowsAttribute` on the app root, matches title suffix (`- 마커 목록` Korean / `- Marker List` English), returns the marker list window or nil.
+- **`AXLogicProElements.enumerateMarkersFromListWindow`** (new): scrapes `AXTable → AXRow → AXCell[1..3]` rows. Position and name extracted from each cell's first child description (skipping the placeholder `"셀"` / `"Cell"` strings the cells carry by default). Position parsed from space-separated `"B B D T "` to canonical `"bar.beat.div.tick"` via `parseMarkerListPosition`.
+- **`AXLogicProElements.parseMarkerListPosition`** (new): converts Logic 12.2's space-separated marker-list position notation to the project-wide `"1.1.1.1"` form. Returns nil for invalid inputs so callers fall through to a default.
+- **`AXLogicProElements.enumerateMarkers`** (modified): strategy order is now (1) marker list window → (2) arrange-area `AXRuler` (Logic 11.x compat) → (3) keyword fallback (oldest path). Strategy 1 wins when both surfaces exist (mid-version transition).
+- **`AccessibilityChannel.defaultGetMarkers`** (modified): no longer requires `getArrangementArea` — that helper returns nil for many Logic 12.2 install configurations because the arrange-area identifier changed. Pre-v3.1.9 the early `.error` return short-circuited the StatePoller before it ever tried the marker list window. New flow: marker list window → arrange-area walk → empty array as success (so the cache reflects "no markers detected" rather than getting stuck at `.distantPast`).
+
+### `StateCache.updateMarkers` invariant fix (P0 cache-staleness bug)
+
+Pre-v3.1.9:
+```swift
+func updateMarkers(_ newMarkers: [MarkerState]) {
+    guard markers != newMarkers else { return }
+    markers = newMarkers
+    markersFetchedAt = Date()
+}
+```
+
+The equality short-circuit skipped the `markersFetchedAt` update. A poller cycle that successfully observed "still no markers" left `markersFetchedAt == .distantPast` if the cache had also started empty (cold-start case). The resource handler then reported `source: "default"` instead of `"ax_live"` — and `cache_age_sec: null` instead of an actual age — making **honest empty indistinguishable from never-polled**. The marker list closed scenario hit this exact case on every poll cycle.
+
+v3.1.9:
+```swift
+func updateMarkers(_ newMarkers: [MarkerState]) {
+    markersFetchedAt = Date()
+    if markers != newMarkers {
+        markers = newMarkers
+    }
+}
+```
+
+`markersFetchedAt` always advances on a successful poll, regardless of data change. The data assignment is still guarded so listeners that diff `cache.markers` directly don't see redundant publishes. The other `update*` cache methods (transport, tracks, mixer, regions, project) already had this semantic — `updateMarkers` was the outlier.
+
+### Live verification (2026-05-07, Logic Pro 12.2)
+
+E2E ran the v3.1.9 release binary against `/Users/isaac/Music/Logic/무제 15.logicx` (5 user markers created at bars 1, 1, 1, 5, 17) via stdio JSON-RPC. Captured `logic://markers` envelope:
+
+**Marker List window OPEN**:
+```json
+{
+  "cache_age_sec": 7.05, "ax_occluded": false,
+  "source": "ax_live",
+  "data": [
+    {"id": 0, "name": "마커 1", "position": "1.1.1.1"},
+    {"id": 1, "name": "마커 2", "position": "1.1.1.1"},
+    {"id": 2, "name": "마커 3", "position": "1.1.1.1"},
+    {"id": 3, "name": "마커 4", "position": "5.1.1.1"},
+    {"id": 4, "name": "마커 5", "position": "17.1.1.1"}
+  ]
+}
+```
+
+**Marker List window CLOSED**:
+```json
+{
+  "cache_age_sec": 6.64, "ax_occluded": false,
+  "source": "ax_live",
+  "data": []
+}
+```
+
+Pre-v3.1.9 `source: "default"` on the closed case is now `"ax_live"` (honest empty).
+
+`logic://project/info` and `logic://tracks` continue to work — `tempo: 120, timeSignature: 4/4, trackCount: 2, source: "project_file"`; tracks `source: "ax_live", count: 2` with real names.
+
+### Caveat (UX) — marker list window must be open
+
+The fix only resolves user markers when the user has opened the dedicated Marker List window (via Logic's `탐색 → 마커 목록 열기` menu). When closed, `logic://markers` returns the honest-empty signal documented above. **No automatic open** ships in v3.1.9 — that's an opt-in we want explicit user consent on. Tracked as a follow-up ergonomics improvement; if you'd like it, file an issue.
+
+### Tests
+
+- `Tests/LogicProMCPTests/AXMarkers12MarkerListTests.swift` (new, 10 tests):
+  - 3 marker list scrape scenarios (open with rows / open empty / closed → AXRuler fallback)
+  - 4 `parseMarkerListPosition` valid / invalid input cases
+  - 2 `findMarkerListWindow` Korean / English / not-open
+  - 1 list-and-ruler-both-present (list strategy must win)
+  - 2 `StateCache.updateMarkers` `markersFetchedAt` invariant tests (regression coverage for the cache-staleness bug above)
+
+`swift test --no-parallel` → **1057 / 1057 PASS** (was 1047 in v3.1.8; +10 net).
+`swift build -c release` clean.
+
+### Cross-refs
+
+- [#5](https://github.com/MongLong0214/logic-pro-mcp/issues/5) — original report (Logic 11.x marker ruler). Closed under v3.1.5; effectively reopened by this release for 12.x but kept closed because the AX walker fix lands here.
+- [#7](https://github.com/MongLong0214/logic-pro-mcp/issues/7) — v3.1.7 dictionary-empty diagnosis from `thomas-doesburg`. Closed by v3.1.8.
+- [#8](https://github.com/MongLong0214/logic-pro-mcp/issues/8) — 12.2-specific marker AX hierarchy investigation. Closed by v3.1.9 (this release).
+
 ## [3.1.8] — 2026-05-06
 
 **Issue #7 (`thomas-doesburg`) — Logic Pro 12.x read-path recovery via project-file fallback + AX hardening.** v3.1.5 / v3.1.6 / v3.1.7 closed Issues #3 / #4 / #5 by routing `logic://tracks` / `logic://markers` / `logic://project/info` through `tell front document → tracks/markers/tempo/time signature` AppleScript reads. Logic Pro 12.x ships an AppleScript scripting dictionary that does not expose any of those terms — every call returns `-2753` ("variable is not defined") or `-1700` ("Can't make tempo of document 1 into type reference") at runtime, and the AX fallback is the panel-focus-dependent scrape that prompted the original bug reports. End-to-end behaviour was identical to v3.1.4 on every Logic 12.x install. v3.1.8 ships a project-file (`MetaData.plist`) tier-merge at the resource layer + a hardened AX walker, and removes the now-dead AppleScript-primary code paths.
