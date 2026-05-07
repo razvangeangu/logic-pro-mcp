@@ -136,21 +136,12 @@ func markerState_fromParsed_fallback() {
 
 // MARK: - logic://markers wire schema (회귀 보호: position_source / is_canonical 키 + derived 정확성)
 
-/// 테스트 헬퍼 — wire JSON 직렬화 결과를 array-of-dict 로 안전 디코드한다.
-/// force cast (`as!`) 를 회피하여 schema mismatch 시 진단 가능한 실패 메시지
-/// 가 보고되도록 한다.
-private func decodeWireArray(_ json: String) throws -> [[String: Any]] {
-    let data = try #require(json.data(using: .utf8))
-    let parsed = try JSONSerialization.jsonObject(with: data)
-    return try #require(parsed as? [[String: Any]])
-}
-
 @Test("encodeMarkersWire: parser 마커 → position_source=parser + is_canonical=true")
 func encodeMarkersWire_parser() throws {
     let markers = [
         MarkerState(id: 0, name: "VOCALS", position: "146.4.4.240", positionSource: .parser),
     ]
-    let decoded = try decodeWireArray(ResourceHandlers.encodeMarkersWire(markers))
+    let decoded = try #require(sharedJSONArray(ResourceHandlers.encodeMarkersWire(markers)))
     #expect(decoded.count == 1)
     let item = decoded[0]
     #expect(item["id"] as? Int == 0)
@@ -168,7 +159,7 @@ func encodeMarkersWire_fallback() throws {
     let markers = [
         MarkerState(id: 1, name: "X", position: "2.1.1.1", positionSource: .fallback),
     ]
-    let decoded = try decodeWireArray(ResourceHandlers.encodeMarkersWire(markers))
+    let decoded = try #require(sharedJSONArray(ResourceHandlers.encodeMarkersWire(markers)))
     let item = decoded[0]
     #expect(item["position_source"] as? String == "fallback")
     #expect(item["is_canonical"] as? Bool == false)
@@ -179,7 +170,7 @@ func encodeMarkersWire_unknown() throws {
     let markers = [
         MarkerState(id: 2, name: "Legacy", position: "1.1.1.1", positionSource: .unknown),
     ]
-    let decoded = try decodeWireArray(ResourceHandlers.encodeMarkersWire(markers))
+    let decoded = try #require(sharedJSONArray(ResourceHandlers.encodeMarkersWire(markers)))
     let item = decoded[0]
     #expect(item["position_source"] as? String == "unknown")
     #expect(item["is_canonical"] as? Bool == false)
@@ -187,8 +178,6 @@ func encodeMarkersWire_unknown() throws {
 
 @Test("encodeMarkersWire: 빈 배열 → []")
 func encodeMarkersWire_empty() throws {
-    let json = ResourceHandlers.encodeMarkersWire([])
-    let data = try #require(json.data(using: .utf8))
-    let decoded = try #require(try JSONSerialization.jsonObject(with: data) as? [Any])
+    let decoded = try #require(sharedJSONArray(ResourceHandlers.encodeMarkersWire([])))
     #expect(decoded.isEmpty)
 }

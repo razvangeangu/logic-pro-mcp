@@ -91,7 +91,7 @@ struct RegionState: Sendable, Codable, Identifiable {
 /// - `.fallback` — parser 실패 → caller가 `\(index+1).1.1.1` 합성 (manufactured).
 /// - `.unknown` — v3.1.x 이하 cache snapshot decode 결과 (provenance 정보 없음).
 ///   신규 marker는 항상 `.parser` 또는 `.fallback` 명시; `.unknown` 은 legacy 한정.
-enum PositionSource: String, Sendable, Codable, Equatable, CaseIterable {
+enum PositionSource: String, Sendable, Codable, CaseIterable {
     case parser
     case fallback
     case unknown

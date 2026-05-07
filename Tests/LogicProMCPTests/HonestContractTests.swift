@@ -86,19 +86,11 @@ import Testing
 
 // MARK: - addExtras (caller-side post-encode top-level merge)
 
-/// `#require` 매크로는 nested expansion 시 recursive expansion 에러 발생 →
-/// 단계 분리한 헬퍼.
-private func decodeAddExtrasObject(_ json: String) throws -> [String: Any] {
-    let data = try #require(json.data(using: .utf8))
-    let parsed = try JSONSerialization.jsonObject(with: data)
-    return try #require(parsed as? [String: Any])
-}
-
 @Test("addExtras: State A 응답에 extras top-level merge")
 func testAddExtras_stateA_mergesAtTopLevel() throws {
     let raw = HonestContract.encodeStateA(extras: ["requested": "1.1.1.1"])
     let merged = HonestContract.addExtras(["caller_flag": true], into: raw)
-    let obj = try decodeAddExtrasObject(merged)
+    let obj = try #require(sharedJSONObject(merged))
     #expect(obj["success"] as? Bool == true)
     #expect(obj["verified"] as? Bool == true)
     #expect(obj["requested"] as? String == "1.1.1.1", "기존 extras 보존")
@@ -109,7 +101,7 @@ func testAddExtras_stateA_mergesAtTopLevel() throws {
 func testAddExtras_stateB_preservesReasonAndMerges() throws {
     let raw = HonestContract.encodeStateB(reason: .readbackUnavailable)
     let merged = HonestContract.addExtras(["caller_flag": true], into: raw)
-    let obj = try decodeAddExtrasObject(merged)
+    let obj = try #require(sharedJSONObject(merged))
     #expect(obj["success"] as? Bool == true)
     #expect(obj["verified"] as? Bool == false)
     #expect(obj["reason"] as? String == "readback_unavailable", "State B reason 보존")
