@@ -449,10 +449,8 @@ extension ResourceHandlers {
         }
     }
 
-    /// v3.2 — marker 배열을 wire JSON (snake_case `position_source` + derived
-    /// `is_canonical`) 으로 직렬화. internal 가시성: 단위 테스트가 envelope 우회
-    /// 후 schema 자체를 직접 검증할 수 있도록 노출 (도메인 model 과 wire 형식의
-    /// SRP 분리를 회귀 테스트로 보호).
+    /// Marker 배열을 wire JSON (snake_case `position_source` + derived
+    /// `is_canonical`) 으로 직렬화한다.
     static func encodeMarkersWire(_ markers: [MarkerState]) -> String {
         let dtos = markers.map { m in
             MarkerWireDTO(
