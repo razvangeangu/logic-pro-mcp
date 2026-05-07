@@ -105,6 +105,33 @@ enum HonestContract {
         return jsonString(dict)
     }
 
+    /// 이미 직렬화된 HC envelope (raw JSON) 의 top-level 에 caller-side extras 를
+    /// merge 한다. 구체 사용처: dispatcher 가 router 가 반환한 채널 응답에 자체
+    /// 메타데이터(`marker_position_uncertain` 같은) 를 추가해야 하지만 어떤 HC
+    /// state(A/B/C) 가 채택됐는지 모를 때.
+    ///
+    /// State C 보호: `success == false` 응답은 변경 없이 그대로 반환한다 — error
+    /// payload 에 caller-side context 를 섞으면 진단성이 떨어지므로.
+    /// 비-JSON / parse 실패 입력도 원본 그대로 반환 (defensive — production
+    /// 정상 경로에서는 발생 안 함).
+    static func addExtras(_ extras: [String: Any], into rawJSON: String) -> String {
+        guard let data = rawJSON.data(using: .utf8),
+              var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return rawJSON
+        }
+        if (object["success"] as? Bool) == false {
+            return rawJSON
+        }
+        for (k, v) in extras { object[k] = v }
+        guard let encoded = try? JSONSerialization.data(
+                  withJSONObject: object, options: [.sortedKeys]
+              ),
+              let str = String(data: encoded, encoding: .utf8) else {
+            return rawJSON
+        }
+        return str
+    }
+
     // MARK: - Terminal-state inspection (router fallback gate)
 
     /// Errors that mean "no other channel will do better either" — invalid

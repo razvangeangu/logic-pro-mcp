@@ -83,3 +83,49 @@ import Testing
     let b = HonestContract.jsonString(["a": 2, "b": 1])
     #expect(a == b, "same logical object should serialize identically regardless of insertion order")
 }
+
+// MARK: - addExtras (caller-side post-encode top-level merge)
+
+/// `#require` 매크로는 nested expansion 시 recursive expansion 에러 발생 →
+/// 단계 분리한 헬퍼.
+private func decodeAddExtrasObject(_ json: String) throws -> [String: Any] {
+    let data = try #require(json.data(using: .utf8))
+    let parsed = try JSONSerialization.jsonObject(with: data)
+    return try #require(parsed as? [String: Any])
+}
+
+@Test("addExtras: State A 응답에 extras top-level merge")
+func testAddExtras_stateA_mergesAtTopLevel() throws {
+    let raw = HonestContract.encodeStateA(extras: ["requested": "1.1.1.1"])
+    let merged = HonestContract.addExtras(["caller_flag": true], into: raw)
+    let obj = try decodeAddExtrasObject(merged)
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["requested"] as? String == "1.1.1.1", "기존 extras 보존")
+    #expect(obj["caller_flag"] as? Bool == true, "신규 caller extras 추가")
+}
+
+@Test("addExtras: State B 응답에 reason 보존 + extras merge")
+func testAddExtras_stateB_preservesReasonAndMerges() throws {
+    let raw = HonestContract.encodeStateB(reason: .readbackUnavailable)
+    let merged = HonestContract.addExtras(["caller_flag": true], into: raw)
+    let obj = try decodeAddExtrasObject(merged)
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["reason"] as? String == "readback_unavailable", "State B reason 보존")
+    #expect(obj["caller_flag"] as? Bool == true)
+}
+
+@Test("addExtras: State C (success:false) 는 변경 없이 통과 — error 보존")
+func testAddExtras_stateC_skipsMerge() {
+    let raw = HonestContract.encodeStateC(error: .axWriteFailed, hint: "permission?")
+    let merged = HonestContract.addExtras(["caller_flag": true], into: raw)
+    #expect(merged == raw, "State C raw 그대로 — caller extras 추가 금지")
+}
+
+@Test("addExtras: 비-JSON 입력 → 원본 그대로")
+func testAddExtras_invalidJSON_returnsRaw() {
+    let raw = "not json"
+    let merged = HonestContract.addExtras(["caller_flag": true], into: raw)
+    #expect(merged == raw)
+}

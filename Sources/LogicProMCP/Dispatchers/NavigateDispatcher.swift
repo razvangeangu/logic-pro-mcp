@@ -172,25 +172,14 @@ struct NavigateDispatcher {
         }
     }
 
-    /// HC top-level flat shape (HonestContract.swift:73-105) 에 uncertainty
-    /// extras merge. State C (`success:false`) 응답은 변경 없이 통과 — error 보존.
+    /// goto_marker 응답에 marker provenance uncertainty 를 surface — State A/B
+    /// envelope 의 top-level 에 `marker_position_uncertain`/`marker_position_source`
+    /// 를 merge 한다. State C (success:false) 는 보존 — `HonestContract.addExtras`
+    /// 가 정책 책임.
     static func mergeMarkerUncertainty(into rawJSON: String, source: PositionSource) -> String {
-        guard let data = rawJSON.data(using: .utf8),
-              var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return rawJSON
-        }
-        // State C 보호: error 응답에 uncertainty 추가 안 함.
-        if (object["success"] as? Bool) == false {
-            return rawJSON
-        }
-        object["marker_position_uncertain"] = true
-        object["marker_position_source"] = source.rawValue
-        guard let encoded = try? JSONSerialization.data(
-                  withJSONObject: object, options: [.sortedKeys]
-              ),
-              let str = String(data: encoded, encoding: .utf8) else {
-            return rawJSON
-        }
-        return str
+        HonestContract.addExtras([
+            "marker_position_uncertain": true,
+            "marker_position_source": source.rawValue,
+        ], into: rawJSON)
     }
 }

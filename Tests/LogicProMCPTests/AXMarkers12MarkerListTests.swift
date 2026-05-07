@@ -101,10 +101,13 @@ func enumerateMarkers_logic122_markerListWindow_open_returnsMarkers() async {
     #expect(markers.count == 3)
     #expect(markers[0].name == "Intro")
     #expect(markers[0].position == "1.1.1.1")
+    #expect(markers[0].positionSource == .parser)
     #expect(markers[1].name == "Verse")
     #expect(markers[1].position == "5.1.1.1")
+    #expect(markers[1].positionSource == .parser)
     #expect(markers[2].name == "Chorus")
     #expect(markers[2].position == "9.2.3.4")
+    #expect(markers[2].positionSource == .parser)
 }
 
 @Test
@@ -155,6 +158,9 @@ func enumerateMarkers_listWindow_closed_fallsThroughToRulerStrategy() async {
     #expect(markers.count == 2)
     #expect(markers[0].name == "Section A")
     #expect(markers[1].name == "Section B")
+    // ruler walker 의 fixture 는 position 속성을 노출하지 않음 → caller fallback.
+    #expect(markers[0].positionSource == .fallback)
+    #expect(markers[1].positionSource == .fallback)
 }
 
 // v3.1.11 (Issue #9): parameterized 매트릭스로 통합. 기존 _validInputs / _invalidInputs는
@@ -244,6 +250,7 @@ func enumerateMarkers_listAndRulerBothPresent_listWins() async {
     let markers = AXLogicProElements.enumerateMarkers(in: arrange, runtime: runtime)
     #expect(markers.count == 1)
     #expect(markers[0].name == "FromList", "list strategy must take precedence")
+    #expect(markers[0].positionSource == .parser, "list 경로 parser 성공 source 보존")
 }
 
 // MARK: - StateCache.updateMarkers fetchedAt invariant (v3.1.9 Issue #8 cache bug)
@@ -310,7 +317,9 @@ func enumerateMarkers_malformedRow_skipsRowKeepsValid() async {
     let markers = AXLogicProElements.enumerateMarkers(in: arrange, runtime: runtime)
     #expect(markers.count == 2, "malformed row skipped, two valid rows surface")
     #expect(markers[0].name == "ValidA")
+    #expect(markers[0].positionSource == .parser)
     #expect(markers[1].name == "ValidB")
+    #expect(markers[1].positionSource == .parser)
 }
 
 @Test
@@ -333,6 +342,7 @@ func enumerateMarkers_unparseablePosition_usesIndexFallback() async {
     #expect(markers.count == 1)
     #expect(markers[0].name == "BadPos", "name still captured even when position unparseable")
     #expect(markers[0].position == "1.1.1.1", "fallback position is index+1.1.1.1")
+    #expect(markers[0].positionSource == .fallback, "parser 실패 → caller fallback provenance")
 }
 
 // v3.1.11 (Issue #9): 영문 12.2 비-bar-aligned 마커 + UI 끝 마침표 통합 회귀.
@@ -353,6 +363,7 @@ func enumerateMarkers_trailingDotPosition_canonicalizes() async {
     #expect(markers.count == 1)
     #expect(markers[0].name == "VOCALS")
     #expect(markers[0].position == "146.4.4.240", "영문 UI 끝 마침표 strip 후 canonical")
+    #expect(markers[0].positionSource == .parser, "trailing-dot strip 후 parser 성공")
 }
 
 // v3.1.11 (Issue #9 / Tester P0): 한글 12.2 whole-bar 통합 회귀 — G3 영문/한글
@@ -373,6 +384,7 @@ func enumerateMarkers_koreanWholeBarPosition_canonicalizes() async {
     #expect(markers.count == 1)
     #expect(markers[0].name == "Section A")
     #expect(markers[0].position == "1.1.1.1")
+    #expect(markers[0].positionSource == .parser, "한글 whole-bar parser 성공")
 }
 
 @Test

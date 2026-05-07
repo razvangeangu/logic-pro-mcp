@@ -8,35 +8,18 @@ import Foundation
 
 // MARK: - MarkerState Codable round-trip
 
-@Test("MarkerState Codable round-trip — .parser")
-func markerState_codableRoundTrip_parser() throws {
+// 모든 PositionSource case 에 대해 round-trip 균질 검증. 신규 enum case 추가 시
+// `PositionSource.allCases` 자동 확장 (v3.3 등에서 case 추가 시 누락 방지).
+@Test("MarkerState Codable round-trip — 모든 PositionSource",
+      arguments: PositionSource.allCases)
+func markerState_codableRoundTrip(_ source: PositionSource) throws {
     let original = MarkerState(
-        id: 0, name: "VOCALS", position: "146.4.4.240", positionSource: .parser
+        id: 0, name: "M", position: "1.1.1.1", positionSource: source
     )
     let data = try JSONEncoder().encode(original)
     let decoded = try JSONDecoder().decode(MarkerState.self, from: data)
-    #expect(decoded == original)
-    #expect(decoded.positionSource == .parser)
-}
-
-@Test("MarkerState Codable round-trip — .fallback")
-func markerState_codableRoundTrip_fallback() throws {
-    let original = MarkerState(
-        id: 1, name: "Section A", position: "2.1.1.1", positionSource: .fallback
-    )
-    let data = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(MarkerState.self, from: data)
-    #expect(decoded.positionSource == .fallback)
-}
-
-@Test("MarkerState Codable round-trip — .unknown")
-func markerState_codableRoundTrip_unknown() throws {
-    let original = MarkerState(
-        id: 2, name: "Legacy", position: "1.1.1.1", positionSource: .unknown
-    )
-    let data = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(MarkerState.self, from: data)
-    #expect(decoded.positionSource == .unknown)
+    #expect(decoded == original, "round-trip 동등성 (\(source))")
+    #expect(decoded.positionSource == source, "\(source) 보존")
 }
 
 // v3.1.x cache snapshot 디코딩 — positionSource field 없음 → .unknown
