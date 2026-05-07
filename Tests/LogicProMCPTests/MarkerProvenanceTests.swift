@@ -119,3 +119,90 @@ func mergeMarkerUncertainty_invalidJSON_returnsRaw() {
     )
     #expect(merged == raw)
 }
+
+// MARK: - PositionSource.isCanonical (단일 진실 소스 보호)
+
+@Test("PositionSource.isCanonical — parser 만 true",
+      arguments: [
+        (PositionSource.parser, true),
+        (PositionSource.fallback, false),
+        (PositionSource.unknown, false),
+      ])
+func positionSource_isCanonical(source: PositionSource, expected: Bool) {
+    #expect(source.isCanonical == expected)
+}
+
+// MARK: - MarkerState.fromParsed factory (양쪽 fallback site dedup 회귀 보호)
+
+@Test("MarkerState.fromParsed: parser 성공 → .parser + canonical position")
+func markerState_fromParsed_success() {
+    let m = MarkerState.fromParsed("146.4.4.240", ordinal: 0, name: "VOCALS")
+    #expect(m.position == "146.4.4.240")
+    #expect(m.positionSource == .parser)
+    #expect(m.id == 0)
+    #expect(m.name == "VOCALS")
+}
+
+@Test("MarkerState.fromParsed: parser 실패 → .fallback + (ordinal+1).1.1.1 합성")
+func markerState_fromParsed_fallback() {
+    let m = MarkerState.fromParsed(nil, ordinal: 5, name: "X")
+    #expect(m.position == "6.1.1.1")
+    #expect(m.positionSource == .fallback)
+    #expect(m.id == 5)
+}
+
+// MARK: - logic://markers wire schema (회귀 보호: position_source / is_canonical 키 + derived 정확성)
+
+@Test("encodeMarkersWire: parser 마커 → position_source=parser + is_canonical=true")
+func encodeMarkersWire_parser() throws {
+    let markers = [
+        MarkerState(id: 0, name: "VOCALS", position: "146.4.4.240", positionSource: .parser),
+    ]
+    let json = ResourceHandlers.encodeMarkersWire(markers)
+    let data = json.data(using: .utf8)!
+    let decoded = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+    #expect(decoded.count == 1)
+    let item = decoded[0]
+    #expect(item["id"] as? Int == 0)
+    #expect(item["name"] as? String == "VOCALS")
+    #expect(item["position"] as? String == "146.4.4.240")
+    #expect(item["position_source"] as? String == "parser")
+    #expect(item["is_canonical"] as? Bool == true)
+    // domain camelCase 필드는 wire 에 새지 않아야 한다.
+    #expect(item["positionSource"] == nil)
+    #expect(item["isCanonical"] == nil)
+}
+
+@Test("encodeMarkersWire: fallback 마커 → position_source=fallback + is_canonical=false")
+func encodeMarkersWire_fallback() throws {
+    let markers = [
+        MarkerState(id: 1, name: "X", position: "2.1.1.1", positionSource: .fallback),
+    ]
+    let json = ResourceHandlers.encodeMarkersWire(markers)
+    let data = json.data(using: .utf8)!
+    let decoded = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+    let item = decoded[0]
+    #expect(item["position_source"] as? String == "fallback")
+    #expect(item["is_canonical"] as? Bool == false)
+}
+
+@Test("encodeMarkersWire: unknown(legacy) 마커 → position_source=unknown + is_canonical=false")
+func encodeMarkersWire_unknown() throws {
+    let markers = [
+        MarkerState(id: 2, name: "Legacy", position: "1.1.1.1", positionSource: .unknown),
+    ]
+    let json = ResourceHandlers.encodeMarkersWire(markers)
+    let data = json.data(using: .utf8)!
+    let decoded = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+    let item = decoded[0]
+    #expect(item["position_source"] as? String == "unknown")
+    #expect(item["is_canonical"] as? Bool == false)
+}
+
+@Test("encodeMarkersWire: 빈 배열 → []")
+func encodeMarkersWire_empty() throws {
+    let json = ResourceHandlers.encodeMarkersWire([])
+    let data = json.data(using: .utf8)!
+    let decoded = try JSONSerialization.jsonObject(with: data) as! [Any]
+    #expect(decoded.isEmpty)
+}

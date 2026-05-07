@@ -75,7 +75,7 @@ nested AppleScript 표현 한계 + slider raw value (1.85E+8 / 2.27E+15) 와 dis
 
 ```bash
 swift test --no-parallel
-# → 1064 + 신규 ≥ 8 = 1072+ PASS
+# → 1064 (v3.1.11 baseline) + 17 신규 = 1081 PASS
 
 swift build -c release
 # → 0 warnings
@@ -113,7 +113,7 @@ brew test logic-pro-mcp
 
 ### 2.3 Codable backward compat
 
-기존 `~/.logic-pro-mcp/cache.json` (v3.1.x snapshot) 로드 → marker `positionSource` missing → `.unknown` decode → `is_canonical: false`. crash 0.
+v3.1.x JSON snapshot (예: `StatePoller.swift:272` 디코드 경로 또는 외부 클라이언트가 저장한 `logic://markers` 응답) → marker `positionSource` missing → `.unknown` decode → `is_canonical: false`. crash 0. 단위 테스트 `markerState_codableLegacySnapshot_*` 가 회귀 보호.
 
 ---
 

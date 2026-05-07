@@ -97,7 +97,22 @@ jobs:
           echo "Built binary: $BIN"
           cp "$BIN" LogicProMCP
           chmod +x LogicProMCP
-          file LogicProMCP  # confirm Mach-O universal (arm64 + x86_64)
+          # Guardant: universal Mach-O 검증 (단일 arch staging 결과를 ship 하면
+          # Intel Mac on Rosetta 시 nil-binary 사고). file 출력에서 두 architecture
+          # ID 모두 존재해야 PASS — 미만 시 fail-fast.
+          file LogicProMCP
+          if ! file LogicProMCP | grep -q "Mach-O universal binary"; then
+            echo "::error::LogicProMCP is not a universal Mach-O binary"
+            exit 1
+          fi
+          if ! file LogicProMCP | grep -q "arm64"; then
+            echo "::error::LogicProMCP missing arm64 slice"
+            exit 1
+          fi
+          if ! file LogicProMCP | grep -q "x86_64"; then
+            echo "::error::LogicProMCP missing x86_64 slice"
+            exit 1
+          fi
 
       - name: Codesign binary (Developer ID)
         if: steps.mode.outputs.mode == 'notarized'

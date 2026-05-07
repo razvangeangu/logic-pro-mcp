@@ -705,7 +705,7 @@ enum AXLogicProElements {
                 ?? ""
             guard !name.isEmpty else { continue }
             let parsed = extractMarkerPosition(text, runtime: runtime.ax)
-            markers.append(.fromParsed(parsed, id: index, name: name))
+            markers.append(.fromParsed(parsed, ordinal: index, name: name))
         }
         return markers
     }
@@ -796,7 +796,7 @@ enum AXLogicProElements {
             let name = nameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { continue }
             let parsed = parseMarkerListPosition(positionRaw)
-            markers.append(.fromParsed(parsed, id: index, name: name))
+            markers.append(.fromParsed(parsed, ordinal: index, name: name))
         }
         return markers
     }

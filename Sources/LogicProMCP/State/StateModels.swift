@@ -130,13 +130,15 @@ struct MarkerState: Sendable, Codable, Identifiable, Equatable {
     }
 
     /// AX walker 의 두 fallback site 공통 factory — `parsed != nil` → `.parser`,
-    /// `nil` → `.fallback` + `\(index+1).1.1.1` 합성. 추가 site에서 정책이 갈라
-    /// 지지 않도록 단일화.
-    static func fromParsed(_ parsed: String?, id: Int, name: String) -> MarkerState {
+    /// `nil` → `.fallback` + `\(ordinal+1).1.1.1` 합성. 추가 site에서 정책이
+    /// 갈라지지 않도록 단일화. `ordinal` 은 enumeration 0-based index — 현재
+    /// 호출 site는 marker id 와 동일 값을 전달하지만, 미래에 id 가 별도 식별
+    /// 체계를 갖더라도 fallback 합성 의미(목록 N번째)가 유지되도록 명명한다.
+    static func fromParsed(_ parsed: String?, ordinal: Int, name: String) -> MarkerState {
         MarkerState(
-            id: id,
+            id: ordinal,
             name: name,
-            position: parsed ?? "\(id + 1).1.1.1",
+            position: parsed ?? "\(ordinal + 1).1.1.1",
             positionSource: parsed != nil ? .parser : .fallback
         )
     }
