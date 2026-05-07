@@ -79,10 +79,25 @@ jobs:
           done
 
       - name: Build universal binary
+        # Universal swift-pm output path varies by Xcode/Swift version (16.0
+        # placed it at `.build/apple/Products/Release/`; 16.4 sometimes lands
+        # the executable at a different staging location and the previous
+        # hard-coded `cp` failed silently after a successful build, taking the
+        # whole release pipeline down with `set -e`). Locate the binary via
+        # `find` so future Xcode bumps don't regress this.
         run: |
           swift build -c release --arch arm64 --arch x86_64
-          cp .build/apple/Products/Release/LogicProMCP LogicProMCP
+          BIN=$(find .build -type f -name LogicProMCP -perm -u+x \
+                | grep -iE '/release/' | head -1)
+          if [ -z "$BIN" ]; then
+            echo "::error::Built LogicProMCP binary not located; tree below:"
+            find .build -type f -name LogicProMCP
+            exit 1
+          fi
+          echo "Built binary: $BIN"
+          cp "$BIN" LogicProMCP
           chmod +x LogicProMCP
+          file LogicProMCP  # confirm Mach-O universal (arm64 + x86_64)
 
       - name: Codesign binary (Developer ID)
         if: steps.mode.outputs.mode == 'notarized'
