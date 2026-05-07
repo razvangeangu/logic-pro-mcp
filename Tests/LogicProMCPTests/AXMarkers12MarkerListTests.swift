@@ -157,20 +157,34 @@ func enumerateMarkers_listWindow_closed_fallsThroughToRulerStrategy() async {
     #expect(markers[1].name == "Section B")
 }
 
-@Test
-func parseMarkerListPosition_validInputs() {
-    #expect(AXLogicProElements.parseMarkerListPosition("1 1 1 1 ") == "1.1.1.1")
-    #expect(AXLogicProElements.parseMarkerListPosition("17 2 3 4") == "17.2.3.4")
-    #expect(AXLogicProElements.parseMarkerListPosition("17 2") == "17.2")
+// v3.1.11 (Issue #9): parameterized 매트릭스로 통합. 기존 _validInputs / _invalidInputs는
+// 단일 커밋으로 strict 4-component 정책 + parameterized 패턴으로 교체.
+@Test("parseMarkerListPosition: 유효 입력 → canonical 형태", arguments: [
+    ("1 1 1 1", "1.1.1.1"),                     // 한글 12.2 whole-bar
+    ("146 4 4 240", "146.4.4.240"),             // 영문 12.2 비-bar-aligned
+    ("146 4 4 240.", "146.4.4.240"),            // 영문 UI 끝 마침표 (이번 fix 핵심)
+    ("146 4 4 240,", "146.4.4.240"),            // 끝 콤마 방어
+    ("  146 4 4 240  ", "146.4.4.240"),         // 양쪽 공백
+    ("146  4  4  240", "146.4.4.240"),          // 다중 공백
+    ("146\t4\t4\t240", "146.4.4.240"),          // 탭 separator
+    ("17 2 3 4", "17.2.3.4"),                   // 정확 4 컴포넌트
+])
+func parseMarkerListPosition_valid(input: String, expected: String) {
+    #expect(AXLogicProElements.parseMarkerListPosition(input) == expected)
 }
 
-@Test
-func parseMarkerListPosition_invalidInputs() {
-    #expect(AXLogicProElements.parseMarkerListPosition("") == nil)
-    #expect(AXLogicProElements.parseMarkerListPosition("   ") == nil)
-    #expect(AXLogicProElements.parseMarkerListPosition("abc") == nil)
-    #expect(AXLogicProElements.parseMarkerListPosition("1 2 3 4 5") == nil) // 5 components — fence-post boundary
-    #expect(AXLogicProElements.parseMarkerListPosition("1 2 3 4 5 6") == nil) // > 4 components
+@Test("parseMarkerListPosition: 무효 입력 → nil", arguments: [
+    "", "   ", ".",                              // 빈 / 의미 없음
+    "abc", "1 abc", "1 2 3 x",                   // 비숫자 혼합
+    "1", "17 2", "1 2 3",                        // NG11 strict 4 — 1-3 components 거부
+    "1 2 3 4 5", "1 2 3 4 5 6",                  // 5+ components
+    "0 0 0 0", "0 1 1 1", "1 0 1 1",             // NG8 1-based 위반
+    "١٤٦ ٤ ٤ ٢٤٠",                              // NG9 ASCII narrow (Arabic-Indic)
+    "1.1 1.1", "146.4 4 240",                    // NG7 mixed separator
+    "+1 2 3 4", "-1 2 3 4", "1 +2 3 4",          // NG9 부호 prefix (Int 리터럴 우회 차단)
+])
+func parseMarkerListPosition_invalid(input: String) {
+    #expect(AXLogicProElements.parseMarkerListPosition(input) == nil)
 }
 
 @Test
@@ -319,6 +333,46 @@ func enumerateMarkers_unparseablePosition_usesIndexFallback() async {
     #expect(markers.count == 1)
     #expect(markers[0].name == "BadPos", "name still captured even when position unparseable")
     #expect(markers[0].position == "1.1.1.1", "fallback position is index+1.1.1.1")
+}
+
+// v3.1.11 (Issue #9): 영문 12.2 비-bar-aligned 마커 + UI 끝 마침표 통합 회귀.
+// raw "146 4 4 240." → parser → MarkerState.position == "146.4.4.240" 검증.
+@Test
+func enumerateMarkers_trailingDotPosition_canonicalizes() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(7900)
+    let arrange = builder.element(7901)
+    let listWin = builder.element(7902)
+    _ = makeMarkerListTree(
+        builder: builder, appElement: app,
+        arrangeWindow: arrange, markerListWindow: listWin,
+        rows: [(position: "146 4 4 240.", name: "VOCALS", length: "∞")]
+    )
+    let runtime = builder.makeLogicRuntime(appElement: app)
+    let markers = AXLogicProElements.enumerateMarkers(in: arrange, runtime: runtime)
+    #expect(markers.count == 1)
+    #expect(markers[0].name == "VOCALS")
+    #expect(markers[0].position == "146.4.4.240", "영문 UI 끝 마침표 strip 후 canonical")
+}
+
+// v3.1.11 (Issue #9 / Tester P0): 한글 12.2 whole-bar 통합 회귀 — G3 영문/한글
+// 양쪽 정확성 명시 보장.
+@Test
+func enumerateMarkers_koreanWholeBarPosition_canonicalizes() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(7910)
+    let arrange = builder.element(7911)
+    let listWin = builder.element(7912)
+    _ = makeMarkerListTree(
+        builder: builder, appElement: app,
+        arrangeWindow: arrange, markerListWindow: listWin,
+        rows: [(position: "1 1 1 1", name: "Section A", length: "∞")]
+    )
+    let runtime = builder.makeLogicRuntime(appElement: app)
+    let markers = AXLogicProElements.enumerateMarkers(in: arrange, runtime: runtime)
+    #expect(markers.count == 1)
+    #expect(markers[0].name == "Section A")
+    #expect(markers[0].position == "1.1.1.1")
 }
 
 @Test

@@ -287,7 +287,15 @@ GET logic://markers
 
 `source: "ax_live"` (not `"default"`) means the v3.1.9 walker ran successfully — it just couldn't locate the marker list window because it's closed.
 
-**Fix:** open the Marker List window once via `탐색 → 마커 목록 열기` (KR) / `Navigate → Open Marker List` (EN). After ~3-15 seconds the next poll cycle picks up the markers.
+**Fix**: Marker List 윈도우는 **Navigate / 탐색 메뉴** 하위에 있습니다 (Window 메뉴 아님 — `thomas-doesburg`의 Issue #9에서 영문 12.2 사용자가 헛걸음한 후 보고). 한 번 열고 ~3-15초 후 다음 poll cycle에서 markers cache로 surface.
+
+| UI Locale | 메뉴 경로 |
+|-----------|-----------|
+| 한글 | `탐색 → 마커 목록 열기` |
+| 영문 | `Navigate → Open Marker List` |
+| 일본어 / 프랑스어 / 독일어 / 스페인어 / 이탈리아어 / 중국어(간/번체) / 러시아어 / 포르투갈어 / 네덜란드어 | 동일 메뉴 위치 — 본인 locale의 Navigate 항목 하위 확인. 코드는 13 locales의 윈도우 타이틀을 자동 인식 (`AXLogicProElements.markerListWindowSuffixes`). |
+
+본인 locale의 메뉴 명칭이 명확하지 않다면 System Settings → Language & Region → Apps → Logic Pro에서 임시로 영문(English)으로 전환 후 재확인 가능 (Logic 재시작 필요, 시스템 전역 변경 아님).
 
 **Tip — minimise to get it out of the way.** Empirically verified on Logic 12.2: minimising the Marker List window (Cmd+M while it's focused) keeps it in the AX `kAXWindowsAttribute` array, and the v3.1.9 walker continues to scrape it. So the production workflow is:
 

@@ -13,7 +13,7 @@
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
   <img src="https://img.shields.io/badge/tests-1019+_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.1.9-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.1.11-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -153,6 +153,10 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 | [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, PR workflow |
 
 ## Status
+
+**v3.1.11** (2026-05-07) — Issue #9 (`thomas-doesburg`): 영문 Logic 12.2 marker position parser 정확성 + 13 locales 메뉴 경로 + lenient 1-3 components 정책 폐기 (NG11). v3.1.10 → v3.1.11 behavior change: `"17 2"` (2-component lenient) 가 이제 nil — Logic UI는 항상 4 컴포넌트 노출하므로 비-position 셀(tempo 등)이 silently 잘못된 bar로 manufacturing되는 위험 차단. 자세한 내용 [CHANGELOG §3.1.11](CHANGELOG.md#3111--2026-05-07).
+
+**v3.1.10** (2026-05-07) — `goto_marker` routing fix (boomer P1): `transport.goto_position`로 라우팅하여 cache의 정확한 position으로 navigation.
 
 **v3.1.9** (2026-05-07) — Logic Pro 12.2 marker walker fix. Apple removed the `AXRuler` role from the arrange window's AX subtree on 12.2; user markers now live exclusively in the dedicated **Marker List** window's `AXTable`. v3.1.9 ships a 13-locale title-suffix matcher for that window plus a `StateCache.updateMarkers` invariant fix (advance `markersFetchedAt` even on empty-to-empty polls — pre-fix made "honest empty" indistinguishable from "never polled"). Caveat: requires Marker List window to be open; auto-open is opt-in via `LOGIC_PRO_MCP_AUTO_OPEN_MARKER_LIST=1` (planned).
 

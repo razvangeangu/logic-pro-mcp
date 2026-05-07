@@ -853,30 +853,29 @@ enum AXLogicProElements {
         return nil
     }
 
-    /// Logic 12.2 Marker List position cells expose positions as
-    /// space-separated bar/beat/division/tick (e.g. `"1 1 1 1 "`). The rest of
-    /// the codebase uses dot-separated `"bar.beat.div.tick"` (e.g.
-    /// `"1.1.1.1"`). Convert one to the other; return nil for unparseable
-    /// inputs so the caller can fall back to a default.
+    /// Logic Marker List 셀의 위치 문자열을 표준 "bar.beat.div.tick" 형태로 변환한다.
     ///
-    /// **Lenient by design** (v3.1.9 / boomer P1 — explicit policy
-    /// decision): this parser accepts 1-4 numeric components rather than
-    /// requiring all four. Rationale: future Logic releases may surface
-    /// shorter representations (e.g. just the bar number for header rows)
-    /// and we'd rather pass them through with the available precision than
-    /// drop them silently. Consumers that need the canonical 4-component
-    /// shape get it from the `\(index+1).1.1.1` fallback when this parser
-    /// returns nil. If Logic ever exposes non-positional content here that
-    /// happens to look numeric (e.g. tempo cells), tighten the guard to
-    /// `parts.count == 4`.
+    /// 관찰된 입력 변형:
+    /// - 한글 12.2: `"1 1 1 1"` (공백 구분, whole-bar)
+    /// - 영문 12.2: `"146 4 4 240."` (공백 구분 + UI 끝 마침표)
+    ///
+    /// 정확히 4 컴포넌트, 각 ASCII 정수 1 이상이어야 한다. Logic UI는 항상 4
+    /// 컴포넌트를 노출하므로 1-3 컴포넌트는 비-position 셀(예: tempo)일 가능성으로
+    /// nil 반환한다. 호출자는 `\(index+1).1.1.1` fallback을 사용한다.
     static func parseMarkerListPosition(_ raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let parts = trimmed.split(whereSeparator: { $0 == " " || $0 == "\t" })
-            .map(String.init)
-        guard !parts.isEmpty,
-              parts.count <= 4,
-              parts.allSatisfy({ $0.allSatisfy(\.isNumber) }) else {
+        // 끝의 마침표/콤마는 Logic UI rendering artifact — 반복 strip.
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = trimmed.last, last == "." || last == "," {
+            trimmed.removeLast()
+        }
+        // 공백/탭만 separator (Logic은 공백만 사용; 점은 끝에서만 의미).
+        let parts = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        // 정확히 4 컴포넌트 + ASCII 0-9만 (부호 prefix·Arabic-Indic 거부) + 1-based.
+        guard parts.count == 4,
+              parts.allSatisfy({ part in
+                  part.allSatisfy { $0.isASCII && $0.isNumber }
+                      && (Int(part) ?? 0) >= 1
+              }) else {
             return nil
         }
         return parts.joined(separator: ".")
