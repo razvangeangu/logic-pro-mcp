@@ -704,15 +704,8 @@ enum AXLogicProElements {
                 ?? axValueAsName(text, runtime: runtime.ax)
                 ?? ""
             guard !name.isEmpty else { continue }
-            // v3.2 — parser 성공 / 실패 시 provenance 명시.
             let parsed = extractMarkerPosition(text, runtime: runtime.ax)
-            let source: PositionSource = parsed != nil ? .parser : .fallback
-            markers.append(MarkerState(
-                id: index,
-                name: name,
-                position: parsed ?? "\(index + 1).1.1.1",
-                positionSource: source
-            ))
+            markers.append(.fromParsed(parsed, id: index, name: name))
         }
         return markers
     }
@@ -802,15 +795,8 @@ enum AXLogicProElements {
             let nameRaw = firstChildDescription(of: cells[2], runtime: runtime) ?? ""
             let name = nameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { continue }
-            // v3.2 — parser 성공 / 실패 시 provenance 명시 (Boomer P2-3).
             let parsed = parseMarkerListPosition(positionRaw)
-            let source: PositionSource = parsed != nil ? .parser : .fallback
-            markers.append(MarkerState(
-                id: index,
-                name: name,
-                position: parsed ?? "\(index + 1).1.1.1",
-                positionSource: source
-            ))
+            markers.append(.fromParsed(parsed, id: index, name: name))
         }
         return markers
     }

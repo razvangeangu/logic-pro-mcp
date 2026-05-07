@@ -439,22 +439,27 @@ extension ResourceHandlers {
         let id: Int
         let name: String
         let position: String
-        let position_source: String
-        let is_canonical: Bool
+        let positionSource: PositionSource
+        let isCanonical: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, position
+            case positionSource = "position_source"
+            case isCanonical = "is_canonical"
+        }
     }
 
     private static func readMarkers(cache: StateCache, uri: String) async throws -> ReadResource.Result {
         let markers = await cache.getMarkers()
         let fetchedAt = await cache.getMarkersFetchedAt()
         let axOccluded = await cache.getAXOccluded()
-        // v3.2 — DTO 변환 후 표준 JSONEncoder 직렬화 (수동 string concat 금지).
         let dtos = markers.map { m in
             MarkerWireDTO(
                 id: m.id,
                 name: m.name,
                 position: m.position,
-                position_source: m.positionSource.rawValue,
-                is_canonical: m.positionSource == .parser
+                positionSource: m.positionSource,
+                isCanonical: m.positionSource.isCanonical
             )
         }
         let body = encodeJSON(dtos)

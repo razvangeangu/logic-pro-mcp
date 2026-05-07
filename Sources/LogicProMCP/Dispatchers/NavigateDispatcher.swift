@@ -57,16 +57,15 @@ struct NavigateDispatcher {
                     operation: "transport.goto_position",
                     params: ["position": target.position]
                 )
-                // v3.2 — fallback / unknown provenance 마커 라우팅 시 uncertainty
-                // 머신 가독으로 surface (Boomer P2-3). HC State A/B (success:true)
-                // 응답에만 top-level extras merge; State C (error) 응답 보존.
-                if target.positionSource != .parser {
-                    let merged = mergeMarkerUncertainty(
-                        into: result.message, source: target.positionSource
-                    )
-                    return toolTextResult(merged, isError: !result.isSuccess)
+                // canonical 마커는 응답 그대로. fallback/unknown 만 uncertainty
+                // 머신 가독으로 surface (HC State A/B 한정; State C 보존).
+                guard !target.positionSource.isCanonical else {
+                    return toolTextResult(result)
                 }
-                return toolTextResult(result)
+                let merged = mergeMarkerUncertainty(
+                    into: result.message, source: target.positionSource
+                )
+                return toolTextResult(merged, isError: !result.isSuccess)
             }
             // Cache cold AND index-based caller — pass through to the legacy
             // keycmd path. The keypress at least advances Logic's marker

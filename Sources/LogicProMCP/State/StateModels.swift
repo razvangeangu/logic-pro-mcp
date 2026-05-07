@@ -95,6 +95,10 @@ enum PositionSource: String, Sendable, Codable, Equatable {
     case parser
     case fallback
     case unknown
+
+    /// canonical 여부 — wire schema의 `is_canonical` derived 필드와
+    /// `goto_marker` uncertainty 분기 양쪽에서 단일 진실 소스로 사용한다.
+    var isCanonical: Bool { self == .parser }
 }
 
 /// Marker 정보.
@@ -123,6 +127,18 @@ struct MarkerState: Sendable, Codable, Identifiable, Equatable {
         self.position = try c.decode(String.self, forKey: .position)
         self.positionSource = try c.decodeIfPresent(PositionSource.self, forKey: .positionSource)
             ?? .unknown
+    }
+
+    /// AX walker 의 두 fallback site 공통 factory — `parsed != nil` → `.parser`,
+    /// `nil` → `.fallback` + `\(index+1).1.1.1` 합성. 추가 site에서 정책이 갈라
+    /// 지지 않도록 단일화.
+    static func fromParsed(_ parsed: String?, id: Int, name: String) -> MarkerState {
+        MarkerState(
+            id: id,
+            name: name,
+            position: parsed ?? "\(id + 1).1.1.1",
+            positionSource: parsed != nil ? .parser : .fallback
+        )
     }
 }
 
