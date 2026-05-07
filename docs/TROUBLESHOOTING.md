@@ -287,7 +287,18 @@ GET logic://markers
 
 `source: "ax_live"` (not `"default"`) means the v3.1.9 walker ran successfully — it just couldn't locate the marker list window because it's closed.
 
-**Fix:** open the Marker List window once via `탐색 → 마커 목록 열기` (KR) / `Navigate → Open Marker List` (EN). You can minimise it after; the AX walk still finds it as long as it's open. After ~3-15 seconds the next poll cycle picks up the markers.
+**Fix:** open the Marker List window once via `탐색 → 마커 목록 열기` (KR) / `Navigate → Open Marker List` (EN). After ~3-15 seconds the next poll cycle picks up the markers.
+
+**Tip — minimise to get it out of the way.** Empirically verified on Logic 12.2: minimising the Marker List window (Cmd+M while it's focused) keeps it in the AX `kAXWindowsAttribute` array, and the v3.1.9 walker continues to scrape it. So the production workflow is:
+
+1. Open project
+2. `탐색 → 마커 목록 열기`
+3. Cmd+M to minimise (window goes to dock)
+4. Carry on working in the arrange window
+
+`logic://markers` will return live data from the minimised window for the rest of the session. The cost is one entry in your dock; CPU and AX traversal cost is negligible.
+
+**Caveat — minimising the *arrange* window stops the poller.** When all Logic windows are minimised, the StatePoller's `hasVisibleWindow` check returns false and skips the poll cycle entirely. This is intentional resource conservation but means marker reads will go stale once the cache `cache_age_sec` exceeds your tolerance. Restore the arrange window to resume polling.
 
 You can verify the window is recognised with:
 ```bash

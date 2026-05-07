@@ -13,7 +13,7 @@
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
   <img src="https://img.shields.io/badge/tests-1019+_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.1.7-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.1.9-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -154,6 +154,10 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 ## Status
 
+**v3.1.9** (2026-05-07) — Logic Pro 12.2 marker walker fix. Apple removed the `AXRuler` role from the arrange window's AX subtree on 12.2; user markers now live exclusively in the dedicated **Marker List** window's `AXTable`. v3.1.9 ships a 13-locale title-suffix matcher for that window plus a `StateCache.updateMarkers` invariant fix (advance `markersFetchedAt` even on empty-to-empty polls — pre-fix made "honest empty" indistinguishable from "never polled"). Caveat: requires Marker List window to be open; auto-open is opt-in via `LOGIC_PRO_MCP_AUTO_OPEN_MARKER_LIST=1` (planned).
+
+**v3.1.8** (2026-05-06) — Logic Pro 12.x read-path recovery. v3.1.5/3.1.6/3.1.7 all closed Issues #3/#4/#5 via AppleScript-primary reads (`tell front document → tracks/markers/tempo`); 12.x ships a dictionary that does not expose any of those terms. v3.1.8 reads `Alternatives/000/MetaData.plist` for project tempo/timesig/trackCount (per-field merge with cache), hardens the AX walker to refuse Inspector subtree leaks, and removes ~270 LOC of dead AppleScript-primary code. Tier-merge happens at the resource handler (not the channel) so placeholder rows never poison `StateCache`.
+
 **v3.1.1** (2026-04-26) — Honest Contract Extension. v3.1.0 covered 4 ops; v3.1.1 promotes 13 more AX-channel mutating ops (track lifecycle, transport, region, midi.import_file, project.save_as, mixer AC fallback) to the same 3-state envelope, plus unifies `logic://transport/state` under the `{cache_age_sec, fetched_at, data}` envelope. MCU-routed `track.set_automation` and the V-Pot pan State-A enabler are deferred to v3.1.2.
 
 **What changed from v3.0.9**
@@ -175,7 +179,7 @@ See [SECURITY.md §Release types](SECURITY.md#release-types) for the trust model
 
 ### Testing
 
-- **824 unit + integration tests passing** on the v3.1.1 branch (`swift test --skip testLogicProServerStartCoversDefaultPortAndPollerLifecyclePaths --skip testStatePollerStartStopLifecycle` — 2 timer-driven lifecycle tests are deterministic-only under load-bearing CI, not product code)
+- **1059 unit + integration tests passing** on the v3.1.9 branch (`swift test --no-parallel`). Coverage spans Honest Contract envelopes, AX hardening (track headers, marker list window, marker AX walker locale matrix), `LogicProjectFileReader` plist parsing + path validation (10 MB cap, mtime-jitter retry, `..` rejection), tier-merge at the resource layer, and the `StateCache.updateMarkers` `markersFetchedAt` invariant fix.
 - **Live E2E** (`Scripts/live-e2e-test.py`): the ~200 environment-independent assertions pass; ~45 tests require a running Logic Pro 12 session with the MCU control surface registered and fail otherwise (documented as environment-gated, not regression)
 - Multiple independent production-readiness reviews (code quality, security, architecture) converged to PROCEED after the v3.0.2 hardening passes
 - **v3.0.3+ AX-native control surface**: primary GUI touchpoints (track selection, plugin Setting popup) prefer Apple AX actions (AXPress, AXShowMenu, AXSelectedChildren) with CGEvent only as a last-resort fallback — reduces fragility under Logic UI updates
