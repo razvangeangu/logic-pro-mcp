@@ -54,9 +54,15 @@ private let toolText = sharedToolText
 }
 
 @Test func testNavigateDispatcherGotoMarkerByNameUsesCachedMarker() async {
+    // v3.1.10 (boomer P1-1) — name-based goto resolves the marker from
+    // cache, then routes via `transport.goto_position` using the
+    // marker's `position` string. Pre-v3.1.10 routed via the keycmd
+    // `nav.goto_marker` (CC 38) which ignores params and just fires the
+    // "go to next marker" hotkey — making name-based goto a silent
+    // no-op relative to the named marker.
     let router = ChannelRouter()
-    let keyCmd = MockChannel(id: .midiKeyCommands)
-    await router.register(keyCmd)
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
     let cache = StateCache()
     await cache.updateMarkers([MarkerState(id: 7, name: "Verse", position: "7.1.1.1")])
 
@@ -68,9 +74,73 @@ private let toolText = sharedToolText
     )
 
     #expect(result.isError == false)
+    let ops = await ax.executedOps
+    #expect(ops.first?.0 == "transport.goto_position")
+    #expect(ops.first?.1["position"] == "7.1.1.1")
+}
+
+@Test func testNavigateDispatcherGotoMarkerByIndexUsesCachedPosition() async {
+    // v3.1.10 (boomer P1-1) — index-based goto also resolves from cache
+    // and routes via position when the marker is present.
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+    let cache = StateCache()
+    await cache.updateMarkers([
+        MarkerState(id: 0, name: "Intro", position: "1.1.1.1"),
+        MarkerState(id: 1, name: "Verse", position: "5.1.1.1"),
+        MarkerState(id: 2, name: "Chorus", position: "9.1.1.1"),
+    ])
+
+    let result = await NavigateDispatcher.handle(
+        command: "goto_marker",
+        params: ["index": .int(2)],
+        router: router,
+        cache: cache
+    )
+
+    #expect(result.isError == false)
+    let ops = await ax.executedOps
+    #expect(ops.first?.0 == "transport.goto_position")
+    #expect(ops.first?.1["position"] == "9.1.1.1")
+}
+
+@Test func testNavigateDispatcherGotoMarkerColdCacheFallsBackToKeycmd() async {
+    // Cold cache: index-based falls through to legacy keycmd so
+    // existing call sites still get *some* navigation signal.
+    let router = ChannelRouter()
+    let keyCmd = MockChannel(id: .midiKeyCommands)
+    await router.register(keyCmd)
+
+    let result = await NavigateDispatcher.handle(
+        command: "goto_marker",
+        params: ["index": .int(3)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError == false)
     let ops = await keyCmd.executedOps
     #expect(ops.first?.0 == "nav.goto_marker")
-    #expect(ops.first?.1["index"] == "7")
+    #expect(ops.first?.1["index"] == "3")
+}
+
+@Test func testNavigateDispatcherGotoMarkerColdCacheNameReturnsError() async {
+    // Name-based goto with cold cache: no useful keycmd fallback, so
+    // return a clear error.
+    let router = ChannelRouter()
+    let keyCmd = MockChannel(id: .midiKeyCommands)
+    await router.register(keyCmd)
+
+    let result = await NavigateDispatcher.handle(
+        command: "goto_marker",
+        params: ["name": .string("Verse")],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError == true)
+    #expect(toolText(result).contains("No marker found matching"))
 }
 
 @Test func testNavigateDispatcherRenameMarkerUsesAccessibilityChannel() async {

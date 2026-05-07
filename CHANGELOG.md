@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.1.10] — 2026-05-07
+
+**boomer P1-1 hotfix on top of v3.1.9: `goto_marker` was a silent no-op relative to its parameter.** Final BOOMER-6 review caught that `NavigateDispatcher.handle("goto_marker", ...)` resolved the target marker correctly (by name from cache, or by index) and then routed `nav.goto_marker { index: <id> }` to `MIDIKeyCommandsChannel`, which ignores all params and fires fixed CC 38 — Logic's "go to next marker" hotkey. Both index- and name-based goto therefore advanced the marker pointer by one regardless of which marker the caller asked for. The cache lookup did its job; the routing throw the result away.
+
+### Fix
+
+`NavigateDispatcher.goto_marker` now resolves the target `MarkerState` from cache (by `id` for index-based, by `localizedCaseInsensitiveContains` for name-based), then routes via `transport.goto_position` using the marker's `position` string. The marker-list-window scrape that v3.1.9 introduced supplies the cache with correct positions on Logic 12.2; the read+write cycle now correctly navigates to the named bar.
+
+**Cold-cache fallback**: when the cache has no markers (poller hasn't run yet, or the marker list window is closed on Logic 12.2), index-based callers fall through to the legacy `nav.goto_marker` keycmd path so they still get *some* navigation signal — best-effort, advances Logic's marker pointer by one. Name-based callers with an empty cache return `No marker found matching '<name>'` because the keycmd has no name-aware semantic to fall back on.
+
+### Tests
+
+- `testNavigateDispatcherGotoMarkerByNameUsesCachedMarker` — updated: asserts `transport.goto_position { position: "7.1.1.1" }` (was: `nav.goto_marker { index: "7" }` to keycmd channel).
+- `testNavigateDispatcherGotoMarkerByIndexUsesCachedPosition` — new: asserts index-based path also routes via position.
+- `testNavigateDispatcherGotoMarkerColdCacheFallsBackToKeycmd` — new: cold cache + index → legacy keycmd.
+- `testNavigateDispatcherGotoMarkerColdCacheNameReturnsError` — new: cold cache + name → "No marker found matching" error.
+- `testNavigateDispatcherRoutesMarkerAndZoomCommands` — updated: asserts both index- and name-based goto land on AX `transport.goto_position` (was: keycmd `nav.goto_marker`).
+
+`swift test --no-parallel` → **1062 / 1062 PASS** (+3 net new tests for the fix; 1 existing assertion updated for the new contract).
+
+### Behaviour change for callers (additive correctness, not breaking)
+
+- `goto_marker { index: 5 }` used to advance Logic's marker pointer once regardless of the index. **Now**: goes to bar.beat.div.tick of marker id 5 (when in cache).
+- `goto_marker { name: "Verse" }` used to do the same one-step advance regardless of name. **Now**: goes to that marker's saved position.
+- Existing call sites that depended on the bug (i.e. used `goto_marker` to advance the pointer by one) need to use `goto_marker` with no params or another mechanism — but no such callers are documented or tested anywhere in the codebase, so this is being treated as additive.
+
+### CHANGELOG correction (v3.1.9)
+
+The v3.1.9 entry stated `1057 / 1057 PASS (+10 net)`. The accurate count was `1059 / 1059 (+12 net)` — the `StateCache.updateMarkers` invariant regression tests were added after the line was drafted. Corrected in this release.
+
 ## [3.1.9] — 2026-05-07
 
 **Issue #8 (`thomas-doesburg`'s 12.2 verification follow-up to #5 / #7) — Logic Pro 12.2 marker walker via `Marker List` window AXTable.** v3.1.8's `AXRuler`-structural strategy assumed user markers lived in the arrange window's AX subtree. Verified live on Logic Pro 12.2 today: that subtree contains **zero `AXRuler` elements** at all. User markers only appear in the dedicated `*-마커 목록` / `*-Marker List` window's `AXTable`. v3.1.9 adds that scrape as the primary strategy and fixes a pre-existing `StateCache` invariant bug that was masking "honest empty" as "never polled".
@@ -111,7 +141,7 @@ The fix only resolves user markers when the user has opened the dedicated Marker
   - 1 list-and-ruler-both-present (list strategy must win)
   - 2 `StateCache.updateMarkers` `markersFetchedAt` invariant tests (regression coverage for the cache-staleness bug above)
 
-`swift test --no-parallel` → **1057 / 1057 PASS** (was 1047 in v3.1.8; +10 net).
+`swift test --no-parallel` → **1059 / 1059 PASS** (was 1047 in v3.1.8; +12 net — 8 marker-list scrape + 2 parse helper + 2 `StateCache.updateMarkers` `markersFetchedAt` invariant regression tests).
 `swift build -c release` clean.
 
 ### Cross-refs

@@ -1973,11 +1973,17 @@ private actor SelectiveFailChannel: Channel {
     #expect(mcuOps.isEmpty)
     expectExecutedOps(axOps, equals: [
         ("transport.goto_position", ["position": "12.1.1.1"]),
+        // v3.1.10 (boomer P1-1) — both index- and name-based goto_marker
+        // now resolve from cache and route via transport.goto_position
+        // using the marker's `position` string (chorus at 17.1.1.1).
+        ("transport.goto_position", ["position": "17.1.1.1"]),
+        ("transport.goto_position", ["position": "17.1.1.1"]),
         ("nav.rename_marker", ["index": "2", "name": "Big Chorus"]),
     ])
     expectExecutedOps(keyCmdOps, equals: [
-        ("nav.goto_marker", ["index": "2"]),
-        ("nav.goto_marker", ["index": "2"]),
+        // v3.1.10 — `nav.goto_marker` keycmd path is reserved for the
+        // cold-cache fallback (cache empty, index supplied). Cached path
+        // routes to AX `transport.goto_position` (see axOps above).
         ("nav.create_marker", ["name": "Bridge"]),
         ("nav.delete_marker", ["index": "1"]),
         ("nav.zoom_to_fit", [:]),

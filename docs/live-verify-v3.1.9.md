@@ -11,14 +11,14 @@ The runbook splits into three tiers:
 
 ## Tier 1 — Automated (runs in `swift test --no-parallel`)
 
-### 1057-test baseline (post v3.1.9)
+### 1062-test baseline (post v3.1.10)
 
 ```bash
 swift test --no-parallel
-# → 1059 / 1059 PASS in ~22s
+# → 1062 / 1062 PASS in ~22s (was 1059 in v3.1.9; +3 in v3.1.10 for goto_marker fix)
 ```
 
-If this drops below 1059, regression. If a new test is added without bumping this baseline, document the increment in CHANGELOG.
+If this drops below 1062, regression. If a new test is added without bumping this baseline, document the increment in CHANGELOG.
 
 ### Targeted v3.1.9 regression suite
 

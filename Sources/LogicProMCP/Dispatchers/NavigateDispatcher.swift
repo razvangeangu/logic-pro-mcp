@@ -27,27 +27,54 @@ struct NavigateDispatcher {
             return toolTextResult(result)
 
         case "goto_marker":
-            if params["index"] != nil {
-                let index = intParam(params, "index", default: 0)
+            // v3.1.10 (boomer P1-1) — resolve the target marker from cache and
+            // navigate via `transport.goto_position` using its `position`
+            // string. Pre-v3.1.10 this routed to `nav.goto_marker` →
+            // `MIDIKeyCommandsChannel` CC 38 (Logic's "go to next marker"
+            // hotkey), which ignores params entirely and just advances the
+            // marker pointer by one — making both index- and name-based
+            // goto silent no-ops relative to their parameter.
+            //
+            // Cache miss strategy: if the marker isn't in cache (e.g. the
+            // poller hasn't run yet, or the marker list window is closed
+            // on Logic 12.2), fall back to the legacy `nav.goto_marker` CC
+            // keycmd path so existing call sites get *some* navigation
+            // signal. Documented in API.md as "best-effort when cache is
+            // cold".
+            let markers = await cache.getMarkers()
+            let target: MarkerState? = {
+                if let indexStr = params["index"]?.intValue.map(String.init)
+                    ?? params["index"]?.stringValue,
+                   let index = Int(indexStr) {
+                    return markers.first { $0.id == index }
+                }
+                let name = stringParam(params, "name")
+                guard !name.isEmpty else { return nil }
+                return markers.first { $0.name.localizedCaseInsensitiveContains(name) }
+            }()
+            if let target {
+                let result = await router.route(
+                    operation: "transport.goto_position",
+                    params: ["position": target.position]
+                )
+                return toolTextResult(result)
+            }
+            // Cache cold AND index-based caller — pass through to the legacy
+            // keycmd path. The keypress at least advances Logic's marker
+            // pointer; better than failing outright.
+            if let indexStr = params["index"]?.intValue.map(String.init)
+                ?? params["index"]?.stringValue {
                 let result = await router.route(
                     operation: "nav.goto_marker",
-                    params: ["index": String(index)]
+                    params: ["index": indexStr]
                 )
                 return toolTextResult(result)
             }
             let name = stringParam(params, "name")
-            if !name.isEmpty {
-                let markers = await cache.getMarkers()
-                if let marker = markers.first(where: { $0.name.localizedCaseInsensitiveContains(name) }) {
-                    let result = await router.route(
-                        operation: "nav.goto_marker",
-                        params: ["index": String(marker.id)]
-                    )
-                    return toolTextResult(result)
-                }
-                return toolTextResult("No marker found matching '\(name)'", isError: true)
+            if name.isEmpty {
+                return toolTextResult("goto_marker requires 'index' or 'name' param", isError: true)
             }
-            return toolTextResult("goto_marker requires 'index' or 'name' param", isError: true)
+            return toolTextResult("No marker found matching '\(name)'", isError: true)
 
         case "create_marker":
             let name = stringParam(params, "name", default: "Marker")
