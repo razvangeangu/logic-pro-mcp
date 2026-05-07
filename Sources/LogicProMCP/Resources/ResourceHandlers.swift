@@ -432,11 +432,32 @@ extension ResourceHandlers {
     /// Source: "ax_live" if cache populated, "default" if empty/unread.
     /// `ax_occluded` flag in the envelope flags untrusted-empty (Logic UI focus
     /// stole AX away from the arrange area mid-poll).
+    /// v3.2 — wire 형식 DTO. 도메인 `MarkerState` 의 `positionSource` (camelCase) →
+    /// JSON `position_source` (snake_case) 변환 + derived `is_canonical` 추가.
+    /// SRP — 도메인 model 과 wire schema 책임 분리.
+    private struct MarkerWireDTO: Encodable {
+        let id: Int
+        let name: String
+        let position: String
+        let position_source: String
+        let is_canonical: Bool
+    }
+
     private static func readMarkers(cache: StateCache, uri: String) async throws -> ReadResource.Result {
         let markers = await cache.getMarkers()
         let fetchedAt = await cache.getMarkersFetchedAt()
         let axOccluded = await cache.getAXOccluded()
-        let body = encodeJSON(markers)
+        // v3.2 — DTO 변환 후 표준 JSONEncoder 직렬화 (수동 string concat 금지).
+        let dtos = markers.map { m in
+            MarkerWireDTO(
+                id: m.id,
+                name: m.name,
+                position: m.position,
+                position_source: m.positionSource.rawValue,
+                is_canonical: m.positionSource == .parser
+            )
+        }
+        let body = encodeJSON(dtos)
         let source: String
         if !markers.isEmpty {
             source = "ax_live"

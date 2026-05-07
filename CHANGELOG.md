@@ -8,6 +8,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.2.0] — 2026-05-07
+
+**Marker provenance — Boomer P2-3 closed.** `MarkerState` 가 `position` 의 출처를 머신 가독으로 surface (`position_source`: `parser` / `fallback` / `unknown`). `goto_marker` 가 fallback 또는 unknown provenance 마커 라우팅 시 응답 extras에 `marker_position_uncertain: true` 를 추가하여 caller가 cache fallback 위치임을 명시적으로 인지할 수 있다.
+
+### Honest deferred — NG10 sub-bar navigation 정확도
+
+v3.2.0은 **navigation 정확도 fix를 ship하지 않음**. v3.1.11 에서 deferred 된 NG10 (`gotoPositionViaBarSlider` 첫 dot-component만 소비) 은 다음 분기 (v3.3) 로 다시 deferred. 이유:
+
+T0 live spike (실측, 2026-05-07) 결과 PRD 가정이 깨짐:
+- Logic 12.2 `위치로 이동` dialog 는 단일 텍스트 input이 아닌 4-segment `AXSlider` 구조 (bar / beat / div / tick 각 별개 slider)
+- AppleScript `keystroke "146.4.4.240"` → segment에 입력 도달 안 함
+- AXSlider 직접 value set 시도 → `AppleEvent 처리 구조 실패` (raw value ~2.27E+15 와 displayed value 매핑 미해독)
+
+따라서 v3.1.11 navigation 동작 (`bar` 첫 component만 navigate) 그대로 유지. v3.3 PRD에서 slider raw value mapping reverse-engineering 후 closure 시도. 자세한 spike 결과: `docs/live-verify-v3.2.0.md`.
+
+### Schema additions (back-compat)
+
+`MarkerState` Swift 도메인 model:
+```swift
+enum PositionSource: String, Codable { case parser, fallback, unknown }
+
+struct MarkerState {
+    let id: Int
+    var name: String
+    var position: String
+    var positionSource: PositionSource  // v3.2 신규
+}
+```
+
+`logic://markers` JSON wire schema:
+```json
+{
+  "id": 0,
+  "name": "VOCALS",
+  "position": "146.4.4.240",
+  "position_source": "parser",
+  "is_canonical": true
+}
+```
+
+### Codable backward compat
+
+기존 v3.1.x cache snapshot 디코딩 시 `positionSource` field 부재 → `.unknown` (false provenance 차단). 신규 marker는 항상 `.parser` 또는 `.fallback` 명시.
+
+### `goto_marker` uncertainty extras
+
+cache의 `position_source ∈ {.fallback, .unknown}` 마커에 라우팅 시:
+```json
+{
+  "success": true, "verified": true, "requested": "1.1.1.1",
+  "marker_position_uncertain": true,
+  "marker_position_source": "fallback"
+}
+```
+HC State A/B 응답에만 top-level extras merge. State C (`success: false`) 응답은 보존.
+
+### Tests
+
+1064 → 1074 PASS. 신규 10 cases — Codable round-trip × 3, legacy snapshot decode × 2, HC top-level merge (State A/B/C/invalid JSON) × 4, `PositionSource` rawValue 안정성 × 1.
+
+### Behavior change
+
+없음. v3.1.11 의 `goto_marker`/`transport.goto_position` 동작 그대로 유지. 신규 field만 추가, 기존 field 변경 0.
+
 ## [3.1.11] — 2026-05-07
 
 **`thomas-doesburg`의 Issue #9 — 영문 Logic 12.2 marker position parser 정확성 + 13 locales 메뉴 경로 문서화 + lenient 1-3 components 정책 폐기.**

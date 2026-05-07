@@ -353,7 +353,7 @@ All commands route through `MIDIKeyCommands → CGEvent`.
 | Command | Params | Returns | Channel |
 |---------|--------|---------|---------|
 | `goto_bar` | `{ bar: int }` | text | Delegates to `transport.goto_position` — dialog primary (auto-extends project, ~800ms), slider fallback |
-| `goto_marker` | `{ name: string }` or `{ index: int }` | text | By name: cache lookup → MIDIKeyCommands; by index: MIDIKeyCommands → CGEvent |
+| `goto_marker` | `{ name: string }` or `{ index: int }` | text | By name: cache lookup → `transport.goto_position`. v3.2 — fallback/unknown provenance 마커 라우팅 시 응답 extras에 `marker_position_uncertain: true` + `marker_position_source` 추가 (HC State A/B만; State C 보존). NG10: 첫 dot-component(bar)만 navigate — sub-bar 정확도는 v3.3 deferred |
 | `create_marker` | `{ name?: string }` | text | MIDIKeyCommands → CGEvent |
 | `delete_marker` | `{ index: int }` | text | MIDIKeyCommands → CGEvent |
 | `rename_marker` | `{ index: int, name: string }` | text | Accessibility |
@@ -366,8 +366,14 @@ All commands route through `MIDIKeyCommands → CGEvent`.
 The state poller enumerates markers from the AX marker ruler every 3 seconds and caches them. `goto_marker { name: ... }` and `delete_marker { name: ... }` use this cache for name-based lookup.
 
 ```ts
-// MarkerState (polled into cache, also available in logic://project/info)
-{ id: int, name: string, position: string }
+// MarkerState (v3.2 wire schema — JSON)
+{
+  id: int,
+  name: string,
+  position: string,                                // "bar.beat.div.tick" canonical
+  position_source: "parser" | "fallback" | "unknown",  // v3.2 — provenance
+  is_canonical: boolean                            // v3.2 — derived: position_source == "parser"
+}
 ```
 
 #### Marker semantics

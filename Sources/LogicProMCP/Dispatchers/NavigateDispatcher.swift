@@ -57,6 +57,15 @@ struct NavigateDispatcher {
                     operation: "transport.goto_position",
                     params: ["position": target.position]
                 )
+                // v3.2 — fallback / unknown provenance 마커 라우팅 시 uncertainty
+                // 머신 가독으로 surface (Boomer P2-3). HC State A/B (success:true)
+                // 응답에만 top-level extras merge; State C (error) 응답 보존.
+                if target.positionSource != .parser {
+                    let merged = mergeMarkerUncertainty(
+                        into: result.message, source: target.positionSource
+                    )
+                    return toolTextResult(merged, isError: !result.isSuccess)
+                }
                 return toolTextResult(result)
             }
             // Cache cold AND index-based caller — pass through to the legacy
@@ -162,5 +171,27 @@ struct NavigateDispatcher {
                 isError: true
             )
         }
+    }
+
+    /// HC top-level flat shape (HonestContract.swift:73-105) 에 uncertainty
+    /// extras merge. State C (`success:false`) 응답은 변경 없이 통과 — error 보존.
+    static func mergeMarkerUncertainty(into rawJSON: String, source: PositionSource) -> String {
+        guard let data = rawJSON.data(using: .utf8),
+              var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return rawJSON
+        }
+        // State C 보호: error 응답에 uncertainty 추가 안 함.
+        if (object["success"] as? Bool) == false {
+            return rawJSON
+        }
+        object["marker_position_uncertain"] = true
+        object["marker_position_source"] = source.rawValue
+        guard let encoded = try? JSONSerialization.data(
+                  withJSONObject: object, options: [.sortedKeys]
+              ),
+              let str = String(data: encoded, encoding: .utf8) else {
+            return rawJSON
+        }
+        return str
     }
 }

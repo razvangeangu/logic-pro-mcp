@@ -13,7 +13,7 @@
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
   <img src="https://img.shields.io/badge/tests-1019+_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.1.11-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.2.0-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -153,6 +153,8 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 | [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, PR workflow |
 
 ## Status
+
+**v3.2.0** (2026-05-07) — Marker provenance. `MarkerState` 가 `position` 의 출처를 `position_source` (`parser` / `fallback` / `unknown`) 로 surface. `goto_marker` 가 fallback/unknown 마커 라우팅 시 응답 extras에 `marker_position_uncertain: true` 추가. **Sub-bar nav 정확도 (NG10) 는 v3.3 로 honest deferred** — T0 live spike 결과 Logic 12.2 dialog가 4-segment AXSlider 구조라 keystroke approach 실패. Codable backward compat — v3.1.x snapshot decode 시 `.unknown`. 자세한 내용 [CHANGELOG §3.2.0](CHANGELOG.md#320--2026-05-07).
 
 **v3.1.11** (2026-05-07) — Issue #9 (`thomas-doesburg`): 영문 Logic 12.2 marker position parser 정확성 + 13 locales 메뉴 경로 + lenient 1-3 components 정책 폐기 (NG11). v3.1.10 → v3.1.11 behavior change: `"17 2"` (2-component lenient) 가 이제 nil — Logic UI는 항상 4 컴포넌트 노출하므로 비-position 셀(tempo 등)이 silently 잘못된 bar로 manufacturing되는 위험 차단. 자세한 내용 [CHANGELOG §3.1.11](CHANGELOG.md#3111--2026-05-07).
 

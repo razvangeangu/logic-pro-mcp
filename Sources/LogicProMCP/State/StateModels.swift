@@ -86,11 +86,44 @@ struct RegionState: Sendable, Codable, Identifiable {
     var isLooped: Bool = false
 }
 
-/// Marker info.
+/// Marker `position`의 출처.
+/// - `.parser` — `parseMarkerListPosition` 성공 (canonical "bar.beat.div.tick").
+/// - `.fallback` — parser 실패 → caller가 `\(index+1).1.1.1` 합성 (manufactured).
+/// - `.unknown` — v3.1.x 이하 cache snapshot decode 결과 (provenance 정보 없음).
+///   신규 marker는 항상 `.parser` 또는 `.fallback` 명시; `.unknown` 은 legacy 한정.
+enum PositionSource: String, Sendable, Codable, Equatable {
+    case parser
+    case fallback
+    case unknown
+}
+
+/// Marker 정보.
 struct MarkerState: Sendable, Codable, Identifiable, Equatable {
     let id: Int
     var name: String
     var position: String
+    var positionSource: PositionSource
+
+    /// `positionSource` 기본값은 `.unknown` — 호출 site가 명시적으로 `.parser`/
+    /// `.fallback` 을 지정하지 않으면 silent false provenance 발생을 방지한다
+    /// (boomer Phase G P2-1).
+    init(id: Int, name: String, position: String, positionSource: PositionSource = .unknown) {
+        self.id = id
+        self.name = name
+        self.position = position
+        self.positionSource = positionSource
+    }
+
+    // v3.2 — Codable backward compat. v3.1.x snapshot 에 positionSource field 없음 →
+    // `.unknown` 으로 decode (false provenance 차단; boomer Phase C P1-2).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(Int.self, forKey: .id)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.position = try c.decode(String.self, forKey: .position)
+        self.positionSource = try c.decodeIfPresent(PositionSource.self, forKey: .positionSource)
+            ?? .unknown
+    }
 }
 
 /// Automation mode.
