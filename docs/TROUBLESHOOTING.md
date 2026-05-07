@@ -275,6 +275,51 @@ logic_system refresh_cache
 
 Or wait up to 5 seconds.
 
+### `logic://markers` returns empty `[]` even though the project has markers (Logic 12.2+)
+
+**Cause:** v3.1.9 reads markers from the dedicated **Marker List** window's AX table. On Logic Pro 12.2+ user markers are *not* present in the main arrange window's AX subtree at all — Apple removed the role in 12.2 (verified `osascript`: zero `AXRuler` elements in arrange window). The fix landed in v3.1.9 but requires that window to be open.
+
+**Symptom:**
+```json
+GET logic://markers
+{ "source": "ax_live", "data": [], "ax_occluded": false }
+```
+
+`source: "ax_live"` (not `"default"`) means the v3.1.9 walker ran successfully — it just couldn't locate the marker list window because it's closed.
+
+**Fix:** open the Marker List window once via `탐색 → 마커 목록 열기` (KR) / `Navigate → Open Marker List` (EN). You can minimise it after; the AX walk still finds it as long as it's open. After ~3-15 seconds the next poll cycle picks up the markers.
+
+You can verify the window is recognised with:
+```bash
+osascript -e 'tell application "System Events" to tell process "Logic Pro" to return name of windows'
+# expect at least one entry ending in "- 마커 목록" (KR) or "- Marker List" (EN)
+```
+
+The Marker List window stays open across project saves but **closes when you close the project**, so the workflow is "open project → open marker list → leave it open for the session." If you regularly need fresh marker reads, leave it docked / minimised; CPU cost is negligible.
+
+This is an explicit UX trade-off vs auto-opening the window. If your workflow needs a hands-off path, an env-gated auto-open (`LOGIC_PRO_MCP_AUTO_OPEN_MARKER_LIST=1`) can ship in a future patch — file an issue.
+
+### `logic://markers` works on Logic 12.0/12.1 but not on 12.2 (or vice versa)
+
+The v3.1.9 walker has three strategies in this order:
+1. **Marker List window AXTable** (Logic 12.2+ canonical surface — required on 12.2)
+2. **AXRuler structural position** (Logic 11.x / earlier 12.x)
+3. **Keyword identifier match** (`marker` / `마커` — Logic 10.x)
+
+If markers work on one Logic version and not another, check `source` in the envelope:
+- `"source": "ax_live"` + non-empty data → all good
+- `"source": "ax_live"` + empty data → walker ran, found no markers (project may genuinely have none, OR marker list window is closed on 12.2)
+- `"source": "default"` → poller hasn't populated yet (cold-start) — wait 3-15s for the next poll cycle
+- `"source": "cache"` + `ax_occluded: true` → plugin window or modal stole AX focus from arrange; previous values served
+
+For a fresh diagnosis dump, restart the MCP server with `LOG_LEVEL=debug` and grep for `[poller]` lines — every marker poll cycle logs success/failure detail.
+
+### `logic://project/info` shows `tempo: 120, trackCount: 0` (defaults) even with a real project open
+
+**Cause:** Likely running v3.1.7 or older. v3.1.8 introduced project-file (`MetaData.plist`) tier-merge; before that, the AX path only filled `name` and left tempo/timesig/trackCount at struct defaults.
+
+**Fix:** `brew upgrade logic-pro-mcp` to v3.1.8+. Verify via `serverInfo.version` after `tools/list` — it should show 3.1.8 or newer. If you can't upgrade, restart Logic with the project saved (the AppleScript-primary path that v3.1.5 introduced was always-failing on 12.x and has been removed in v3.1.8).
+
 ---
 
 ## Performance
