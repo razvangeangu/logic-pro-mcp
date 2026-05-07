@@ -397,12 +397,17 @@ actor AccessibilityChannel: Channel {
 
         // MARK: - Navigation
         case "nav.get_markers":
-            // v3.1.5 (Issue #5) — AppleScript primary, AX fallback. The
-            // v3.1.8 (Issue #7) — AppleScript-primary fallback removed
-            // (Logic 12.x dropped the `markers` term). The AX walker has
-            // been hardened in T6: AXRuler-based structural match
-            // (`enumerateMarkers`) now finds the marker ruler without
-            // needing the language-specific `marker`/`마커` keyword.
+            // History: v3.1.5 used an AppleScript-primary path
+            // (`tell front document → markers`) — Logic 12.x dictionary
+            // doesn't expose `markers` so it was always failing; removed
+            // in v3.1.8. v3.1.8's `AXRuler`-structural fallback also
+            // returned empty on Logic 12.2 (Apple removed the role from
+            // the arrange window AX subtree entirely). v3.1.9
+            // (`AXLogicProElements.enumerateMarkers`) now scrapes the
+            // dedicated Marker List window's `AXTable` first, falls
+            // through to `AXRuler` for Logic 11.x, then keyword match
+            // for Logic 10.x. See PRD-issue7-logic12-read-paths.md for
+            // the strategy hierarchy.
             return runtime.markers()
         case "nav.rename_marker":
             return .error("Marker renaming not yet implemented via AX")
