@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.2] — 2026-05-08
+
+**CI hotfix — `ProjectAuditPhaseTests` parallel-execution race.** v3.4.0 introduced six new audit-phase tests that captured `Log.output` via a fire-and-forget `Task { await capture.append(line) }` pattern with a 30 ms post-test drain sleep. Local `swift test --no-parallel` (single-threaded, 23 s runs) consistently passed; CI's `swift test` (parallel, ~9 s) failed three of the tests because:
+
+1. The 30 ms drain was insufficient under runner load — pending Task appends could land after the snapshot.
+2. `Log.output` is a static, so concurrent suite teardown could swap the global capture closure between two tests' emit and snapshot phases.
+
+The test target's `swift test` (default parallel) is the authoritative gate on the CI side. v3.4.0 / v3.4.1 both shipped with this race — the local non-parallel run masked it. Verified by inspecting the v3.4.0 CI run #25600287472 (6 issues across `testProjectOpenWithoutConfirmLogsConfirmationRequired`, `testProjectOpenWithInvalidPathLogsRejected`, `testProjectQuitWithoutConfirmLogsConfirmationRequired`).
+
+### Fixed
+
+- **`ProjectAuditPhaseTests` race.** `AuditCapture` is now an `NSLock`-guarded `final class` (synchronous append/snapshot, no actor hop). The whole suite is wrapped in `@Suite(.serialized)` so the static `Log.output` mutation in `captureAuditLines` cannot interleave between concurrent tests within this file. The 30 ms drain `Task.sleep` is removed — capture is synchronous, so by the time `await body()` returns every audit line is already in the array.
+
+### Tests
+
+- Both `swift test` (parallel, ~4.4 s) and `swift test --no-parallel` (~23 s) now pass 1110 / 1110.
+- The fix also addresses the cascading Coverage step failure on CI: with the test step green, the coverage step's `swift test --enable-code-coverage --no-parallel` no longer carries forward stale runner state.
+
+### Known scope
+
+This hotfix only changes the test file and the version bump artifacts. No production code path changed; the audit-phase contract from v3.4.0 is preserved.
+
 ## [3.4.1] — 2026-05-08
 
 **v3.4.0 Boomer P2 sweep — non-BREAKING fail-loud hardening.** The Boomer review of v3.4.0 catalogued five P2 items as "addressable in a v3.4.1 sweep but none blocks release." This patch closes four of them (the fifth — `nav.goto_marker` orphan routing entry — was already addressed inline in v3.4.0 with a clarifying comment in `ChannelRouter`).

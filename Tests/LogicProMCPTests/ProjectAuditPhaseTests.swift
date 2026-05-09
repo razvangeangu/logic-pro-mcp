@@ -19,11 +19,29 @@ import Testing
 // `captureAuditLines` filters down to the `project` subsystem so other
 // log noise (e.g. cache invalidation `INFO`) doesn't leak into the
 // assertion.
+//
+// v3.4.1 (CI hotfix): the entire suite is `@Suite(.serialized)` and the
+// capture is **synchronous lock-guarded** (not actor-based fire-and-forget).
+// Pre-fix the suite used `Task { await capture.append(line) }` for each
+// log line and a 30 ms post-test sleep to drain pending Tasks. Under
+// parallel `swift test` on macos-15 / Xcode 16.4 runners, the 30 ms drain
+// was insufficient — three tests' Task chains could outrun snapshot, plus
+// `Log.output` is a static mutation that races between concurrent suites.
+// `.serialized` gives single-test ordering within this suite; the lock
+// gives ordering within a single test's emit chain. Together they make
+// the suite robust to runner timing.
 
-private actor AuditCapture {
-    var lines: [String] = []
-    func append(_ s: String) { lines.append(s) }
-    func snapshot() -> [String] { lines }
+private final class AuditCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    func append(_ s: String) {
+        lock.lock(); defer { lock.unlock() }
+        lines.append(s)
+    }
+    func snapshot() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return lines
+    }
 }
 
 @MainActor
@@ -36,8 +54,11 @@ private func captureAuditLines(during body: () async -> Void) async -> [String] 
     Log.setLevel(.info)
     Log.output = { line in
         // We only care about [AUDIT] lines on the project subsystem.
+        // Synchronous capture — no Task hop — so the line is recorded
+        // before `Log.info(...)` returns. This eliminates the race where
+        // a fire-and-forget Task could land after the test's snapshot.
         if line.contains("[AUDIT]") {
-            Task { await capture.append(line) }
+            capture.append(line)
         }
     }
     defer {
@@ -48,16 +69,15 @@ private func captureAuditLines(during body: () async -> Void) async -> [String] 
 
     Log.resetForTests()
     await body()
-
-    // Drain any pending Task append calls before snapshotting.
-    await Task.yield()
-    try? await Task.sleep(nanoseconds: 30_000_000) // 30ms — defensive flush
-    return await capture.snapshot()
+    return capture.snapshot()
 }
 
 private func projectAudits(_ lines: [String]) -> [String] {
     lines.filter { $0.contains("[project]") || $0.contains("\"subsystem\":\"project\"") }
 }
+
+@Suite(.serialized)
+struct ProjectAuditPhaseTests {
 
 @Test func testProjectOpenWithMissingPathLogsRejected() async {
     let captured = await captureAuditLines {
@@ -168,3 +188,5 @@ private func projectAudits(_ lines: [String]) -> [String] {
     #expect(audits.contains { $0.contains("project.quit confirmation_required") })
     #expect(!audits.contains { $0.contains("project.quit executed") })
 }
+
+}  // end @Suite(.serialized) struct ProjectAuditPhaseTests
