@@ -18,7 +18,7 @@ class LogicProMcp < Formula
   #       Update every release from the published SHA256SUMS.txt.
   on_macos do
     url "https://github.com/MongLong0214/logic-pro-mcp/releases/download/v#{version}/LogicProMCP-macOS-universal.tar.gz"
-    sha256 "5445de2295641f033c44922b0352df47f9789ac1d1f5653718f69c29d6e55e0f"
+    sha256 "dbde3211b03ffdde944d179816ede22a3a7da399102160bb71a5094ca2ca0048"
   end
 
   depends_on :macos => :sonoma
