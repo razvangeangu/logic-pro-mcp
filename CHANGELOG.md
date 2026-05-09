@@ -8,6 +8,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.3] — 2026-05-09
+
+**CI Coverage step hotfix — `find`-based path resolution + diagnostic output.** v3.4.2 fixed the `Run tests` step's parallel-race; the `Coverage report` step still failed on macos-15-arm64 with no parseable error in the truncated job log. Direct verification of the coverage path showed:
+
+- v3.4.2 step used `.build/debug/...` (a SwiftPM-created symlink to `.build/arm64-apple-macosx/debug/...`).
+- The symlink exists locally on Apple Silicon. Whether it exists on the macos-15-arm64 GitHub runner across all Xcode 16.x point versions is not guaranteed.
+- An absent symlink causes `xcrun llvm-cov report` to silently produce an empty `coverage-report.txt`, which the v3.4.1 regex guard correctly catches with `::error::Region coverage field '' did not match <float>% pattern.` — but the failure root cause looks identical to a column-drift, hiding the real symlink problem.
+
+### Fixed
+
+- `.github/workflows/ci.yml` Coverage step now resolves the test binary and profdata via `find .build -type f -path '*/debug/...' | head -1`. Path-version-stable across SwiftPM versions.
+- The step prints the full `coverage-report.txt` inside a `::group::Full coverage report` section so future failures (threshold drift, column reorder, etc.) are diagnosable without log archaeology.
+- Captures the inner `swift test --enable-code-coverage --no-parallel` exit code in `TEST_RC` and echoes it explicitly so we can tell `swift test failed` from `coverage parse failed`.
+- Hard-fails with a `::error::` line listing the `.build` directory tree if the binary or profdata cannot be located, so the next operator does not have to repeat this debug session.
+
+### Tests
+
+`swift test --no-parallel` → 1110 / 1110 PASS (unchanged). Build clean. CI workflow YAML change only — no production code path touched.
+
+### Known scope
+
+This hotfix only touches the Coverage step. If the diagnostic output reveals coverage is below the 65% / 72% threshold on CI (because the runner can't exercise some live-OS code paths the local host can), the thresholds themselves will be tuned in a follow-up patch with the diagnostic numbers as evidence.
+
 ## [3.4.2] — 2026-05-08
 
 **CI hotfix — `ProjectAuditPhaseTests` parallel-execution race.** v3.4.0 introduced six new audit-phase tests that captured `Log.output` via a fire-and-forget `Task { await capture.append(line) }` pattern with a 30 ms post-test drain sleep. Local `swift test --no-parallel` (single-threaded, 23 s runs) consistently passed; CI's `swift test` (parallel, ~9 s) failed three of the tests because:

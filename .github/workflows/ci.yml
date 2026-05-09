@@ -46,12 +46,34 @@ jobs:
         run: |
           set +e
           swift test --enable-code-coverage --no-parallel
+          TEST_RC=$?
           set -e
+          echo "swift test --enable-code-coverage exit code: $TEST_RC"
+
+          # v3.4.3: locate the test binary + profdata via `find` instead of
+          # the `.build/debug/...` symlink path. The symlink exists on local
+          # arm64 Macs but its presence under the macos-15-arm64 GitHub
+          # runner is not guaranteed across SwiftPM versions; an absent
+          # symlink silently produces an empty coverage report. `find`
+          # against the actual `.build/arm64-apple-macosx/debug/` tree is
+          # path-version-stable.
+          BIN=$(find .build -type f -path '*/debug/LogicProMCPPackageTests.xctest/Contents/MacOS/LogicProMCPPackageTests' | head -1)
+          PROFDATA=$(find .build -type f -path '*/debug/codecov/default.profdata' | head -1)
+          echo "Test binary: $BIN"
+          echo "Profdata:    $PROFDATA"
+          if [ -z "$BIN" ] || [ -z "$PROFDATA" ]; then
+            echo "::error::Could not locate test binary or profdata; coverage gate cannot run."
+            echo "::error::.build tree:"
+            find .build -maxdepth 4 -type d | head -30
+            exit 1
+          fi
+
           find Sources/LogicProMCP -name '*.swift' | sort > /tmp/logicpro_sources.txt
-          xargs xcrun llvm-cov report \
-            .build/debug/LogicProMCPPackageTests.xctest/Contents/MacOS/LogicProMCPPackageTests \
-            -instr-profile .build/debug/codecov/default.profdata \
+          xargs xcrun llvm-cov report "$BIN" -instr-profile "$PROFDATA" \
             < /tmp/logicpro_sources.txt > coverage-report.txt
+          echo "::group::Full coverage report"
+          cat coverage-report.txt
+          echo "::endgroup::"
 
           # Extract TOTAL line — llvm-cov column order: regions, missed,
           # cover%, functions, missed, cover%, lines, missed, cover%.
