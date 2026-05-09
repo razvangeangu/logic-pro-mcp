@@ -241,6 +241,107 @@ private actor FailingExecuteChannel: Channel {
     #expect(ops[0].1["volume"] == "0.7")
 }
 
+// RB-1.a (2026-05-08 enterprise review): mutating mixer commands must
+// reject missing/negative track index instead of falling through to track 0.
+// Pre-fix the dispatchers used `intParam(default 0)` which silently routed
+// `set_volume {value: 0.5}` (no track) to `index: "0"` — wrong-track mutation.
+// These tests prove the new fail-closed gates and assert that the router was
+// never reached on rejection.
+@Test func testMixerDispatcherSetVolumeRejectsMissingTrack() async {
+    let router = ChannelRouter()
+    let mcu = MockChannel(id: .mcu)
+    await router.register(mcu)
+
+    let result = await MixerDispatcher.handle(
+        command: "set_volume",
+        params: ["value": .double(0.5)],
+        router: router, cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    #expect(dispatcherText(result).contains("requires explicit 'track'"))
+    let ops = await mcu.executedOps
+    #expect(ops.isEmpty, "Router must not be invoked when target is missing")
+}
+
+@Test func testMixerDispatcherSetVolumeRejectsNegativeTrack() async {
+    let router = ChannelRouter()
+    let mcu = MockChannel(id: .mcu)
+    await router.register(mcu)
+
+    let result = await MixerDispatcher.handle(
+        command: "set_volume",
+        params: ["track": .int(-1), "value": .double(0.5)],
+        router: router, cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    let ops = await mcu.executedOps
+    #expect(ops.isEmpty)
+}
+
+@Test func testMixerDispatcherSetPanRejectsMissingTrack() async {
+    let router = ChannelRouter()
+    let mcu = MockChannel(id: .mcu)
+    await router.register(mcu)
+
+    let result = await MixerDispatcher.handle(
+        command: "set_pan",
+        params: ["value": .double(0.0)],
+        router: router, cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    #expect(dispatcherText(result).contains("requires explicit 'track'"))
+    let ops = await mcu.executedOps
+    #expect(ops.isEmpty)
+}
+
+@Test func testMixerDispatcherSetPluginParamRejectsMissingTargets() async {
+    let router = ChannelRouter()
+    let scripter = MockChannel(id: .scripter)
+    await router.register(scripter)
+
+    // Missing track
+    let noTrack = await MixerDispatcher.handle(
+        command: "set_plugin_param",
+        params: ["insert": .int(0), "param": .int(0), "value": .double(0.5)],
+        router: router, cache: StateCache()
+    )
+    #expect(noTrack.isError!)
+    #expect(dispatcherText(noTrack).contains("requires explicit 'track'"))
+
+    // Missing insert
+    let noInsert = await MixerDispatcher.handle(
+        command: "set_plugin_param",
+        params: ["track": .int(0), "param": .int(0), "value": .double(0.5)],
+        router: router, cache: StateCache()
+    )
+    #expect(noInsert.isError!)
+    #expect(dispatcherText(noInsert).contains("requires explicit 'insert'"))
+
+    // Missing param
+    let noParam = await MixerDispatcher.handle(
+        command: "set_plugin_param",
+        params: ["track": .int(0), "insert": .int(0), "value": .double(0.5)],
+        router: router, cache: StateCache()
+    )
+    #expect(noParam.isError!)
+    #expect(dispatcherText(noParam).contains("requires explicit 'param'"))
+
+    // Missing value
+    let noValue = await MixerDispatcher.handle(
+        command: "set_plugin_param",
+        params: ["track": .int(0), "insert": .int(0), "param": .int(0)],
+        router: router, cache: StateCache()
+    )
+    #expect(noValue.isError!)
+    #expect(dispatcherText(noValue).contains("requires explicit 'value'"))
+
+    let ops = await scripter.executedOps
+    #expect(ops.isEmpty, "Router must not be invoked for any missing-target case")
+}
+
 @Test func testMixerDispatcherSetPluginParam() async {
     let router = ChannelRouter()
     let mcu = MockChannel(id: .mcu)
@@ -686,15 +787,15 @@ private actor FailingExecuteChannel: Channel {
 }
 
 @Test func testTrackDispatcherDeleteAndDuplicateRespectSelectionFlow() async {
-    // v3.1.2 P1-5 — `track.delete` now requires that the preceding
-    // `track.select` returns a State A envelope (`verified:true`). The
-    // generic `MockChannel` returns the plain string `"Mock: track.select"`,
-    // which is intentionally rejected by the new gate, so we use the
-    // envelope-returning `VerifiedSelectMockChannel` for the MCU
-    // (track.select goes to MCU here per the routing table). `duplicate`
-    // remains gated only on `isSuccess` for backwards compatibility, so the
-    // generic mock still works for that path; we use the verified mock for
-    // both calls to keep the test a single router setup.
+    // v3.1.2 P1-5 — `track.delete` requires that the preceding
+    // `track.select` returns a State A envelope (`verified:true`).
+    // RB-1.c (2026-05-08 enterprise review) — `track.duplicate` now
+    // enforces the same State-A gate so duplicating an unverified target
+    // can't silently duplicate a different track. Both ops therefore need
+    // the envelope-returning `VerifiedSelectMockChannel` for the MCU
+    // (track.select routes to MCU per the routing table); the generic
+    // `MockChannel` returns plain `"Mock: track.select"` which is now
+    // intentionally rejected by both gates.
     let successRouter = ChannelRouter()
     let mcu = VerifiedSelectMockChannel(id: .mcu)
     let keyCmd = MockChannel(id: .midiKeyCommands)
@@ -1991,6 +2092,86 @@ private actor SelectiveFailChannel: Channel {
         ("nav.set_zoom_level", ["level": "2"]),
         ("nav.set_zoom_level", ["level": "5"]),
     ])
+}
+
+// RB-1.b (2026-05-08 enterprise review): pre-fix `delete_marker` and
+// `rename_marker` defaulted the missing `index` to 0, so `delete_marker {}`
+// silently deleted the first marker. Marker writes are not undoable in the
+// same project session, so missing target now fails closed. `rename_marker`
+// also rejects empty `name` to avoid blank-label overwrites.
+@Test func testNavigateDispatcherDeleteMarkerRejectsMissingIndex() async {
+    let router = ChannelRouter()
+    let keyCmd = MockChannel(id: .midiKeyCommands)
+    let cgEvent = MockChannel(id: .cgEvent)
+    await router.register(keyCmd)
+    await router.register(cgEvent)
+
+    let result = await NavigateDispatcher.handle(
+        command: "delete_marker",
+        params: [:],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    #expect(dispatcherText(result).contains("requires explicit 'index'"))
+    let keyCmdOps = await keyCmd.executedOps
+    let cgEventOps = await cgEvent.executedOps
+    #expect(keyCmdOps.isEmpty, "Router must not be invoked when target is missing")
+    #expect(cgEventOps.isEmpty)
+}
+
+@Test func testNavigateDispatcherDeleteMarkerRejectsNegativeIndex() async {
+    let router = ChannelRouter()
+    let keyCmd = MockChannel(id: .midiKeyCommands)
+    await router.register(keyCmd)
+
+    let result = await NavigateDispatcher.handle(
+        command: "delete_marker",
+        params: ["index": .int(-1)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    let ops = await keyCmd.executedOps
+    #expect(ops.isEmpty)
+}
+
+@Test func testNavigateDispatcherRenameMarkerRejectsMissingIndex() async {
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+
+    let result = await NavigateDispatcher.handle(
+        command: "rename_marker",
+        params: ["name": .string("New name")],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    #expect(dispatcherText(result).contains("requires explicit 'index'"))
+    let ops = await ax.executedOps
+    #expect(ops.isEmpty)
+}
+
+@Test func testNavigateDispatcherRenameMarkerRejectsEmptyName() async {
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+
+    let result = await NavigateDispatcher.handle(
+        command: "rename_marker",
+        params: ["index": .int(2)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    #expect(dispatcherText(result).contains("non-empty 'name'"))
+    let ops = await ax.executedOps
+    #expect(ops.isEmpty, "Empty rename must not reach the router")
 }
 
 @Test func testNavigateDispatcherToggleViewAndErrors() async {

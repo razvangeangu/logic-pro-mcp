@@ -112,6 +112,23 @@ struct TrackDispatcher {
             guard selectResult.isSuccess else {
                 return toolTextResult(selectResult.message, isError: true)
             }
+            // RB-1.c (2026-05-08 enterprise review): mirror the State-B
+            // refusal gate that `delete` already enforces. `track.select`
+            // can return State B (`verified:false`, e.g. `readback_mismatch`
+            // or `retry_exhausted`) while the outer ChannelResult is still
+            // `.success`. Following State B with `track.duplicate` would
+            // duplicate whatever track is currently selected (which can
+            // differ from the requested index), creating a phantom track
+            // and confusing the caller's mental model. Refuse and require
+            // the caller to re-issue selection.
+            guard let data = selectResult.message.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let verified = json["verified"] as? Bool, verified == true else {
+                return toolTextResult(
+                    "track.duplicate refused: track \(index) selection unverified (State B). Cannot safely duplicate unverified target — re-select or fix Logic Pro AX state and retry. select_response=\(selectResult.message)",
+                    isError: true
+                )
+            }
             let result = await router.route(operation: "track.duplicate")
             return toolTextResult(result)
 

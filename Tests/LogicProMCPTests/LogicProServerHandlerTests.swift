@@ -259,3 +259,53 @@ private let serverResourceText = sharedResourceText
         "stopPoller",
     ])
 }
+
+// RB-3 (signal cleanup): MainEntrypoint's SIGTERM/SIGINT handlers were
+// `exit(0)` before this fix, which leaked the AX poller, channel transports,
+// and virtual MIDI ports on every supervisor restart. The fix adds a public
+// `LogicProServer.stop()` that the signal handler now invokes; this test
+// guards the behaviour by exercising stop() directly.
+@Test func testLogicProServerStopInvokesPollerChannelsPortsTeardown() async {
+    let recorder = ServerStartRecorder()
+    let overrides = LogicProServerRuntimeOverrides(
+        stopPoller: { await recorder.record("stopPoller") },
+        stopChannels: { await recorder.record("stopChannels") },
+        stopPorts: { await recorder.record("stopPorts") }
+    )
+    let server = LogicProServer(runtimeOverrides: overrides)
+
+    await server.stop()
+
+    #expect(await recorder.snapshot() == [
+        "stopPoller",
+        "stopChannels",
+        "stopPorts",
+    ])
+}
+
+@Test func testLogicProServerStopDoesNotHangOnRepeatInvocation() async {
+    // RB-3 (signal cleanup): repeat-stop tolerance is required because a
+    // supervisor may send SIGTERM while the previous shutdown is still in
+    // flight. `stop()` itself does NOT dedupe — each call drives the full
+    // teardown closure chain — but the underlying actors (`StatePoller`,
+    // `ChannelRouter`, `MIDIPortManager`) swallow repeats internally
+    // (`StatePoller.stop()` early-returns when `pollingTask == nil`, etc.).
+    // This test pins the entrypoint behaviour: "two consecutive stop()
+    // invocations complete without throwing or hanging," not "stop()
+    // self-dedupes its work."
+    let recorder = ServerStartRecorder()
+    let overrides = LogicProServerRuntimeOverrides(
+        stopPoller: { await recorder.record("stopPoller") },
+        stopChannels: { await recorder.record("stopChannels") },
+        stopPorts: { await recorder.record("stopPorts") }
+    )
+    let server = LogicProServer(runtimeOverrides: overrides)
+
+    await server.stop()
+    await server.stop()
+
+    #expect(await recorder.snapshot() == [
+        "stopPoller", "stopChannels", "stopPorts",
+        "stopPoller", "stopChannels", "stopPorts",
+    ])
+}

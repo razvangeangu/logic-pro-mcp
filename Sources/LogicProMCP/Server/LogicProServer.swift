@@ -300,6 +300,30 @@ actor LogicProServer {
         try await plan.run()
     }
 
+    /// Tear down the server in the same order that `ServerRuntimePlan.run`
+    /// uses on its happy path: poller → channels → ports. Idempotent — actors
+    /// underneath swallow repeat stop calls. Used by the SIGTERM/SIGINT path
+    /// in `MainEntrypoint` so signal-driven shutdown actually cleans up the
+    /// virtual MIDI ports, AX poller, and channel transports instead of
+    /// leaking them on `exit(0)`.
+    func stop() async {
+        if let stopPoller = runtimeOverrides?.stopPoller {
+            await stopPoller()
+        } else {
+            await poller.stop()
+        }
+        if let stopChannels = runtimeOverrides?.stopChannels {
+            await stopChannels()
+        } else {
+            await router.stopAll()
+        }
+        if let stopPorts = runtimeOverrides?.stopPorts {
+            await stopPorts()
+        } else {
+            await portManager.stop()
+        }
+    }
+
     private func runtimePlan() -> ServerRuntimePlan {
         let server = self.server
         let router = self.router

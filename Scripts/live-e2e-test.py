@@ -510,9 +510,32 @@ def main():
     r = call_tool(client, "logic_mixer", "set_volume", {"index": 0, "volume": 5})
     T("mixer.set_volume(5) handled", r, lambda _: len(tool_text(r)) > 0)
 
-    # Missing params
+    # Missing params — RB-1.a (2026-05-08 enterprise review): the previous
+    # expectation here ("responds (default 0)") locked the production
+    # fail-open behaviour into the test suite. set_volume without an explicit
+    # `track` now fails closed, and this test enforces that contract so a
+    # future regression doesn't silently bring the wrong-track-mutation bug
+    # back.
     r = call_tool(client, "logic_mixer", "set_volume")
-    T("mixer.set_volume without params responds (default 0)", r, lambda _: len(tool_text(r)) > 0)
+    T(
+        "mixer.set_volume without params is rejected (fail-closed)",
+        r,
+        lambda _: is_error(r) and "requires explicit 'track'" in tool_text(r),
+    )
+
+    r = call_tool(client, "logic_mixer", "set_pan")
+    T(
+        "mixer.set_pan without params is rejected (fail-closed)",
+        r,
+        lambda _: is_error(r) and "requires explicit 'track'" in tool_text(r),
+    )
+
+    r = call_tool(client, "logic_mixer", "set_plugin_param", {"insert": 0, "param": 0, "value": 0.5})
+    T(
+        "mixer.set_plugin_param without track is rejected (fail-closed)",
+        r,
+        lambda _: is_error(r) and "requires explicit 'track'" in tool_text(r),
+    )
 
     # Other mixer commands
     r = call_tool(client, "logic_mixer", "toggle_eq", {"index": 0})
@@ -905,8 +928,14 @@ def main():
     r = call_tool(client, "logic_tracks", "select", {"index": "abc"})
     T("track.select non-numeric handled", r, lambda _: len(tool_text(r)) > 0)
 
+    # RB-1.a — non-numeric track must fail-closed with the explicit-required
+    # message, NOT default-to-0 silently.
     r = call_tool(client, "logic_mixer", "set_volume", {"index": "foo", "volume": "bar"})
-    T("mixer.set_volume non-numeric handled", r, lambda _: len(tool_text(r)) > 0)
+    T(
+        "mixer.set_volume non-numeric track is rejected (fail-closed)",
+        r,
+        lambda _: is_error(r) and "requires explicit 'track'" in tool_text(r),
+    )
 
     # Large but reasonable integer values
     r = call_tool(client, "logic_tracks", "select", {"index": 9999})
@@ -924,9 +953,13 @@ def main():
     r = call_tool(client, "logic_tracks", "rename", {"index": 0, "name": "한국어 🎹 音楽"})
     T("track.rename unicode handled", r, lambda _: len(tool_text(r)) > 0)
 
-    # Empty params object
+    # Empty params object — RB-1.a: fail-closed contract.
     r = call_tool(client, "logic_mixer", "set_volume", {})
-    T("mixer.set_volume empty params handled", r, lambda _: len(tool_text(r)) > 0)
+    T(
+        "mixer.set_volume empty params is rejected (fail-closed)",
+        r,
+        lambda _: is_error(r) and "requires explicit 'track'" in tool_text(r),
+    )
 
     # MIDI out-of-range (should still route, driver may reject)
     r = call_tool(client, "logic_midi", "send_note", {"note": 200, "duration_ms": 20})

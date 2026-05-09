@@ -8,6 +8,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.3.0] — 2026-05-08
+
+**Enterprise production-readiness P0 closure — fail-closed mutating writes + signal cleanup.** Closes 5 release blockers (RB-1.a/b/c, RB-3, RB-5) from the 2026-05-08 enterprise production review. The 2026-05-08 review (`docs/reviews/2026-05-08-enterprise-production-readiness-review.md`) verified each evidence line against the source and called the v3.2.0 ship `HARD NO-GO` until these closed. v3.3.0 closes them with 12 new regression tests; remaining P0/P1 items (RB-2 stdio launch parity, RB-4 release-workflow notarization gate, RB-6 install/uninstall non-interactive safety, H-1..H-6) tracked for follow-up.
+
+### ⚠️ BREAKING
+
+#### Mutating mixer / marker commands now require explicit target
+
+Pre-v3.3.0 a malformed call could silently mutate the wrong target because the dispatcher helpers defaulted missing `track`/`index` to `0`. Mixer fader writes and marker deletes are not undoable from the operator's seat, so missing-target now fails closed with an explicit error.
+
+| Tool / command                         | Pre-v3.3.0 behaviour (omitted target)             | v3.3.0+ behaviour                                                     |
+|----------------------------------------|---------------------------------------------------|-----------------------------------------------------------------------|
+| `logic_mixer.set_volume`               | wrote to track 0 silently                         | `requires explicit 'track' (Int ≥ 0)`                                  |
+| `logic_mixer.set_pan`                  | wrote to track 0 silently                         | `requires explicit 'track' (Int ≥ 0)`                                  |
+| `logic_mixer.set_plugin_param`         | wrote to track 0 / insert 0 / param 0 / value 0.0 | each of `track`, `insert`, `param`, `value` now required               |
+| `logic_navigate.delete_marker`         | deleted marker 0                                  | `requires explicit 'index' (Int ≥ 0)`                                  |
+| `logic_navigate.rename_marker`         | renamed marker 0 with empty string                | `index` required + `name` required-non-empty                           |
+
+Caller migration: any client (LLM agent, automation script) that omitted `track`/`index` and relied on the implicit default must add the explicit value. Callers that already supplied the parameter are unaffected.
+
+#### `track.duplicate` rejects unverified selection
+
+`track.select` can return a State B envelope (`success:true, verified:false`, e.g. `readback_mismatch` or `retry_exhausted`) when the AX read-back can't confirm the selection landed. Pre-v3.3.0 `track.duplicate` proceeded on any `selectResult.isSuccess` and could duplicate whatever was actually selected; this matches the v3.1.2 P1-5 fix that the same gate already enforced for `track.delete`.
+
+Affected callers: any client that proceeded after a State B select envelope without re-selecting. Recommended migration: handle `track.select` State B explicitly — re-issue selection or abort the mutation.
+
+### Fixed
+
+- **RB-3 — signal cleanup.** `MainEntrypoint.swift` SIGTERM/SIGINT handlers used to call `exit(0)` directly, skipping the AX poller, channel transports, and virtual MIDI port teardown. The handler now invokes a new public `LogicProServer.stop()` (which drives the same `stopPoller / stopChannels / stopPorts` triple as the happy-path lifecycle) on a dedicated background `signalQueue`, with a 3-second hard timeout exiting `1` so a supervisor can notice. `ServerStarting` protocol gained `stop() async` with a default no-op extension so existing test mocks compile unchanged.
+- **RB-5 — E2E false-positive expectation.** `Scripts/live-e2e-test.py:514` previously asserted that `mixer.set_volume` without `track` "responds (default 0)" — the test literally locked the production fail-open into the suite. The harness now asserts the call is rejected with `"requires explicit 'track'"`, plus matching expectations for `set_pan` and `set_plugin_param`. Lines 932 / 952 (non-numeric track / empty params) tightened to the same fail-closed contract.
+
+### Added
+
+- `RoutingAuditInvariantTests` from v3.1.7 expanded with mutating-write fail-closed regression tests across `MixerDispatcher`, `NavigateDispatcher`, and `TrackDispatcher`. New tests:
+  - `testMixerDispatcherSetVolumeRejectsMissingTrack`, `…RejectsNegativeTrack`, `testMixerDispatcherSetPanRejectsMissingTrack`, `testMixerDispatcherSetPluginParamRejectsMissingTargets` (4 tests; all verify the router is never invoked on rejection).
+  - `testNavigateDispatcherDeleteMarkerRejectsMissingIndex`, `…RejectsNegativeIndex`, `testNavigateDispatcherRenameMarkerRejectsMissingIndex`, `…RejectsEmptyName` (4 tests).
+  - `testDuplicateRefusesOnUnverifiedSelection`, `testDuplicateProceedsOnVerifiedSelection` (2 tests; mirrors the existing delete-State-B-refusal coverage).
+  - `testLogicProServerStopInvokesPollerChannelsPortsTeardown`, `testLogicProServerStopDoesNotHangOnRepeatInvocation` (2 tests; pins the cleanup contract for the signal-handler path).
+
+### Tool description updates
+
+- `logic_mixer.description` and `logic_navigate.description` now name the BREAKING change inline so an LLM agent reading the schema sees the new contract without diving into CHANGELOG.
+
+### Tests
+
+`swift test --no-parallel` → **1095 / 1095 PASS** (was 1083 in v3.2.0; +12 new). Build clean.
+
+### Known gaps tracked for follow-up
+
+The 2026-05-08 review flagged six release blockers and six high findings; this release closes RB-1.a/b/c, RB-3, RB-5 (5 of 6 P0). The remainder is honest deferred:
+
+- **RB-2 (stdio launch parity)** — `ProcessUtils` AppKit-vs-fallback gap under sandboxed MCP-client launch needs a topology probe before fix lands.
+- **RB-4 (release workflow notarization gate)** — production-tag enforcement needs a workflow guard (`refs/tags/v*` requires `MACOS_CERT_BASE64`) and removal of the local `Scripts/release.sh` "ADHOC" path.
+- **RB-6 (install/uninstall non-interactive safety)** — `install-keycmds.sh:40` backup glob must include `*.logikcs`; `uninstall-keycmds.sh` must skip the `read -p` prompt under non-TTY.
+- **H-1..H-6** — audit-log timing, goto_marker cold-cache fallback, README/API/ARCHITECTURE drift, CI coverage gate disabled, swift-testing dependency stale, AXValue force casts in `AXHelpers`.
+
+These are tracked for v3.4.x.
+
 ## [3.2.0] — 2026-05-07
 
 **Marker provenance — Boomer P2-3 closed.** `MarkerState` 가 `position` 의 출처를 머신 가독으로 surface (`position_source`: `parser` / `fallback` / `unknown`). `goto_marker` 가 fallback 또는 unknown provenance 마커 라우팅 시 응답 extras에 `marker_position_uncertain: true` 를 추가하여 caller가 cache fallback 위치임을 명시적으로 인지할 수 있다.

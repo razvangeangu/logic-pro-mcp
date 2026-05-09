@@ -111,6 +111,70 @@ private actor StateBSelectMockChannel: Channel {
     #expect(keyCmdOps[0].0 == "track.delete")
 }
 
+// RB-1.c (2026-05-08 enterprise review): `track.duplicate` mirrors
+// `track.delete`'s State-A gate. Pre-fix duplicate proceeded on any
+// `selectResult.isSuccess`, including State-B (verified:false) — which
+// meant duplicating whatever was actually selected when the AX read-back
+// couldn't confirm the requested track. Post-fix duplicate refuses with
+// the same hint pattern so the caller can re-issue selection.
+@Test func testDuplicateRefusesOnUnverifiedSelection() async {
+    let router = ChannelRouter()
+    let mcu = StateBSelectMockChannel(id: .mcu)
+    let keyCmd = MockChannel(id: .midiKeyCommands)
+    await router.register(mcu)
+    await router.register(keyCmd)
+
+    let result = await TrackDispatcher.handle(
+        command: "duplicate",
+        params: ["index": .int(3)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError == true, "duplicate must error on State B select")
+    let text = sharedToolText(result)
+    #expect(
+        text.contains("track.duplicate refused"),
+        "expected explicit refusal wording, got: \(text)"
+    )
+    #expect(
+        text.contains("State B") || text.contains("unverified"),
+        "expected mention of State B / unverified, got: \(text)"
+    )
+
+    let mcuOps = await mcu.executedOps
+    let keyCmdOps = await keyCmd.executedOps
+    #expect(mcuOps.count == 1, "track.select should have been routed exactly once")
+    #expect(mcuOps[0].0 == "track.select")
+    #expect(keyCmdOps.isEmpty, "track.duplicate must NOT be routed after State B select")
+}
+
+@Test func testDuplicateProceedsOnVerifiedSelection() async {
+    // Companion to the State B refusal test for duplicate.
+    let router = ChannelRouter()
+    let mcu = VerifiedSelectMockChannel(id: .mcu)
+    let keyCmd = MockChannel(id: .midiKeyCommands)
+    await router.register(mcu)
+    await router.register(keyCmd)
+
+    let result = await TrackDispatcher.handle(
+        command: "duplicate",
+        params: ["index": .int(4)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError == false, "duplicate must succeed on State A select")
+
+    let mcuOps = await mcu.executedOps
+    let keyCmdOps = await keyCmd.executedOps
+    #expect(mcuOps.count == 1)
+    #expect(mcuOps[0].0 == "track.select")
+    #expect(mcuOps[0].1 == ["index": "4"])
+    #expect(keyCmdOps.count == 1)
+    #expect(keyCmdOps[0].0 == "track.duplicate")
+}
+
 @Test func testDeleteRefusalIncludesSelectResponseDetail() async {
     // Diagnostic detail check — the refusal message must surface the
     // original select envelope so the caller can debug WHICH State B

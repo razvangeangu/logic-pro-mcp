@@ -1,8 +1,15 @@
 import Dispatch
 import Foundation
 
-protocol ServerStarting {
+protocol ServerStarting: Sendable {
     func start() async throws
+    func stop() async
+}
+
+extension ServerStarting {
+    /// Default no-op so existing test mocks that only implement `start()` keep
+    /// working. Production `LogicProServer` overrides with the real teardown.
+    func stop() async {}
 }
 
 extension LogicProServer: ServerStarting {}
@@ -61,18 +68,48 @@ enum MainEntrypoint {
             return status.allGranted ? 0 : 1
         }
 
-        // Install SIGTERM/SIGINT handlers for graceful shutdown
-        let signalSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+        let server = serverFactory()
+
+        // SIGTERM / SIGINT → coordinated shutdown, then exit. Pre-fix the
+        // handlers called `exit(0)` directly which skipped the AX poller,
+        // channel transports, and virtual MIDI port teardown — leaking
+        // resources every time a supervisor restarted the process.
+        //
+        // The handler runs on a dedicated background queue (not `.main`) so
+        // `group.wait` cannot deadlock against an actor that needs the main
+        // runloop. Hard timeout caps cleanup at 3s; on overrun we still exit
+        // with a non-zero code so a supervisor can notice.
+        let signalQueue = DispatchQueue(label: "logic-pro-mcp.signal")
+        let signalSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: signalQueue)
+        let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: signalQueue)
         signal(SIGTERM, SIG_IGN)
         signal(SIGINT, SIG_IGN)
-        signalSource.setEventHandler { exit(0) }
-        intSource.setEventHandler { exit(0) }
+
+        let shutdownTimeout = DispatchTimeInterval.seconds(3)
+        let shutdown: @Sendable () -> Void = { [server] in
+            let group = DispatchGroup()
+            group.enter()
+            Task {
+                await server.stop()
+                group.leave()
+            }
+            if group.wait(timeout: .now() + shutdownTimeout) == .timedOut {
+                Log.error(
+                    "Shutdown timeout exceeded — exiting without confirmed cleanup",
+                    subsystem: "main"
+                )
+                exit(1)
+            }
+            Log.info("Server stopped — graceful shutdown complete", subsystem: "main")
+            exit(0)
+        }
+        signalSource.setEventHandler(handler: shutdown)
+        intSource.setEventHandler(handler: shutdown)
         signalSource.resume()
         intSource.resume()
 
         do {
-            try await serverFactory().start()
+            try await server.start()
             return 0
         } catch {
             Log.error("Server failed: \(error)", subsystem: "main")

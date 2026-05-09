@@ -4,7 +4,7 @@ import MCP
 struct NavigateDispatcher {
     static let tool = Tool(
         name: "logic_navigate",
-        description: "Navigation and markers in Logic Pro. Commands: goto_bar, goto_marker, create_marker, delete_marker, rename_marker, zoom_to_fit, set_zoom, toggle_view. Params: goto_bar -> { bar: Int }; goto_marker -> { index: Int } or { name: String }; create_marker -> { name: String }; rename_marker -> { index: Int, name: String }; delete_marker -> { index: Int }; set_zoom -> { level: String } (in|out|fit); toggle_view -> { view: String } (mixer|piano_roll|score|step_editor|library|inspector|automation).",
+        description: "Navigation and markers in Logic Pro. Commands: goto_bar, goto_marker, create_marker, delete_marker, rename_marker, zoom_to_fit, set_zoom, toggle_view. BREAKING since v3.3.0: delete_marker / rename_marker require explicit `index` (Int ≥ 0) — pre-v3.3.0 missing `index` defaulted to 0 and silently mutated marker 0; rename_marker now also rejects empty `name`. Params: goto_bar -> { bar: Int }; goto_marker -> { index: Int } or { name: String }; create_marker -> { name: String }; rename_marker -> { index: Int (required, ≥ 0), name: String (required, non-empty) }; delete_marker -> { index: Int (required, ≥ 0) }; set_zoom -> { level: String } (in|out|fit); toggle_view -> { view: String } (mixer|piano_roll|score|step_editor|library|inspector|automation).",
         inputSchema: commandParamsToolSchema(commandDescription: "Navigation command to execute")
     )
 
@@ -93,7 +93,16 @@ struct NavigateDispatcher {
             return toolTextResult(result)
 
         case "delete_marker":
-            let index = intParam(params, "index", default: 0)
+            // RB-1.b (2026-05-08 enterprise review): pre-fix `intParam(default: 0)`
+            // silently deleted marker 0 when `index` was missing/malformed.
+            // Marker mutations are not undoable in the same project session,
+            // so missing/negative target now fails closed.
+            guard let index = intParamOrNil(params, "index"), index >= 0 else {
+                return toolTextResult(
+                    "delete_marker requires explicit 'index' (Int ≥ 0)",
+                    isError: true
+                )
+            }
             let result = await router.route(
                 operation: "nav.delete_marker",
                 params: ["index": String(index)]
@@ -101,8 +110,21 @@ struct NavigateDispatcher {
             return toolTextResult(result)
 
         case "rename_marker":
-            let index = intParam(params, "index", default: 0)
+            // RB-1.b — same fail-closed treatment for index, plus reject empty
+            // `name` (a blank rename overwrote the marker label silently).
+            guard let index = intParamOrNil(params, "index"), index >= 0 else {
+                return toolTextResult(
+                    "rename_marker requires explicit 'index' (Int ≥ 0)",
+                    isError: true
+                )
+            }
             let name = stringParam(params, "name")
+            guard !name.isEmpty else {
+                return toolTextResult(
+                    "rename_marker requires non-empty 'name'",
+                    isError: true
+                )
+            }
             let result = await router.route(
                 operation: "nav.rename_marker",
                 params: ["index": String(index), "name": name]
