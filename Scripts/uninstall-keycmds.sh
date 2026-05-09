@@ -42,9 +42,22 @@ if [ -d "$BACKUP_DIR" ]; then
         # action for unattended uninstalls — the operator can re-run with
         # `LOGIC_PRO_MCP_KEYCMD_AUTO_RESTORE=1` if they actually wanted
         # the restore). Interactive runs are unchanged.
+        # v3.4.1 (Boomer P2-5): make the AUTO_RESTORE branch fail-loud on
+        # an empty backup directory. Pre-fix the `cp .../* ... || true`
+        # masked an empty source dir as success, so an operator running
+        # uninstall with `LOGIC_PRO_MCP_KEYCMD_AUTO_RESTORE=1` against a
+        # corrupt backup would see "✓ Restored" without any files moving.
+        # The new check counts what actually exists in $LATEST first.
         if [ "$AUTO_RESTORE" = "1" ]; then
-            cp "$LATEST"/* "$KEYCMD_DIR/" 2>/dev/null || true
-            echo "✓ Restored from: $(basename "$LATEST")"
+            BACKUP_FILE_COUNT=$(find "$LATEST" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$BACKUP_FILE_COUNT" = "0" ]; then
+                echo "⚠  Backup '$(basename "$LATEST")' is empty — skipping restore."
+                echo "  Pick a different backup with LOGIC_PRO_MCP_KEYCMD_RESTORE_FROM=<path>"
+                echo "  or remove the corrupt backup directory manually."
+            else
+                cp "$LATEST"/* "$KEYCMD_DIR/" 2>/dev/null || true
+                echo "✓ Restored $BACKUP_FILE_COUNT files from: $(basename "$LATEST")"
+            fi
         elif [ -t 0 ]; then
             read -p "Restore from $(basename "$LATEST")? [y/N] " -n 1 -r
             echo

@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.1] — 2026-05-08
+
+**v3.4.0 Boomer P2 sweep — non-BREAKING fail-loud hardening.** The Boomer review of v3.4.0 catalogued five P2 items as "addressable in a v3.4.1 sweep but none blocks release." This patch closes four of them (the fifth — `nav.goto_marker` orphan routing entry — was already addressed inline in v3.4.0 with a clarifying comment in `ChannelRouter`).
+
+### Fixed (Boomer P2 from v3.4.0 review)
+
+- **P2-2 — `release.sh` lipo empty / garbled output now fails loud.** Pre-fix `lipo -info` returning nothing or an unparseable string silently produced `"architectures":[]` in `RELEASE-METADATA.json`. The metadata consumer would see that as a known-empty manifest. v3.4.1 exits non-zero before publishing if the binary's architecture(s) cannot be parsed.
+- **P2-3 — `ProjectDispatcher.AuditPhase.executed` contract documented.** The audit phase docstring now explicitly states that `executed` records *invocation intent* before `router.route(...)` fires, not the route's *outcome*. SIEM consumers who want outcome correlate the audit line with the channel response by timestamp + command name. This prevents future readers from misreading the contract.
+- **P2-4 — CI coverage gate awk extraction is now fail-loud on column drift.** Pre-fix `awk '{print $4}'` and `$10` would silently extract a wrong field if a future LLVM `cov report` version inserted a column. v3.4.1 validates the extracted values match `^[0-9]+\.[0-9]+%$` before threshold compare; a mismatch fails the build with an `::error::` line naming the actual TOTAL line so a maintainer can fix the awk indices.
+- **P2-5 — `uninstall-keycmds.sh` AUTO_RESTORE branch now refuses an empty backup.** Pre-fix `cp $LATEST/* … || true` masked an empty source directory as success — the operator saw `"✓ Restored"` without any files moving. v3.4.1 counts the backup file count first; an empty backup logs a clear warning and skips the copy with a hint to pick a different backup directory.
+
+### Tests
+
+`swift test --no-parallel` → **1110 / 1110 PASS** (unchanged from v3.4.0; this patch is hardening + comments only). Build clean.
+
 ## [3.4.0] — 2026-05-08
 
 **Enterprise deferred-blocker closure: stdio launch parity, release governance, install rollback safety, audit-phase split, target-faithful navigation, AX hardening, docs realignment.** Closes the v3.3.0 honest-deferred set (RB-2, RB-4, RB-6, H-1..H-4, H-6) from the 2026-05-08 enterprise production-readiness review. Eight tickets, +15 regression tests (1110/1110 PASS), Boomer BOOMER-6 verdict pending Phase 6 final review. H-5 (swift-testing dep) re-deferred — Apple has not yet shipped the SwiftPM-side glue that makes the bundled Swift 6 Testing framework usable without the explicit package dependency (`_TestingInternals` missing on direct removal — confirmed twice).

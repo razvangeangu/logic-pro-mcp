@@ -55,9 +55,27 @@ jobs:
 
           # Extract TOTAL line — llvm-cov column order: regions, missed,
           # cover%, functions, missed, cover%, lines, missed, cover%.
+          # v3.4.1 (Boomer P2-4): validate extracted values match the
+          # `<float>%` shape before threshold compare. A future LLVM
+          # version that prepends a column (e.g. instantiation summary
+          # in TOTAL) would silently grab a different field; the regex
+          # guard below makes that fail-loud instead.
           TOTAL_LINE=$(grep -E "^TOTAL" coverage-report.txt || true)
-          REGION_PCT=$(echo "$TOTAL_LINE" | awk '{print $4}' | tr -d '%')
-          LINE_PCT=$(echo "$TOTAL_LINE" | awk '{print $10}' | tr -d '%')
+          REGION_RAW=$(echo "$TOTAL_LINE" | awk '{print $4}')
+          LINE_RAW=$(echo "$TOTAL_LINE" | awk '{print $10}')
+          if ! echo "$REGION_RAW" | grep -qE '^[0-9]+\.[0-9]+%$'; then
+            echo "::error::Region coverage field '$REGION_RAW' did not match <float>% pattern."
+            echo "::error::TOTAL line was: $TOTAL_LINE"
+            echo "::error::This usually means llvm-cov column order changed; review the awk extraction."
+            exit 1
+          fi
+          if ! echo "$LINE_RAW" | grep -qE '^[0-9]+\.[0-9]+%$'; then
+            echo "::error::Line coverage field '$LINE_RAW' did not match <float>% pattern."
+            echo "::error::TOTAL line was: $TOTAL_LINE"
+            exit 1
+          fi
+          REGION_PCT=$(echo "$REGION_RAW" | tr -d '%')
+          LINE_PCT=$(echo "$LINE_RAW" | tr -d '%')
 
           {
             echo "## Coverage report"

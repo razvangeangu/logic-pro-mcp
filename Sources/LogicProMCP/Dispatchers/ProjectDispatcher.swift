@@ -221,6 +221,20 @@ struct ProjectDispatcher {
     /// H-1 (2026-05-08 enterprise review): audit phases for L1+ project
     /// commands. Splits the prior single `executed` line into three signals
     /// a SIEM can filter on.
+    ///
+    /// **Contract — v3.4.1 (Boomer P2-3):** `executed` is emitted
+    /// **immediately before** `router.route(...)` fires, not after. This
+    /// records *invocation intent* rather than *outcome*. The reasons:
+    ///   - Outcome lives in the channel response (success / hard error).
+    ///   - A post-route audit line would be lost if the AppleScript hung
+    ///     or the actor died, exactly when audit visibility matters most.
+    ///   - SIEM consumers that want the outcome can correlate the
+    ///     `executed` line with the channel response by timestamp +
+    ///     command name; the contract gives them both signals.
+    /// Concretely: an L1 command that passes validation but fails at the
+    /// channel level (Logic not running, AppleScript denied) will still
+    /// show `[AUDIT] project.<command> executed` followed by an error
+    /// envelope on the wire. That is the intended behaviour.
     enum AuditPhase: String, Sendable {
         /// Validation refused the call before any side effect.
         case rejected

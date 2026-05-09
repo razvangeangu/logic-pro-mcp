@@ -128,13 +128,35 @@ else
     # like:
     #   Non-fat file: ... is architecture: arm64
     #   Architectures in the fat file: ... are: arm64 x86_64
+    #
+    # v3.4.1 (Boomer P2-2): fail loud when lipo returns nothing parseable.
+    # Pre-fix an empty/garbled lipo output silently produced
+    # `"architectures":[]`, which a downstream consumer could misread as
+    # a known-empty manifest. We instead exit non-zero so the release is
+    # never published with malformed metadata.
     LIPO_OUT=$(lipo -info "$STAGE_DIR/LogicProMCP" 2>/dev/null || true)
+    if [ -z "$LIPO_OUT" ]; then
+        echo "Error: lipo -info '$STAGE_DIR/LogicProMCP' returned no output."
+        echo "  The binary may be missing, unreadable, or not a Mach-O file."
+        echo "  Refusing to publish a release with unknown architecture metadata."
+        exit 1
+    fi
     if echo "$LIPO_OUT" | grep -q "Non-fat file"; then
         ARCH_FIELD=$(echo "$LIPO_OUT" | sed -E 's/.*architecture: ([a-zA-Z0-9_]+).*/\1/')
+        if [ -z "$ARCH_FIELD" ] || ! echo "$ARCH_FIELD" | grep -qE '^[a-zA-Z0-9_]+$'; then
+            echo "Error: could not parse architecture from lipo output:"
+            echo "  $LIPO_OUT"
+            exit 1
+        fi
         ARCH_JSON="[\"$ARCH_FIELD\"]"
     else
         # Multi-arch line — extract everything after "are:" and split.
         ARCH_LIST=$(echo "$LIPO_OUT" | sed -E 's/.*are: //' | tr ' ' '\n' | grep -v '^$' | sed 's/.*/"&"/' | paste -sd, -)
+        if [ -z "$ARCH_LIST" ]; then
+            echo "Error: could not parse fat-file architectures from lipo output:"
+            echo "  $LIPO_OUT"
+            exit 1
+        fi
         ARCH_JSON="[$ARCH_LIST]"
     fi
 
