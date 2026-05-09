@@ -33,13 +33,32 @@ struct ProjectDispatcher {
     ) async -> CallTool.Result {
         let confirmed = boolParam(params, "confirmed", default: false)
 
-        // Audit log for L1+ commands
-        if DestructivePolicy.needsAuditLog(for: command) {
-            Log.info("[AUDIT] project.\(command) executed", subsystem: "project")
-        }
+        // H-1 (2026-05-08 enterprise review): pre-fix this dispatcher logged
+        // `[AUDIT] project.<command> executed` BEFORE param validation,
+        // BEFORE the destructive-confirmation gate, and BEFORE the route
+        // actually fired. Enterprise audit trails treated rejected calls
+        // (e.g. `project.open` with empty path) as if they had run, which
+        // both inflated the audit volume and hid genuine failures behind
+        // identical log lines.
+        //
+        // The fix splits the audit signal into three distinct phases that
+        // a SIEM can filter on:
+        //   - `rejected` — validation refused the call before any side effect
+        //   - `confirmation_required` — destructive policy returned the
+        //     confirmation envelope; no route was attempted
+        //   - `executed` — the underlying route was invoked (success or
+        //     hard failure) and any side effect has either landed or been
+        //     reported back from the channel
+        //
+        // Helpers below are intentionally inlined per-case rather than
+        // wrapped in a single function so the log is always paired with
+        // the immediately-following return — refactors that move the
+        // return without moving the audit call would surface as a diff
+        // anomaly during review.
 
         switch command {
         case "new":
+            audit(command, phase: .executed)
             let result = await router.route(operation: "project.new")
             // v3.1.2 (P0-3) — clear cache on lifecycle success so the next
             // resource read / name-based routing decision sees the fresh
@@ -56,14 +75,18 @@ struct ProjectDispatcher {
         case "open":
             let path = stringParam(params, "path")
             guard !path.isEmpty else {
+                audit(command, phase: .rejected, reason: "missing path")
                 return toolTextResult("open requires 'path' param", isError: true)
             }
             guard AppleScriptSafety.isValidProjectPath(path, requireExisting: true) else {
+                audit(command, phase: .rejected, reason: "invalid path")
                 return toolTextResult("open requires an existing absolute .logicx project path", isError: true)
             }
             if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+                audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
+            audit(command, phase: .executed)
             let result = await router.route(
                 operation: "project.open",
                 params: ["path": path]
@@ -73,20 +96,25 @@ struct ProjectDispatcher {
             return toolTextResult(result)
 
         case "save":
+            audit(command, phase: .executed)
             let result = await router.route(operation: "project.save")
             return toolTextResult(result)
 
         case "save_as":
             let path = stringParam(params, "path")
             guard !path.isEmpty else {
+                audit(command, phase: .rejected, reason: "missing path")
                 return toolTextResult("save_as requires 'path' param", isError: true)
             }
             guard AppleScriptSafety.isValidProjectPath(path, requireExisting: false) else {
+                audit(command, phase: .rejected, reason: "invalid path")
                 return toolTextResult("save_as requires an absolute .logicx project path", isError: true)
             }
             if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+                audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
+            audit(command, phase: .executed)
             let result = await router.route(
                 operation: "project.save_as",
                 params: ["path": path]
@@ -97,14 +125,17 @@ struct ProjectDispatcher {
             let savingRaw = stringParam(params, "saving", default: "yes")
             let saving = ["yes", "no", "ask"].contains(savingRaw) ? savingRaw : "yes"
             if savingRaw != saving {
+                audit(command, phase: .rejected, reason: "invalid saving value")
                 return toolTextResult(
                     "close 'saving' must be one of: yes, no, ask (got: \(savingRaw))",
                     isError: true
                 )
             }
             if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+                audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
+            audit(command, phase: .executed)
             let result = await router.route(
                 operation: "project.close",
                 params: ["saving": saving]
@@ -117,8 +148,10 @@ struct ProjectDispatcher {
 
         case "bounce":
             if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+                audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
+            audit(command, phase: .executed)
             let result = await router.route(operation: "project.bounce")
             return toolTextResult(result)
 
@@ -134,8 +167,10 @@ struct ProjectDispatcher {
 
         case "launch":
             if isLogicProRunning() {
+                audit(command, phase: .rejected, reason: "already running")
                 return toolTextResult("Logic Pro is already running")
             }
+            audit(command, phase: .executed)
             return await runLifecycleScript(
                 script: "tell application \"Logic Pro\" to activate",
                 successMessage: "Logic Pro launched",
@@ -148,11 +183,14 @@ struct ProjectDispatcher {
 
         case "quit":
             if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+                audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
             if !isLogicProRunning() {
+                audit(command, phase: .rejected, reason: "not running")
                 return toolTextResult("Logic Pro is not running")
             }
+            audit(command, phase: .executed)
             return await runLifecycleScript(
                 script: "tell application \"Logic Pro\" to quit",
                 successMessage: "Logic Pro quit",
@@ -178,6 +216,31 @@ struct ProjectDispatcher {
     private static func invalidateOnSuccess(_ result: ChannelResult, cache: StateCache) async {
         guard result.isSuccess else { return }
         await cache.clearProjectState()
+    }
+
+    /// H-1 (2026-05-08 enterprise review): audit phases for L1+ project
+    /// commands. Splits the prior single `executed` line into three signals
+    /// a SIEM can filter on.
+    enum AuditPhase: String, Sendable {
+        /// Validation refused the call before any side effect.
+        case rejected
+        /// Destructive policy returned the confirmation envelope; no route
+        /// was attempted, the caller is expected to retry with `confirmed:true`.
+        case confirmationRequired = "confirmation_required"
+        /// The underlying route was invoked. Success or hard failure is then
+        /// captured in the channel response, not the audit line.
+        case executed
+    }
+
+    /// Emit an audit line for L1+ commands. No-op for L0 (`is_running`,
+    /// `get_regions`, etc.) so read-only ops don't pollute the audit log.
+    static func audit(_ command: String, phase: AuditPhase, reason: String? = nil) {
+        guard DestructivePolicy.needsAuditLog(for: command) else { return }
+        if let reason {
+            Log.info("[AUDIT] project.\(command) \(phase.rawValue) — \(reason)", subsystem: "project")
+        } else {
+            Log.info("[AUDIT] project.\(command) \(phase.rawValue)", subsystem: "project")
+        }
     }
 
     private static func runLifecycleScript(

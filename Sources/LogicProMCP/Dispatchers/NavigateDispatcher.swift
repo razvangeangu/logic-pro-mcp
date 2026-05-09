@@ -67,22 +67,48 @@ struct NavigateDispatcher {
                 )
                 return toolTextResult(merged, isError: !result.isSuccess)
             }
-            // Cache cold AND index-based caller — pass through to the legacy
-            // keycmd path. The keypress at least advances Logic's marker
-            // pointer; better than failing outright.
+            // H-2 (2026-05-08 enterprise review): pre-fix the cache-cold
+            // index-based path fell back to `nav.goto_marker` (CC 38), which
+            // is Logic's "go to next marker" hotkey — it advances the marker
+            // pointer by one regardless of the requested index. A caller
+            // saying "goto_marker { index: 5 }" with a cold cache silently
+            // got "go to whatever marker comes next." That violates the
+            // target-faithful contract every other dispatcher honors.
+            //
+            // Fix: when the target can't be resolved against the cache,
+            // return State C (`element_not_found`) with a hint pointing the
+            // caller at the cache freshness state. The caller can then
+            // decide whether to refresh the cache and retry, or accept the
+            // failure. No silent wrong-target navigation.
             if let indexStr = params["index"]?.intValue.map(String.init)
                 ?? params["index"]?.stringValue {
-                let result = await router.route(
-                    operation: "nav.goto_marker",
-                    params: ["index": indexStr]
+                return toolTextResult(
+                    HonestContract.encodeStateC(
+                        error: .elementNotFound,
+                        hint: "goto_marker: marker index \(indexStr) not found in cached marker list (count=\(markers.count)). The marker list cache may be cold (poller hasn't refreshed, or the marker list window is closed on Logic 12.2). Try `system.refresh_cache` and retry, or supply `name` instead. Pre-v3.4.0 this fell back to the legacy CC 38 keycmd which silently advanced to the next marker — this fallback is removed because it ignored the requested index.",
+                        extras: [
+                            "requested_index": indexStr,
+                            "cached_marker_count": markers.count,
+                        ]
+                    ),
+                    isError: true
                 )
-                return toolTextResult(result)
             }
             let name = stringParam(params, "name")
             if name.isEmpty {
                 return toolTextResult("goto_marker requires 'index' or 'name' param", isError: true)
             }
-            return toolTextResult("No marker found matching '\(name)'", isError: true)
+            return toolTextResult(
+                HonestContract.encodeStateC(
+                    error: .elementNotFound,
+                    hint: "goto_marker: no marker matching name '\(name)' in cached list (count=\(markers.count)). Try `system.refresh_cache` and retry.",
+                    extras: [
+                        "requested_name": name,
+                        "cached_marker_count": markers.count,
+                    ]
+                ),
+                isError: true
+            )
 
         case "create_marker":
             let name = stringParam(params, "name", default: "Marker")

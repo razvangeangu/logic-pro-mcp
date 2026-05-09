@@ -37,7 +37,14 @@ mkdir -p "$KEYCMD_DIR"
 mkdir -p "$BACKUP_DIR"
 
 # Backup existing key commands
-EXISTING_FILES=$(find "$KEYCMD_DIR" -maxdepth 1 \( -name "*.plist" -o -name "*.logickeycommands" \) 2>/dev/null | grep -v backups || true)
+# RB-6 (2026-05-08 enterprise review) closed in v3.4.0: pre-fix this glob
+# matched only `*.plist` and `*.logickeycommands` and silently skipped
+# `*.logikcs` (Logic 12.2+ binary format), so the v3.1.6 SETUP rewrite
+# claimed manual-learn safety while the underlying installer could still
+# clobber a Logic 12.2 user's bindings without backing them up. The
+# `.logikcs` extension is now included so backup coverage matches the
+# user-facing claim.
+EXISTING_FILES=$(find "$KEYCMD_DIR" -maxdepth 1 \( -name "*.plist" -o -name "*.logickeycommands" -o -name "*.logikcs" \) 2>/dev/null | grep -v backups || true)
 if [ -n "$EXISTING_FILES" ]; then
     echo "Backing up existing key commands to: $BACKUP_DIR/backup_$TIMESTAMP/"
     mkdir -p "$BACKUP_DIR/backup_$TIMESTAMP"

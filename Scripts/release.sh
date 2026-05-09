@@ -1,15 +1,30 @@
 #!/bin/bash
 #
-# Scripts/release.sh — one-command ADHOC release.
+# Scripts/release.sh — local one-command ADHOC release.
 #
-# Produces a v-tagged GitHub release with the arm64-native binary, aliased
-# `universal` / `arm64` tarballs, SHA256SUMS.txt, and RELEASE-METADATA.json.
-# Commits the Formula sha256 sync *before* pushing the tag so `brew install`
-# against `git checkout <tag>` resolves correctly.
+# Produces a v-tagged GitHub release with an ADHOC-signed binary, aliased
+# `universal` / `arm64` tarballs (bytes identical for tap backward-compat),
+# SHA256SUMS.txt, and RELEASE-METADATA.json. Commits the Formula sha256 sync
+# *before* pushing the tag so `brew install` against `git checkout <tag>`
+# resolves correctly.
+#
+# RB-4 (2026-05-08 enterprise review): this script is for LOCAL / RC
+# releases ONLY. It will refuse to publish a stable tag (`vX.Y.Z` with no
+# `-prerelease` suffix) unless `LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1` is set
+# explicitly — same governance gate as `.github/workflows/release.yml`.
+# Production stable releases should use the GitHub Actions workflow with
+# Apple Developer ID + notarization secrets.
+#
+# Architecture honesty: pre-fix this script copied the arm64-only build
+# to `LogicProMCP-macOS-universal.tar.gz`. v3.4.0+ records the actual
+# architecture(s) in RELEASE-METADATA.json (`architectures` field) so
+# downstream consumers can detect the mismatch instead of trusting the
+# filename.
 #
 # Usage:
-#   Scripts/release.sh v3.0.1            # adhoc release
-#   DRY_RUN=1 Scripts/release.sh v3.0.1  # print steps without executing
+#   Scripts/release.sh v3.0.1-rc1                        # adhoc RC
+#   LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1 Scripts/release.sh v3.4.0
+#   DRY_RUN=1 Scripts/release.sh v3.0.1-rc1              # print steps only
 #
 # Preconditions:
 #   - Working tree clean (or only the version-bump commit staged)
@@ -29,6 +44,30 @@ fi
 if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
     echo "Error: VERSION '$VERSION' must be strict SemVer, e.g. v3.0.1 or v3.1.0-rc1"
     exit 1
+fi
+
+# RB-4 (2026-05-08 enterprise review): refuse stable tags by default. Stable
+# = no `-prerelease` suffix. Set LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1 to opt
+# in (e.g. when the GitHub Actions workflow is unavailable and you need to
+# ship anyway — but the artifact will be ADHOC, not notarized).
+if [[ "$VERSION" != *-* ]]; then
+    if [ "${LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE:-0}" != "1" ]; then
+        echo "Error: stable tag '$VERSION' refused for ADHOC release."
+        echo ""
+        echo "  Production stable releases should use the GitHub Actions"
+        echo "  workflow (.github/workflows/release.yml) with Apple Developer"
+        echo "  ID + notarization secrets configured."
+        echo ""
+        echo "  To override (e.g. for a private adhoc cut):"
+        echo "    LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1 Scripts/release.sh $VERSION"
+        echo ""
+        echo "  Or use a prerelease tag (no override needed):"
+        echo "    Scripts/release.sh ${VERSION}-rc1"
+        exit 1
+    fi
+    echo ""
+    echo "  ⚠  ADHOC stable release: explicit LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1 set."
+    echo ""
 fi
 
 run() {
@@ -84,13 +123,28 @@ else
     BINARY_SHA=$(shasum -a 256 "$STAGE_DIR/LogicProMCP" | awk '{print $1}')
     TARBALL_SHA=$(shasum -a 256 "$STAGE_DIR/LogicProMCP-macOS-arm64.tar.gz" | awk '{print $1}')
 
+    # RB-4 — record actual binary architecture(s) so a downstream consumer
+    # can detect a mismatch with the filename. `lipo -info` returns lines
+    # like:
+    #   Non-fat file: ... is architecture: arm64
+    #   Architectures in the fat file: ... are: arm64 x86_64
+    LIPO_OUT=$(lipo -info "$STAGE_DIR/LogicProMCP" 2>/dev/null || true)
+    if echo "$LIPO_OUT" | grep -q "Non-fat file"; then
+        ARCH_FIELD=$(echo "$LIPO_OUT" | sed -E 's/.*architecture: ([a-zA-Z0-9_]+).*/\1/')
+        ARCH_JSON="[\"$ARCH_FIELD\"]"
+    else
+        # Multi-arch line — extract everything after "are:" and split.
+        ARCH_LIST=$(echo "$LIPO_OUT" | sed -E 's/.*are: //' | tr ' ' '\n' | grep -v '^$' | sed 's/.*/"&"/' | paste -sd, -)
+        ARCH_JSON="[$ARCH_LIST]"
+    fi
+
     cat > "$STAGE_DIR/SHA256SUMS.txt" <<EOF
 $BINARY_SHA  LogicProMCP
 $TARBALL_SHA  LogicProMCP-macOS-arm64.tar.gz
 $TARBALL_SHA  LogicProMCP-macOS-universal.tar.gz
 EOF
     cat > "$STAGE_DIR/RELEASE-METADATA.json" <<EOF
-{"version":"$VERSION","team_id":"ADHOC","signing":"adhoc"}
+{"version":"$VERSION","team_id":"ADHOC","signing":"adhoc","architectures":$ARCH_JSON}
 EOF
 fi
 

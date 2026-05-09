@@ -193,13 +193,13 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 - `notes` is empty, or no valid events parsed
 - Playhead reset (`transport.goto_position` with `bar=1`) fails — treated as a hard precondition because Logic's MIDI File Import anchors the region at playhead; without the reset, notes would land at the wrong bar
 - `midi.import_file` fails
-- No new track is observed in the AX cache within 2 seconds of import
+- No new track is observed via live AX within 500 ms of import (v3.1.2+ switched from 2s cache polling to live `AXLogicProElements.allTrackHeaders` after the cache-poll race documented in CHANGELOG §3.1.2)
 
 **Strategy D — tick-0 padding CC**: Logic Pro's MIDI File import strips leading empty delta before the first MIDI channel event, which would silently place every imported region at bar 1 regardless of the caller's `bar` parameter. SMFWriter counters this by emitting `CC#110 value 0` on channel 0 at tick 0 whenever `bar > 1`. Logic preserves the full tick timeline because a MIDI channel event now exists at tick 0. The resulting region spans bar 1 through the target bar; the caller's notes land at exactly the encoded positions inside the region. Verified on Logic Pro 12 — `bar=50` request produces a region described by Logic as "1 마디에서 시작하여 51 마디에서 끝납니다" with the note at the trailing edge.
 
 **Response caveats**:
 - The region's start is always bar 1 (cosmetic trade-off of the padding strategy). If you need the region itself trimmed, the caller can run `편집 → 이동 → 재생헤드로` on the selected region after positioning the playhead.
-- `created_track` is always the 0-based index of the newly-created track (Logic always creates a new MIDI track per import). The v2.3.0 `track_index_confirmed` fallback was removed in v3.0.0 — the command now polls the AX cache for up to 2 seconds and returns an error if the new track never appears, so the field would always be `true` in a success response and was redundant.
+- `created_track` is always the 0-based index of the newly-created track (Logic always creates a new MIDI track per import). The v2.3.0 `track_index_confirmed` fallback was removed in v3.0.0; v3.1.2 then replaced the original 2-second cache-poll loop with a 500 ms live-AX read against `AXLogicProElements.allTrackHeaders` (cache-poll race fix). On success the field would always be `true` so it was dropped from the response.
 
 **`arm_only` behavior (v3.0.0+)**:
 
@@ -452,8 +452,8 @@ The `source` field tells you which transport tier produced each response:
 
 | `source` | Meaning |
 |----------|---------|
-| `"ax_live"` | Cache value, refreshed within the last 5 seconds by the AX poller. |
-| `"cache"` | Cache value, older than 5 seconds. Treat as potentially stale. |
+| `"ax_live"` | Cache value, refreshed within the last 3 seconds by the AX poller. |
+| `"cache"` | Cache value, older than 3 seconds. Treat as potentially stale. |
 | `"project_file"` | Read from `MetaData.plist`. Reflects last-saved state — `lastSavedAgeSec` shows how stale relative to the on-disk file. |
 | `"default"` | Struct defaults (`tempo: 120`, `timeSignature: "4/4"`, `trackCount: 0`). Logic not running, no document open, or all tiers unavailable. |
 

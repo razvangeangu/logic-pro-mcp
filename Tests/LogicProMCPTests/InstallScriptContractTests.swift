@@ -38,7 +38,11 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(script.contains("LOGIC_PRO_MCP_REGISTER_CLAUDE"))
     #expect(script.contains("Registering with Claude Code"))
     #expect(script.contains("LOGIC_PRO_MCP_INSTALL_KEYCMDS"))
-    #expect(script.contains("Installing Key Commands preset"))
+    // RB-6 (v3.4.0): wording was "Installing Key Commands preset" — corrected to
+    // "Staging Key Commands mapping reference" since Logic 12.2 doesn't actually
+    // import the .plist; the script only stages a CC→Command mapping reference
+    // for Manual MIDI Learn.
+    #expect(script.contains("Staging Key Commands mapping reference"))
     #expect(script.contains("LOGIC_PRO_MCP_INSTALL_DIR"))
     #expect(script.contains("LOGIC_PRO_MCP_SKIP_SUDO"))
     #expect(script.contains("--approve-channel MIDIKeyCommands"))

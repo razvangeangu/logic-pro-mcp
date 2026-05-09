@@ -26,10 +26,13 @@ enum ProcessUtils {
                 return ProcessUtils.runAppKit { app.activate(); return true } ?? false
             },
             logicProBundleURL: {
-                ProcessUtils.runAppKit {
-                    ProcessUtils.logicProApp()?.bundleURL
-                        ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: ServerConfig.logicProBundleID)
-                } ?? nil
+                // RB-2 (v3.4.0): same rationale as `logicProApp()` — both
+                // `NSRunningApplication.bundleURL` and
+                // `NSWorkspace.urlForApplication(withBundleIdentifier:)` are
+                // launch-services queries with no runloop dependency, so the
+                // prior `runAppKit` guard forced a false-nil under stdio.
+                ProcessUtils.logicProApp()?.bundleURL
+                    ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: ServerConfig.logicProBundleID)
             }
         )
     }
@@ -64,12 +67,23 @@ enum ProcessUtils {
         return DispatchQueue.main.sync(execute: body)
     }
 
+    /// RB-2 (2026-05-08 enterprise review) closed in v3.4.0: pre-fix this
+    /// wrapped the call in `runAppKit` "to be safe," which forced a nil
+    /// return whenever the server ran as an MCP-client stdio subprocess
+    /// (no AppKit runloop). The fallback chain (`/bin/ps` →
+    /// `osascript System Events`) then took over, and in restricted
+    /// launch contexts it sometimes failed too — producing the observed
+    /// `logic_pro_running:false` while System Events on the same host
+    /// could see Logic.
+    ///
+    /// `NSRunningApplication.runningApplications(withBundleIdentifier:)`
+    /// is documented as thread-safe (it queries the launch services
+    /// database; no runloop dependency). Calling it directly removes
+    /// the false negative without losing safety.
     private static func logicProApp() -> NSRunningApplication? {
-        runAppKit {
-            NSRunningApplication.runningApplications(
-                withBundleIdentifier: ServerConfig.logicProBundleID
-            ).first
-        } ?? nil
+        NSRunningApplication.runningApplications(
+            withBundleIdentifier: ServerConfig.logicProBundleID
+        ).first
     }
 
     /// Returns the PID of Logic Pro if running, nil otherwise.

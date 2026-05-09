@@ -5,7 +5,7 @@ REPO="MongLong0214/logic-pro-mcp"
 BINARY="LogicProMCP"
 INSTALL_DIR="${LOGIC_PRO_MCP_INSTALL_DIR:-/usr/local/bin}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION="${LOGIC_PRO_MCP_VERSION:-v3.3.0}"
+VERSION="${LOGIC_PRO_MCP_VERSION:-v3.4.0}"
 SHA256="${LOGIC_PRO_MCP_SHA256:-}"
 EXPECTED_TEAM_ID="${LOGIC_PRO_MCP_TEAM_ID:-}"
 REGISTER_CLAUDE="${LOGIC_PRO_MCP_REGISTER_CLAUDE:-1}"
@@ -91,7 +91,7 @@ fi
 
 if [ "$VERSION" = "latest" ]; then
     echo "  Error: mutable 'latest' installs are not allowed in enterprise mode."
-    echo "    Set LOGIC_PRO_MCP_VERSION to a pinned tag, e.g. v3.3.0."
+    echo "    Set LOGIC_PRO_MCP_VERSION to a pinned tag, e.g. v3.4.0."
     exit 1
 fi
 
@@ -206,14 +206,22 @@ echo ""
 
 if [ -f "$SCRIPT_DIR/install-keycmds.sh" ]; then
     if [ "$INSTALL_KEYCMDS" = "1" ]; then
-        echo "  Installing Key Commands preset..."
+        # RB-6 (2026-05-08 enterprise review): the prior wording "Key
+        # Commands preset installed" overstated what the inner script
+        # actually does. On Logic 12.2+ the .plist cannot be Imported
+        # (Logic gates that on the .logikcs format), so the script only
+        # STAGES a CC→Command mapping reference for Manual MIDI Learn.
+        # Wording corrected so an operator reading the install log
+        # doesn't think the bindings are live.
+        echo "  Staging Key Commands mapping reference..."
         if bash "$SCRIPT_DIR/install-keycmds.sh"; then
-            echo "  Key Commands preset installed."
+            echo "  Key Commands mapping reference staged. (Logic 12.2+ requires"
+            echo "    Manual MIDI Learn — see docs/SETUP.md §MIDIKeyCommands.)"
         else
-            echo "  Warning: Key Commands preset install did not complete cleanly."
+            echo "  Warning: Key Commands reference staging did not complete cleanly."
         fi
     else
-        echo "  Key Commands preset install skipped."
+        echo "  Key Commands mapping reference staging skipped."
         echo "    Manual command: bash $SCRIPT_DIR/install-keycmds.sh"
     fi
     echo ""

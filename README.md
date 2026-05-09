@@ -12,8 +12,8 @@
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14+-000000.svg?style=flat-square&logo=apple" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
-  <img src="https://img.shields.io/badge/tests-1095+_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.3.0-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-1110+_passing-brightgreen.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.4.0-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -81,7 +81,7 @@ The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew 
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.1.1/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.0/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=ADHOC \
@@ -92,12 +92,12 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.1.1/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.0/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
 
-Either path installs the binary, verifies its SHA256, registers with Claude Code, and installs the Key Commands preset. It does **not** configure the MCU control surface or Scripter insert — see the [Setup Guide](docs/SETUP.md) for those two manual steps (~5 minutes).
+Either path installs the binary, verifies its SHA256, registers with Claude Code, and stages the Key Commands mapping reference (Logic 12.2+ does not auto-import; the reference assists Manual MIDI Learn — see [Setup Guide](docs/SETUP.md) §MIDIKeyCommands). It does **not** configure the MCU control surface or Scripter insert — see the [Setup Guide](docs/SETUP.md) for those two manual steps (~5 minutes).
 
 Then test in Claude:
 
@@ -185,7 +185,7 @@ See [SECURITY.md §Release types](SECURITY.md#release-types) for the trust model
 
 ### Testing
 
-- **1059 unit + integration tests passing** on the v3.1.9 branch (`swift test --no-parallel`). Coverage spans Honest Contract envelopes, AX hardening (track headers, marker list window, marker AX walker locale matrix), `LogicProjectFileReader` plist parsing + path validation (10 MB cap, mtime-jitter retry, `..` rejection), tier-merge at the resource layer, and the `StateCache.updateMarkers` `markersFetchedAt` invariant fix.
+- **1110+ unit + integration tests passing** on the v3.4.0 branch (`swift test --no-parallel`). Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker, track.duplicate State-A verification), routing-audit invariants, AX hardening (track headers, marker list window, marker AX walker locale matrix), `LogicProjectFileReader` plist parsing + path validation (10 MB cap, mtime-jitter retry, `..` rejection), tier-merge at the resource layer, signal-cleanup contract for the stdio supervised-restart path, and audit-phase splitting for L1+ project lifecycle ops.
 - **Live E2E** (`Scripts/live-e2e-test.py`): the ~200 environment-independent assertions pass; ~45 tests require a running Logic Pro 12 session with the MCU control surface registered and fail otherwise (documented as environment-gated, not regression)
 - Multiple independent production-readiness reviews (code quality, security, architecture) converged to PROCEED after the v3.0.2 hardening passes
 - **v3.0.3+ AX-native control surface**: primary GUI touchpoints (track selection, plugin Setting popup) prefer Apple AX actions (AXPress, AXShowMenu, AXSelectedChildren) with CGEvent only as a last-resort fallback — reduces fragility under Logic UI updates

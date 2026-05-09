@@ -42,13 +42,42 @@ jobs:
         id: mode
         env:
           MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
+          # RB-4 (2026-05-08 enterprise review) closed in v3.4.0: production
+          # tags now require notarization. Pre-fix this step silently
+          # selected ADHOC mode whenever `MACOS_CERT_BASE64` was missing,
+          # so a stable tag like `v3.4.0` could publish a non-notarized
+          # binary without anyone noticing. The fix gates the fallback:
+          #   - Stable tags (no `-prerelease` suffix) require notarization.
+          #     Missing secrets → workflow fails before publishing.
+          #   - Prerelease tags (`v3.4.0-rc1`, `v3.4.0-beta`, etc.) may
+          #     fall back to ADHOC for cheap release candidate cuts.
+          #   - The repository owner can opt out by setting variable
+          #     `ALLOW_ADHOC_STABLE=1` (vars, not secrets — visible in
+          #     repo settings as a deliberate trust decision).
+          ALLOW_ADHOC_STABLE: ${{ vars.ALLOW_ADHOC_STABLE }}
         run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ - ]]; then
+            tag_kind="prerelease"
+          else
+            tag_kind="stable"
+          fi
+          echo "Tag kind: $tag_kind"
+
           if [ -n "$MACOS_CERT_BASE64" ]; then
             echo "mode=notarized" >> "$GITHUB_OUTPUT"
             echo "Release mode: NOTARIZED (Developer ID + notarization)"
+          elif [ "$tag_kind" = "stable" ] && [ "$ALLOW_ADHOC_STABLE" != "1" ]; then
+            echo "::error::Stable tag '$tag' requires notarization secrets."
+            echo "::error::Configure MACOS_CERT_BASE64 (and the related secrets — see Validate step)"
+            echo "::error::or set repo variable ALLOW_ADHOC_STABLE=1 to permit ADHOC stable releases."
+            exit 1
           else
             echo "mode=adhoc" >> "$GITHUB_OUTPUT"
             echo "Release mode: ADHOC (codesign --sign -; no notarization)"
+            if [ "$tag_kind" = "stable" ]; then
+              echo "::warning::Publishing ADHOC stable release ($tag) — explicit ALLOW_ADHOC_STABLE=1 was set."
+            fi
           fi
 
       - name: Validate notarization secrets

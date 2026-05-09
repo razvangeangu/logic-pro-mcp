@@ -105,9 +105,15 @@ private let toolText = sharedToolText
     #expect(ops.first?.1["position"] == "9.1.1.1")
 }
 
-@Test func testNavigateDispatcherGotoMarkerColdCacheFallsBackToKeycmd() async {
-    // Cold cache: index-based falls through to legacy keycmd so
-    // existing call sites still get *some* navigation signal.
+@Test func testNavigateDispatcherGotoMarkerColdCacheReturnsElementNotFound() async {
+    // H-2 (2026-05-08 enterprise review): pre-v3.4.0 the cold-cache
+    // index path fell back to `nav.goto_marker` (CC 38 keycmd), which
+    // is Logic's "go to next marker" hotkey — it ignored the requested
+    // index and silently advanced to whatever marker comes next.
+    // BREAKING since v3.4.0: cold-cache index returns State C
+    // `element_not_found` so callers learn the cache was cold instead
+    // of getting wrong-target navigation. Caller should refresh cache
+    // and retry, or supply `name` instead.
     let router = ChannelRouter()
     let keyCmd = MockChannel(id: .midiKeyCommands)
     await router.register(keyCmd)
@@ -119,15 +125,20 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == false)
+    #expect(result.isError == true)
+    let text = toolText(result)
+    #expect(text.contains("\"error\":\"element_not_found\""))
+    #expect(text.contains("not found in cached marker list"))
+    #expect(text.contains("system.refresh_cache"))
+    // Critical: the legacy CC 38 keycmd must NOT have been invoked.
     let ops = await keyCmd.executedOps
-    #expect(ops.first?.0 == "nav.goto_marker")
-    #expect(ops.first?.1["index"] == "3")
+    #expect(ops.isEmpty, "Cold-cache index must not advance the marker pointer via CC 38")
 }
 
-@Test func testNavigateDispatcherGotoMarkerColdCacheNameReturnsError() async {
-    // Name-based goto with cold cache: no useful keycmd fallback, so
-    // return a clear error.
+@Test func testNavigateDispatcherGotoMarkerColdCacheNameReturnsElementNotFound() async {
+    // H-2 — name-based cold-cache also returns the structured State C
+    // envelope so the caller can programmatically detect the cache-cold
+    // condition (was a free-form "No marker found matching" string).
     let router = ChannelRouter()
     let keyCmd = MockChannel(id: .midiKeyCommands)
     await router.register(keyCmd)
@@ -140,7 +151,10 @@ private let toolText = sharedToolText
     )
 
     #expect(result.isError == true)
-    #expect(toolText(result).contains("No marker found matching"))
+    let text = toolText(result)
+    #expect(text.contains("\"error\":\"element_not_found\""))
+    #expect(text.contains("no marker matching name 'Verse'"))
+    #expect(text.contains("system.refresh_cache"))
 }
 
 @Test func testNavigateDispatcherRenameMarkerUsesAccessibilityChannel() async {

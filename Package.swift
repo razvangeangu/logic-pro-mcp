@@ -12,6 +12,18 @@ let package = Package(
         // `withThrowingTaskGroup { group in }` syntax (Swift 6.2 inference).
         // CI requires Xcode 16.4+ (Swift 6.2) — see .github/workflows/ci.yml.
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
+        // H-5 (2026-05-08 enterprise review) — honest-deferred again in
+        // v3.4.0. The deprecation warning ("Swift Testing is now included
+        // in the Swift 6 toolchain. Remove your 'swift-testing' package
+        // dependency to silence this warning.") suggests removal, but the
+        // bundled Testing framework in Swift 6.0/6.2 still emits
+        // `missing required module '_TestingInternals'` when compiled via
+        // SwiftPM CLI (`swift test`) — confirmed twice in this repo (prior
+        // attempt logged in PATTERN_LOG, retry on 2026-05-08 hit the same
+        // error). Apple has not yet shipped the SwiftPM-side glue that
+        // makes the bundled framework usable without the explicit package
+        // dep. Pinned to 0.12.0 with the deprecation noise as a known
+        // tradeoff until Apple closes the gap.
         .package(url: "https://github.com/swiftlang/swift-testing.git", from: "0.12.0"),
     ],
     targets: [

@@ -139,6 +139,18 @@ actor ChannelRouter {
 
         // Navigation — goto_bar is handled by NavigateDispatcher via
         // transport.goto_position (AX bar-slider); no nav.goto_bar route needed.
+        //
+        // v3.4.0 (H-2 enterprise review): `NavigateDispatcher.goto_marker`
+        // no longer routes to `nav.goto_marker` for any caller path —
+        // warm-cache hits go via `transport.goto_position` and cold-cache
+        // hits return State C `element_not_found`. The legacy CC 38 keycmd
+        // (which advances to "next marker" regardless of index) was
+        // confusing target-faithful semantics. The routing table entry is
+        // preserved so direct callers (live-e2e harness, future
+        // dispatchers, or operators sending the operation key manually
+        // via the router) still resolve to the keycmd path; from the
+        // primary `logic_navigate` tool surface this entry is now dead
+        // weight by design.
         "nav.goto_marker":            [.midiKeyCommands, .cgEvent],
         "nav.create_marker":          [.midiKeyCommands, .cgEvent],
         "nav.delete_marker":          [.midiKeyCommands, .cgEvent],

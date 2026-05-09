@@ -8,6 +8,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.0] — 2026-05-08
+
+**Enterprise deferred-blocker closure: stdio launch parity, release governance, install rollback safety, audit-phase split, target-faithful navigation, AX hardening, docs realignment.** Closes the v3.3.0 honest-deferred set (RB-2, RB-4, RB-6, H-1..H-4, H-6) from the 2026-05-08 enterprise production-readiness review. Eight tickets, +15 regression tests (1110/1110 PASS), Boomer BOOMER-6 verdict pending Phase 6 final review. H-5 (swift-testing dep) re-deferred — Apple has not yet shipped the SwiftPM-side glue that makes the bundled Swift 6 Testing framework usable without the explicit package dependency (`_TestingInternals` missing on direct removal — confirmed twice).
+
+### ⚠️ BREAKING
+
+#### `goto_marker` cold-cache fallback removed (target-faithful contract)
+
+Pre-v3.4.0 a cold-cache `goto_marker { index: N }` silently fell through to the legacy `nav.goto_marker` keycmd path (CC 38), which is Logic's "go to next marker" hotkey — it ignored the requested index and advanced the marker pointer by one. A caller asking for marker 5 with a cold cache could land on marker 1 and never know.
+
+v3.4.0 returns a State C `element_not_found` envelope instead, naming the cached marker count and pointing the caller at `system.refresh_cache`. Callers that actually wanted "next marker" should use the keycmd path explicitly via `logic_midi.send_cc { controller: 38, channel: 16, port: "keycmd" }` after binding it through Manual MIDI Learn.
+
+| Caller pattern                                       | Pre-v3.4.0 behaviour                | v3.4.0+ behaviour                                                                              |
+|------------------------------------------------------|--------------------------------------|------------------------------------------------------------------------------------------------|
+| `goto_marker { index: N }` with cold cache           | Silent advance to next marker (CC 38) | State C `element_not_found` with `requested_index`, `cached_marker_count`, refresh-cache hint |
+| `goto_marker { name: "..." }` with cold cache        | Free-form `"No marker found matching"` string | Same intent, now structured State C envelope                                          |
+| `goto_marker` against a populated cache              | Unchanged                            | Unchanged                                                                                      |
+
+Caller migration: parse the State C envelope; on `element_not_found` issue `system.refresh_cache` and retry.
+
+#### Project audit log split into three phases
+
+Pre-v3.4.0 `[AUDIT] project.<command> executed` was emitted before parameter validation, before the destructive-confirmation gate, and before any route. Enterprise audit pipelines treated rejected calls as if they had run.
+
+v3.4.0 splits the signal into three machine-filterable phases:
+
+- `rejected` — validation refused the call (no side effect)
+- `confirmation_required` — destructive policy gated, awaiting `confirmed:true`
+- `executed` — route was actually invoked (success or hard failure)
+
+SIEM rules that grep for `[AUDIT] project.<command> executed` need to add the new phases or they'll under-report rejections and confirmation prompts.
+
+### Fixed (P0/P1 from 2026-05-08 review)
+
+- **RB-2 — stdio launch parity.** `ProcessUtils.logicProApp()` and the `logicProBundleURL` runtime closure used to wrap `NSRunningApplication` and `NSWorkspace` lookups in `runAppKit`, which forced a nil return whenever the server ran as an MCP-client stdio subprocess (no AppKit runloop). The live e2e harness reported `logic_pro_running:false` while System Events on the same host could see Logic — exactly that bug. Both APIs are documented as thread-safe launch-services queries with no runloop dependency, so the wrapping was over-defensive. Removed.
+- **RB-4 — release governance gate.** `.github/workflows/release.yml` now refuses stable tags (no `-prerelease` suffix) when notarization secrets (`MACOS_CERT_BASE64` et al.) are absent. Operators can opt out by setting repo variable `ALLOW_ADHOC_STABLE=1` (vars, not secrets — visible in repo settings as a deliberate trust decision). `Scripts/release.sh` got the same gate via `LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1`. The local script also now records actual binary architecture(s) in `RELEASE-METADATA.json` (`architectures` field) so a `lipo -info` mismatch with the `LogicProMCP-macOS-universal.tar.gz` filename is detectable downstream.
+- **RB-6 — install/uninstall non-interactive safety.** `Scripts/install-keycmds.sh:40` backup glob now includes `*.logikcs` (Logic 12.2+ binary key-commands format) — pre-fix the glob silently skipped that extension, so a Logic 12.2 user's bindings could be clobbered without backup. `Scripts/uninstall-keycmds.sh` `read -p` prompt now gates on `[ -t 0 ]` so non-TTY contexts (MDM, fleet automation, CI) skip the prompt instead of exiting `1` under `set -euo pipefail`. The Manual MIDI Learn flow can be auto-restored via `LOGIC_PRO_MCP_KEYCMD_AUTO_RESTORE=1`. README and `Scripts/install.sh` wording corrected from "installs the Key Commands preset" to "stages the Key Commands mapping reference" — Logic 12.2+ doesn't actually import the .plist.
+- **H-1 — audit log timing.** `ProjectDispatcher.handle` no longer emits `executed` before validation. New `ProjectDispatcher.AuditPhase` enum (`rejected`, `confirmationRequired`, `executed`) drives phase-specific log lines. See BREAKING above.
+- **H-2 — `goto_marker` target-faithful.** Cold-cache fallback to CC 38 removed. See BREAKING above.
+- **H-3 — docs drift.** `docs/ARCHITECTURE.md` (`5s` → `3s` polling), `docs/TROUBLESHOOTING.md` (cache-refresh timing), `docs/API.md` (`record_sequence` 2-second cache poll → 500 ms live AX, project source freshness `5s` → `3s`), `README.md` (install URL pin `v3.1.1` → `v3.4.0`, test count `1059 (v3.1.9)` → `1110+ (v3.4.0)`). The drift was load-bearing — operators were waiting 5 seconds when the cache refreshed at 3.
+- **H-4 — CI coverage gate re-armed.** `.github/workflows/ci.yml` Coverage step now enforces region ≥ 65% and line ≥ 72% (baseline on 2026-05-08 was 70.65% / 77.71%, so the thresholds carry ~5pp / ~6pp of slack for normal churn). Pre-fix the step ran `set +e` and `exit 0` so coverage regressions never blocked a merge. The `swift test` pass/fail signal at the prior step remains the authoritative test gate; this step adds the coverage threshold on top.
+- **H-6 — AXValue force casts hardened.** `Sources/LogicProMCP/Accessibility/AXHelpers.swift` `getPosition` and `getSize` now match the `CFGetTypeID(... AXValueGetTypeID())` guard pattern used by `LibraryAccessor`, `PluginInspector`, and `AXLogicProElements`. A malformed AX attribute (Logic build drift, plugin mock, AX timeout returning a stub) returns nil instead of crashing with `Could not cast value of type ... to 'AXValue'`.
+
+### Honest deferred (still open from 2026-05-08 review)
+
+- **H-5 — `swift-testing` package dependency.** Removal triggers `missing required module '_TestingInternals'` on Swift 6.0 / 6.2 toolchains — the bundled Testing framework's SwiftPM glue isn't shipped yet. Pinned to `0.12.0` with the deprecation warning noise as a known tradeoff. Re-evaluate when Apple ships the SwiftPM-side fix (likely Xcode 16.5+).
+
+### Added
+
+- 15 new regression tests across 4 new files + 2 modified files:
+  - `Tests/LogicProMCPTests/AXHelpersForceCastTests.swift` (6 tests for H-6).
+  - `Tests/LogicProMCPTests/ProjectAuditPhaseTests.swift` (6 tests for H-1, including non-TTY path coverage and L0 read-only no-audit invariant).
+  - `Tests/LogicProMCPTests/ProcessUtilsStdioParityTests.swift` (3 tests for RB-2; the bundle-URL and version tests skip cleanly on hosts without Logic Pro installed so CI runners stay green).
+  - `Tests/LogicProMCPTests/CommercialReadinessTests.swift` updated: replaced the two cold-cache fallback tests with State C `element_not_found` assertions for both index- and name-based goto_marker.
+
+### Changed
+
+- `Sources/LogicProMCP/Dispatchers/ProjectDispatcher.swift` — `audit(_:phase:reason:)` helper added. L0 commands (`is_running`, `get_regions`) emit no audit lines.
+- `Sources/LogicProMCP/Utilities/ProcessUtils.swift` — `logicProApp()` and `logicProBundleURL` no longer wrap their launch-services queries in `runAppKit`. `runAppKit` itself is unchanged (`activateLogicPro` and the in-process AppleScript path still need it).
+
+### Tool description updates
+
+- None needed — all changes are internal hardening or BREAKING via behavior, not parameter shape. The `goto_marker` schema is unchanged; only the cold-cache fallback semantics shifted.
+
+### Tests
+
+`swift test --no-parallel` → **1110 / 1110 PASS** (was 1095 in v3.3.0; +15 net).
+
 ## [3.3.0] — 2026-05-08
 
 **Enterprise production-readiness P0 closure — fail-closed mutating writes + signal cleanup.** Closes 5 release blockers (RB-1.a/b/c, RB-3, RB-5) from the 2026-05-08 enterprise production review. The 2026-05-08 review (`docs/reviews/2026-05-08-enterprise-production-readiness-review.md`) verified each evidence line against the source and called the v3.2.0 ship `HARD NO-GO` until these closed. v3.3.0 closes them with 12 new regression tests; remaining P0/P1 items (RB-2 stdio launch parity, RB-4 release-workflow notarization gate, RB-6 install/uninstall non-interactive safety, H-1..H-6) tracked for follow-up.

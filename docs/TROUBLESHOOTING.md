@@ -266,14 +266,14 @@ logic_system health → mcu.connected, cache.transport_age_sec
 
 ### Track list doesn't update after creating a new track
 
-**Cause:** AX polling runs every 5s. The cache may not have refreshed yet.
+**Cause:** AX polling runs every 3s. The cache may not have refreshed yet.
 
 **Fix:**
 ```
 logic_system refresh_cache
 ```
 
-Or wait up to 5 seconds.
+Or wait up to 3 seconds.
 
 ### `logic://markers` returns empty `[]` even though the project has markers (Logic 12.2+)
 

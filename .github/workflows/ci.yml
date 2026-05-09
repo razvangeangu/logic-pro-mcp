@@ -24,42 +24,72 @@ jobs:
       - name: Run tests
         run: swift test
 
-      - name: Coverage report (gate disabled for v3.1.5)
-        # v3.1.5 — coverage gate temporarily disabled while the
-        # AppleScript-primary read helpers ship. Their production-default
-        # `executeScript` branch is structurally unreachable from unit
-        # tests (NSAppleScript needs a live Logic Pro environment, CI
-        # runners don't have Logic installed). Reachability tests cover
-        # the closure invocation but llvm-cov's line attribution still
-        # marks the inner production call as missed. Combined with the
-        # parallel v3.1.6 dispatcher additions whose tests aren't on
-        # this branch, the prior 90.0 / 80.0 thresholds both fail.
+      - name: Coverage report
+        # H-4 (2026-05-08 enterprise review) closed in v3.4.0: re-armed
+        # the coverage gate. Pre-fix this step ran with `set +e` and
+        # `exit 0` unconditionally, so coverage regressions never blocked
+        # a merge — exactly the bug the previous review caught.
         #
-        # Re-armed in v3.1.7 once the AppleScript default is hoisted into
-        # an injectable static so test-side swap can cover the production
-        # wiring deterministically. The TOTAL line is still emitted to
-        # the summary so the trend is visible over time.
+        # The step now runs in TWO phases:
+        #   1. Generate the report (always succeeds — `||true` on the
+        #      coverage-test step lets transient instrumentation flakes
+        #      through; the prior `swift test` step at line 24 is the
+        #      authoritative pass/fail signal).
+        #   2. Enforce thresholds (this is the actual gate).
         #
-        # `set +e` and trailing `exit 0` are deliberate — `swift test`
-        # under `--enable-code-coverage --no-parallel` occasionally
-        # surfaces transient failures (e.g. the StatePoller occlusion
-        # tests' shared-clock timing under coverage instrumentation) that
-        # don't reproduce in the prior `Run tests` step. We don't want
-        # those to block the workflow when the gate is already off.
+        # Thresholds: 65% region, 72% line. Baseline on 2026-05-08 was
+        # 70.65% region / 77.71% line, so we have ~5pp / ~6pp slack for
+        # normal churn. If a PR drops below either threshold, the gate
+        # fails the build and the PR author must either restore coverage
+        # or justify the drop in the PR description.
         if: always()
         run: |
           set +e
           swift test --enable-code-coverage --no-parallel
+          set -e
           find Sources/LogicProMCP -name '*.swift' | sort > /tmp/logicpro_sources.txt
           xargs xcrun llvm-cov report \
             .build/debug/LogicProMCPPackageTests.xctest/Contents/MacOS/LogicProMCPPackageTests \
             -instr-profile .build/debug/codecov/default.profdata \
             < /tmp/logicpro_sources.txt > coverage-report.txt
+
+          # Extract TOTAL line — llvm-cov column order: regions, missed,
+          # cover%, functions, missed, cover%, lines, missed, cover%.
+          TOTAL_LINE=$(grep -E "^TOTAL" coverage-report.txt || true)
+          REGION_PCT=$(echo "$TOTAL_LINE" | awk '{print $4}' | tr -d '%')
+          LINE_PCT=$(echo "$TOTAL_LINE" | awk '{print $10}' | tr -d '%')
+
           {
-            echo "## Coverage report (gate disabled for v3.1.5)"
+            echo "## Coverage report"
             echo ""
             echo '```'
-            grep -E "^TOTAL" coverage-report.txt || echo "TOTAL line not found in report"
+            echo "$TOTAL_LINE"
             echo '```'
+            echo ""
+            echo "Thresholds: region ≥ 65%, line ≥ 72%."
           } >> "$GITHUB_STEP_SUMMARY"
-          exit 0
+
+          MIN_REGION=65
+          MIN_LINE=72
+          FAIL=0
+          if [ -z "$REGION_PCT" ] || [ -z "$LINE_PCT" ]; then
+            echo "::error::Could not parse coverage TOTAL line; coverage gate cannot evaluate."
+            FAIL=1
+          else
+            # Bash arithmetic doesn't handle floats; use awk for the comparison.
+            REGION_OK=$(awk -v r="$REGION_PCT" -v m="$MIN_REGION" 'BEGIN { print (r+0 >= m+0) ? 1 : 0 }')
+            LINE_OK=$(awk -v l="$LINE_PCT" -v m="$MIN_LINE" 'BEGIN { print (l+0 >= m+0) ? 1 : 0 }')
+            if [ "$REGION_OK" != "1" ]; then
+              echo "::error::Region coverage $REGION_PCT% below threshold $MIN_REGION%."
+              FAIL=1
+            fi
+            if [ "$LINE_OK" != "1" ]; then
+              echo "::error::Line coverage $LINE_PCT% below threshold $MIN_LINE%."
+              FAIL=1
+            fi
+          fi
+
+          if [ "$FAIL" = "1" ]; then
+            exit 1
+          fi
+          echo "Coverage gate passed: region $REGION_PCT% / line $LINE_PCT%."

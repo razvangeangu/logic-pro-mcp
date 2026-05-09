@@ -25,7 +25,7 @@ Logic Pro MCP Server is a Swift 6 actor-based system that multiplexes **7 native
        │                  │                   │                    │
 ┌──────▼────────┐  ┌──────▼────────┐  ┌───────▼────────┐  ┌────────▼──────┐
 │  Dispatchers  │  │ ResourceHandlers │ │   StateCache   │  │  StatePoller  │
-│ (8 tools)     │  │  (6 + template) │ │   (actor)      │  │ (5s AX poll)  │
+│ (8 tools)     │  │  (6 + template) │ │   (actor)      │  │ (3s AX poll)  │
 └──────┬────────┘  └──────┬────────┘  └───────▲────────┘  └────────┬──────┘
        │                  │                   │                    │
        │                  │                   │                    │
@@ -62,7 +62,7 @@ Legend — `↕` bidirectional, `↑` read, `↓` write.
 | **Dispatchers** | 8 MCP tool structs — argument coercion, destructive-policy gating | `struct` | Immutable |
 | **Routing** | `ChannelRouter` — priority chain selection, fallback, health checks | `actor` | Actor |
 | **Channels** | 7 communication channels, each wrapping one macOS API | `actor` | Actor per channel |
-| **State** | `StateCache` (store) + `StatePoller` (5s AX refresh) | `actor` | Actor |
+| **State** | `StateCache` (store) + `StatePoller` (3s AX refresh) | `actor` | Actor |
 | **Resources** | `ResourceHandlers` — URI routing, JSON serialization | `struct` | Pure |
 | **Utilities** | `AppleScriptSafety`, `DestructivePolicy`, `PermissionChecker`, `Logger` | mixed | Pure / `enum` |
 
@@ -91,7 +91,7 @@ Legend — `↕` bidirectional, `↑` read, `↓` write.
 1. Claude sends: resources/read { uri: "logic://tracks" }
 2. LogicProServer.readResource → ResourceHandlers.read
 3. ResourceHandlers inspects URI, queries StateCache
-4. StateCache returns current snapshot (event-driven from MCU + 5s AX poll)
+4. StateCache returns current snapshot (event-driven from MCU + 3s AX poll)
 5. Serialized as JSON in ReadResource.Result
 ```
 
@@ -159,7 +159,7 @@ The complete table is `ChannelRouter.v2RoutingTable` (90+ entries). Excerpt:
 │  • lastToolAccessAt, lastUpdated        │
 └──┬──────────────────────────────┬────────┘
    │                              │
-   │ event-driven writes          │ periodic writes (5s)
+   │ event-driven writes          │ periodic writes (3s)
    │                              │
 ┌──▼──────────┐              ┌────▼────────┐
 │  MCU        │              │ StatePoller │

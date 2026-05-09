@@ -34,10 +34,18 @@ if [ -d "$BACKUP_DIR" ]; then
         # Restore latest backup
         LATEST=$(echo "$BACKUPS" | sort -r | head -1)
         echo ""
+        # RB-6 (2026-05-08 enterprise review) closed in v3.4.0: pre-fix the
+        # `else` branch ran `read -p` unconditionally, which under
+        # `set -euo pipefail` exits 1 in non-TTY contexts (MDM, fleet
+        # automation, CI). The fix uses `[ -t 0 ]` to detect whether stdin
+        # is a TTY: when not, default to skipping the restore (the safe
+        # action for unattended uninstalls — the operator can re-run with
+        # `LOGIC_PRO_MCP_KEYCMD_AUTO_RESTORE=1` if they actually wanted
+        # the restore). Interactive runs are unchanged.
         if [ "$AUTO_RESTORE" = "1" ]; then
             cp "$LATEST"/* "$KEYCMD_DIR/" 2>/dev/null || true
             echo "✓ Restored from: $(basename "$LATEST")"
-        else
+        elif [ -t 0 ]; then
             read -p "Restore from $(basename "$LATEST")? [y/N] " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -46,6 +54,9 @@ if [ -d "$BACKUP_DIR" ]; then
             else
                 echo "Skipped restore."
             fi
+        else
+            echo "Non-interactive shell detected — skipping restore prompt."
+            echo "Re-run with LOGIC_PRO_MCP_KEYCMD_AUTO_RESTORE=1 to auto-restore from $(basename "$LATEST")."
         fi
     else
         echo "No backups found."

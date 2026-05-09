@@ -207,9 +207,15 @@ enum AXHelpers {
     }
 
     /// Get element screen position (kAXPositionAttribute) as CGPoint.
+    /// H-6 (2026-05-08 enterprise review): pre-fix this used `as! AXValue`
+    /// without a `CFGetTypeID` guard, so a malformed or mocked attribute
+    /// could crash the process instead of returning nil. Now matches the
+    /// guarded pattern already used by `LibraryAccessor`, `PluginInspector`,
+    /// and `AXLogicProElements`.
     static func getPosition(_ element: AXUIElement, runtime: Runtime = .production) -> CGPoint? {
-        guard let raw = runtime.attributeValue(element, kAXPositionAttribute) else { return nil }
-        // swiftlint:disable:next force_cast — AXValue bridging is well-defined for position attrs.
+        guard let raw = runtime.attributeValue(element, kAXPositionAttribute),
+              CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+        // swiftlint:disable:next force_cast — guarded by CFGetTypeID above.
         let v = raw as! AXValue
         var pt = CGPoint.zero
         guard AXValueGetValue(v, .cgPoint, &pt) else { return nil }
@@ -217,9 +223,11 @@ enum AXHelpers {
     }
 
     /// Get element screen size (kAXSizeAttribute) as CGSize.
+    /// H-6: same `CFGetTypeID` guard as `getPosition`.
     static func getSize(_ element: AXUIElement, runtime: Runtime = .production) -> CGSize? {
-        guard let raw = runtime.attributeValue(element, kAXSizeAttribute) else { return nil }
-        // swiftlint:disable:next force_cast
+        guard let raw = runtime.attributeValue(element, kAXSizeAttribute),
+              CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+        // swiftlint:disable:next force_cast — guarded by CFGetTypeID above.
         let v = raw as! AXValue
         var sz = CGSize.zero
         guard AXValueGetValue(v, .cgSize, &sz) else { return nil }
