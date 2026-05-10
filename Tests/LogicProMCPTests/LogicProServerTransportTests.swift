@@ -91,15 +91,20 @@ private actor MockServerPortManager: VirtualPortManaging {
     }
 }
 
-private actor PacketSinkRecorder {
-    var packets: [(MIDIEndpointRef, [UInt8])] = []
+private final class PacketSinkRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var packets: [(MIDIEndpointRef, [UInt8])] = []
 
     func record(endpoint: MIDIEndpointRef, bytes: [UInt8]) {
+        lock.lock()
+        defer { lock.unlock() }
         packets.append((endpoint, bytes))
     }
 
     func snapshot() -> [(MIDIEndpointRef, [UInt8])] {
-        packets
+        lock.lock()
+        defer { lock.unlock() }
+        return packets
     }
 }
 
@@ -170,19 +175,18 @@ private actor FeedbackEventRecorder {
         portManager: manager,
         portName: "Send-Test",
         packetSink: { endpoint, bytes in
-            Task { await recorder.record(endpoint: endpoint, bytes: bytes) }
+            recorder.record(endpoint: endpoint, bytes: bytes)
         }
     )
 
     try await transport.send([0x90, 0x3C, 0x64])
-    await Task.yield()
 
     let names = await manager.sendOnlyNames
-    let packets = await recorder.snapshot()
+    let packets = recorder.snapshot()
     #expect(names == ["Send-Test"])
     #expect(packets.count == 1)
-    #expect(packets[0].0 == 101)
-    #expect(packets[0].1 == [0x90, 0x3C, 0x64])
+    #expect(packets.first?.0 == 101)
+    #expect(packets.first?.1 == [0x90, 0x3C, 0x64])
 }
 
 @Test func testProductionKeyCmdTransportDefaultPacketSinkSmoke() async throws {
@@ -236,13 +240,13 @@ private actor FeedbackEventRecorder {
     let transport = ProductionMCUTransport(
         portManager: MockServerPortManager(),
         packetSink: { endpoint, bytes in
-            Task { await recorder.record(endpoint: endpoint, bytes: bytes) }
+            recorder.record(endpoint: endpoint, bytes: bytes)
         }
     )
 
     await transport.send([0x01, 0x02, 0x03])
 
-    let packets = await recorder.snapshot()
+    let packets = recorder.snapshot()
     #expect(packets.isEmpty)
 }
 
@@ -295,18 +299,17 @@ private actor FeedbackEventRecorder {
     let transport = ProductionMCUTransport(
         portManager: manager,
         packetSink: { endpoint, bytes in
-            Task { await recorder.record(endpoint: endpoint, bytes: bytes) }
+            recorder.record(endpoint: endpoint, bytes: bytes)
         }
     )
 
     try await transport.start { _ in }
     await transport.send([0x7F, 0x01])
-    await Task.yield()
 
-    let packets = await recorder.snapshot()
+    let packets = recorder.snapshot()
     #expect(packets.count == 1)
-    #expect(packets[0].0 == 201)
-    #expect(packets[0].1 == [0x7F, 0x01])
+    #expect(packets.first?.0 == 201)
+    #expect(packets.first?.1 == [0x7F, 0x01])
 }
 
 @Test func testProductionMCUTransportStopClearsPortAndDropsSubsequentSends() async throws {
@@ -315,7 +318,7 @@ private actor FeedbackEventRecorder {
     let transport = ProductionMCUTransport(
         portManager: manager,
         packetSink: { endpoint, bytes in
-            Task { await recorder.record(endpoint: endpoint, bytes: bytes) }
+            recorder.record(endpoint: endpoint, bytes: bytes)
         }
     )
 
@@ -324,7 +327,7 @@ private actor FeedbackEventRecorder {
     await transport.send([0x11, 0x22, 0x33])
     await Task.yield()
 
-    let packets = await recorder.snapshot()
+    let packets = recorder.snapshot()
     #expect(packets.isEmpty)
 }
 
@@ -380,12 +383,12 @@ private actor FeedbackEventRecorder {
         "logic://tracks/{index}/regions",
         "logic://mixer/{strip}",
     ])
-    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5-rc2 — 8 tools, 9 resources, 4 channels")
+    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5-rc3 — 8 tools, 9 resources, 4 channels")
 }
 
 @Test func testServerCatalogStartupBannerUsesProvidedChannelCount() {
     let banner = ServerCatalog.startupBanner(channelCount: 7)
-    #expect(banner == "Starting logic-pro-mcp v3.4.5-rc2 — 8 tools, 9 resources, 7 channels")
+    #expect(banner == "Starting logic-pro-mcp v3.4.5-rc3 — 8 tools, 9 resources, 7 channels")
 }
 
 @Test func testLogicProServerCompositionSnapshotMatchesExpectedOrder() async {
@@ -404,5 +407,5 @@ private actor FeedbackEventRecorder {
     ])
     #expect(snapshot.toolNames.count == 8)
     #expect(snapshot.resourceURIs.contains("logic://system/health"))
-    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5-rc2 — 8 tools, 9 resources, 7 channels")
+    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5-rc3 — 8 tools, 9 resources, 7 channels")
 }

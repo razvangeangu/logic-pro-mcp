@@ -3,7 +3,7 @@ class LogicProMcp < Formula
   homepage "https://github.com/MongLong0214/logic-pro-mcp"
   # Single source of truth is Sources/LogicProMCP/Server/ServerConfig.swift
   # (ServerConfig.serverVersion). Bump both together.
-  version "3.4.5-rc2"
+  version "3.4.5-rc3"
   license "MIT"
 
   # arm64-native binary. Intel Macs run under Rosetta 2 — functional but
@@ -14,7 +14,7 @@ class LogicProMcp < Formula
   # compatibility with taps that hardcoded the older URL — the bytes are
   # identical.
   #
-  # NOTE: sha256 below is the v3.0.1 adhoc-signed tarball shipped on GitHub.
+  # NOTE: sha256 below is the current adhoc-signed tarball shipped on GitHub.
   #       Update every release from the published SHA256SUMS.txt.
   on_macos do
     url "https://github.com/MongLong0214/logic-pro-mcp/releases/download/v#{version}/LogicProMCP-macOS-universal.tar.gz"

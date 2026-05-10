@@ -81,7 +81,7 @@ The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew 
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc2/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc3/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=ADHOC \
@@ -92,7 +92,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc2/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc3/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
@@ -154,7 +154,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 ## Status
 
-**Current prerelease: v3.4.5-rc2 (2026-05-10)** — CI baseline uses the deterministic `swift test --no-parallel` gate on `macos-15-arm64` GitHub Actions, `1113` deterministic tests pass locally, strict live E2E passes (`259/259`, `0` skipped, `0` failed) in the validated shell/tmux stdio parent context, and all P0/P1 items from the 2026-05-08 enterprise production-readiness review are closed except `swift-testing` package dependency removal (deferred — Apple has not yet shipped the SwiftPM-side glue that lets the bundled Swift 6 Testing framework resolve `_TestingInternals` without the explicit package dep). `v3.4.5-rc1` is superseded because the published tag used CI's default parallel `swift test` path, which can race process-wide `Log.output` capture tests.
+**Current prerelease: v3.4.5-rc3 (2026-05-10)** — CI baseline uses the deterministic `swift test --no-parallel` gate on `macos-15-arm64` GitHub Actions, `1113` deterministic tests pass locally, strict live E2E passes (`259/259`, `0` skipped, `0` failed) in the validated shell/tmux stdio parent context, and all P0/P1 items from the 2026-05-08 enterprise production-readiness review are closed except `swift-testing` package dependency removal (deferred — Apple has not yet shipped the SwiftPM-side glue that lets the bundled Swift 6 Testing framework resolve `_TestingInternals` without the explicit package dep). `v3.4.5-rc1` is superseded because the published tag used CI's default parallel `swift test` path, which can race process-wide `Log.output` capture tests; `v3.4.5-rc2` is superseded because the CI gate was corrected but a transport packet-sink test recorder still used an async fire-and-forget capture path that could report a false empty packet list on GitHub runners.
 
 ### Active contracts (the things callers most care about)
 
@@ -168,7 +168,8 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 | Version | Date | Headline |
 |---------|------|----------|
-| **v3.4.5-rc2** | 2026-05-10 | CI gate aligned to deterministic `swift test --no-parallel`; supersedes rc1's parallel `Log.output` capture-test race |
+| **v3.4.5-rc3** | 2026-05-10 | Final CI-readiness RC — synchronous transport packet-sink recorder removes rc2's CI false empty-packet failure |
+| v3.4.5-rc2 | 2026-05-10 | CI gate aligned to deterministic `swift test --no-parallel`; superseded by rc3 due transport packet-sink recorder race in CI |
 | v3.4.5-rc1 | 2026-05-10 | Strict live E2E parent-context closure — shell-owned tmux transport, long JSON-RPC PTY hardening, `259/259` live checks passing |
 | **v3.4.4** | 2026-05-09 | CI hotfix — `MIDIClientCreate(-50)` smoke-test skip on macos-15-arm64 (sandboxed runner has no CoreMIDI server) |
 | v3.4.3 | 2026-05-09 | CI Coverage step `find`-based path resolution + diagnostic output |
@@ -189,9 +190,9 @@ ADHOC release until Apple Developer Program membership lands. SHA256 pin + `code
 
 ### Testing
 
-- **1113 unit + integration tests** on the v3.4.5-rc2 branch — `swift test --no-parallel` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker), routing-audit invariants, AX hardening (track headers, marker list window walker, 13-locale matrix), `LogicProjectFileReader` plist parsing + path validation (10 MB cap, mtime-jitter retry, `..` rejection), tier-merge at the resource layer, `LogicProServer.stop()` signal-cleanup contract, and audit-phase splitting for L1+ project lifecycle ops.
+- **1113 unit + integration tests** on the v3.4.5-rc3 branch — `swift test --no-parallel` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker), routing-audit invariants, AX hardening (track headers, marker list window walker, 13-locale matrix), `LogicProjectFileReader` plist parsing + path validation (10 MB cap, mtime-jitter retry, `..` rejection), tier-merge at the resource layer, `LogicProServer.stop()` signal-cleanup contract, audit-phase splitting for L1+ project lifecycle ops, and deterministic transport packet-sink capture.
 - **Live E2E** (`Scripts/live-e2e-test.py`) defaults to the release binary. Protocol/security/validation assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a live Logic Pro session is detected. For attestation runs, use `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh`; the shell wrapper launches the MCP server under a trusted tmux parent so macOS TCC evaluates the same stdio parent context instead of Python.
-- **CI coverage gate** — `region ≥ 65%`, `line ≥ 72%` (current 70.46 / 77.27%, ~5pp slack). Re-armed in v3.4.0 after the v3.1.5 disable.
+- **CI coverage gate** — `region ≥ 65%`, `line ≥ 72%` (current 70.65 / 77.63%, ~5pp slack). Re-armed in v3.4.0 after the v3.1.5 disable.
 - **CoreMIDI smoke tests skip on macos-15-arm64 GitHub runners** (`MIDIClientCreate` returns `-50` in the sandboxed image; production code path coverage on real macOS hosts is unchanged).
 
 ### Known limitations

@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.5-rc3] — 2026-05-10
+
+**Final CI-readiness release candidate for v3.4.5.** `v3.4.5-rc2` fixed the workflow's parallel-test mismatch, but the GitHub run exposed a separate test-harness race in `ProductionMCUTransport` packet-sink assertions: packet capture used a fire-and-forget `Task`, so the assertion could observe an empty packet list before the recorder actor handled the message. The production send path was already synchronous; this candidate makes the recorder synchronous too and prevents a count failure from cascading into an array-index trap.
+
+### Fixed
+
+- `LogicProServerTransportTests` now records packet-sink callbacks synchronously with a lock-protected `PacketSinkRecorder`, matching the production callback ordering under test.
+- Packet-sink assertions use safe `first` access after the count check so a failed count reports one assertion failure instead of crashing the whole test process.
+- README, manifest, installer defaults, Formula metadata, and startup-banner tests now point at `v3.4.5-rc3`.
+- `v3.4.5-rc2` remains published but is superseded by this candidate because its CI run still contained the packet-sink recorder race.
+
+### Tests
+
+- `swift test --no-parallel` -> 1113 / 1113 PASS locally.
+- `swift test --enable-code-coverage --no-parallel` -> 1113 / 1113 PASS locally; coverage 70.65% region / 77.63% line.
+- `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh` -> 259 / 259 PASS, 0 skipped, 0 failed.
+- `Scripts/live-e2e-test.py` -> 213 PASS, 46 correctly skipped on the direct Python parent path, 0 failed.
+
 ## [3.4.5-rc2] — 2026-05-10
 
 **CI gate determinism hotfix for the v3.4.5 release candidate.** `v3.4.5-rc1` closed the strict live E2E blocker, but the published tag exposed a separate CI-only false failure: the workflow still used default `swift test`, so suites that temporarily replace the process-wide `Log.output` singleton could interleave with one another under Swift Testing's parallel scheduler. The project has used `swift test --no-parallel` as the deterministic local and coverage gate since the enterprise review; this release candidate aligns the main CI test step to the same authoritative path instead of treating global-output capture tests as safely parallelizable.
