@@ -2,13 +2,13 @@
 
 **Status**: Todo
 **Size**: S
-**의존성**: T3
+**Depends on**: T3
 **PRD**: AC-3.2, AC-3.3
-**Boomer Phase E P2-1 fix**: 기존 `encodeJSON<T: Encodable>` + `jsonStringEscape` (JSONHelper.swift) 사용. 수동 string concat 금지 — `Encodable` DTO 권장.
+**Boomer Phase E P2-1 fix**: Use existing `encodeJSON<T: Encodable>` + `jsonStringEscape` (JSONHelper.swift). Manual string concatenation prohibited — `Encodable` DTO recommended.
 
-## 목표
+## Goal
 
-`logic://markers` JSON 응답에 marker 별 `position_source` (snake_case) + derived `is_canonical: Bool` 포함. `is_canonical = position_source == "parser"`.
+Include per-marker `position_source` (snake_case) + derived `is_canonical: Bool` in the `logic://markers` JSON response. `is_canonical = position_source == "parser"`.
 
 ## TDD Red Phase
 
@@ -23,18 +23,18 @@ func readMarkers_envelope_includesPositionSource() async throws {
     let result = try await ResourceHandlers.readMarkers(cache: cache, uri: "logic://markers")
     let json = result.contents.first.flatMap { contentText($0) } ?? ""
 
-    // parser 케이스
+    // parser case
     #expect(json.contains("\"position_source\":\"parser\""))
     #expect(json.contains("\"is_canonical\":true"))
 
-    // fallback 케이스
+    // fallback case
     #expect(json.contains("\"position_source\":\"fallback\""))
     #expect(json.contains("\"is_canonical\":false"))
 }
 
 @Test
 func readMarkers_envelope_legacyUnknown_isCanonicalFalse() async throws {
-    // legacy snapshot decode 결과로 .unknown — is_canonical false
+    // .unknown from legacy snapshot decode — is_canonical false
     let cache = StateCache()
     await cache.updateMarkers([
         MarkerState(id: 0, name: "Legacy", position: "1.1.1.1", positionSource: .unknown),
@@ -47,16 +47,16 @@ func readMarkers_envelope_legacyUnknown_isCanonicalFalse() async throws {
 }
 ```
 
-**Red 확인**: 현재 `encodeJSON([MarkerState])` 는 Swift camelCase (`positionSource`) 또는 (Codable 기본 동작에 따라) 미포함 → assertion FAIL.
+**Red confirmation**: Current `encodeJSON([MarkerState])` outputs Swift camelCase (`positionSource`) or (depending on Codable default behavior) omits it → assertion FAIL.
 
-## Green Phase 구현 (Encodable DTO + 기존 helper)
+## Green Phase Implementation (Encodable DTO + existing helper)
 
 `Sources/LogicProMCP/Resources/ResourceHandlers.swift` `readMarkers`:
 
 ```swift
-/// v3.2 — wire schema에 position_source + derived is_canonical 포함.
-/// 별도 DTO 사용 이유: MarkerState는 도메인 model (positionSource camelCase),
-/// wire는 snake_case + derived field. SRP — 두 책임 분리.
+/// v3.2 — wire schema includes position_source + derived is_canonical per marker.
+/// Separate DTO reason: MarkerState is domain model (positionSource camelCase),
+/// wire uses snake_case + derived field. SRP — two responsibilities separated.
 private struct MarkerWireDTO: Encodable {
     let id: Int
     let name: String
@@ -79,7 +79,7 @@ private static func readMarkers(cache: StateCache, uri: String) async throws -> 
             is_canonical: m.positionSource == .parser
         )
     }
-    let body = encodeJSON(dtos)  // 기존 helper (JSONHelper.swift:99)
+    let body = encodeJSON(dtos)  // existing helper (JSONHelper.swift:99)
 
     let source: String
     if !markers.isEmpty {
@@ -99,28 +99,28 @@ private static func readMarkers(cache: StateCache, uri: String) async throws -> 
 }
 ```
 
-DTO field `position_source` snake_case naming → JSONEncoder 기본 동작 (no `keyEncodingStrategy`)으로 그대로 직렬화. CodingKeys override 불필요.
+DTO field `position_source` snake_case naming → serialized as-is with JSONEncoder default behavior (no `keyEncodingStrategy`). No CodingKeys override needed.
 
-기존 string-escape 안전성: `JSONEncoder` 가 표준 escape 처리 (control char + quote + backslash).
+Existing string-escape safety: `JSONEncoder` handles standard escaping (control chars + quote + backslash).
 
 ## Refactor Phase
 
-- 한글 주석 (WHY: SRP — 도메인 model vs wire schema 분리)
-- 기존 `encodeJSON<T: Encodable>` (JSONHelper.swift:99) + JSONEncoder 표준 escape 사용 — boomer P2-1 fix: 수동 string concat 금지
-- `MarkerWireDTO` 는 `private` nested type — 외부 노출 X
+- Korean comments (WHY: SRP — domain model vs wire schema separation)
+- Use existing `encodeJSON<T: Encodable>` (JSONHelper.swift:99) + JSONEncoder standard escape — Boomer P2-1 fix: manual string concat prohibited
+- `MarkerWireDTO` is `private` nested type — not exposed externally
 
 ## Acceptance Criteria
 
-- **AC-T5.1**: 응답 JSON에 marker 별 `position_source: "parser"|"fallback"|"unknown"` 포함
-- **AC-T5.2**: 응답 JSON에 marker 별 `is_canonical: true|false` 포함 (derived)
-- **AC-T5.3**: `position_source == "parser"` 일 때만 `is_canonical: true`
-- **AC-T5.4**: 3 통합 테스트 (parser / fallback / unknown) PASS
-- **AC-T5.5**: 기존 marker resource tests 회귀 0건 (envelope shape 동일)
-- **AC-T5.6**: 한글 주석, 신규 TODO 0
-- **AC-T5.7**: JSONEncoder 표준 escape — `"`, `\`, control chars 안전 (별도 helper 작성 X)
-- **AC-T5.8**: `MarkerWireDTO` 별도 file 분리 안 함 (private nested in ResourceHandlers — SRP within file scope)
+- **AC-T5.1**: Response JSON includes per-marker `position_source: "parser"|"fallback"|"unknown"`
+- **AC-T5.2**: Response JSON includes per-marker `is_canonical: true|false` (derived)
+- **AC-T5.3**: `is_canonical: true` only when `position_source == "parser"`
+- **AC-T5.4**: 3 integration tests (parser / fallback / unknown) PASS
+- **AC-T5.5**: Existing marker resource tests: 0 regressions (envelope shape unchanged)
+- **AC-T5.6**: Korean comments, no new TODOs
+- **AC-T5.7**: JSONEncoder standard escape — `"`, `\`, control chars safe (no custom helper needed)
+- **AC-T5.8**: `MarkerWireDTO` not split to separate file (private nested in ResourceHandlers — SRP within file scope)
 
 ## Out of Scope
 
 - goto_marker uncertainty extras = T6
-- docs/API.md 갱신 = T8
+- docs/API.md update = T8

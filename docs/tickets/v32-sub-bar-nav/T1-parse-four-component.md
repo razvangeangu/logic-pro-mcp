@@ -1,17 +1,17 @@
 # T1 — `parseFourComponentPosition` Helper
 
-**Status**: Todo (T0 PASS 후 진행)
+**Status**: Todo (proceed after T0 PASS)
 **Size**: S
-**의존성**: T0
+**Depends on**: T0
 **PRD**: AC-1.1, AC-2.1~2.4, AC-4.4, AC-4.5
 
-## 목표
+## Goal
 
-`gotoPositionViaBarSlider` 가 `params["position"]` 의 4-component string 을 정확히 추출하는 helper 함수 분리. v3.1.11 parser (`parseMarkerListPosition`) 와는 다른 책임 — caller validation/extraction.
+Extract a helper function that accurately parses the 4-component string from `params["position"]` in `gotoPositionViaBarSlider`. This has a different responsibility from the v3.1.11 parser (`parseMarkerListPosition`) — this is caller validation/extraction.
 
-## 배경
+## Background
 
-v3.1.11 코드:
+v3.1.11 code:
 
 ```swift
 // AccessibilityChannel.swift:2206-2208
@@ -21,16 +21,16 @@ if let first = parts.first, let b = Int(first) {
 }
 ```
 
-첫 컴포넌트만 추출. v3.2 — 4 컴포넌트 모두 추출.
+Extracts only the first component. v3.2 — extract all 4 components.
 
-TransportDispatcher 가 이미 `isValidPositionString` 으로 4-component 형식 검증 → AccessibilityChannel 에 도달한 시점에 `pos` 는 valid 한 4-component string 임. 그러나 AX channel 도 self-contained validation 유지 (defense in depth).
+TransportDispatcher already validates 4-component format via `isValidPositionString` → by the time `pos` reaches AccessibilityChannel, it is a valid 4-component string. However, the AX channel also maintains self-contained validation (defense in depth).
 
 ## TDD Red Phase
 
-`Tests/LogicProMCPTests/AXGotoPositionTests.swift` 에 추가 (or 신규 파일):
+Add to `Tests/LogicProMCPTests/AXGotoPositionTests.swift` (or new file):
 
 ```swift
-@Test("parseFourComponentPosition: 유효 → (bar, beat, div, tick)", arguments: [
+@Test("parseFourComponentPosition: valid → (bar, beat, div, tick)", arguments: [
     ("146.4.4.240", (146, 4, 4, 240)),
     ("1.1.1.1", (1, 1, 1, 1)),
     ("9999.16.16.999", (9999, 16, 16, 999)),
@@ -43,7 +43,7 @@ func parseFourComponentPosition_valid(input: String, expected: (Int, Int, Int, I
     #expect(parsed?.tick == expected.3)
 }
 
-@Test("parseFourComponentPosition: 무효 → nil", arguments: [
+@Test("parseFourComponentPosition: invalid → nil", arguments: [
     "", "146", "146.4", "146.4.4", "146.4.4.240.1",
     "0.1.1.1", "10000.1.1.1", "146.17.4.240", "146.4.17.240", "146.4.4.1000",
     "abc.4.4.240", "146.+4.4.240", "146.-4.4.240", "146.4.4.240.",
@@ -54,19 +54,19 @@ func parseFourComponentPosition_invalid(input: String) {
 }
 ```
 
-**Red 확인**: 함수 정의 전 — `parseFourComponentPosition` 존재 안 함 → 컴파일 에러 → Red.
+**Red confirmation**: Before the function is defined — `parseFourComponentPosition` does not exist → compile error → Red.
 
-## Green Phase 구현
+## Green Phase Implementation
 
-`Sources/LogicProMCP/Channels/AccessibilityChannel.swift` 에 추가:
+Add to `Sources/LogicProMCP/Channels/AccessibilityChannel.swift`:
 
 ```swift
-/// `transport.goto_position` 의 4-component position string을 분해한다.
+/// Parses the 4-component position string for `transport.goto_position`.
 ///
-/// 입력은 TransportDispatcher.isValidPositionString 검증 통과 후 전달되지만,
-/// AX channel도 self-contained validation 유지 — defense-in-depth.
-/// Bound: bar 1..9999, beat 1..16, div 1..16, tick 1..999.
-/// `+`/`-` prefix, 비-ASCII digit, timecode (`:` 포함) 거부.
+/// Input arrives after TransportDispatcher.isValidPositionString validation,
+/// but the AX channel also maintains self-contained validation — defense-in-depth.
+/// Bounds: bar 1..9999, beat 1..16, div 1..16, tick 1..999.
+/// Rejects `+`/`-` prefix, non-ASCII digits, and timecode (contains `:`).
 struct FourComponentPosition: Equatable {
     let bar: Int
     let beat: Int
@@ -75,11 +75,11 @@ struct FourComponentPosition: Equatable {
 }
 
 static func parseFourComponentPosition(_ raw: String) -> FourComponentPosition? {
-    // timecode 명시적 거부 (caller가 잘못된 channel 라우팅한 경우 방어).
+    // Explicitly reject timecode (defense against wrong channel routing by caller).
     guard !raw.contains(":") else { return nil }
     let parts = raw.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
     guard parts.count == 4 else { return nil }
-    // ASCII 0-9 char-set check (v3.1.11 NG9와 동일 정책).
+    // ASCII 0-9 char-set check (same policy as v3.1.11 NG9).
     let asciiDigit = { (s: String) -> Bool in
         !s.isEmpty && s.allSatisfy { $0.isASCII && $0.isNumber }
     }
@@ -94,26 +94,26 @@ static func parseFourComponentPosition(_ raw: String) -> FourComponentPosition? 
 }
 ```
 
-본문 ≤ 25 lines (AC-4.5).
+Body ≤ 25 lines (AC-4.5).
 
 ## Refactor Phase
 
-- 한글 주석 점검 (영어 주석 추가 금지 — AC-4.1)
-- TODO/FIXME grep 0건 (AC-4.2)
-- `static`/`internal` 가시성 — 테스트가 internal 접근 필요. Swift Testing은 `@testable import` 사용 → `static func` 으로 충분
-- 명명: Swift API Design Guidelines (`parseFourComponentPosition` — verb phrase, side-effect-free 명사 query). Struct `FourComponentPosition` PascalCase
+- Verify comments (no English comments — AC-4.1)
+- grep TODO/FIXME 0 (AC-4.2)
+- `static`/`internal` visibility — tests need internal access. Swift Testing uses `@testable import` → `static func` is sufficient
+- Naming: Swift API Design Guidelines (`parseFourComponentPosition` — verb phrase, side-effect-free query). Struct `FourComponentPosition` PascalCase
 
 ## Acceptance Criteria
 
-- **AC-T1.1**: `AccessibilityChannel.parseFourComponentPosition` 함수 추가, body ≤ 25 lines
+- **AC-T1.1**: `AccessibilityChannel.parseFourComponentPosition` added, body ≤ 25 lines
 - **AC-T1.2**: parameterized test 3 valid + 15 invalid cases PASS
-- **AC-T1.3**: 한글 주석만 (영어 주석 0건 — git diff grep 검증)
-- **AC-T1.4**: 신규 TODO/FIXME/XXX 0건
-- **AC-T1.5**: 기존 1064 tests 회귀 0건 (PASS 유지)
-- **AC-T1.6**: SOLID/SRP — parser 함수 (`parseMarkerListPosition`) 와 책임 분리 (parser는 AX surface 변환, 본 함수는 caller input extraction)
+- **AC-T1.3**: No English comments (git diff grep verified)
+- **AC-T1.4**: No new TODO/FIXME/XXX
+- **AC-T1.5**: Existing 1064 tests: 0 regressions (PASS maintained)
+- **AC-T1.6**: SOLID/SRP — responsibility separated from parser function (`parseMarkerListPosition`): parser handles AX surface conversion; this function handles caller input extraction
 
 ## Out of Scope
 
-- 본 helper는 추출만 — actual navigation 은 T2
-- TransportDispatcher 측 검증 변경 0건 (기존 isValidPositionString 유지)
-- 1-component 또는 SMPTE 처리는 호출 site (T2) 에서 분기
+- This helper is extraction only — actual navigation is T2
+- TransportDispatcher validation unchanged (existing isValidPositionString kept)
+- 1-component or SMPTE handling is branched at the call site (T2)

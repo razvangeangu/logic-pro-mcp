@@ -1,28 +1,28 @@
-# T4 — `extractMarkerPosition` 양쪽 Caller Fallback Site `.fallback` 마킹
+# T4 — `extractMarkerPosition` Both Caller Fallback Sites `.fallback` Marking
 
 **Status**: Todo
 **Size**: S
-**의존성**: T3
+**Depends on**: T3
 **PRD**: AC-3.1, AC-3.4
-**Boomer Phase E P1-4 fix**: Logic 12.2 primary path은 `enumerateMarkersFromListWindow` (L798-800). Legacy ruler path (L708) 만 수정 시 v3.1.11 이후 모든 marker가 `.parser` 로 잘못 마킹됨. **두 사이트 모두 수정**.
+**Boomer Phase E P1-4 fix**: The Logic 12.2 primary path is `enumerateMarkersFromListWindow` (L798-800). Fixing only the legacy ruler path (L708) would cause all markers from v3.1.11+ to be incorrectly marked as `.parser`. **Both sites must be fixed**.
 
-## 목표
+## Goal
 
-두 fallback site 모두 `position_source` 명시:
+Explicitly mark `position_source` at both fallback sites:
 
-**사이트 1 — Legacy ruler walker** (`AXLogicProElements.swift:708`):
+**Site 1 — Legacy ruler walker** (`AXLogicProElements.swift:708`):
 ```swift
 markers.append(MarkerState(id: index, name: name, position: position ?? "\(index + 1).1.1.1"))
 ```
 
-**사이트 2 — Logic 12.2 marker list (primary)** (`AXLogicProElements.swift:798-800`):
+**Site 2 — Logic 12.2 marker list (primary)** (`AXLogicProElements.swift:798-800`):
 ```swift
 let position = parseMarkerListPosition(positionRaw)
     ?? "\(index + 1).1.1.1"
 markers.append(MarkerState(id: index, name: name, position: position))
 ```
 
-→ 두 사이트 모두 parser 성공 시 `.parser`, fallback 시 `.fallback` 명시.
+→ Both sites: mark `.parser` when parser succeeds, `.fallback` when fallback is used.
 
 ## TDD Red Phase
 
@@ -64,11 +64,11 @@ func enumerateMarkers_unparseablePosition_marksAsFallback() async {
 }
 ```
 
-**Red 확인**: 현재 코드는 `MarkerState` init 시 `positionSource` 기본값 `.parser` 사용 → fallback case도 `.parser` 로 마킹 → assertion FAIL.
+**Red confirmation**: Current code uses `MarkerState` init with default `.parser` → fallback case is also marked `.parser` → assertion FAIL.
 
-## Green Phase 구현
+## Green Phase Implementation
 
-**사이트 1** (legacy ruler — `AXLogicProElements.swift:708`):
+**Site 1** (legacy ruler — `AXLogicProElements.swift:708`):
 
 ```swift
 let position = extractMarkerPosition(text, runtime: runtime.ax)
@@ -81,7 +81,7 @@ markers.append(MarkerState(
 ))
 ```
 
-**사이트 2** (Logic 12.2 marker list — `AXLogicProElements.swift:798-800`):
+**Site 2** (Logic 12.2 marker list — `AXLogicProElements.swift:798-800`):
 
 ```swift
 let parsed = parseMarkerListPosition(positionRaw)
@@ -94,21 +94,21 @@ markers.append(MarkerState(
 ))
 ```
 
-기존 `let position = parseMarkerListPosition(positionRaw) ?? "\(index + 1).1.1.1"` 한 줄 → 3 줄로 확장. parser 결과를 두 번 사용 (source 결정 + position 값).
+Existing `let position = parseMarkerListPosition(positionRaw) ?? "\(index + 1).1.1.1"` one line → expanded to 3 lines. Parser result used twice (source determination + position value).
 
 ## Refactor Phase
 
-- 한글 주석: `// parser 성공 → .parser, nil → .fallback (manufactured)`
-- 단순 변환 — extra logic 추가 0
-- AC-4.2 grep 검증
+- Korean comment: `// parser success → .parser, nil → .fallback (manufactured)`
+- Simple transformation — no extra logic added
+- AC-4.2 grep verification
 
 ## Acceptance Criteria
 
-- **AC-T4.1**: 2 통합 테스트 PASS (parser 성공 / fallback 케이스)
-- **AC-T4.2**: 기존 1064 tests + T3 4 tests = 1070 PASS 유지
-- **AC-T4.3**: 변경 라인 ≤ 12 (양쪽 사이트 합산 — boomer P1-4 반영)
-- **AC-T4.4**: 한글 주석, 신규 TODO 0
-- **AC-T4.5**: enumerator 외 다른 marker 생성 site 없음 확인 (grep `MarkerState(id:`)
+- **AC-T4.1**: 2 integration tests PASS (parser success / fallback case)
+- **AC-T4.2**: Existing 1064 tests + T3 4 tests = 1070 PASS maintained
+- **AC-T4.3**: Changed lines ≤ 12 (both sites combined — Boomer P1-4 reflected)
+- **AC-T4.4**: Korean comments, no new TODOs
+- **AC-T4.5**: Confirm no other marker creation sites exist (grep `MarkerState(id:`)
 
 ## Out of Scope
 

@@ -221,22 +221,22 @@ These are tracked for v3.4.x.
 
 ## [3.2.0] — 2026-05-07
 
-**Marker provenance — Boomer P2-3 closed.** `MarkerState` 가 `position` 의 출처를 머신 가독으로 surface (`position_source`: `parser` / `fallback` / `unknown`). `goto_marker` 가 fallback 또는 unknown provenance 마커 라우팅 시 응답 extras에 `marker_position_uncertain: true` 를 추가하여 caller가 cache fallback 위치임을 명시적으로 인지할 수 있다.
+**Marker provenance — Boomer P2-3 closed.** `MarkerState` now surfaces the origin of `position` in a machine-readable form (`position_source`: `parser` / `fallback` / `unknown`). When `goto_marker` routes to a fallback or unknown provenance marker, it adds `marker_position_uncertain: true` to the response extras so the caller can explicitly detect that a cache fallback position was used.
 
-### Honest deferred — NG10 sub-bar navigation 정확도
+### Honest deferred — NG10 sub-bar navigation accuracy
 
-v3.2.0은 **navigation 정확도 fix를 ship하지 않음**. v3.1.11 에서 deferred 된 NG10 (`gotoPositionViaBarSlider` 첫 dot-component만 소비) 은 다음 분기 (v3.3) 로 다시 deferred. 이유:
+v3.2.0 **does not ship a navigation accuracy fix**. NG10 (deferred from v3.1.11: `gotoPositionViaBarSlider` consuming only the first dot-component) is re-deferred to v3.3. Reason:
 
-T0 live spike (실측, 2026-05-07) 결과 PRD 가정이 깨짐:
-- Logic 12.2 `위치로 이동` dialog 는 단일 텍스트 input이 아닌 4-segment `AXSlider` 구조 (bar / beat / div / tick 각 별개 slider)
-- AppleScript `keystroke "146.4.4.240"` → segment에 입력 도달 안 함
-- AXSlider 직접 value set 시도 → `AppleEvent 처리 구조 실패` (raw value ~2.27E+15 와 displayed value 매핑 미해독)
+The T0 live spike (measured on 2026-05-07) invalidated the PRD assumption:
+- The Logic 12.2 Go to Position dialog is a 4-segment `AXSlider` structure (bar / beat / div / tick as separate sliders), not a single text input.
+- `AppleScript keystroke "146.4.4.240"` does not reach any segment.
+- Attempting to set the AXSlider value directly fails (the mapping between raw values (~2.27E+15) and displayed values has not been decoded).
 
-따라서 v3.1.11 navigation 동작 (`bar` 첫 component만 navigate) 그대로 유지. v3.3 PRD에서 slider raw value mapping reverse-engineering 후 closure 시도. 자세한 spike 결과: `docs/live-verify-v3.2.0.md`.
+The v3.1.11 navigation behavior (navigates only the `bar` first component) is therefore preserved unchanged. v3.3 will attempt closure after reverse-engineering the slider raw value mapping in the PRD. Full spike results: `docs/live-verify-v3.2.0.md`.
 
 ### Schema additions (back-compat)
 
-`MarkerState` Swift 도메인 model:
+`MarkerState` Swift domain model:
 ```swift
 enum PositionSource: String, Codable { case parser, fallback, unknown }
 
@@ -244,7 +244,7 @@ struct MarkerState {
     let id: Int
     var name: String
     var position: String
-    var positionSource: PositionSource  // v3.2 신규
+    var positionSource: PositionSource  // new in v3.2
 }
 ```
 
@@ -261,11 +261,11 @@ struct MarkerState {
 
 ### Codable backward compat
 
-기존 v3.1.x cache snapshot 디코딩 시 `positionSource` field 부재 → `.unknown` (false provenance 차단). 신규 marker는 항상 `.parser` 또는 `.fallback` 명시.
+When decoding existing v3.1.x cache snapshots, absence of the `positionSource` field defaults to `.unknown` (prevents false provenance). New markers always explicitly carry `.parser` or `.fallback`.
 
 ### `goto_marker` uncertainty extras
 
-cache의 `position_source ∈ {.fallback, .unknown}` 마커에 라우팅 시:
+When routing to a marker whose `position_source ∈ {.fallback, .unknown}` in cache:
 ```json
 {
   "success": true, "verified": true, "requested": "1.1.1.1",
@@ -273,62 +273,62 @@ cache의 `position_source ∈ {.fallback, .unknown}` 마커에 라우팅 시:
   "marker_position_source": "fallback"
 }
 ```
-HC State A/B 응답에만 top-level extras merge. State C (`success: false`) 응답은 보존.
+Top-level extras are merged only into HC State A/B responses. State C (`success: false`) responses are preserved unchanged.
 
 ### Tests
 
-1064 → 1074 PASS. 신규 10 cases — Codable round-trip × 3, legacy snapshot decode × 2, HC top-level merge (State A/B/C/invalid JSON) × 4, `PositionSource` rawValue 안정성 × 1.
+1064 → 1074 PASS. 10 new cases — Codable round-trip × 3, legacy snapshot decode × 2, HC top-level merge (State A/B/C/invalid JSON) × 4, `PositionSource` rawValue stability × 1.
 
 ### Behavior change
 
-없음. v3.1.11 의 `goto_marker`/`transport.goto_position` 동작 그대로 유지. 신규 field만 추가, 기존 field 변경 0.
+None. The `goto_marker` / `transport.goto_position` behavior from v3.1.11 is preserved unchanged. Only new fields are added; no existing fields are modified.
 
 ## [3.1.11] — 2026-05-07
 
-**`thomas-doesburg`의 Issue #9 — 영문 Logic 12.2 marker position parser 정확성 + 13 locales 메뉴 경로 문서화 + lenient 1-3 components 정책 폐기.**
+**Issue #9 (`thomas-doesburg`) — English Logic 12.2 marker position parser accuracy + 13-locale menu path documentation + lenient 1–3 component policy removed.**
 
-v3.1.10 verification에서 reporter가 두 가지 발견을 보고:
-- **F1 (해결 — doc 보강)**: 영문 12.2의 Marker List 윈도우는 `Navigate → Open Marker List` 하위 (Window 메뉴 아님). v3.1.9 릴리스 노트가 "Open the Marker List window" 표현을 사용하여 영문 사용자가 Window 메뉴를 검색.
-- **F2 (parser bug)**: VOCALS 마커 위치 `"146 4 4 240."` (UI rendering 끝 마침표) → parser reject → fallback `\(index+1).1.1.1` = `"6.1.1.1"`. 데이터 정확성 위반.
+During v3.1.10 verification, the reporter identified two findings:
+- **F1 (resolved — doc improvement)**: The Marker List window on English 12.2 is under `Navigate → Open Marker List` (not the Window menu). The v3.1.9 release notes used the phrase "Open the Marker List window", leading English users to search the Window menu.
+- **F2 (parser bug)**: VOCALS marker position `"146 4 4 240."` (trailing period from Logic UI rendering) → parser rejection → fallback `\(index+1).1.1.1` = `"6.1.1.1"`. Data accuracy violation.
 
 ### Fix
 
-`AXLogicProElements.parseMarkerListPosition`을 다음 정책으로 강화:
+`AXLogicProElements.parseMarkerListPosition` hardened with the following policies:
 
-1. **끝 마침표 / 콤마 strip** (`while`-loop): Logic UI rendering artifact 흡수.
-2. **공백/탭만 separator** (NG7, Guardian P0-3): dot은 끝에서만 의미. mixed separator (`"1.1 1.1"`) 거부 — manufacturing 차단.
-3. **ASCII digit narrow** (NG9, Guardian P2-2): `Int(_: String)` failable initializer 사용 — Arabic-Indic 등 비-ASCII 거부.
-4. **1-based 검증** (NG8, Guardian P0-2): 모든 컴포넌트 ≥ 1 — `"0 0 0 0"` 거부.
-5. **Strict 4 components 정책** (NG11, Boomer P1-1): lenient 1-3 components 폐기. Logic UI는 항상 4 컴포넌트를 노출하므로 1-3은 비-position 셀(예: tempo)일 가능성 — silently 잘못된 bar로 manufacturing 안 함.
+1. **Trailing period / comma strip** (`while`-loop): absorbs Logic UI rendering artifacts.
+2. **Whitespace/tab-only separators** (NG7, Guardian P0-3): dots are meaningful only at the end. Mixed separators (`"1.1 1.1"`) are rejected — prevents manufacturing incorrect values.
+3. **ASCII digit narrowing** (NG9, Guardian P2-2): uses `Int(_: String)` failable initializer — rejects non-ASCII digits such as Arabic-Indic.
+4. **1-based validation** (NG8, Guardian P0-2): all components must be ≥ 1 — `"0 0 0 0"` is rejected.
+5. **Strict 4-component policy** (NG11, Boomer P1-1): lenient 1–3 component handling removed. Logic UI always exposes 4 components, so 1–3 components likely represent non-position cells (e.g. tempo) — no silent manufacturing of an incorrect bar value.
 
-### Behavior change (정직 명시)
+### Behavior change (stated explicitly)
 
-v3.1.10에서 valid이던 `"17 2"` → `"17.2"` (2-component lenient)는 v3.1.11에서 nil. 영향:
-- 어떤 관찰된 Logic 빌드도 1-3 컴포넌트 표기를 사용 안 하므로 사용자 직면 영향 0.
-- 이론적 영향: 미래 빌드가 헤더 행 단축 표기 노출 시 → fallback `\(index+1).1.1.1` (silently 잘못된 bar로 manufacturing 안 함 — honest).
+`"17 2"` (2-component lenient), which was valid in v3.1.10, returns nil in v3.1.11. Impact:
+- No observed Logic build uses 1–3 component notation, so user-facing impact is zero.
+- Theoretical impact: if a future build exposes a shortened header row → fallback `\(index+1).1.1.1` (no silent manufacturing of an incorrect bar value — honest).
 
-### Sub-bar navigation (NG10 분리, Guardian P0-1)
+### Sub-bar navigation (NG10 separated, Guardian P0-1)
 
-`goto_marker { name: "VOCALS" }`가 cache의 `position: "146.4.4.240"`를 정확히 surface하지만, AX `gotoPositionViaBarSlider`는 첫 컴포넌트(bar)만 추출하여 slider에 set — beat/div/tick은 무시. v3.1.11은 **cache 정확성까지** scope. Sub-bar 정확도 navigation은 별도 PRD (v3.2 — `gotoPositionViaBarSlider` 확장)로 분리.
+`goto_marker { name: "VOCALS" }` correctly surfaces `position: "146.4.4.240"` from cache, but the AX `gotoPositionViaBarSlider` only extracts the first component (bar) and sets the slider — beat/div/tick are ignored. v3.1.11 scope ends at **cache accuracy**. Sub-bar navigation accuracy is separated into its own PRD (v3.2 — `gotoPositionViaBarSlider` extension).
 
 ### TROUBLESHOOTING 13 locales (Boomer P1-2)
 
-코드는 이미 13 locales (KR/EN/JA/FR/DE/ES/IT/ZH-S/ZH-T/RU/PT/NL)의 Marker List 윈도우 타이틀을 인식하지만, v3.1.9 docs는 KR/EN만 명시 → 다른 locale 사용자가 동일 discoverability 결함 재발. v3.1.11 docs는 13 locales 표 + "모든 빌드 Navigate 메뉴" 명시.
+The code already recognizes Marker List window titles in 13 locales (KR/EN/JA/FR/DE/ES/IT/ZH-S/ZH-T/RU/PT/NL), but v3.1.9 docs only listed KR/EN — users in other locales encountered the same discoverability gap. v3.1.11 docs add the 13-locale table and explicitly state "Navigate menu on all builds".
 
 ### Implementation
 
 `AXLogicProElements.parseMarkerListPosition` (15 lines body, doc 7 lines):
 
 ```swift
-/// Logic Marker List 셀의 위치 문자열을 표준 "bar.beat.div.tick" 형태로 변환한다.
+/// Converts a Logic Marker List cell position string to the canonical "bar.beat.div.tick" form.
 ///
-/// 관찰된 입력 변형:
-/// - 한글 12.2: "1 1 1 1" (공백 구분, whole-bar)
-/// - 영문 12.2: "146 4 4 240." (공백 구분 + UI 끝 마침표)
+/// Observed input variants:
+/// - Korean 12.2: "1 1 1 1" (space-separated, whole-bar)
+/// - English 12.2: "146 4 4 240." (space-separated + trailing period from UI rendering)
 ///
-/// 정확히 4 컴포넌트, 각 ASCII 정수 1 이상이어야 한다. Logic UI는 항상 4
-/// 컴포넌트를 노출하므로 1-3 컴포넌트는 비-position 셀(예: tempo)일 가능성으로
-/// nil 반환한다. 호출자는 `\(index+1).1.1.1` fallback을 사용한다.
+/// Requires exactly 4 components, each an ASCII integer ≥ 1. Logic UI always exposes 4
+/// components, so 1–3 components likely represent non-position cells (e.g. tempo) and
+/// return nil. Callers use the `\(index+1).1.1.1` fallback.
 static func parseMarkerListPosition(_ raw: String) -> String? {
     var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     while let last = trimmed.last, last == "." || last == "," {
@@ -345,48 +345,48 @@ static func parseMarkerListPosition(_ raw: String) -> String? {
 
 ### Tests
 
-기존 `parseMarkerListPosition_validInputs` / `_invalidInputs` 삭제 → Swift Testing parameterized 2개로 통합:
-- `parseMarkerListPosition_valid` (8 cases): trailing-dot, trailing-comma, 다중 공백, 탭, 정확 4-component.
-- `parseMarkerListPosition_invalid` (17 cases): 1-3 components (NG11), 0-positions (NG8), Arabic-Indic (NG9), mixed separator (NG7), etc.
+Removed `parseMarkerListPosition_validInputs` / `_invalidInputs` → consolidated into 2 Swift Testing parameterized test functions:
+- `parseMarkerListPosition_valid` (8 cases): trailing-dot, trailing-comma, multiple spaces, tab, exact 4-component.
+- `parseMarkerListPosition_invalid` (17 cases): 1–3 components (NG11), 0-positions (NG8), Arabic-Indic (NG9), mixed separator (NG7), etc.
 
-신규 통합:
-- `enumerateMarkers_trailingDotPosition_canonicalizes` — 영문 12.2 시나리오 (synthetic AX tree).
-- `enumerateMarkers_koreanWholeBarPosition_canonicalizes` — 한글 12.2 회귀 (G3 양쪽 검증).
+New integration tests:
+- `enumerateMarkers_trailingDotPosition_canonicalizes` — English 12.2 scenario (synthetic AX tree).
+- `enumerateMarkers_koreanWholeBarPosition_canonicalizes` — Korean 12.2 regression (G3 both-direction verification).
 
-기존 `enumerateMarkers_unparseablePosition_usesIndexFallback` (caller fallback 회귀) PASS 유지.
+Existing `enumerateMarkers_unparseablePosition_usesIndexFallback` (caller fallback regression) continues to PASS.
 
-`swift test --no-parallel` → **1064 / 1064 PASS** (was 1062 in v3.1.10; +2 net — parameterized 25 cases가 2 test functions로 카운트되어 net 변화 작음, 실제 case 매트릭스는 +20).
+`swift test --no-parallel` → **1064 / 1064 PASS** (was 1062 in v3.1.10; +2 net — the 25 parameterized cases count as 2 test functions, so the net count change is small; actual case matrix is +20).
 
 ### Review process
 
-PRD v0.3 = Strategist + Guardian + Boomer 3-agent 통합. 본 fix 7 P0/P1 통합:
-- **Strategist**: parser 라인 축소, edge case 25→14, 언어 전환 안전 절차
-- **Guardian P0-1**: sub-bar nav 불가 → NG10 분리
-- **Guardian P0-2**: 0 거부 (NG8)
-- **Guardian P0-3**: mixed separator 거부 (NG7)
-- **Guardian P2-2**: ASCII narrow (NG9)
-- **Boomer P1-1**: lenient 폐기 → strict 4 (NG11)
-- **Boomer P1-2**: 13 locales doc 통합
+PRD v0.3 = Strategist + Guardian + Boomer 3-agent integration. This fix consolidates 7 P0/P1 findings:
+- **Strategist**: parser line reduction, edge cases 25→14, language-switch safety procedure
+- **Guardian P0-1**: sub-bar navigation not feasible → separated as NG10
+- **Guardian P0-2**: reject 0-values (NG8)
+- **Guardian P0-3**: reject mixed separators (NG7)
+- **Guardian P2-2**: ASCII digit narrowing (NG9)
+- **Boomer P1-1**: lenient removed → strict 4 (NG11)
+- **Boomer P1-2**: 13-locale documentation integrated
 
-티켓 review 4-agent (boomer + strategist + tester + guardian):
-- **Tester**: 한글 whole-bar 통합 회귀 추가 (G3 양쪽 검증)
-- **Guardian**: TODO/FIXME grep 검증 절차 추가 (AC-4.2)
+Ticket review by 4 agents (boomer + strategist + tester + guardian):
+- **Tester**: added Korean whole-bar integration regression (G3 both-direction verification)
+- **Guardian**: added TODO/FIXME grep verification step (AC-4.2)
 
-### 11 원칙 매핑 (사용자 directive)
+### 11-principle mapping (user directive)
 
-| # | 원칙 | 적용 |
-|---|------|------|
-| 1 | 실리콘밸리 0.1% | 4-agent review × 2 phases (PRD + 티켓) + 라이브 e2e |
-| 2 | Apple 수준 | Foundation API only, 13-line body, ASCII narrow via `Int(_:String)` |
-| 3 | 0.1% 엣지케이스 0 | 25 parameterized cases + 통합 3 |
-| 4 | 오버엔지니어링 금지 | NG2/3/4/5/7/8/9/10/11 명시; 가설적 cases 제거 (lenient 폐기) |
-| 5 | 데드코드 0 | grep verification + lenient 정책 폐기 |
-| 6 | 컴팩트 | parser 본문 13 lines |
-| 7 | 표준 레퍼런스 | Swift API Design Guidelines + swift-testing parameterized |
-| 8 | 주니어 가독성 | 한글 step-by-step 주석 |
-| 9 | 한글 주석 | 신규/수정 코드 모두 |
-| 10 | SOLID/SRP | pure function, side-effect 0 |
-| 11 | 컴팩트 | parameterized 25 cases → 2 test functions |
+| # | Principle | Application |
+|---|-----------|-------------|
+| 1 | Top 0.1% | 4-agent review × 2 phases (PRD + ticket) + live e2e |
+| 2 | Foundation-quality | Foundation API only, 13-line body, ASCII narrow via `Int(_:String)` |
+| 3 | Zero edge-case escapes | 25 parameterized cases + 3 integration tests |
+| 4 | No over-engineering | NG2/3/4/5/7/8/9/10/11 explicitly scoped; hypothetical cases removed (lenient removed) |
+| 5 | Zero dead code | grep verification + lenient policy removed |
+| 6 | Compact | Parser body 13 lines |
+| 7 | Standard references | Swift API Design Guidelines + swift-testing parameterized |
+| 8 | Junior-readable | Step-by-step inline comments |
+| 9 | Inline comments | All new/modified code |
+| 10 | SOLID/SRP | Pure function, zero side effects |
+| 11 | Compact | 25 parameterized cases → 2 test functions |
 
 ## [3.1.10] — 2026-05-07
 
@@ -510,7 +510,7 @@ Pre-v3.1.9 `source: "default"` on the closed case is now `"ax_live"` (honest emp
 
 ### Caveat (UX) — marker list window must be open
 
-The fix only resolves user markers when the user has opened the dedicated Marker List window (via Logic's `탐색 → 마커 목록 열기` menu). When closed, `logic://markers` returns the honest-empty signal documented above. **No automatic open** ships in v3.1.9 — that's an opt-in we want explicit user consent on. Tracked as a follow-up ergonomics improvement; if you'd like it, file an issue.
+The fix only resolves user markers when the user has opened the dedicated Marker List window (via Logic's `탐색 → 마커 목록 열기 (Navigate → Open Marker List)` menu). When closed, `logic://markers` returns the honest-empty signal documented above. **No automatic open** ships in v3.1.9 — that's an opt-in we want explicit user consent on. Tracked as a follow-up ergonomics improvement; if you'd like it, file an issue.
 
 ### Tests
 
@@ -1183,7 +1183,7 @@ N-column Library Panel navigation. Pre-3.0.4 `track.set_instrument` took `parts[
 
 ## [3.0.3] — 2026-04-20
 
-AX-native control surface pass. Isaac's directive was blunt — *"GUI 단순 클릭 이벤트로 컨트롤하는 부분 모두 100% Apple 공식 AX 혹은 다른 방법으로"*: replace every primary GUI-click call path with the Apple AX API. v3.0.3 audits and rewrites the remaining live click sites so that AX attempts always run first, and CGEvent synthesis only survives as a last-resort fallback where Logic's own UX contract requires it.
+AX-native control surface pass. The directive was explicit — replace every primary GUI-click call path with the Apple AX API; use CGEvent synthesis only as a last-resort fallback where Logic's UX contract requires it. v3.0.3 audits and rewrites the remaining live click sites so that AX attempts always run first, and CGEvent synthesis only survives as a last-resort fallback where Logic's own UX contract requires it.
 
 ### Changed
 
@@ -1357,8 +1357,8 @@ Sending `{ "time": ... }` in v3.0.0+ returns an explicit error naming the remove
 
 ### Fixed
 
-- **`record_sequence` now places regions at the requested bar reliably.** Live verification revealed that Logic Pro's MIDI File Import anchors the imported region to the current playhead position — a bar=1 request on a session whose playhead had drifted to bar 129 produced a region at bar 129. The fix forces the playhead to bar 1 before every import via the `탐색 → 이동 → 위치…` dialog (auto-extends project length; slider path was silently clamping). Strategy D padding CC continues to position notes within the region at the requested bar.
-- **`transport.goto_position` no longer silently clamps to project length.** Previous implementation used the 마디 slider whose value is clipped to the active project's end bar. A `goto_position bar=50` on an 8-bar project stopped at bar 8 with a success response. The new implementation uses the dialog (which auto-extends the project) as the primary path and falls back to slider only when the dialog is disabled (empty project).
+- **`record_sequence` now places regions at the requested bar reliably.** Live verification revealed that Logic Pro's MIDI File Import anchors the imported region to the current playhead position — a bar=1 request on a session whose playhead had drifted to bar 129 produced a region at bar 129. The fix forces the playhead to bar 1 before every import via the Go to Position dialog (`탐색 → 이동 → 위치… / Navigate → Move → Position…`, auto-extends project length; the slider path was silently clamping). Strategy D padding CC continues to position notes within the region at the requested bar.
+- **`transport.goto_position` no longer silently clamps to project length.** Previous implementation used the bar slider whose value is clipped to the active project's end bar. A `goto_position bar=50` on an 8-bar project stopped at bar 8 with a success response. The new implementation uses the dialog (which auto-extends the project) as the primary path and falls back to slider only when the dialog is disabled (empty project).
 - **Dialog-keystroke race eliminated.** The previous `delay 0.5` assumed the Go-to-Position dialog would render within 500 ms. On slow machines the Cmd+A keystroke reached the arrange area instead, silently triggering "Select All Regions." The dialog-ready state is now polled with a 3-second timeout.
 
 ### Security
@@ -1380,7 +1380,7 @@ Sending `{ "time": ... }` in v3.0.0+ returns an explicit error naming the remove
 
 - **`logic_tracks.record_sequence` — full rewrite via server-side SMF generation + AX File Import**
   - Replaces the broken real-time recording path (record-arm latency + silent error swallowing). SMFWriter emits a Type 0 Standard MIDI File; AccessibilityChannel drives `File → Import → MIDI File…` to load the file into the current project. Note timing is now byte-exact with zero drift regardless of system load.
-  - **Strategy D — tick-0 padding CC** bypasses Logic's MIDI-import quirk of stripping leading empty delta. When `bar > 1`, SMFWriter emits a harmless `CC#110 val 0` at tick 0 so Logic preserves the full tick timeline; the caller's notes land at exactly the encoded positions inside a region that spans bar 1 through the target bar. Verified live on Logic Pro 12: `bar=50` request produces a region explicitly described by Logic as "1 마디에서 시작하여 51 마디에서 끝납니다".
+  - **Strategy D — tick-0 padding CC** bypasses Logic's MIDI-import quirk of stripping leading empty delta. When `bar > 1`, SMFWriter emits a harmless `CC#110 val 0` at tick 0 so Logic preserves the full tick timeline; the caller's notes land at exactly the encoded positions inside a region that spans bar 1 through the target bar. Verified live on Logic Pro 12: a `bar=50` request produces a region that Logic describes as starting at bar 1 and ending at bar 51.
   - Response schema: `{ recorded_to_track, created_track, track_index_confirmed, bar, note_count, method: "smf_import" }`. `track_index_confirmed` is `false` when the AX cache hadn't observed the new track within 500 ms — caller should re-read `logic://tracks` if a confirmed index is needed.
   - Hard upper limit lifted from 256 → 1024 notes (bounded by SMFWriter). Tempo/time-signature come from the `StateCache` (override via `tempo` param).
 - **`logic_tracks.arm_only` — error propagation fix**

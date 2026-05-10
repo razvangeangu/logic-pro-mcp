@@ -59,7 +59,7 @@ Three user-facing MCP resources (`logic://tracks`, `logic://markers`, `logic://p
 
 - [ ] **G1**: `logic://project/info` returns **correct** `tempo` / `timeSignature` / `trackCount` on Logic 12.x for an open project regardless of focused panel. Verified against `Lofi-Dreamscape-80.logicx` (BPM 80, 31 tracks, 4/4) — all three fields match.
 - [ ] **G2**: `logic://tracks` returns **at least the saved track count as placeholder rows** when AX is occluded or returns empty. Live names preserved when AX works (arrange panel focused).
-- [ ] **G3**: `logic://markers` returns markers via a **hardened AX walker** that does not depend on the `marker` / `마커` identifier string.
+- [ ] **G3**: `logic://markers` returns markers via a **hardened AX walker** that does not depend on the `marker` / `마커` (`marker`) identifier string.
 - [ ] **G4**: All three resource envelopes carry a `source` indicator. Permitted values: `"ax_live" | "project_file" | "ax_live_with_file_count" | "cache" | "default"`. Callers can branch on data quality.
 - [ ] **G5** (P0 from boomer review): **Placeholder track data MUST NEVER enter `StateCache`.** The tier-merge happens in `ResourceHandlers`, not in `AccessibilityChannel.execute`. `StatePoller` continues to feed cache from AX only. Write dispatchers consulting `cache.getTracks()` (e.g. `TrackDispatcher.handle("select", name: …)`) cannot match against placeholder names like `"Track 5"`.
 - [ ] **G6**: Test count grows by **+25** minimum; existing 1019 tests stay green.
@@ -110,7 +110,7 @@ Three user-facing MCP resources (`logic://tracks`, `logic://markers`, `logic://p
 
 **Acceptance Criteria:**
 - [ ] AC-3.1: Project with named markers, arrange panel focused → entries with `name` and bar-position strings, envelope `source: "ax_live"`.
-- [ ] AC-3.2: Marker ruler does not carry `marker` / `마커` identifier (12.x case from #5) — hardened walker locates ruler by AXRole + structural position (sibling of timeline AXRuler in the arrange area subtree). When present, markers are returned.
+- [ ] AC-3.2: Marker ruler does not carry `marker` / `마커` (`marker`) identifier (12.x case from #5) — hardened walker locates ruler by AXRole + structural position (sibling of timeline AXRuler in the arrange area subtree). When present, markers are returned.
 - [ ] AC-3.3: No markers in project → `[]`, `source: "ax_live"`. (`ax_occluded: false`)
 - [ ] AC-3.4: Plugin window focused / arrange panel obscured → `[]`, `source: "cache"` if cache has data, else `"default"`. `ax_occluded: true` in envelope.
 
@@ -247,7 +247,7 @@ No new MCP tool surface. Three existing resources change response shape (additiv
 | TCC scope | New entitlement / reuse Automation | Reuse Automation | Read of `.logicx` is plain `open()` — user-readable. |
 | `source` placement | Top-level / inside data / envelope `extras` | **Envelope `extras`** for cross-resource consistency; `placeholder` is per-row inside `TrackState`. | Envelope for `source` and `last_saved_age_sec`; row-level for `placeholder` to mark individual fake entries. |
 | AppleScript-primary helpers | Keep (defensive) / Remove | **Remove** (strategist) | Dead on 12.x (target). Removal eliminates `-2753` round-trip cost and an entire false-positive surface area. |
-| AX track headers fallback | Loose (any outline/table) / strict (identifier or layout-item children) | **Strict** | The `outline` / `table` fallback at `AXLogicProElements.swift:325-330` is what surfaces Inspector subtrees. Restrict to elements containing `kAXLayoutItemRole` children OR with description `"track headers"` / `"트랙 헤더"`. Otherwise return nil — let Tier 2 supply count fallback. |
+| AX track headers fallback | Loose (any outline/table) / strict (identifier or layout-item children) | **Strict** | The `outline` / `table` fallback at `AXLogicProElements.swift:325-330` is what surfaces Inspector subtrees. Restrict to elements containing `kAXLayoutItemRole` children OR with description `"track headers"` / `"트랙 헤더"` (`"track headers"`). Otherwise return nil — let Tier 2 supply count fallback. |
 | AX marker walker | Identifier / AXRole + position / both | **AXRole + structural position** | Identifier dropped in 12.x. Marker ruler is `AXRuler` adjacent to timeline `AXRuler` — structural position is stable. |
 | Identity contract | Per-section docPath / cache-wide invalidation | **Cache-wide invalidation** (existing) | Existing logic resets cache when `hasDocument: false`. Adequate for v3.1.8. NG8. |
 | Marker tri-state | Enum / bool flag / `ax_occluded` envelope | **`ax_occluded` envelope** (existing) | Existing flag already exposes "untrusted empty". NG9. |

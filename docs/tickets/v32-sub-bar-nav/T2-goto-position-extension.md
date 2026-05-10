@@ -1,18 +1,18 @@
-# T2 — `gotoPositionViaBarSlider` 4-Component 확장 (+ AppleScript Runner Test Seam)
+# T2 — `gotoPositionViaBarSlider` 4-Component Extension (+ AppleScript Runner Test Seam)
 
-**Status**: Todo (T1 완료 후)
+**Status**: Todo (after T1 complete)
 **Size**: M
-**의존성**: T1
+**Depends on**: T1
 **PRD**: AC-1.1, AC-1.4, AC-1.5, AC-1.6, AC-4.6
-**Boomer Phase E P1-3 fix**: AppleScript dialog 호출 test seam 필수 — 현재 `gotoPositionViaDialog`는 `AppleScriptChannel.executeAppleScript` 직접 호출 → unit test 불가. 본 티켓에서 runner injection 추가.
+**Boomer Phase E P1-3 fix**: AppleScript dialog call test seam required — current `gotoPositionViaDialog` calls `AppleScriptChannel.executeAppleScript` directly → cannot be unit tested. This ticket adds runner injection.
 
-## 목표
+## Goal
 
-`gotoPositionViaBarSlider` 가 4 컴포넌트 모두 사용하도록 확장. Dialog path는 4-component string keystroke. Slider fallback은 bar+beat partial.
+Extend `gotoPositionViaBarSlider` to use all 4 components. Dialog path uses 4-component string keystroke. Slider fallback uses bar+beat partial.
 
-## Test Seam 도입 (Boomer P1-3)
+## Test Seam Introduction (Boomer P1-3)
 
-`gotoPositionViaDialog` 가 직접 `AppleScriptChannel.executeAppleScript` 호출 → 테스트에서 AppleScript 실제 실행 불가능. v3.2 신규: runner closure injection.
+`gotoPositionViaDialog` calls `AppleScriptChannel.executeAppleScript` directly → cannot run real AppleScript in tests. v3.2 new: runner closure injection.
 
 ```swift
 typealias AppleScriptRunner = (String) async -> ChannelResult
@@ -27,7 +27,7 @@ private static func gotoPositionViaDialog(
 }
 ```
 
-`gotoPositionViaBarSlider` 도 같은 시그니처 확장:
+`gotoPositionViaBarSlider` extended with the same signature:
 
 ```swift
 private static func gotoPositionViaBarSlider(
@@ -37,21 +37,21 @@ private static func gotoPositionViaBarSlider(
 ) async -> ChannelResult { ... }
 ```
 
-기존 caller (channel layer)는 default arg 사용 → 변경 0. 테스트만 closure 주입.
+Existing callers (channel layer) use default args → 0 changes. Only tests inject the closure.
 
 ## TDD Red Phase
 
 ```swift
 @Test
 func gotoPosition_fourComponent_dialogSucceeds() async {
-    // AppleScript runner stub — 실제 dialog 띄우지 않고 "OK" 반환
+    // AppleScript runner stub — returns "OK" without showing real dialog
     let stubRunner: AppleScriptRunner = { _ in .success("OK") }
     let params = ["position": "146.4.4.240"]
     let result = await AccessibilityChannel.gotoPositionViaBarSlider(
         params: params, appleScriptRunner: stubRunner
     )
     if case .success(let json) = result {
-        // HC State A/B는 top-level "success":true + extras 머지 (HonestContract.swift:73-89)
+        // HC State A/B is flat top-level "success":true + extras merged (HonestContract.swift:73-89)
         #expect(json.contains("\"requested\":\"146.4.4.240\""))
         #expect(json.contains("\"via\":\"dialog\""))
     } else {
@@ -106,13 +106,13 @@ func gotoPosition_invalidPosition_returnsStateC() async {
 }
 ```
 
-**Red 확인**: 
-1. 현재 `gotoPositionViaBarSlider` 시그니처에 `appleScriptRunner` 파라미터 없음 → 컴파일 에러
-2. 기존 코드는 `targetBar` 만 set → `requested: "146.1.1.1"` 반환 → `requested:"146.4.4.240"` assertion FAIL
+**Red confirmation**: 
+1. Current `gotoPositionViaBarSlider` signature has no `appleScriptRunner` parameter → compile error
+2. Existing code sets only `targetBar` → returns `requested: "146.1.1.1"` → `requested:"146.4.4.240"` assertion FAIL
 
-## Green Phase 구현
+## Green Phase Implementation
 
-`gotoPositionViaBarSlider` 수정:
+Modify `gotoPositionViaBarSlider`:
 
 ```swift
 private static func gotoPositionViaBarSlider(
@@ -120,7 +120,7 @@ private static func gotoPositionViaBarSlider(
     runtime: AXLogicProElements.Runtime = .production,
     appleScriptRunner: AppleScriptRunner = AppleScriptChannel.executeAppleScript
 ) async -> ChannelResult {
-    // 입력 분기: bar 정수 / position 4-component / 기타.
+    // Input branch: bar integer / position 4-component / other.
     let position: FourComponentPosition?
     if let barStr = params["bar"], let b = Int(barStr), (1...9999).contains(b) {
         position = FourComponentPosition(bar: b, beat: 1, div: 1, tick: 1)
@@ -140,7 +140,7 @@ private static func gotoPositionViaBarSlider(
     let requested = "\(p.bar).\(p.beat).\(p.div).\(p.tick)"
     let baseExtras: [String: Any] = ["requested": requested]
 
-    // Dialog path — 4-component 정밀. runner 주입 (test seam).
+    // Dialog path — 4-component precision. Runner injection (test seam).
     let dialogResult = await gotoPositionViaDialog(
         position: p, appleScriptRunner: appleScriptRunner
     )
@@ -153,37 +153,37 @@ private static func gotoPositionViaBarSlider(
 }
 ```
 
-`gotoPositionViaDialog` 시그니처 변경: `bar: Int` → `position: FourComponentPosition`. AppleScript keystroke `"\(p.bar).\(p.beat).\(p.div).\(p.tick)"`.
+`gotoPositionViaDialog` signature change: `bar: Int` → `position: FourComponentPosition`. AppleScript keystroke `"\(p.bar).\(p.beat).\(p.div).\(p.tick)"`.
 
-`gotoPositionViaSliderPartial` 신규 — bar slider + beat slider 만 set. div/tick 무시. extras `precision: "bar_beat"` 명시.
+`gotoPositionViaSliderPartial` new function — sets bar slider + beat slider only. Ignores div/tick. extras `precision: "bar_beat"` included.
 
 ## Refactor Phase
 
-- `gotoPositionViaSliderPartial` 본문 ≤ 30 lines
-- 한글 주석 (구조 + WHY)
+- `gotoPositionViaSliderPartial` body ≤ 30 lines
+- Korean comments (structure + WHY)
 - TODO/FIXME 0
-- 기존 dialog 함수 호환성: AppleScript `keystroke "\(p.bar)"` → `keystroke "\(p.bar).\(p.beat).\(p.div).\(p.tick)"` 단일 변경. 1.1.1.1 입력 시 기존 `keystroke "1"` 와 동일 위치로 도달 (bar 1 시작) 보장 필요 — T0 spike에서 검증
+- Existing dialog function compatibility: AppleScript `keystroke "\(p.bar)"` → `keystroke "\(p.bar).\(p.beat).\(p.div).\(p.tick)"` single change. 1.1.1.1 input must reach same position as `keystroke "1"` (bar 1 start) — verify in T0 spike
 
-## IME mitigation 분기 (T0 결과 의존)
+## IME Mitigation Branch (depends on T0 results)
 
-| T0 결과 | 본 티켓 구현 |
-|---------|--------------|
-| 3/3 PASS | 단순 `keystroke "\(requested)"` |
+| T0 result | This ticket implementation |
+|-----------|---------------------------|
+| 3/3 PASS | Simple `keystroke "\(requested)"` |
 | S3 FAIL | NSPasteboard save+restore + paste |
-| S2/S3 FAIL | input source ABC 강제 |
-| S1 FAIL | `CGEventKeyboardSetUnicodeString` (**T2b** 별도 sub-ticket) |
+| S2/S3 FAIL | Force ABC input source |
+| S1 FAIL | `CGEventKeyboardSetUnicodeString` (**T2b** separate sub-ticket) |
 
 ## Acceptance Criteria
 
-- **AC-T2.1**: 4 valid 시나리오 unit test PASS (dialog success / slider partial / bar integer / invalid)
-- **AC-T2.2**: dialog path 가 4-component string keystroke 사용
-- **AC-T2.3**: slider fallback 이 bar+beat 까지 set, div/tick 미시도, extras `precision: "bar_beat"`
-- **AC-T2.4**: 1-component / 5-component / 0 / 10000 / beat 17 등 invalid → State C error
-- **AC-T2.5**: 한글 주석만, 신규 TODO 0건
-- **AC-T2.6**: 기존 dialog tests 회귀 0건 (`gotoPositionViaDialog` 시그니처 변경 시 기존 caller 동기 변경)
+- **AC-T2.1**: 4 valid scenario unit tests PASS (dialog success / slider partial / bar integer / invalid)
+- **AC-T2.2**: Dialog path uses 4-component string keystroke
+- **AC-T2.3**: Slider fallback sets bar+beat, does not attempt div/tick, extras `precision: "bar_beat"`
+- **AC-T2.4**: 1-component / 5-component / 0 / 10000 / beat 17 etc. invalid → State C error
+- **AC-T2.5**: Korean comments only, no new TODOs
+- **AC-T2.6**: Existing dialog tests: 0 regressions (if `gotoPositionViaDialog` signature changes, synchronize existing callers)
 
 ## Out of Scope
 
-- IME mitigation 구현 (T0 결과에 따라 sub-ticket 분기)
+- IME mitigation implementation (sub-ticket branch based on T0 results)
 - MarkerState provenance (T3-T6)
-- 문서 업데이트 (T8)
+- Documentation updates (T8)

@@ -2,12 +2,12 @@
 
 **Status**: Todo
 **Size**: S
-**의존성**: 없음 (T1/T2와 병렬 가능)
+**Depends on**: None (can run in parallel with T1/T2)
 **PRD**: AC-3.1, AC-3.4, AC-3.5, AC-6.4
 
-## 목표
+## Goal
 
-`MarkerState` 에 `positionSource: PositionSource` enum field 추가. Codable backward compat — 기존 v3.1.x cache snapshot 디코딩 시 missing field → `.unknown`.
+Add `positionSource: PositionSource` enum field to `MarkerState`. Codable backward compat — existing v3.1.x cache snapshots with missing field decode as `.unknown`.
 
 ## TDD Red Phase
 
@@ -31,11 +31,11 @@ func markerState_codableRoundTrip_fallback() throws {
 
 @Test
 func markerState_codableLegacySnapshot_missingField_decodesAsUnknown() throws {
-    // v3.1.x cache snapshot — positionSource field 없음
+    // v3.1.x cache snapshot — no positionSource field
     let legacyJSON = #"{"id":0,"name":"VOCALS","position":"146.4.4.240"}"#.data(using: .utf8)!
     let decoded = try JSONDecoder().decode(MarkerState.self, from: legacyJSON)
     #expect(decoded.positionSource == .unknown)
-    // 기존 field 동작 유지
+    // Existing field behavior preserved
     #expect(decoded.id == 0)
     #expect(decoded.name == "VOCALS")
     #expect(decoded.position == "146.4.4.240")
@@ -43,7 +43,7 @@ func markerState_codableLegacySnapshot_missingField_decodesAsUnknown() throws {
 
 @Test
 func markerState_codableLegacyArray_decodes() throws {
-    // v3.1.x cache snapshot이 marker array 일 때 — 가장 일반적
+    // v3.1.x cache snapshot as marker array — most common case
     let legacyJSON = #"""
     [
       {"id":0,"name":"A","position":"1.1.1.1"},
@@ -56,17 +56,17 @@ func markerState_codableLegacyArray_decodes() throws {
 }
 ```
 
-**Red 확인**: 기존 `MarkerState` 에 `positionSource` 없음 → 컴파일 에러 → Red.
+**Red confirmation**: existing `MarkerState` has no `positionSource` → compile error → Red.
 
-## Green Phase 구현
+## Green Phase Implementation
 
 `Sources/LogicProMCP/State/StateModels.swift`:
 
 ```swift
-/// Marker position의 출처 — `.parser` 는 canonical (parseMarkerListPosition 성공),
-/// `.fallback` 은 manufactured (`\(index+1).1.1.1`), `.unknown` 은 v3.1.x 이하의
-/// legacy cache snapshot (provenance 정보 없음). 신규 marker는 항상 `.parser`
-/// 또는 `.fallback` 으로 명시 — `.unknown` 은 decode 결과로만 발생.
+/// Provenance of a marker position — `.parser` is canonical (parseMarkerListPosition success),
+/// `.fallback` is manufactured (`\(index+1).1.1.1`), `.unknown` is from
+/// legacy v3.1.x cache snapshots (no provenance info). New markers are always `.parser`
+/// or `.fallback` — `.unknown` appears only as a decode result.
 enum PositionSource: String, Codable, Sendable, Equatable {
     case parser
     case fallback
@@ -87,7 +87,7 @@ struct MarkerState: Sendable, Codable, Identifiable, Equatable {
         self.positionSource = positionSource
     }
 
-    // Codable backward compat — v3.1.x snapshot은 positionSource field 없음 → .unknown
+    // Codable backward compat — v3.1.x snapshots have no positionSource field → .unknown
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try c.decode(Int.self, forKey: .id)
@@ -99,25 +99,25 @@ struct MarkerState: Sendable, Codable, Identifiable, Equatable {
 }
 ```
 
-JSON snake_case 변환은 `JSONEncoder.keyEncodingStrategy = .convertToSnakeCase` 필요 시 ResourceHandlers에서 적용. 기존 `encodeJSON` 헬퍼 패턴 따름.
+JSON snake_case conversion applies `JSONEncoder.keyEncodingStrategy = .convertToSnakeCase` at ResourceHandlers if needed. Follows existing `encodeJSON` helper pattern.
 
 ## Refactor Phase
 
-- `positionSource` 기본값 init parameter — 기존 호출 site (테스트 등)가 변경 없이 컴파일되도록
-- 한글 주석 (enum 의미 + Codable backward compat WHY)
-- AC-4.2 grep TODO/FIXME 0건
+- `positionSource` default init parameter — allows existing call sites (tests etc.) to compile without changes
+- Korean comments (enum semantics + Codable backward compat WHY)
+- AC-4.2 grep TODO/FIXME 0
 
 ## Acceptance Criteria
 
-- **AC-T3.1**: `PositionSource` enum 3 cases (parser/fallback/unknown)
+- **AC-T3.1**: `PositionSource` enum with 3 cases (parser/fallback/unknown)
 - **AC-T3.2**: `MarkerState.positionSource` field — default `.parser` (init), Codable missing → `.unknown` (decode)
 - **AC-T3.3**: 4 Codable round-trip + legacy snapshot tests PASS
-- **AC-T3.4**: 기존 1064 tests 회귀 0건 — `MarkerState` 사용 site 컴파일 OK (기본값 default arg로 자동)
-- **AC-T3.5**: 한글 주석, 신규 TODO 0건
-- **AC-T3.6**: SOLID — enum 자체는 immutable value type, MarkerState 에만 추가
+- **AC-T3.4**: Existing 1064 tests: 0 regressions — `MarkerState` usage sites compile OK (default arg auto-applies)
+- **AC-T3.5**: Korean comments, no new TODOs
+- **AC-T3.6**: SOLID — enum is immutable value type, added only to MarkerState
 
 ## Out of Scope
 
-- caller fallback site에서 `.fallback` 마킹 = T4
+- Marking `.fallback` at caller fallback site = T4
 - resource envelope surface = T5
 - goto_marker uncertainty extras = T6

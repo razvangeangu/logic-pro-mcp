@@ -130,7 +130,7 @@ Clients can detect stale snapshots without cross-referencing `logic://system/hea
 | `solo` | `{ index: int, enabled?: bool }` | text | MCU → AX → CGEvent |
 | `arm` | `{ index: int, enabled?: bool }` | text | MCU → AX → CGEvent |
 | `arm_only` | `{ index: int }` | text on full success; **error** when target arm fails or any disarm fails | composite (disarm-all + arm target) |
-| `record_sequence` | `{ bar?: int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: float }` | JSON on success; **error** when goto fails OR new track never appears within 2s | **v2.3 rewrite**: SMF generation + AX `File → Import → MIDI File…` — byte-exact timing |
+| `record_sequence` | `{ bar?: int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: float }` | JSON on success; **error** when goto fails OR no new track is observed via live AX within 500 ms | **v2.3 rewrite**: SMF generation + AX `File → Import → MIDI File…` — byte-exact timing |
 | `set_automation` | `{ index: int, mode: "off"\|"read"\|"touch"\|"latch"\|"trim"\|"write" }` | text | MCU |
 | `set_instrument` | `{ index: int, path: string }` OR `{ index: int, category: string, preset: string }` — at least one path OR (category + preset) is required | text | Accessibility |
 | `list_library` | — | text | Accessibility |
@@ -184,8 +184,8 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 1. Parses the `notes` spec into internal `NoteEvent` structs.
 2. Generates a Type 0 Standard MIDI File with `SMFWriter` — tempo and time-signature meta events + byte-exact note positions computed from `ms` offsets via round-half-up tick conversion.
 3. Writes to `/tmp/LogicProMCP/{uuid}.mid` (cleaned up via `defer` on return and via server-startup sweep for crash recovery).
-4. Routes `midi.import_file` → `AccessibilityChannel` which drives `파일 → 가져오기 → MIDI 파일…` via AppleScript, dismissing the "템포 가져오기" sub-dialog with "아니요" so the project's tempo is authoritative.
-5. Polls the AX cache (100ms × 20 = 2s budget) until a new track appears. Returns `{ recorded_to_track, created_track, bar, note_count, method: "smf_import" }`. If the new track never appears within the polling window, the command returns an error instead of lying about `created_track`. `recorded_to_track` is a legacy alias for `created_track`; new clients should prefer `created_track`.
+4. Routes `midi.import_file` → `AccessibilityChannel` which drives `파일 → 가져오기 → MIDI 파일… (File → Import → MIDI File…)` via AppleScript, dismissing the `템포 가져오기 (Import Tempo)` sub-dialog with `아니요 (No)` so the project's tempo is authoritative.
+5. Reads the live AX track-header tree for up to 500 ms until a new track appears. Returns `{ recorded_to_track, created_track, bar, note_count, method: "smf_import" }`. If the new track never appears within the readback window, the command returns an error instead of lying about `created_track`. `recorded_to_track` is a legacy alias for `created_track`; new clients should prefer `created_track`.
 
 **Error conditions for `record_sequence`**:
 
@@ -195,10 +195,10 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 - `midi.import_file` fails
 - No new track is observed via live AX within 500 ms of import (v3.1.2+ switched from 2s cache polling to live `AXLogicProElements.allTrackHeaders` after the cache-poll race documented in CHANGELOG §3.1.2)
 
-**Strategy D — tick-0 padding CC**: Logic Pro's MIDI File import strips leading empty delta before the first MIDI channel event, which would silently place every imported region at bar 1 regardless of the caller's `bar` parameter. SMFWriter counters this by emitting `CC#110 value 0` on channel 0 at tick 0 whenever `bar > 1`. Logic preserves the full tick timeline because a MIDI channel event now exists at tick 0. The resulting region spans bar 1 through the target bar; the caller's notes land at exactly the encoded positions inside the region. Verified on Logic Pro 12 — `bar=50` request produces a region described by Logic as "1 마디에서 시작하여 51 마디에서 끝납니다" with the note at the trailing edge.
+**Strategy D — tick-0 padding CC**: Logic Pro's MIDI File import strips leading empty delta before the first MIDI channel event, which would silently place every imported region at bar 1 regardless of the caller's `bar` parameter. SMFWriter counters this by emitting `CC#110 value 0` on channel 0 at tick 0 whenever `bar > 1`. Logic preserves the full tick timeline because a MIDI channel event now exists at tick 0. The resulting region spans bar 1 through the target bar; the caller's notes land at exactly the encoded positions inside the region. Verified on Logic Pro 12 — a `bar=50` request produces a region that Logic describes as starting at bar 1 and ending at bar 51, with the note at the trailing edge.
 
 **Response caveats**:
-- The region's start is always bar 1 (cosmetic trade-off of the padding strategy). If you need the region itself trimmed, the caller can run `편집 → 이동 → 재생헤드로` on the selected region after positioning the playhead.
+- The region's start is always bar 1 (cosmetic trade-off of the padding strategy). If you need the region itself trimmed, the caller can run `편집 → 이동 → 재생헤드로 (Edit → Move → To Playhead)` on the selected region after positioning the playhead.
 - `created_track` is always the 0-based index of the newly-created track (Logic always creates a new MIDI track per import). The v2.3.0 `track_index_confirmed` fallback was removed in v3.0.0; v3.1.2 then replaced the original 2-second cache-poll loop with a 500 ms live-AX read against `AXLogicProElements.allTrackHeaders` (cache-poll race fix). On success the field would always be `true` so it was dropped from the response.
 
 **`arm_only` behavior (v3.0.0+)**:
@@ -353,7 +353,7 @@ All commands route through `MIDIKeyCommands → CGEvent`.
 | Command | Params | Returns | Channel |
 |---------|--------|---------|---------|
 | `goto_bar` | `{ bar: int }` | text | Delegates to `transport.goto_position` — dialog primary (auto-extends project, ~800ms), slider fallback |
-| `goto_marker` | `{ name: string }` or `{ index: int }` | text | By name: cache lookup → `transport.goto_position`. v3.2 — fallback/unknown provenance 마커 라우팅 시 응답 extras에 `marker_position_uncertain: true` + `marker_position_source` 추가 (HC State A/B만; State C 보존). NG10: 첫 dot-component(bar)만 navigate — sub-bar 정확도는 v3.3 deferred |
+| `goto_marker` | `{ name: string }` or `{ index: int }` | text | By name: cache lookup → `transport.goto_position`. v3.2 — when routing to a fallback/unknown provenance marker, adds `marker_position_uncertain: true` + `marker_position_source` to response extras (HC State A/B only; State C preserved). NG10: navigates only the first dot-component (bar) — sub-bar accuracy is deferred to v3.3 |
 | `create_marker` | `{ name?: string }` | text | MIDIKeyCommands → CGEvent |
 | `delete_marker` | `{ index: int }` | text | MIDIKeyCommands → CGEvent |
 | `rename_marker` | `{ index: int, name: string }` | text | Accessibility |
@@ -363,7 +363,7 @@ All commands route through `MIDIKeyCommands → CGEvent`.
 
 ### Reading markers
 
-The state poller enumerates markers from the AX marker ruler every 3 seconds and caches them. `goto_marker { name: ... }` and `delete_marker { name: ... }` use this cache for name-based lookup.
+The state poller enumerates markers through AX every 3 seconds and caches them. On Logic Pro 12.2-style hierarchies it prefers the Marker List window strategy; older/alternate hierarchies fall back to the structural marker-ruler walker. `goto_marker { name: ... }` and `delete_marker { name: ... }` use this cache for name-based lookup.
 
 ```ts
 // MarkerState (v3.2 wire schema — JSON)
@@ -378,12 +378,12 @@ The state poller enumerates markers from the AX marker ruler every 3 seconds and
 
 #### Marker semantics
 
-`logic://markers` resolves the marker ruler **only via AX** — there is no project-file fallback. Logic stores marker positions/names in `Alternatives/000/ProjectData` (an opaque binary blob; reverse-engineering deferred per PRD-issue7-logic12-read-paths.md NG2).
+`logic://markers` resolves marker data **only via AX** — there is no project-file fallback. Logic stores marker positions/names in `Alternatives/000/ProjectData` (an opaque binary blob; reverse-engineering deferred per PRD-issue7-logic12-read-paths.md NG2).
 
 Envelope `source` values:
-- `"ax_live"` — markers came from a successful AX walk of the marker ruler
+- `"ax_live"` — markers came from a successful AX marker read (Marker List window or marker-ruler fallback)
 - `"cache"` — markers came from a prior poll; `ax_occluded:true` flags untrusted-empty (plugin window / modal stole AX focus)
-- `"default"` — empty array, no successful poll yet (cold-start) **or** the AX walker could not locate the marker ruler subtree
+- `"default"` — empty array, no successful poll yet (cold-start) **or** the AX marker reader could not locate a supported marker subtree/window
 
 On Logic Pro 12.x the new `AXRuler`-structural walker (v3.1.8) succeeds for typical projects but a 12.2-specific marker hierarchy variant has been observed where the walk fails; tracked separately. When `source: "default"` appears on a project that visibly has markers, the AX subtree on that Logic build hasn't been characterized yet.
 

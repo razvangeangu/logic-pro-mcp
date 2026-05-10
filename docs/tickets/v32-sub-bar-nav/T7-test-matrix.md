@@ -1,19 +1,19 @@
-# T7 — Parameterized 매트릭스 + 통합 회귀 테스트
+# T7 — Parameterized Matrix + Integration Regression Tests
 
 **Status**: Todo
-**의존성**: T1-T6
+**Depends on**: T1-T6
 **Size**: M
 **PRD**: AC-7.1~7.5
 
-## 목표
+## Goal
 
-T1-T6 의 unit test 외에 cross-cutting 통합 회귀 + edge case 매트릭스. 1064 → 1074+ tests.
+Cross-cutting integration regression + edge case matrix beyond the unit tests in T1-T6. 1064 → 1074+ tests.
 
-## 매트릭스 (E1-E13 PRD edge case 직접 매핑)
+## Matrix (PRD edge cases E1-E13 directly mapped)
 
 ```swift
-@Test("transport.goto_position E1-E13 매트릭스", arguments: [
-    // 입력, 분기, 기대
+@Test("transport.goto_position E1-E13 matrix", arguments: [
+    // input, branch, expected
     ("position=146.4.4.240", .accept, .dialogPath4Comp),     // E1
     ("position=1.1.1.1", .accept, .dialogPath4Comp),         // E2
     ("position=9999.16.16.999", .accept, .dialogPath4Comp),  // E3
@@ -26,21 +26,21 @@ T1-T6 의 unit test 외에 cross-cutting 통합 회귀 + edge case 매트릭스.
     ("position=146.17.4.240", .reject, .dispatcherInvalidParams), // E10
     ("position=00:01:30:00", .accept, .cgEventFallback),     // E11
     ("bar=146", .accept, .dialogPath4CompFromBar),           // E12
-    // E13 라이브 검증 (slider partial) — synthetic runtime
+    // E13 live verification (slider partial) — synthetic runtime
 ])
 func transportGotoPosition_matrix(input: String, expected: ...) {
     ...
 }
 ```
 
-(actual implementation은 T1-T6의 helper 사용 — 각 case는 dispatcher가 검증/거부 또는 AX channel이 라우팅)
+(Actual implementation uses helpers from T1-T6 — each case is validated/rejected by the dispatcher or routed by the AX channel)
 
-## 통합 회귀 (cross-ticket)
+## Integration Regression (cross-ticket)
 
 ```swift
 @Test
 func e2e_gotoMarker_byName_fallbackMarker_routesToTransportWithUncertainty() async {
-    // T2 + T4 + T6 통합 시나리오:
+    // T2 + T4 + T6 integrated scenario:
     // 1. parser fail → MarkerState `.fallback`
     // 2. goto_marker { name: ... } → cache lookup → transport.goto_position
     // 3. response extras `marker_position_uncertain: true`
@@ -48,25 +48,25 @@ func e2e_gotoMarker_byName_fallbackMarker_routesToTransportWithUncertainty() asy
 
 @Test
 func e2e_logicMarkers_resourceIncludesProvenance() async {
-    // T3 + T4 + T5 통합:
-    // cache에 `.parser` + `.fallback` + `.unknown` 3 markers
-    // logic://markers 응답에 모두 position_source / is_canonical 포함
+    // T3 + T4 + T5 integrated:
+    // cache has `.parser` + `.fallback` + `.unknown` 3 markers
+    // logic://markers response includes position_source / is_canonical for all
 }
 
 @Test
 func backwardCompat_v31xCacheSnapshot_decodesAsUnknown_doesNotCrash() async {
-    // 기존 cache.json 파일을 v3.2 디코더로 읽어도 crash 없음 (production-realistic)
+    // Reading an existing cache.json with v3.2 decoder succeeds without crash (production-realistic)
 }
 ```
 
 ## Acceptance Criteria
 
-- **AC-T7.1**: E1-E13 매트릭스 13 cases PASS
-- **AC-T7.2**: 3 cross-ticket E2E 시나리오 PASS
-- **AC-T7.3**: 1064 + 신규 ≥ 10 = 1074+ tests PASS (`swift test --no-parallel`)
+- **AC-T7.1**: E1-E13 matrix 13 cases PASS
+- **AC-T7.2**: 3 cross-ticket E2E scenarios PASS
+- **AC-T7.3**: 1064 + new ≥ 10 = 1074+ tests PASS (`swift test --no-parallel`)
 - **AC-T7.4**: `swift build -c release` 0 warnings
-- **AC-T7.5**: 한글 주석, 신규 TODO 0
-- **AC-T7.6**: parameterized 매트릭스 형식 (case 별 @Test function 분산 X)
+- **AC-T7.5**: Korean comments, no new TODOs
+- **AC-T7.6**: Parameterized matrix format (cases not split into individual @Test functions)
 
 ## Out of Scope
 

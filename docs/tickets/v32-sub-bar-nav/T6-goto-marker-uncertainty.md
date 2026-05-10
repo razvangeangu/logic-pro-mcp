@@ -1,14 +1,14 @@
 # T6 — `goto_marker` Dispatcher: HC Top-Level Extras Merge
 
 **Status**: Todo
-**의존성**: T2, T4
+**Depends on**: T2, T4
 **Size**: S
 **PRD**: AC-3.6
-**Boomer Phase E P1-5 fix**: HonestContract JSON shape는 **flat top-level** (`{"success":true, "verified":true, ...extras}` per HonestContract.swift:73-105). nested `{state, extras}` 가정 잘못. State C (success:false) 는 merge 회피 — error 응답 보존.
+**Boomer Phase E P1-5 fix**: HonestContract JSON shape is **flat top-level** (`{"success":true, "verified":true, ...extras}` per HonestContract.swift:73-105). Nested `{state, extras}` assumption is wrong. State C (success:false) avoids merge — error response preserved.
 
-## 목표
+## Goal
 
-`NavigateDispatcher` `goto_marker` 가 cache의 `position_source` 를 확인. `.fallback` 또는 `.unknown` 일 때 transport.goto_position 호출 후 응답 extras에 `marker_position_uncertain: true` + `marker_position_source: <enum rawValue>` merge.
+`NavigateDispatcher` `goto_marker` checks cache `position_source`. When `.fallback` or `.unknown`, after calling transport.goto_position, merge `marker_position_uncertain: true` + `marker_position_source: <enum rawValue>` into the response extras.
 
 ## TDD Red Phase
 
@@ -19,7 +19,7 @@ func gotoMarker_byName_canonicalMarker_noUncertaintyFlag() async throws {
     await cache.updateMarkers([
         MarkerState(id: 0, name: "VOCALS", position: "146.4.4.240", positionSource: .parser),
     ])
-    // HC State A actual shape — top-level flat
+    // HC State A actual shape — flat top-level
     let stubRouter = stubRouterReturning(#"{"success":true,"verified":true,"requested":"146.4.4.240"}"#)
     let result = await NavigateDispatcher.dispatch(
         command: "goto_marker", params: ["name": "VOCALS"],
@@ -28,7 +28,7 @@ func gotoMarker_byName_canonicalMarker_noUncertaintyFlag() async throws {
     let json = extractText(result)
     #expect(!json.contains("marker_position_uncertain"))
     #expect(!json.contains("marker_position_source"))
-    // 기존 응답 보존
+    // Existing response preserved
     #expect(json.contains("\"success\":true"))
 }
 
@@ -44,10 +44,10 @@ func gotoMarker_byName_fallbackMarker_mergesUncertaintyAtTopLevel() async throws
         cache: cache, router: stubRouter
     )
     let json = extractText(result)
-    // top-level keys 추가
+    // top-level keys added
     #expect(json.contains("\"marker_position_uncertain\":true"))
     #expect(json.contains("\"marker_position_source\":\"fallback\""))
-    #expect(json.contains("\"success\":true"))  // 기존 보존
+    #expect(json.contains("\"success\":true"))  // existing preserved
 }
 
 @Test
@@ -64,12 +64,12 @@ func gotoMarker_byName_unknownLegacy_mergesUncertaintyAtTopLevel() async throws 
     let json = extractText(result)
     #expect(json.contains("\"marker_position_uncertain\":true"))
     #expect(json.contains("\"marker_position_source\":\"unknown\""))
-    #expect(json.contains("\"reason\":\"readback_unavailable\""))  // State B 보존
+    #expect(json.contains("\"reason\":\"readback_unavailable\""))  // State B preserved
 }
 
 @Test
 func gotoMarker_byName_stateC_doesNotMergeUncertainty() async throws {
-    // State C error는 merge 회피 — error JSON 그대로
+    // State C error → skip merge — error JSON passed through unchanged
     let cache = StateCache()
     await cache.updateMarkers([
         MarkerState(id: 0, name: "X", position: "1.1.1.1", positionSource: .fallback),
@@ -80,17 +80,17 @@ func gotoMarker_byName_stateC_doesNotMergeUncertainty() async throws {
         cache: cache, router: stubRouter
     )
     let json = extractText(result)
-    // State C 보존, uncertainty merge 안 함
+    // State C preserved, uncertainty not merged
     #expect(!json.contains("marker_position_uncertain"))
     #expect(json.contains("\"success\":false"))
 }
 ```
 
-**Red 확인**: 현재 `NavigateDispatcher.swift:55` 는 transport.goto_position 응답 그대로 forward → uncertainty extras 미포함.
+**Red confirmation**: Current `NavigateDispatcher.swift:55` forwards transport.goto_position response as-is → no uncertainty extras included.
 
-## Green Phase 구현
+## Green Phase Implementation
 
-`Sources/LogicProMCP/Dispatchers/NavigateDispatcher.swift` `goto_marker` 처리부:
+`Sources/LogicProMCP/Dispatchers/NavigateDispatcher.swift` goto_marker handler:
 
 ```swift
 case "goto_marker":
@@ -103,28 +103,28 @@ case "goto_marker":
             operation: "transport.goto_position",
             params: ["position": target.position]
         )
-        // v3.2 — fallback/unknown 마커 라우팅 시 uncertainty surfacing.
+        // v3.2 — surface uncertainty extras when routing fallback/unknown markers.
         if target.positionSource != .parser {
             let merged = mergeMarkerUncertainty(into: raw, source: target.positionSource)
             return toolTextResult(merged)
         }
         return toolTextResult(raw)
     }
-    // index branch (기존)
+    // index branch (existing)
     ...
 ```
 
-`mergeMarkerUncertainty` 헬퍼 — HC top-level flat shape 에 직접 merge. State C (`success:false`) 는 변경 없이 통과 (error 응답 보존).
+`mergeMarkerUncertainty` helper — merges directly into HC flat top-level shape. State C (`success:false`) passes through unchanged (error response preserved).
 
 ```swift
 private static func mergeMarkerUncertainty(into rawJSON: String, source: PositionSource) -> String {
-    // HC shape (HonestContract.swift:73-105) — flat top-level keys + extras 머지.
+    // HC shape (HonestContract.swift:73-105) — flat top-level keys + extras merged.
     // {"success":true, "verified":true|false, "reason":..., ...extras}.
     guard let data = rawJSON.data(using: .utf8),
           var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
         return rawJSON
     }
-    // State C 보호 — error 응답에 uncertainty 추가 안 함.
+    // State C protection — do not add uncertainty to error responses.
     if (object["success"] as? Bool) == false {
         return rawJSON
     }
@@ -140,25 +140,25 @@ private static func mergeMarkerUncertainty(into rawJSON: String, source: Positio
 
 ## Refactor Phase
 
-- 한글 주석 (WHY: HC envelope 보존하면서 extras만 추가)
-- 본문 ≤ 25 lines
-- AC-4.2 grep 검증
+- Korean comments (WHY: add only extras while preserving HC envelope)
+- Body ≤ 25 lines
+- AC-4.2 grep verification
 
 ## Acceptance Criteria
 
-- **AC-T6.1**: 4 통합 테스트 PASS (parser → no flag / fallback → flag / unknown → flag / State C → no merge)
-- **AC-T6.2**: index branch는 영향 0 (기존 동작 유지 — name lookup만 cache 사용)
-- **AC-T6.3**: HC State C (success:false) raw 응답은 merge 안 함 (error JSON 보존)
-- **AC-T6.4**: HC top-level flat shape (`success`, `verified`, `reason`) 보존 + uncertainty key 추가 — boomer P1-5 fix
-- **AC-T6.5**: 한글 주석, 신규 TODO 0
+- **AC-T6.1**: 4 integration tests PASS (parser → no flag / fallback → flag / unknown → flag / State C → no merge)
+- **AC-T6.2**: Index branch unaffected (existing behavior maintained — name lookup uses cache)
+- **AC-T6.3**: HC State C (success:false) raw response not merged (error JSON preserved)
+- **AC-T6.4**: HC flat top-level shape (`success`, `verified`, `reason`) preserved + uncertainty key added — Boomer P1-5 fix
+- **AC-T6.5**: Korean comments, no new TODOs
 
 ## Edge Cases
 
-- raw JSON parse 실패 시 → 원본 그대로 반환 (defensive — 잘못된 JSON 발생 안 함이 정상)
-- HC State A 응답에 extras 없을 수 있음 → optional 처리
-- target.position이 4-component 가 아닌 경우 (legacy unknown) → transport.goto_position 검증에서 거부 → State C 반환 → merge 안 함 (정상)
+- Raw JSON parse failure → return original unchanged (defensive — malformed JSON should not occur normally)
+- HC State A response may have no extras → optional handling
+- If target.position is not 4-component (legacy unknown) → rejected by transport.goto_position validation → State C returned → not merged (correct)
 
 ## Out of Scope
 
-- index branch refactor — 기존 MIDIKeyCommands 라우팅 유지 (cache에 의존 안 함)
-- docs 갱신 = T8
+- Index branch refactor — existing MIDIKeyCommands routing kept (no cache dependency)
+- docs update = T8

@@ -1,73 +1,73 @@
 # Live Verification Runbook — v3.2.0 (Marker Provenance, NG10 Deferred)
 
-**검증 시점**: v3.2.0 release 직전 + T0 spike 결과 영구 기록.
-**Scope**: marker `position_source` provenance + `goto_marker` uncertainty surfacing.
-**Honest Deferred**: NG10 (sub-bar navigation 정확도) — Logic 12.2 위치 dialog 4-segment AXSlider 구조로 인해 v3.2.0 approach 실패. v3.3에서 raw slider value mapping 분석 필요.
+**Verification timing**: Immediately before v3.2.0 release + permanent T0 spike record.
+**Scope**: Marker `position_source` provenance + `goto_marker` uncertainty surfacing.
+**Honest Deferred**: NG10 (sub-bar navigation accuracy) — Logic 12.2 position dialog uses a 4-segment AXSlider structure; the v3.2.0 approach failed. Requires deep analysis of raw slider value mapping in v3.3.
 
 ---
 
-## T0 Spike 결과 — 영구 기록 (2026-05-07)
+## T0 Spike Results — Permanent Record (2026-05-07)
 
-### 환경
+### Environment
 - macOS 25.3.0 (Darwin)
-- Logic Pro 12.2 한글 빌드
+- Logic Pro 12.2 Korean build
 - Project "무제 20 - 트랙" 1 track / 1 region
-- IME: 시스템 기본 (한글 입력 모드 가능성)
+- IME: system default (Korean input mode possible)
 
-### S2 시나리오 (한글 빌드 + 시스템 IME)
+### S2 Scenario (Korean build + system IME)
 
 ```
 1. transport.goto_position bar=1 → success requested 1.1.1.1
 2. AppleScript: keystroke "146.4.4.240" + return → spike_sent
-3. logic://transport/state 4초 후 read → position: "129.1.1.1"
+3. logic://transport/state read after 4 seconds → position: "129.1.1.1"
 ```
 
-**FAIL** — 목표 `146.4.4.240` 과 다른 위치 `129.1.1.1`로 이동. sub-bar 부분(beat/div/tick) 모두 1로 reset.
+**FAIL** — target `146.4.4.240` not reached; navigated to different position `129.1.1.1`. All sub-bar components (beat/div/tick) reset to 1.
 
-### S2 검증 — 단순 1-component 시도 (`keystroke "146"`)
+### S2 Verification — Simple 1-component attempt (`keystroke "146"`)
 
-같은 baseline 후 `keystroke "146"`만 시도. 결과 동일하게 `position: "129.1.1.1"` — playhead 변경 없음 (이미 129.1.1.1에 있는 상태에서 dialog가 효과 없이 닫힘).
+Same baseline, then attempted `keystroke "146"` only. Result was the same `position: "129.1.1.1"` — no playhead change (already at 129.1.1.1, dialog closed without effect).
 
-→ **dialog input 자체가 keystroke 처리 안 됨**. main window keyboard shortcut 우회 가능성도 존재.
+→ **Dialog input itself is not processed by keystroke**. Possible interference from main window keyboard shortcuts.
 
-### Dialog AX 구조 enum (실측)
+### Dialog AX Structure enum (measured)
 
 ```
-window "위치로 이동"
-  AXGroup desc=01:04:16:00.00          ← SMPTE "현재" (HH:MM:SS:FF.SUB)
+window "위치로 이동" (Go To Position)
+  AXGroup desc=01:04:16:00.00          ← SMPTE "current" (HH:MM:SS:FF.SUB)
     AXSlider × 5 segments              raw value ~1.85E+8 (internal encoding)
-  AXGroup desc=\t129\t1\t1\t1          ← bar.beat.div.tick "현재"
+  AXGroup desc=\t129\t1\t1\t1          ← bar.beat.div.tick "current"
     AXSlider × 4 segments              raw value ~2.27E+15
-  AXGroup desc=01:04:16:00.00          ← SMPTE "신규"
+  AXGroup desc=01:04:16:00.00          ← SMPTE "new"
     AXSlider × 5 segments
-  AXGroup desc=\t129\t1\t1\t1          ← bar.beat.div.tick "신규" focused=true
-    AXSlider × 4 segments              raw value ~2.27E+15 (segment별 raw 표현)
-  AXButton × 2                          ← 확인 / 취소
-  AXStaticText × 3                      ← "신규:" "현재:" "위치로 이동"
+  AXGroup desc=\t129\t1\t1\t1          ← bar.beat.div.tick "new" focused=true
+    AXSlider × 4 segments              raw value ~2.27E+15 (per-segment raw representation)
+  AXButton × 2                          ← OK / Cancel
+  AXStaticText × 3                      ← "New:" "Current:" "Go To Position"
 ```
 
-### 가정이 깨진 부분 (PRD §3.4 근거)
+### Broken assumptions (basis for PRD §3.4)
 
-| PRD v0.4 가정 | 실측 결과 |
-|---------------|----------|
-| Dialog가 단일 텍스트 input | ❌ 4-segment AXSlider 구조 (bar/beat/div/tick 별개) |
-| `keystroke "B.B.D.T"` 가 native 4-component 입력 | ❌ keystroke가 segment에 도달 안 함 |
-| Logic 좌상단 Position display는 직접 cache surface | ✅ `logic://transport/state` 정확히 surface |
-| `gotoPositionViaDialog` AppleScript로 dialog 자동화 가능 | ✅ dialog 열기는 정상, 입력은 실패 |
+| PRD v0.4 assumption | Measured result |
+|---------------------|----------------|
+| Dialog has a single text input | ❌ 4-segment AXSlider structure (bar/beat/div/tick are separate) |
+| `keystroke "B.B.D.T"` delivers native 4-component input | ❌ Keystroke does not reach segments |
+| Logic top-left Position display directly surfaces cache | ✅ `logic://transport/state` surfaces accurately |
+| `gotoPositionViaDialog` AppleScript can automate dialog input | ✅ Opening the dialog works; input fails |
 
-### AXSlider 직접 value set 시도
+### AXSlider direct value set attempt
 
 ```applescript
-set value of (item 1 of sliders) to 146  → ERROR: AppleEvent 처리 구조 실패
+set value of (item 1 of sliders) to 146  → ERROR: AppleEvent handler structure failure
 ```
 
-nested AppleScript 표현 한계 + slider raw value (1.85E+8 / 2.27E+15) 와 displayed value(146/4/4/240) 매핑 미해독. v3.3 분석 과제.
+Nested AppleScript expression limitations + raw slider values (1.85E+8 / 2.27E+15) vs displayed values (146/4/4/240) mapping not decoded. Analysis task for v3.3.
 
-### 결정 (v3.2.0 scope 축소)
+### Decision (v3.2.0 scope reduced)
 
-- **NG10 (sub-bar nav 정확도)**: v3.3 PRD로 honest deferred. dialog AXSlider 4-segment raw value mapping 깊이 분석 필요.
-- **v3.2.0 ship scope**: marker provenance만 — `MarkerState.positionSource` enum + `logic://markers` envelope + `goto_marker` uncertainty extras.
-- **Why ship at all**: 외부 사용자(`thomas-doesburg` 등)가 fallback marker 인지 가능 → caller 책임 surface. v3.1.5-7 false-positive cycle 재발 방지에 즉시 효용.
+- **NG10 (sub-bar nav accuracy)**: Honestly deferred to v3.3 PRD. Deep analysis of dialog AXSlider 4-segment raw value mapping required.
+- **v3.2.0 ship scope**: Marker provenance only — `MarkerState.positionSource` enum + `logic://markers` envelope + `goto_marker` uncertainty extras.
+- **Why ship at all**: External users (`thomas-doesburg` etc.) can now detect fallback markers → surfaces caller responsibility. Immediately useful to prevent recurrence of v3.1.5-7 false-positive cycle.
 
 ---
 
@@ -75,7 +75,7 @@ nested AppleScript 표현 한계 + slider raw value (1.85E+8 / 2.27E+15) 와 dis
 
 ```bash
 swift test --no-parallel
-# → 1064 (v3.1.11 baseline) + 17 신규 = 1081 PASS
+# → 1064 (v3.1.11 baseline) + 17 new = 1081 PASS
 
 swift build -c release
 # → 0 warnings
@@ -84,52 +84,52 @@ swift test --no-parallel --filter MarkerState
 # → Codable round-trip + legacy snapshot decode (.unknown) PASS
 
 swift test --no-parallel --filter testServerVersionMatchesPackagingArtefacts
-# → version 3.2.0 모든 artifact 동기 검증
+# → version 3.2.0 all artifacts synchronized and verified
 
 brew test logic-pro-mcp
 # → exit 0
 ```
 
-## Tier 2 — Live (Logic Pro 12.2 실기기)
+## Tier 2 — Live (Logic Pro 12.2 real device)
 
 ### 2.1 Marker provenance — `logic://markers` envelope
 
 ```bash
-# 1. Logic Pro Marker List 윈도우 열기 + 마커 1개 추가
-# 2. Marker List에서 position을 비-정상 값으로 편집 (예: "abc") — parser fail induce
+# 1. Open Logic Pro Marker List window + add 1 marker
+# 2. Edit the position in Marker List to an abnormal value (e.g., "abc") — to induce parser failure
 # 3. logic_system refresh_cache
 # 4. logic://markers read
 ```
 
-기대:
-- 정상 마커: `{"position": "1.1.1.1", "position_source": "parser", "is_canonical": true}`
-- parser 실패 마커: `{"position": "1.1.1.1", "position_source": "fallback", "is_canonical": false}`
+Expected:
+- Normal marker: `{"position": "1.1.1.1", "position_source": "parser", "is_canonical": true}`
+- Parser-fail marker: `{"position": "1.1.1.1", "position_source": "fallback", "is_canonical": false}`
 
 ### 2.2 `goto_marker` uncertainty surfacing
 
-`goto_marker { name: "[fallback marker name]" }` → 응답 extras에 `marker_position_uncertain: true` + `marker_position_source: "fallback"` 포함.
+`goto_marker { name: "[fallback marker name]" }` → response extras include `marker_position_uncertain: true` + `marker_position_source: "fallback"`.
 
-정상(parser) marker 호출 시 uncertainty extras 부재 — 기존 응답 그대로.
+When calling with a normal (parser) marker, uncertainty extras are absent — existing response unchanged.
 
 ### 2.3 Codable backward compat
 
-v3.1.x JSON snapshot (예: `StatePoller.swift:272` 디코드 경로 또는 외부 클라이언트가 저장한 `logic://markers` 응답) → marker `positionSource` missing → `.unknown` decode → `is_canonical: false`. crash 0. 단위 테스트 `markerState_codableLegacySnapshot_*` 가 회귀 보호.
+v3.1.x JSON snapshot (e.g., `StatePoller.swift:272` decode path or `logic://markers` response saved by an external client) → marker `positionSource` missing → decoded as `.unknown` → `is_canonical: false`. Zero crashes. Unit test `markerState_codableLegacySnapshot_*` provides regression protection.
 
 ---
 
 ## Tier 3 — NG / Honest Disclosure
 
-| NG | 내용 |
-|----|------|
-| **NG10** | **Sub-bar navigation 정확도 v3.2.0에서 closed 안 됨**. `goto_marker { name: "VOCALS" }` 가 cache의 `"146.4.4.240"`을 정확히 surface하지만, AX channel은 첫 dot-component(bar 146)만 navigate. v3.1.11 동작과 동일. v3.3 PRD에서 dialog AXSlider 4-segment raw value mapping 분석 후 closure 예정. |
-| NG-v32-1 | Logic 11.x AX 표면 미검증 — 12.x primary |
-| NG-v32-2 | Timecode 정밀 nav는 별도 `mmc.locate` (v3.2 자동 라우팅 추가 X) |
-| NG-v32-3 | provenance `.unknown` 케이스 — legacy cache snapshot에서만 발생. 신규 marker는 `.parser` / `.fallback` 명확 |
+| NG | Content |
+|----|---------|
+| **NG10** | **Sub-bar navigation accuracy not closed in v3.2.0**. `goto_marker { name: "VOCALS" }` accurately surfaces the cache value `"146.4.4.240"`, but the AX channel navigates only the first dot-component (bar 146). Same behavior as v3.1.11. v3.3 PRD will attempt closure after analyzing dialog AXSlider 4-segment raw value mapping. |
+| NG-v32-1 | Logic 11.x AX surface unverified — 12.x is primary |
+| NG-v32-2 | Timecode precision nav requires separate `mmc.locate` (no automatic routing added in v3.2) |
+| NG-v32-3 | Provenance `.unknown` case — only occurs from legacy cache snapshots. New markers always have an explicit `.parser` / `.fallback` |
 
 ---
 
 ## When to update this runbook
 
-- v3.3에서 NG10 closure 시도 — slider raw value mapping 결과 추가
-- 신규 locale 보고 — Tier 2.1 표 행 추가
-- Logic 13/14 출시 — 전체 재실행
+- When v3.3 attempts NG10 closure — add slider raw value mapping results
+- When a new locale is reported — add a row to the Tier 2.1 table
+- When Logic 13/14 is released — re-run entirely

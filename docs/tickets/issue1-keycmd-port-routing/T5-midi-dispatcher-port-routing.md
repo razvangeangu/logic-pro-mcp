@@ -1,26 +1,26 @@
-# T5: MIDIDispatcher port routing 통합 + 7 ops × 2 ports + record_sequence/mmc_* reject
+# T5: MIDIDispatcher port routing integration + 7 ops × 2 ports + record_sequence/mmc_* reject
 
 **PRD Ref**: PRD-issue1-keycmd-port-routing > §3 AC-1.1, AC-1.2, AC-1.4, AC-1.6, AC-2.x, §4.3
 **Priority**: P1 (High)
-**Size**: L (4-8h — 7 ops 통합 + routingTable + reject 로직)
+**Size**: L (4-8h — 7 ops integration + routingTable + reject logic)
 **Status**: Todo
 **Depends On**: T1 (HonestContract), T2 (validatePort/validateMidiChannel), T3 (NoteSequenceParser API)
 
 ---
 
 ## 1. Objective
-MIDIDispatcher 7 send ops에 port + 1-based channel validation 통합. operationKey suffix routing (`.keycmd`)으로 직접 분기. record_sequence + mmc_* + send_sysex + step_input + create_virtual_port은 port 입력 시 invalid_params reject. ChannelRouter routingTable에 14 entries 추가.
+Integrate port + 1-based channel validation across MIDIDispatcher 7 send ops. Branch directly via operationKey suffix routing (`.keycmd`). record_sequence + mmc_* + send_sysex + step_input + create_virtual_port return invalid_params when port is specified. Add 14 entries to ChannelRouter routingTable.
 
 ## 2. Acceptance Criteria
-- [ ] AC-1: `send_cc` / `send_note` / `send_chord` / `send_program_change` / `send_pitch_bend` / `send_aftertouch` / `play_sequence` 7 ops에 port 파라미터 적용
-- [ ] AC-2: `port` 미지정 시 default `"midi"` → operation key `"midi.send_cc"` (기존 backward compat)
-- [ ] AC-3: `port: "keycmd"` → operation key `"midi.send_cc.keycmd"`로 dispatch
-- [ ] AC-4: 모든 7 ops에 1-based channel validation 통합 (T2 validateMidiChannel)
-- [ ] AC-5: `record_sequence` 호출에 `port` 파라미터 명시 시 invalid_params reject + hint `"port parameter not supported for record_sequence"`. (TrackDispatcher가 routedTextResult 호출 전 dispatcher-level pre-check 또는 TrackDispatcher.swift에 포함)
-- [ ] AC-6: `mmc_play` / `mmc_stop` / `mmc_record` / `mmc_locate` / `send_sysex` / `step_input` / `create_virtual_port` 호출에 `port` 명시 시 invalid_params reject (NG8)
-- [ ] AC-7: `pitch_bend` / `aftertouch` 채널 검증 통합 (기존 raw UInt8 캐스팅 → validateMidiChannel)
-- [ ] AC-8: `play_sequence`의 `notes` 문자열은 T3 NoteSequenceParser API로 위임 — entry-level port + entry-level channel 검증은 별도 (`notes` 안 ch field는 parser 책임)
-- [ ] AC-9: ChannelRouter `routingTable`에 14 entries 추가:
+- [ ] AC-1: `send_cc` / `send_note` / `send_chord` / `send_program_change` / `send_pitch_bend` / `send_aftertouch` / `play_sequence` — 7 ops accept port parameter
+- [ ] AC-2: `port` not specified → default `"midi"` → operation key `"midi.send_cc"` (existing backward compat)
+- [ ] AC-3: `port: "keycmd"` → operation key `"midi.send_cc.keycmd"` dispatched
+- [ ] AC-4: All 7 ops integrate 1-based channel validation (T2 validateMidiChannel)
+- [ ] AC-5: `record_sequence` with explicit `port` parameter → invalid_params reject + hint `"port parameter not supported for record_sequence"`. (Pre-check at dispatcher-level before TrackDispatcher.routedTextResult call, or included in TrackDispatcher.swift)
+- [ ] AC-6: `mmc_play` / `mmc_stop` / `mmc_record` / `mmc_locate` / `send_sysex` / `step_input` / `create_virtual_port` with explicit `port` → invalid_params reject (NG8)
+- [ ] AC-7: `pitch_bend` / `aftertouch` channel validation integrated (existing raw UInt8 casting → validateMidiChannel)
+- [ ] AC-8: `play_sequence` `notes` string delegated to T3 NoteSequenceParser API — entry-level port + entry-level channel validation separate (`notes` inner ch field is parser responsibility)
+- [ ] AC-9: ChannelRouter `routingTable` gains 14 entries:
   ```
   "midi.send_cc": [.coreMIDI]
   "midi.send_cc.keycmd": [.midiKeyCommands]
@@ -37,7 +37,7 @@ MIDIDispatcher 7 send ops에 port + 1-based channel validation 통합. operation
   "midi.play_sequence": [.coreMIDI]
   "midi.play_sequence.keycmd": [.midiKeyCommands]
   ```
-- [ ] AC-10: 기존 호출(`send_cc {controller, value, channel}`) backward compat — 동일 응답 메시지 string-equality
+- [ ] AC-10: Existing calls (`send_cc {controller, value, channel}`) backward compat — identical response message string-equality
 
 ## 3. TDD Spec (Red Phase)
 
@@ -45,14 +45,14 @@ MIDIDispatcher 7 send ops에 port + 1-based channel validation 통합. operation
 
 | # | Test Name | Type | Description | Expected |
 |---|-----------|------|-------------|----------|
-| 1 | `testSendCCDefaultPortRoutesToMidiSendCC` | Unit | port 미지정 | router 호출에 op="midi.send_cc" |
+| 1 | `testSendCCDefaultPortRoutesToMidiSendCC` | Unit | port not specified | router called with op="midi.send_cc" |
 | 2 | `testSendCCKeycmdPortRoutesToMidiSendCCKeycmd` | Unit | `port:"keycmd"` | op="midi.send_cc.keycmd" |
 | 3 | `testSendCCInvalidPortReturnsStateCInvalidParams` | Unit | `port:"foo"` | toolTextResult error + hint |
 | 4 | `testSendCCScripterPortRejected` | Unit | `port:"scripter"` (NG5) | error |
 | 5 | `testSendCCChannel16WireByteFifteen` | Unit | channel:16 | router params channel="15" |
 | 6 | `testSendCCChannel0Rejected` | Unit | channel:0 | invalid_params |
 | 7 | `testSendCCFloatChannelRejected` | Unit | channel:1.5 | invalid_params |
-| 8 | `testAllSendOpsAcceptPortParam` | Parametrized | 7 ops × 2 ports = 14 cases | 모두 router로 정확한 op key 전달 |
+| 8 | `testAllSendOpsAcceptPortParam` | Parametrized | 7 ops × 2 ports = 14 cases | all pass correct op key to router |
 | 9 | `testAllSendOpsValidateChannel1Based` | Parametrized | 7 ops × 1-based check | wire = ch-1 |
 | 10 | `testRecordSequenceRejectsPortParam` | Unit | record_sequence + port="keycmd" | invalid_params reject, hint includes "record_sequence" |
 | 11 | `testMmcPlayRejectsPortParam` | Unit | mmc_play + port | reject |
@@ -60,10 +60,10 @@ MIDIDispatcher 7 send ops에 port + 1-based channel validation 통합. operation
 | 13 | `testSendSysexRejectsPortParam` | Unit | send_sysex + port | reject |
 | 14 | `testStepInputRejectsPortParam` | Unit | step_input + port | reject |
 | 15 | `testCreateVirtualPortRejectsPortParam` | Unit | create_virtual_port + port | reject |
-| 16 | `testPitchBendChannelValidation` | Unit | pitch_bend + ch=17 | invalid_params (이전 raw UInt8 silent corruption fix) |
+| 16 | `testPitchBendChannelValidation` | Unit | pitch_bend + ch=17 | invalid_params (previous raw UInt8 silent corruption fix) |
 | 17 | `testAftertouchChannelValidation` | Unit | aftertouch + ch=0 | invalid_params |
 | 18 | `testRoutingTableHasFourteenMidiKeycmdEntries` | Unit | ChannelRouter.routingTable inspection | 14 entries match expected list |
-| 19 | `testBackwardCompatSendCCWithoutPortMatchesPriorBehavior` | Regression | 기존 v3.1.4 호출 패턴 | 동일 router op + params **+ 응답 메시지 string-equality** (v3.1.4 fixture string captured + assertEqual to v3.1.5 output) — Phase 4 Loop 1 tester P1 |
+| 19 | `testBackwardCompatSendCCWithoutPortMatchesPriorBehavior` | Regression | v3.1.4 call pattern | same router op + params **+ response message string-equality** (v3.1.4 fixture string captured + assertEqual to v3.1.5 output) — Phase 4 Loop 1 tester P1 |
 
 ### 3.2 Test File Location
 - `Tests/LogicProMCPTests/MIDIDispatcherSendCCPortTests.swift` (NEW, tests 1-7)
@@ -73,21 +73,21 @@ MIDIDispatcher 7 send ops에 port + 1-based channel validation 통합. operation
 - `Tests/LogicProMCPTests/BackwardCompatRegressionTests.swift` (NEW, test 19)
 
 ### 3.3 Mock/Setup Required
-- `MockChannelRouter` capturing operation key + params (기존 패턴 재사용)
+- `MockChannelRouter` capturing operation key + params (reuse existing pattern)
 
 ## 4. Implementation Guide
 
 ### 4.1 Files to Modify
 | File | Change Type | Description |
 |------|------------|-------------|
-| `Sources/LogicProMCP/Dispatchers/MIDIDispatcher.swift` | Modify | 7 send ops에 validatePort+validateMidiChannel 적용, operationKey suffix dispatch, mmc_*/sysex/step_input/create_virtual_port에 port reject |
-| `Sources/LogicProMCP/Dispatchers/TrackDispatcher.swift` | Modify | record_sequence case에 port 입력 reject 추가 |
-| `Sources/LogicProMCP/Channels/ChannelRouter.swift` | Modify | routingTable에 14 entries 추가 |
+| `Sources/LogicProMCP/Dispatchers/MIDIDispatcher.swift` | Modify | Apply validatePort+validateMidiChannel to 7 send ops, operationKey suffix dispatch, port reject for mmc_*/sysex/step_input/create_virtual_port |
+| `Sources/LogicProMCP/Dispatchers/TrackDispatcher.swift` | Modify | Add port reject to record_sequence case |
+| `Sources/LogicProMCP/Channels/ChannelRouter.swift` | Modify | Add 14 entries to routingTable |
 | Tests/LogicProMCPTests/`*5 NEW files` | Create | 19 tests across 5 files |
 
 ### 4.2 Implementation Steps (Green Phase)
-1. ChannelRouter routingTable에 14 entries 추가 (단순 dictionary append)
-2. MIDIDispatcher 7 send ops 수정 — 공통 helper:
+1. Add 14 entries to ChannelRouter routingTable (simple dictionary append)
+2. Modify MIDIDispatcher 7 send ops — shared helper:
    ```swift
    private static func dispatchSendOp(
        baseOp: String,
@@ -111,24 +111,24 @@ MIDIDispatcher 7 send ops에 port + 1-based channel validation 통합. operation
        }
    }
    ```
-3. 7 send case에 dispatchSendOp 호출 적용
-4. mmc_*/sysex/step_input/create_virtual_port case에 `params["port"] != nil` 체크 → invalid_params reject
-5. TrackDispatcher record_sequence case에 동일 reject
-6. 테스트 19 PASS
+3. Apply `dispatchSendOp` to all 7 send cases
+4. Add `params["port"] != nil` check to mmc_*/sysex/step_input/create_virtual_port cases → invalid_params reject
+5. Add same reject to TrackDispatcher record_sequence case
+6. Run 19 tests → PASS
 
 ### 4.3 Refactor Phase
-- 공통 reject helper (`rejectIfPortPresent`) 추출 검토
-- pitch_bend/aftertouch 별도 dispatcher 함수에서 channel validation 일관 적용
+- Consider extracting common reject helper (`rejectIfPortPresent`)
+- Apply consistent channel validation to pitch_bend/aftertouch separate dispatcher functions
 
 ## 5. Edge Cases
-- EC-1: `play_sequence`는 `notes` 문자열만 받음 — entry-level channel 별도 없음. validateMidiChannel skip + port만 적용
-- EC-2: `send_chord`는 `channel` 단일 (chord 내 모든 note 동일 채널)
-- EC-3: routingTable에 entry 없으면 ChannelRouter 기본 에러 (`operation not handled`) — invariant test가 누락 detect
+- EC-1: `play_sequence` takes only `notes` string — no separate entry-level channel. Skip validateMidiChannel + apply port only
+- EC-2: `send_chord` uses single `channel` (same channel for all notes in chord)
+- EC-3: No routingTable entry → ChannelRouter default "operation not handled" error — invariant test detects omissions
 
 ## 6. Review Checklist
-- [ ] Red: 19 test FAILED
+- [ ] Red: 19 tests FAILED
 - [ ] Green: 19 PASSED
-- [ ] AC 10건 충족
-- [ ] T1/T2/T3 의존성 통합 검증
-- [ ] 기존 MIDIDispatcher 테스트 (있다면) regression 0
-- [ ] BackwardCompatRegressionTests로 기존 호출 패턴 호환 명시
+- [ ] AC 10 items satisfied
+- [ ] T1/T2/T3 dependency integration verified
+- [ ] Existing MIDIDispatcher tests (if any): 0 regressions
+- [ ] BackwardCompatRegressionTests explicitly documents existing call pattern compatibility

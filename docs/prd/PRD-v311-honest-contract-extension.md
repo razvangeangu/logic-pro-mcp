@@ -1,4 +1,4 @@
-# PRD — v3.1.1 Honest Contract Extension + GUI-Click Elimination
+# PRD — Logic Pro MCP v3.1.1 "Honest Contract" Extension + GUI-Click Elimination
 
 **Status**: Draft v0.2 (post-strategist REVISE)
 **Author**: Isaac (via Claude orchestrator)
@@ -184,7 +184,7 @@ CoreMIDI > AppleScript > Scripter > AX > CGEvent
 ## 7. Memory / Backlog Disposition
 
 - v3.1.1 ship complete → update `memory/project_v310_shipped.md` to reflect v3.1.1 closure of HC-extension scope.
-- Update `docs/HONEST-CONTRACT.md` §추가 예정 → §완료 (22 ops promoted).
+- Update `docs/HONEST-CONTRACT.md` §planned additions → §completed (22 ops promoted).
 - Move retained CGEvent sites to a documented "intentional ladder fallback" section.
 
 ## 8. Out-of-scope deferred to v3.1.2+

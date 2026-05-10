@@ -1,8 +1,8 @@
 # Live Verification Runbook — v3.1.11 (Issue #9)
 
-**검증 시점**: v3.1.11 release 직전 + 사용자 보고 시 재현용.
-**대상 fix**: `parseMarkerListPosition` strict 4 + trailing punctuation strip + 1-based + ASCII narrow + mixed separator reject.
-**대상 doc**: TROUBLESHOOTING.md 13 locales 메뉴 경로.
+**Verification timing**: Immediately before v3.1.11 release + for reproducing on user reports.
+**Target fix**: `parseMarkerListPosition` strict 4 + trailing punctuation strip + 1-based + ASCII narrow + mixed separator reject.
+**Target doc**: TROUBLESHOOTING.md 13-locale menu paths.
 
 ---
 
@@ -19,90 +19,90 @@ swift test --no-parallel --filter parseMarkerListPosition
 # → 2 functions (parameterized 25 cases) ALL PASS
 
 swift test --no-parallel --filter testServerVersionMatchesPackagingArtefacts
-# → version 3.1.11 모든 artifact 동기 검증
+# → version 3.1.11 all artifacts synchronized and verified
 
-brew test logic-pro-mcp  # 설치 후
+brew test logic-pro-mcp  # after install
 # → exit 0
 ```
 
-추가 verification (사용자 11 원칙 측정 가능 항목):
+Additional verification (user 11-principle measurable items):
 
 ```bash
-# AC-4.2: TODO/FIXME/XXX 신규 0건
+# AC-4.2: 0 new TODO/FIXME/XXX entries
 git diff main..HEAD -- Sources/ | grep -E '^\+.*\b(TODO|FIXME|XXX)\b'
-# → 0 lines (예상)
+# → 0 lines (expected)
 
-# AC-4.6: parser 본문 ≤ 20 lines
+# AC-4.6: parser body ≤ 20 lines
 awk '/static func parseMarkerListPosition/,/^    \}$/' \
   Sources/LogicProMCP/Accessibility/AXLogicProElements.swift | wc -l
-# → 15 lines (시그니처 + body + closing brace)
+# → 15 lines (signature + body + closing brace)
 ```
 
 ---
 
-## Tier 2 — Live (Logic Pro 12.2 실기기)
+## Tier 2 — Live (Logic Pro 12.2 real device)
 
-### 2.1 영문 12.2 비-bar-aligned 마커 회귀 (F2 fix 검증)
+### 2.1 English 12.2 non-bar-aligned marker regression (F2 fix verification)
 
-**언어 전환 (per-app, 안전)**:
-1. System Settings → Language & Region → Apps → Logic Pro → English (영문) 선택
-2. Logic Pro 종료 + 재실행
+**Language switch (per-app, safe)**:
+1. System Settings → Language & Region → Apps → Logic Pro → select English
+2. Quit Logic Pro + relaunch
 
-**시나리오**:
-1. 신규 프로젝트 생성 (BPM 120, 4/4)
-2. `Navigate → Open Marker List` (Window 메뉴 아님 — 영문 12.2 확인)
-3. 마커 1개 생성 후 비-bar-aligned 위치 (예: bar 5 beat 2 div 3 tick 100)로 이동
-   - Marker List 윈도우 → 해당 row → Position 셀 → 직접 입력 또는 마커 위치를 수동 조정
-4. v3.1.11 binary로 stdio JSON-RPC 호출:
+**Scenario**:
+1. Create a new project (BPM 120, 4/4)
+2. `Navigate → Open Marker List` (not the Window menu — confirmed in English 12.2)
+3. Add 1 marker and move it to a non-bar-aligned position (e.g., bar 5 beat 2 div 3 tick 100)
+   - Marker List window → that row → Position cell → direct input or manually move the marker
+4. Call via stdio JSON-RPC with v3.1.11 binary:
    ```bash
    echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"logic://markers"}}' \
      | LogicProMCP
    ```
-5. **기대 응답**: position이 `"5.2.3.100"` (정확). v3.1.10이라면 fallback `"1.1.1.1"`.
+5. **Expected response**: position is `"5.2.3.100"` (accurate). With v3.1.10 it would fall back to `"1.1.1.1"`.
 
-**복구 절차**: System Settings → Language & Region → Apps → Logic Pro → Korean(한국어). Logic 재시작. 만약 Logic Pro가 Apps 리스트에 안 보이면 + 버튼 → Logic Pro 추가 → Korean 선택.
+**Restore procedure**: System Settings → Language & Region → Apps → Logic Pro → Korean. Restart Logic. If Logic Pro is not in the Apps list, click + → add Logic Pro → select Korean.
 
-### 2.2 한글 12.2 whole-bar 회귀 (G3 양쪽 보장)
+### 2.2 Korean 12.2 whole-bar regression (G3 both-builds guarantee)
 
-**시나리오**: 한글 빌드에서 일반 whole-bar 마커 생성. 응답 position == `"1.1.1.1"` (canonical). T2 unit 통과 + T3 통합 회귀.
+**Scenario**: Create a normal whole-bar marker in a Korean build. Response position == `"1.1.1.1"` (canonical). T2 unit pass + T3 integration regression.
 
-### 2.3 13 locales 메뉴 경로 (F1 doc 검증)
+### 2.3 13-locale menu path (F1 doc verification)
 
-위 2.1과 같은 절차에서 `Navigate → Open Marker List` (영문 빌드) 동작 확인.
-한글 빌드에서 `탐색 → 마커 목록 열기` 동작 확인.
-**Window 메뉴에 marker 항목 없음** — 영문 reporter 보고 일치.
+With the same procedure as 2.1, confirm `Navigate → Open Marker List` works in English build.
+Confirm `탐색 → 마커 목록 열기` (`Navigate → Open Marker List`) works in Korean build.
+**No marker list item in the Window menu** — consistent with English reporter's report.
 
-### 2.4 Behavior change (`"17 2"` invalid 이동) 회귀
+### 2.4 Behavior change (`"17 2"` moved to invalid) regression
 
 ```bash
-# 1-3 component 입력은 v3.1.11에서 fallback (silently 잘못된 bar 안 가도록)
-# unit test로 보장; 라이브 검증은 reporter 시나리오 의존
+# 1-3 component input is fallback in v3.1.11 (prevents silently navigating to wrong bar)
+# guaranteed by unit tests; live verification depends on reporter scenario
 ```
 
-라이브에서 직접 시뮬레이션 어려움 (Logic UI는 정상 4 컴포넌트만 노출). T2 invalid matrix가 보장.
+Direct simulation in live environment is difficult (Logic UI only exposes normal 4 components). T2 invalid matrix provides the guarantee.
 
 ---
 
 ## Tier 3 — NG / Honest Disclosure
 
-| NG | 내용 |
-|----|------|
-| **NG10** | **Sub-bar navigation** 불가. `goto_marker { name: "VOCALS" }`가 cache의 정확한 `"146.4.4.240"` 보지만 AX `gotoPositionViaBarSlider`는 첫 컴포넌트만 추출 → bar 146으로만 이동. v3.2 별도 PRD에서 해결 예정. |
-| **NG11** | **Lenient 1-3 components 폐기**. 어떤 Logic 빌드도 1-3 컴포넌트를 사용하지 않음. 미래 빌드가 헤더 행 단축 표기 노출 시 → fallback `\(index+1).1.1.1` (silently manufacturing 안 함 — honest). |
-| NG7 | dot은 끝 punctuation에서만 의미. mixed separator (`"1.1 1.1"`)는 거부. |
-| NG8 | 1-based 검증. `"0 0 0 0"` 거부 (manufacturing 차단). |
-| NG9 | ASCII digit 0-9만 수용 (Arabic-Indic 등 비-ASCII 거부). |
+| NG | Content |
+|----|---------|
+| **NG10** | **Sub-bar navigation** not possible. `goto_marker { name: "VOCALS" }` sees the accurate `"146.4.4.240"` in cache, but AX `gotoPositionViaBarSlider` extracts only the first component → navigates to bar 146 only. Separate PRD for v3.2 will resolve this. |
+| **NG11** | **Lenient 1-3 components removed**. No Logic build uses 1-3 components. If a future build exposes abbreviated header rows → fallback `\(index+1).1.1.1` (no silent manufacturing — honest). |
+| NG7 | Dot has meaning only as trailing punctuation. Mixed separator (`"1.1 1.1"`) is rejected. |
+| NG8 | 1-based validation. `"0 0 0 0"` rejected (blocks manufactured data). |
+| NG9 | Only ASCII digits 0-9 accepted (non-ASCII such as Arabic-Indic rejected). |
 
-### 미검증 항목 (사용자 보고 시 재방문)
+### Unverified items (revisit on user reports)
 
-- Logic Pro 12.3+ — 미공개. AX 표기 변형 시 추가 case 필요.
-- Logic Pro 11.x — 본 프로젝트가 12.x primary target. 11.x AX rule 미검증.
-- KR/EN 외 11 locales — 코드는 13 locales 모두 지원하나, 라이브 실기기 검증은 KR/EN만.
+- Logic Pro 12.3+ — unreleased. Additional cases needed if AX format changes.
+- Logic Pro 11.x — this project targets 12.x primarily. AX rules for 11.x unverified.
+- 11 locales beyond KR/EN — code supports all 13 locales, but live real-device verification is KR/EN only.
 
 ---
 
 ## When to update this runbook
 
-- `parseMarkerListPosition` 변경 시 Tier 1의 unit count + Tier 2 시나리오 갱신
-- 새 Logic 버전 출시 시 Tier 2 전체 재실행
-- 새 locale 보고 시 Tier 2.3 표 행 추가
+- Update Tier 1 unit count + Tier 2 scenarios when `parseMarkerListPosition` changes
+- Re-run Tier 2 in full when a new Logic version is released
+- Add a row to the Tier 2.3 table when a new locale is reported

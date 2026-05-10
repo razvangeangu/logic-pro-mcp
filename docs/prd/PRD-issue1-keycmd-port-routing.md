@@ -3,103 +3,103 @@
 **Version**: 0.4
 **Author**: Isaac (orchestrated via Claude Opus 4.7)
 **Date**: 2026-05-04
-**Status**: Approved (Loop 3 의견 분기 — strategist ALL PASS, guardian/boomer P1 잔존; Rules §8 3회 한도로 micro-revision v0.4 후 Phase 3 진입; v0.4가 4건 P1 모두 fact 정정으로 해소)
+**Status**: Approved (Loop 3 opinion divergence — strategist ALL PASS, guardian/boomer P1 residuals; Rules §8 3-iteration limit → micro-revision v0.4 → Phase 3 entry; v0.4 resolves all 4 P1 items via factual corrections)
 **Size**: L
 **GitHub Issue**: https://github.com/MongLong0214/logic-pro-mcp/issues/1
 **Reporter**: xaexx1
-**Target Release**: v3.1.6 (v3.1.5는 Issue #3/#4/#5 thomas-doesburg AppleScript read-path resilience로 점유. Issue #1의 BREAKING channel encoding 변경은 별도 release로 communication clarity 확보 — Phase 4 Loop 1 결정)
-**Workflow**: C (Level 2 동기 승인 — BREAKING change 포함)
+**Target Release**: v3.1.6 (v3.1.5 occupied by Issue #3/#4/#5 thomas-doesburg AppleScript read-path resilience. Issue #1's BREAKING channel encoding change warrants a dedicated release for communication clarity — Phase 4 Loop 1 decision)
+**Workflow**: C (Level 2 synchronous approval — contains BREAKING change)
 
 **Revision history**:
-- v0.1 (2026-05-04 초안): Phase 2 Loop 1 리뷰에서 P1×4, P2×5 발견 (HAS ISSUE)
-- v0.2 (2026-05-04 revision): routing 설계 dispatcher-level direct로 교체, scope 확장(play_sequence/record_sequence/pitch_bend/aftertouch), "all covered" → audited matrix, ScripterChannel 제외, Scripts/install.sh 포함. Loop 2 리뷰에서 P1×4 발견 (KeyCmd readiness gate / matrix 정확도 / record_sequence 위치 / NoteSequenceParser API)
-- v0.3 (2026-05-04 revision): KeyCmd readiness bypass policy (router-level allowlist), AC-3.4 matrix 사실 정정 (transport.play/stop 행 삭제, view 행 통일, note.up_*/down_* orphan 처리), record_sequence scope 분리 (NG7), NoteSequenceParser API 변경 명시, validateMidiChannel float reject 패턴, NG8 (mmc_*/sysex/step_input port 비지원). Loop 3 리뷰: strategist ALL PASS w/ P3 cosmetic, guardian HAS ISSUE w/ P1 matrix accuracy, boomer ESCALATE w/ P1×4. Rules §8 (3회 한도)로 추가 loop 금지 — micro-revision으로 진행.
-- v0.4 (2026-05-04 micro-revision): AC-3.4 matrix NavigateDispatcher 사실 정정 (smart_controls/plugin_windows orphan으로, automation.toggle_view=logic_navigate 노출 명시, automation.set_mode primary MCU 정정, capture_recording cgEvent 미매핑 명시), §4.3 record_sequence 스타일 comment 정정, §8.1 test 이름 + 카운트 정정 (8→7 ops, 16→14 cases, IgnoresWithWarning→RejectsPort), AC-2.6 notes ch field BREAKING 표 추가 (Boomer P1-3), §4.1 router-gate available==false 분기에서 portUnavailable HC envelope 직접 반환 명시 (Boomer P1-2), AC-5.1 automation.toggle_view "always-required" 제거 (cgEvent fallback 존재), §4.1 readiness rationale chicken-and-egg framing.
+- v0.1 (2026-05-04 initial draft): Phase 2 Loop 1 review found P1×4, P2×5 (HAS ISSUE)
+- v0.2 (2026-05-04 revision): routing design replaced with dispatcher-level direct, scope expanded (play_sequence/record_sequence/pitch_bend/aftertouch), "all covered" → audited matrix, ScripterChannel excluded, Scripts/install.sh included. Loop 2 review found P1×4 (KeyCmd readiness gate / matrix accuracy / record_sequence position / NoteSequenceParser API)
+- v0.3 (2026-05-04 revision): KeyCmd readiness bypass policy (router-level allowlist), AC-3.4 matrix factual correction (transport.play/stop rows removed, view rows unified, note.up_*/down_* orphan handling), record_sequence scope separation (NG7), NoteSequenceParser API change documented, validateMidiChannel float reject pattern, NG8 (mmc_*/sysex/step_input port unsupported). Loop 3 review: strategist ALL PASS w/ P3 cosmetic, guardian HAS ISSUE w/ P1 matrix accuracy, boomer ESCALATE w/ P1×4. Rules §8 (3-iteration limit) prohibits additional loops — proceeding with micro-revision.
+- v0.4 (2026-05-04 micro-revision): AC-3.4 matrix NavigateDispatcher factual correction (smart_controls/plugin_windows as orphan, automation.toggle_view=logic_navigate exposed explicitly, automation.set_mode primary MCU corrected, capture_recording cgEvent unmapped noted), §4.3 record_sequence style comment corrected, §8.1 test name + count corrected (8→7 ops, 16→14 cases, IgnoresWithWarning→RejectsPort), AC-2.6 notes ch field BREAKING table added (Boomer P1-3), §4.1 router-gate available==false branch now explicitly returns portUnavailable HC envelope directly (Boomer P1-2), AC-5.1 automation.toggle_view "always-required" removed (cgEvent fallback exists), §4.1 readiness rationale chicken-and-egg framing.
 
 ---
 
 ## 1. Problem Statement
 
 ### 1.1 Background
-v3.1.1 사용자(`xaexx1`)가 Logic Pro 12.2 + macOS 26.5 환경에서 `MIDIKeyCommands` 채널이 작동하지 않는다고 GitHub Issue #1로 P1급 정확한 진단 보고. v3.1.2~v3.1.4에서 HC envelope wrap, 라이브 race fix, AX occlusion 등은 처리했으나 본 이슈의 root cause인 **port routing 자체와 docs misleading**은 그대로.
+A v3.1.1 user (`xaexx1`) filed GitHub Issue #1 with an accurate P1-level diagnosis: the `MIDIKeyCommands` channel does not work in Logic Pro 12.2 + macOS 26.5. Releases v3.1.2–v3.1.4 addressed HC envelope wrapping, live race fixes, and AX occlusion, but the root cause — **port routing itself and misleading docs** — remained untouched.
 
-보고자가 핵심 분석을 정확히 수행:
-- Logic 12.2 Key Commands 패널이 `.plist` import를 거부 (`.logikcs` schema만 허용)
-- `logic_midi.send_cc`가 `LogicProMCP-MIDI-Internal` 포트로만 송신 → 사용자가 Logic Controller Assignments → Learn Mode로 수동 바인딩 시도 시 `MIDIKeyCommands` 채널의 실제 송신 포트(`LogicProMCP-KeyCmd-Internal`)와 불일치 → 바인딩 매칭 실패
-- `channel: 16` 입력했는데 Logic이 Ch 1로 캡처 (코드 분석: `midiChannel(0...16)` 허용 + wire mask `0x0F` → `16 & 0x0F = 0` → off-by-one)
-- Homebrew formula `depends_on xcode: ["15.0", :build]`가 CLT-only host 차단 (보고자가 수동 binary install로 우회)
+The reporter performed precise core analysis:
+- Logic 12.2 Key Commands panel rejects `.plist` import (only accepts `.logikcs` schema)
+- `logic_midi.send_cc` sends exclusively to the `LogicProMCP-MIDI-Internal` port → when the user attempts manual binding via Logic Controller Assignments → Learn Mode, the actual send port of the `MIDIKeyCommands` channel (`LogicProMCP-KeyCmd-Internal`) does not match → binding capture fails
+- `channel: 16` input results in Logic capturing Ch 1 (code analysis: `midiChannel(0...16)` allowed + wire mask `0x0F` → `16 & 0x0F = 0` → off-by-one)
+- Homebrew formula `depends_on xcode: ["15.0", :build]` blocks CLT-only hosts (reporter worked around with manual binary install)
 
-### 1.2 Problem Definition (v0.2 보강)
+### 1.2 Problem Definition (v0.2 expanded)
 
-1. **Port routing 결함**: `logic_midi.send_*` **6종**(send_cc / send_note / send_chord / send_program_change / send_pitch_bend / send_aftertouch) + `play_sequence` + `record_sequence` 모두 항상 `MIDI-Internal` 포트만 사용 → MIDIKeyCommands 채널의 manual MIDI Learn 워크플로우를 scriptable하게 만들 수 없음.
-2. **Channel encoding 결함**:
-   - **(a)** `send_cc` / `send_note` / `send_chord` / `send_program_change`: `0...16` 허용 + 직접 `0x0F` masking → `channel=16` → wire 0 (Ch 1). off-by-one.
-   - **(b)** `send_pitch_bend` / `send_aftertouch`: 채널 검증 자체가 부재 (`params["channel"].flatMap(UInt8.init) ?? 0` raw 캐스팅 — `CoreMIDIChannel.swift:201,212`). `channel: 17` 입력 시 UInt8 truncate + engine `& 0x0F` → silent corruption. (a)보다 더 큰 문제.
-   - **(c)** `play_sequence` / `record_sequence`의 `notes` 문자열 format `pitch,offsetMs,durMs[,vel[,ch]]`의 `ch` 필드는 `NoteSequenceParser.swift:14`에서 `UInt8 // 0..15` 명시. 사용자 입장에서 다른 6종과 일관성 없음.
-3. **Docs misleading**: `docs/SETUP.md §4`가 Logic 12.2에서 작동하지 않는 `.plist` Import 경로를 1차 안내. `Scripts/install.sh:235`도 동일. `Scripts/install-keycmds.sh` + `Scripts/keycmd-preset.plist` 헤더 주석도 동일. 사용자 25분+ 시행착오 후 GitHub issue 작성하게 됨.
-4. **Homebrew install 차단**: `depends_on xcode` 가 CLT-only host에서 brew install 차단. ADHOC 사전 빌드 바이너리 다운로드라 build-time Xcode 의존 불필요.
-5. **MIDIKeyCommands 채널 부분 redundancy**: `MIDIKeyCommandsChannel.swift:34-108`의 `mappingTable` audit 결과:
-   - **다른 dispatcher로 cover됨**: transport/edit/project/navigate 계열 (Undo/Redo/Cut/Copy/Paste/Save/Quantize/Split/Play/Stop/Record/Goto 등)
-   - **부분 cover**: track 계열은 `logic_tracks` (PRD v0.1 누락 cite), automation 계열은 `logic_tracks.set_automation`
-   - **다른 path 없음 (channel-only)**: `note.up_semitone` / `note.up_octave` / `note.down_semitone` / `note.down_octave` (4종) — 다른 dispatcher case 분기에 노출 안 됨, CGEvent mapping 없음
-   - **부분만 다른 path 있음**: `view.toggle_*` 계열은 일부만 dispatcher 노출 (mixer/library/inspector 등)
-   - 따라서 "All covered" 단순 문구는 부정확 — audited matrix로 교체 필요.
+1. **Port routing defect**: `logic_midi.send_*` **6 ops** (send_cc / send_note / send_chord / send_program_change / send_pitch_bend / send_aftertouch) + `play_sequence` + `record_sequence` all route exclusively to the `MIDI-Internal` port → the MIDIKeyCommands channel's manual MIDI Learn workflow cannot be made scriptable.
+2. **Channel encoding defect**:
+   - **(a)** `send_cc` / `send_note` / `send_chord` / `send_program_change`: allows `0...16` + direct `0x0F` masking → `channel=16` → wire 0 (Ch 1). Off-by-one.
+   - **(b)** `send_pitch_bend` / `send_aftertouch`: no channel validation at all (`params["channel"].flatMap(UInt8.init) ?? 0` raw cast — `CoreMIDIChannel.swift:201,212`). `channel: 17` input causes UInt8 truncation + engine `& 0x0F` → silent corruption. A larger problem than (a).
+   - **(c)** The `ch` field in the `notes` string format `pitch,offsetMs,durMs[,vel[,ch]]` for `play_sequence` / `record_sequence` is annotated as `UInt8 // 0..15` in `NoteSequenceParser.swift:14`. Inconsistent with the other 6 ops from the user's perspective.
+3. **Misleading docs**: `docs/SETUP.md §4` presents the `.plist` Import path as primary guidance, which does not work in Logic 12.2. `Scripts/install.sh:235` is identical. `Scripts/install-keycmds.sh` + `Scripts/keycmd-preset.plist` header comments are the same. Users spend 25+ minutes troubleshooting before filing a GitHub issue.
+4. **Homebrew install blocked**: `depends_on xcode` blocks `brew install` on CLT-only hosts. Since release is an ADHOC pre-built binary download, no build-time Xcode dependency exists.
+5. **MIDIKeyCommands channel partial redundancy**: Audit of `MIDIKeyCommandsChannel.swift:34-108` `mappingTable`:
+   - **Covered by other dispatchers**: transport/edit/project/navigate family (Undo/Redo/Cut/Copy/Paste/Save/Quantize/Split/Play/Stop/Record/Goto, etc.)
+   - **Partially covered**: track family via `logic_tracks` (missed citation in PRD v0.1), automation family via `logic_tracks.set_automation`
+   - **No other path (channel-only)**: `note.up_semitone` / `note.up_octave` / `note.down_semitone` / `note.down_octave` (4 ops) — not exposed in any other dispatcher case, no CGEvent mapping
+   - **Only partially covered elsewhere**: `view.toggle_*` family — only some exposed via dispatcher
+   - Therefore, "All covered" is inaccurate — replace with audited matrix.
 
 ### 1.3 Impact of Not Solving
-- 신규 사용자가 SETUP.md 따라가다가 Logic 12.2 화면에서 `.plist` 파일 회색 처리 발견 → 25분+ 손실 후 포기 또는 수동 binary install로 우회 (보고자 케이스)
-- `channel:16` 보낸 자동화 스크립트가 실제로는 Ch 1로 송신 → silent wrong-channel routing → 디버깅 어려움
-- `pitch_bend channel: 100` 같은 잘못된 입력이 silent UInt8 truncate → 더 깊은 wrong-channel
-- "MIDIKeyCommands channel ready"라는 health 보고가 거짓 → AI 에이전트가 채널 신뢰하고 작업 진행 → 실제 동작 안 함
-- `note.up_octave` 등 channel-only 동작이 docs에서 "use logic_edit instead"로 잘못 안내될 경우 사용자가 막힘
-- Homebrew 사용자 install 차단 → adoption 저해
+- New users follow SETUP.md, encounter greyed-out `.plist` file in Logic 12.2 → 25+ minutes lost → abandon or work around with manual binary install (reporter's case)
+- Automation scripts sending `channel:16` actually transmit on Ch 1 → silent wrong-channel routing → difficult to debug
+- Invalid input like `pitch_bend channel: 100` causes silent UInt8 truncation → even deeper wrong-channel
+- Health report claiming "MIDIKeyCommands channel ready" is false → AI agents trust the channel and proceed → nothing actually works
+- Users blocked if docs incorrectly guide them to use `logic_edit` for channel-only ops like `note.up_octave`
+- Homebrew users blocked from install → adoption deterred
 
 ## 2. Goals & Non-Goals
 
-### 2.1 Goals (v0.3 재정렬)
-- [ ] **G1**: `logic_midi.send_*` 6종 + `play_sequence`에 `port` 파라미터 추가 (`"midi"|"keycmd"`, default `"midi"` for backward compat). 7 ops × 2 ports = 14 routingTable entries. **`record_sequence`는 port 비지원** (NG7 — SMF import path는 KeyCmd port 의미 없음). manual MIDI Learn 워크플로우 scriptable.
-- [ ] **G2**: 모든 MIDI channel 입력 의미를 1-based(1..16, music convention)로 통일. 0/17+/non-integer 입력 시 invalid_params 반환. wire byte = `(channel - 1) & 0x0F`. 적용 범위: send_* 6종 + play_sequence + record_sequence (`NoteSequenceParser` API 타입 변경 — `Result<[ParsedNote], NoteSequenceParseError>`).
-- [ ] **G_NEW (v0.3)**: ChannelRouter readiness gate가 `midi.*.keycmd` 오퍼레이션을 manual_validation_required 채널에 대해서도 통과시키도록 router-level bypass allowlist 도입. KeyCmd 채널 미승인 환경에서도 KeyCmd 포트로의 MIDI 송신은 가능 (Manual MIDI Learn seeding이 사용자 승인 전 단계의 핵심 use case이므로).
-- [ ] **G3**: SETUP.md / TROUBLESHOOTING.md / Scripts/install.sh / Scripts/install-keycmds.sh / Scripts/keycmd-preset.plist 헤더 모두 재작성. Import 경로 제거, manual MIDI Learn 2+ 예시 + 시간 소요 명시 + audited coverage matrix.
-- [ ] **G4**: Homebrew formula `depends_on xcode` 제거 (ADHOC binary는 build 의존 없음). `Formula/logic-pro-mcp.rb` 코멘트로 ADHOC-only path 명시.
-- [ ] **G5**: MIDIKeyCommands 채널 health detail 메시지 정직화 — "Manual MIDI Learn required + audited coverage matrix link + channel-only ops 명시(note.up_*/down_*)".
-- [ ] **G6**: 후방 호환성 보장 — 기존 `port` 미지정 호출은 이전과 동일 동작 + 동일 에러 메시지 wording 유지. channel encoding 변경은 1-based 정렬이 명시적 BREAKING change로 CHANGELOG + Issue #1 자동 댓글 + GitHub Release notes에 BEFORE/AFTER 표 형태로 명시.
-- [ ] **G7**: Issue #1 자동화 — `Scripts/release.sh`에 `gh issue comment 1` + `gh issue close 1` 단계 추가 (또는 release notes에서 Issue close link).
+### 2.1 Goals (v0.3 reordered)
+- [ ] **G1**: Add `port` parameter (`"midi"|"keycmd"`, default `"midi"` for backward compat) to `logic_midi.send_*` 6 ops + `play_sequence`. 7 ops × 2 ports = 14 routingTable entries. **`record_sequence` does not support `port`** (NG7 — SMF import path has no meaning for the KeyCmd port). Enables scriptable manual MIDI Learn workflow.
+- [ ] **G2**: Unify all MIDI channel input semantics to 1-based (1..16, music convention). Return `invalid_params` for 0/17+/non-integer input. Wire byte = `(channel - 1) & 0x0F`. Scope: send_* 6 ops + play_sequence + record_sequence (`NoteSequenceParser` API type change — `Result<[ParsedNote], NoteSequenceParseError>`).
+- [ ] **G_NEW (v0.3)**: Introduce a router-level bypass allowlist so ChannelRouter's readiness gate passes `midi.*.keycmd` operations even for `manual_validation_required` channels. MIDI transmission to the KeyCmd port is possible even before user approval (manual MIDI Learn seeding is the key use case at the pre-approval stage).
+- [ ] **G3**: Rewrite `SETUP.md` / `TROUBLESHOOTING.md` / `Scripts/install.sh` / `Scripts/install-keycmds.sh` / `Scripts/keycmd-preset.plist` header. Remove Import path, add 2+ manual MIDI Learn examples + explicit time estimates + audited coverage matrix.
+- [ ] **G4**: Remove `depends_on xcode` from Homebrew formula (ADHOC binary has no build dependency). Add comment to `Formula/logic-pro-mcp.rb` clarifying ADHOC-only path.
+- [ ] **G5**: Honest MIDIKeyCommands channel health detail message — "Manual MIDI Learn required + audited coverage matrix link + channel-only ops explicitly listed (note.up_*/down_*)".
+- [ ] **G6**: Guarantee backward compatibility — existing calls without `port` behave identically to before + same error message wording preserved. Channel encoding change is an explicit BREAKING change documented in CHANGELOG + Issue #1 auto-comment + GitHub Release notes as BEFORE/AFTER tables.
+- [ ] **G7**: Automate Issue #1 closure — add `gh issue comment 1` + `gh issue close 1` steps to `Scripts/release.sh` (or close link in release notes).
 
 ### 2.2 Non-Goals
-- **NG1**: `--install-keycmds` Swift CLI subcommand (보고자 방안 1) — `.logikcs` schema 리버스 + `MROF` chunk 직접 inject는 큰 작업이며 Logic preferences 직접 수정 위험. v3.2 PRD로 분리.
-- **NG2**: MIDIKeyCommands 채널 완전 제거 — backward compat 유지. 외부 사용자가 manual binding 완료한 경우 계속 작동해야 함. 단 health에서 redundancy + channel-only ops 명시.
-- **NG3**: Manual MIDI Learn UI 자동화 (AppleScript/AX로 Controller Assignments 패널 조작) — Logic의 Controller Assignments는 AX 노출 한정, 실용적 자동화 불가. 별도 R&D 영역.
-- **NG4**: 다른 채널(Scripter, MCU)의 redundancy 평가 — 이번 PRD 범위 외.
-- **NG5 (v0.2 신규)**: `port: "scripter"` 옵션 미포함. ScripterChannel은 `plugin.set_param`/`mixer.set_plugin_param` 전용 (`ScripterChannel.swift:46-48` execute guard), `midi.send_*` 처리 책임 없음. v3.1.5는 `port: "midi" | "keycmd"` 두 값만 지원. Scripter port 라우팅이 필요해지면 별도 PRD에서 ScripterChannel transport 확장 + JSFX rec policy 검토 필요.
-- **NG6 (v0.2 신규)**: `note.up_*` / `note.down_*` 등 mappingTable에 등재되었으나 어떤 dispatcher case에도 노출되지 않은 **orphan ops**의 dispatcher entry 신규 추가 — 별도 follow-up issue로 추적. v3.1.5 docs는 "orphan — not reachable from any logic_* tool today; manual MIDI Learn binding이 유일한 호출 path" 정직 명시만.
-- **NG7 (v0.3 신규)**: `record_sequence`에 `port` 파라미터 비지원. `record_sequence`는 SMF import path (TrackDispatcher 소속)이며 가상 MIDI 포트 송신과 무관. `port` 파라미터를 입력하면 dispatcher-level enum validation에서 reject (silent ignore 폐기 — v0.2 E14 결정 번복). channel 1-based만 적용 대상.
-- **NG8 (v0.3 신규)**: `mmc_play` / `mmc_stop` / `mmc_record` / `mmc_locate` / `send_sysex` / `step_input` / `create_virtual_port`은 `port` 파라미터 비지원. dispatcher-level enum validation에서 입력 시 reject. `mmc_*`는 SysEx broadcast로 모든 청취 device 대상이며 KeyCmd port 의미 없음. `send_sysex`/`step_input`/`create_virtual_port`도 별도 책임.
+- **NG1**: `--install-keycmds` Swift CLI subcommand (reporter option 1) — reverse-engineering `.logikcs` schema + direct `MROF` chunk injection is large scope and risks direct modification of Logic preferences. Separate to v3.2 PRD.
+- **NG2**: Full removal of MIDIKeyCommands channel — maintain backward compat. External users who have completed manual binding must continue to work. Only document redundancy + channel-only ops honestly in health.
+- **NG3**: Automate Manual MIDI Learn UI (operate Controller Assignments panel via AppleScript/AX) — Logic's Controller Assignments has limited AX exposure; practical automation is not feasible. Separate R&D area.
+- **NG4**: Evaluate redundancy of other channels (Scripter, MCU) — out of scope for this PRD.
+- **NG5 (v0.2 new)**: `port: "scripter"` option not included. ScripterChannel is exclusively for `plugin.set_param`/`mixer.set_plugin_param` (`ScripterChannel.swift:46-48` execute guard); it has no responsibility to handle `midi.send_*`. v3.1.5 supports only two values: `port: "midi" | "keycmd"`. If Scripter port routing is needed, a separate PRD must cover ScripterChannel transport extension + JSFX recording policy.
+- **NG6 (v0.2 new)**: Adding new dispatcher entries for **orphan ops** registered in mappingTable but not exposed in any dispatcher case (`note.up_*` / `note.down_*`, etc.) — tracked as a separate follow-up issue. v3.1.5 docs will only honestly state: "orphan — not reachable from any logic_* tool today; manual MIDI Learn binding is the only call path."
+- **NG7 (v0.3 new)**: `record_sequence` does not support `port` parameter. `record_sequence` is an SMF import path (owned by TrackDispatcher) and is unrelated to virtual MIDI port transmission. Providing a `port` parameter will be rejected at dispatcher-level enum validation (silent ignore removed — reverses v0.2 E14 decision).
+- **NG8 (v0.3 new)**: `mmc_play` / `mmc_stop` / `mmc_record` / `mmc_locate` / `send_sysex` / `step_input` / `create_virtual_port` do not support `port`. Input will be rejected at dispatcher-level enum validation. `mmc_*` is SysEx broadcast targeting all listening devices — KeyCmd port has no meaning. `send_sysex`/`step_input`/`create_virtual_port` also have separate responsibilities.
 
 ## 3. User Stories & Acceptance Criteria
 
 ### US-1: Scriptable manual MIDI Learn flow
-**As a** AI agent operator, **I want** `logic_midi.send_cc` 가 어느 가상 MIDI 포트로 송신할지 선택 가능, **so that** Logic의 Controller Assignments → Learn Mode를 통해 MIDIKeyCommands 바인딩을 자동화 스크립트로 seed할 수 있다.
+**As an** AI agent operator, **I want** `logic_midi.send_cc` to allow selecting which virtual MIDI port to transmit to, **so that** I can use an automation script to seed MIDIKeyCommands bindings via Logic's Controller Assignments → Learn Mode.
 
 **Acceptance Criteria:**
-- [ ] **AC-1.1**: `logic_midi.send_cc {controller: 6, value: 127, channel: 16, port: "keycmd"}` 호출 시 메시지가 `LogicProMCP-KeyCmd-Internal` 가상 포트로 송신된다. 검증: (a) unit test — KeyCmd transport handle invocation 확인 (`MIDIKeyCommandsChannel.transport.send` 호출 검증), (b) 라이브 — Logic 12.2 Controller Assignments → Learn Mode 활성화 후 `port:"keycmd"` 송신 → 입력으로 `LogicProMCP-KeyCmd-Internal` 캡처 확인 (보고자 환경 + Isaac 환경 양쪽에서).
-- [ ] **AC-1.2**: `port` 미지정 시 기존 라우팅 100% 보존 — `MIDI-Internal` 포트로 송신 + 동일 에러 메시지 wording (regression test로 string-equality 검증).
-- [ ] **AC-1.3**: 유효하지 않은 `port` 값(`"foo"` / `"scripter"` / `""` 등) 입력 시 **dispatcher-level enum validation** → State C `invalid_params` + hint `"port must be one of: midi, keycmd"`. Channel-side에 도달하지 않음.
-- [ ] **AC-1.4**: `send_note` / `send_chord` / `send_program_change` / `send_pitch_bend` / `send_aftertouch` / `play_sequence` 모두 동일 `port` 파라미터 적용. 일관된 라우팅 (**7개 entry point — v0.3에서 record_sequence 제외**, NG7 참조).
-- [ ] **AC-1.5**: Tool description (manifest.json + `MIDIDispatcher.description`)에 정확한 문구 포함: `"port: virtual MIDI source selection (\"midi\" default | \"keycmd\" — for manual MIDI Learn seeding); channel: MIDI channel number 1..16 (1-based) — independent from port"`. play_sequence의 `notes` 문자열 안 `ch` 필드는 entry-level `port` 파라미터와 별개임을 docstring에 명시.
-- [ ] **AC-1.6 (v0.3 신규)**: `port` 파라미터 비지원 ops(record_sequence / mmc_* / send_sysex / step_input / create_virtual_port)에 `port` 입력 시 dispatcher-level validation에서 State C `invalid_params` + hint `"port parameter not supported for <op_name>"` 반환. silent ignore 금지.
-- [ ] **AC-1.7 (v0.3 신규)**: ChannelRouter readiness gate에 `midi.*.keycmd` operation key bypass allowlist 도입. `MIDIKeyCommandsChannel.healthCheck()` 가 `available: true, ready: false` (manual_validation_required) 인 상태에서도 `midi.*.keycmd` 오퍼레이션은 execute에 도달 가능. `available: false` 인 상태(virtual port 미생성)에서는 여전히 차단 + State C `port_unavailable` 반환.
+- [ ] **AC-1.1**: Calling `logic_midi.send_cc {controller: 6, value: 127, channel: 16, port: "keycmd"}` sends the message to the `LogicProMCP-KeyCmd-Internal` virtual port. Verification: (a) unit test — confirm KeyCmd transport handle invocation (verify `MIDIKeyCommandsChannel.transport.send` called), (b) live — with Logic 12.2 Controller Assignments → Learn Mode active, transmit with `port:"keycmd"` → confirm `LogicProMCP-KeyCmd-Internal` captured as input (both reporter's environment and Isaac's environment).
+- [ ] **AC-1.2**: Without `port` specified, existing routing is 100% preserved — transmits to `MIDI-Internal` port + identical error message wording (validated via string-equality regression test).
+- [ ] **AC-1.3**: Invalid `port` value (`"foo"` / `"scripter"` / `""`, etc.) causes **dispatcher-level enum validation** → State C `invalid_params` + hint `"port must be one of: midi, keycmd"`. Does not reach the channel.
+- [ ] **AC-1.4**: `send_note` / `send_chord` / `send_program_change` / `send_pitch_bend` / `send_aftertouch` / `play_sequence` all support the same `port` parameter. Consistent routing (**7 entry points — record_sequence excluded in v0.3**, see NG7).
+- [ ] **AC-1.5**: Tool description (manifest.json + `MIDIDispatcher.description`) includes exact wording: `"port: virtual MIDI source selection (\"midi\" default | \"keycmd\" — for manual MIDI Learn seeding); channel: MIDI channel number 1..16 (1-based) — independent from port"`. The `ch` field inside play_sequence's `notes` string is documented as separate from the entry-level `port` parameter.
+- [ ] **AC-1.6 (v0.3 new)**: For ops that do not support `port` (record_sequence / mmc_* / send_sysex / step_input / create_virtual_port), providing `port` input causes dispatcher-level validation to return State C `invalid_params` + hint `"port parameter not supported for <op_name>"`. Silent ignore is prohibited.
+- [ ] **AC-1.7 (v0.3 new)**: Introduce `midi.*.keycmd` operation key bypass allowlist in ChannelRouter's readiness gate. When `MIDIKeyCommandsChannel.healthCheck()` returns `available: true, ready: false` (manual_validation_required), `midi.*.keycmd` operations still reach execute. When `available: false` (virtual port not created), operations are still blocked + State C `port_unavailable` returned.
 
 ### US-2: Honest 1-based MIDI channel encoding (BREAKING)
-**As a** caller, **I want** `channel: 16` 가 실제로 MIDI Channel 16으로 송신되도록, **so that** Logic의 channel 표시와 input 의미가 일치한다.
+**As a** caller, **I want** `channel: 16` to actually transmit on MIDI Channel 16, **so that** Logic's channel display matches the input semantics.
 
 **Acceptance Criteria:**
-- [ ] **AC-2.1**: `channel: 16` 입력 시 wire status byte의 lower nibble = `0xF` (Logic이 Ch 16으로 표시). 적용: send_cc / send_note / send_chord / send_program_change / send_pitch_bend / send_aftertouch + play_sequence/record_sequence parser.
-- [ ] **AC-2.2**: `channel: 1` 입력 시 wire lower nibble = `0x0` (Logic이 Ch 1로 표시).
-- [ ] **AC-2.3**: `channel: 0` 또는 `channel: 17+` 입력 시 State C `invalid_params` 반환 + hint: `"channel must be 1..16 (1-based)"`.
-- [ ] **AC-2.4**: Non-integer channel (`channel: 1.5`) 입력 시 strict integer parser로 reject → `invalid_params` + hint: `"channel must be integer 1..16"`. 현재 `intParam`은 JSON `1.5` (`Value.double` 케이스) 입력에서 `intValue == nil` + `stringValue == nil` → silent default fall-through. **v3.1.5 fix**: `MIDIDispatcher` 내 신규 helper `validateMidiChannel(_:)`이 raw `Value` 타입을 case-switch로 검사 — `.int(let n)` 만 통과, `.double(let f)`이면 `Int(exactly: f)` 시도 후 round-trip 일치 시 통과 (예: 1.0 OK, 1.5 reject), `.string(let s)`이면 `Int(s)` 시도. 모든 경로에서 1..16 범위 검증.
-- [ ] **AC-2.5**: pitch_bend / aftertouch는 현재 검증 자체가 부재 → 신규 `midiChannel(_:)` 검증 함수 일관 적용 + State C envelope 표준화.
-- [ ] **AC-2.6 (v0.4 보강)**: BREAKING change communication step:
-  - CHANGELOG **표 #1 — top-level `channel:` parameter** (send_* 6종 + play_sequence):
+- [ ] **AC-2.1**: `channel: 16` input results in the wire status byte's lower nibble = `0xF` (Logic displays Ch 16). Applies to: send_cc / send_note / send_chord / send_program_change / send_pitch_bend / send_aftertouch + play_sequence/record_sequence parser.
+- [ ] **AC-2.2**: `channel: 1` input results in wire lower nibble = `0x0` (Logic displays Ch 1).
+- [ ] **AC-2.3**: `channel: 0` or `channel: 17+` input returns State C `invalid_params` + hint: `"channel must be 1..16 (1-based)"`.
+- [ ] **AC-2.4**: Non-integer channel (`channel: 1.5`) input is rejected by strict integer parser → `invalid_params` + hint: `"channel must be integer 1..16"`. Current `intParam` with JSON `1.5` (`Value.double` case) yields `intValue == nil` + `stringValue == nil` → silent default fall-through. **v3.1.5 fix**: a new helper `validateMidiChannel(_:)` in `MIDIDispatcher` case-switches on raw `Value` type — only `.int(let n)` passes; `.double(let f)` attempts `Int(exactly: f)` and passes if round-trip matches (e.g., 1.0 OK, 1.5 rejected); `.string(let s)` attempts `Int(s)`. All paths validate the 1..16 range.
+- [ ] **AC-2.5**: pitch_bend / aftertouch currently have no validation → apply the new `midiChannel(_:)` validation function consistently + standardize State C envelope.
+- [ ] **AC-2.6 (v0.4 expanded)**: BREAKING change communication steps:
+  - CHANGELOG **Table #1 — top-level `channel:` parameter** (send_* 6 ops + play_sequence):
     ```
     | input        | v3.1.4 wire    | v3.1.5 wire | Logic display |
     |--------------|----------------|-------------|---------------|
@@ -109,7 +109,7 @@ v3.1.1 사용자(`xaexx1`)가 Logic Pro 12.2 + macOS 26.5 환경에서 `MIDIKeyC
     | channel:17   | 0x?1 (truncate)| error       | invalid_params |
     | channel:1.5  | 0x?0 (default) | error       | invalid_params (strict integer) |
     ```
-  - CHANGELOG **표 #2 — `notes` substring `ch` field** (play_sequence + record_sequence parser, Loop 3 Boomer P1-3):
+  - CHANGELOG **Table #2 — `notes` substring `ch` field** (play_sequence + record_sequence parser, Loop 3 Boomer P1-3):
     ```
     | input fragment        | v3.1.4 behavior        | v3.1.5 behavior |
     |-----------------------|------------------------|-----------------|
@@ -120,19 +120,19 @@ v3.1.1 사용자(`xaexx1`)가 Logic Pro 12.2 + macOS 26.5 환경에서 `MIDIKeyC
     | "60,0,500,127" (omit) | wire ch1 (default 0)   | wire ch1 (default 1-based ch1) — unchanged |
     | "60,0,500,127,17"     | invalid → silent default | parse error — whole parse fails |
     ```
-    Migration: 사용자 자동화 스크립트가 `notes` 안 `ch` 필드를 0-based wire 값으로 사용했다면 1씩 증가 필요. ch=0은 무효 (Ch1을 의미하려면 `ch=1`). 또한 NoteSequenceParser가 partial parse silent fall-through에서 strict whole-parse-fail로 변경됨 — invalid 세그먼트 1개라도 있으면 전체 호출 실패 (`Result<[ParsedNote], NoteSequenceParseError>`).
-  - GitHub Release notes에 prominent `### ⚠️ BREAKING` 섹션 + 두 표 모두 포함
-  - Issue #1 자동 comment + close (release.sh 단계 추가)
-  - Tool description (`MIDIDispatcher.description` + `TrackDispatcher.description`)에 "channel: 1..16 (1-based)" inline 명시. play_sequence/record_sequence는 추가로 "`notes` ch field also 1-based since v3.1.5" 명시.
+    Migration: if user automation scripts use the `ch` field inside `notes` as a 0-based wire value, increment by 1. ch=0 is invalid (use `ch=1` to mean Ch 1). Also, NoteSequenceParser changes from partial-parse silent fall-through to strict whole-parse-fail — a single invalid segment fails the entire call (`Result<[ParsedNote], NoteSequenceParseError>`).
+  - GitHub Release notes: prominent `### ⚠️ BREAKING` section + both tables included
+  - Issue #1 auto-comment + close (add step to release.sh)
+  - Tool description (`MIDIDispatcher.description` + `TrackDispatcher.description`) inline "channel: 1..16 (1-based)". play_sequence/record_sequence additionally note "`notes` ch field also 1-based since v3.1.5".
 
 ### US-3: Honest documentation for Logic 12.2
-**As a** new user, **I want** SETUP.md가 Logic 12.2 실제 동작과 일치하는 안내를 제공, **so that** 25분+ 시행착오 없이 단계별로 진행 가능하다.
+**As a** new user, **I want** SETUP.md to match the actual behavior of Logic 12.2, **so that** I can proceed step by step without 25+ minutes of trial and error.
 
 **Acceptance Criteria:**
-- [ ] **AC-3.1**: `docs/SETUP.md` 의 모든 `.plist` Import 안내가 완전히 제거된다 (해당 섹션 §, MIDIKeyCommands 관련 모든 곳).
-- [ ] **AC-3.2**: Manual MIDI Learn step-by-step 가이드가 **최소 2개 예시** binding (반복 패턴 명시 — 예: `Edit > Undo` 1번, `Track > New Audio Track` 1번)으로 작성. 각 단계마다 Logic UI 클릭 위치 + MCP 호출 명령(`port:"keycmd"` 포함) + screenshot 또는 상세 문구. Learn 패널 진입/탈출 cycle + Save Assignments 단계 모두 포함.
-- [ ] **AC-3.3**: 시간 소요 명시 (예: "최소 binding: ~2분 (1개), 전체 권장 binding: ~25분 (48개) — 단 channel-only ops만 binding하는 minimal path 권장 ~5분").
-- [ ] **AC-3.4 (v0.3 정정)**: **Audited coverage matrix** — `MIDIKeyCommandsChannel.swift:34-110` mappingTable 실측 검증된 행만 등재. 단순 "all covered" 문구 금지. 4-column matrix:
+- [ ] **AC-3.1**: All `.plist` Import guidance in `docs/SETUP.md` is completely removed (the relevant section, all MIDIKeyCommands-related mentions).
+- [ ] **AC-3.2**: A step-by-step Manual MIDI Learn guide is written with **at least 2 example** bindings (showing the repeating pattern — e.g., `Edit > Undo` once, `Track > New Audio Track` once). Each step includes the Logic UI click location + MCP call command (with `port:"keycmd"`) + screenshot or detailed description. All steps covered: entering/exiting the Learn panel cycle + Save Assignments.
+- [ ] **AC-3.3**: Time estimate explicitly stated (e.g., "Minimum binding: ~2 min (1 binding), Recommended full binding: ~25 min (48 bindings) — minimal path covering channel-only ops recommended ~5 min").
+- [ ] **AC-3.4 (v0.3 corrected)**: **Audited coverage matrix** — only rows verified against the actual `MIDIKeyCommandsChannel.swift:34-110` mappingTable. "All covered" phrasing prohibited. 4-column matrix:
   ```
   | mappingTable op (CC#)        | dispatcher entry exposing it    | router primary fallback     | requires keycmd binding? |
   |------------------------------|---------------------------------|-----------------------------|--------------------------|
@@ -150,43 +150,43 @@ v3.1.1 사용자(`xaexx1`)가 Logic Pro 12.2 + macOS 26.5 환경에서 `MIDIKeyC
   | automation.set_mode (84)     | logic_tracks.set_automation     | mcu (primary), midiKeyCommands, cgevent | RECOMMENDED  |
   | automation.toggle_view (85)  | logic_navigate.toggle_view {automation} | midiKeyCommands, cgevent (`.key(0)`) | RECOMMENDED  |
   ```
-  **Orphan ops 별도 섹션** (mappingTable + routingTable 등재되었으나 어떤 dispatcher case에도 노출 안 됨 — Loop 3 boomer P1-4 검증 결과 추가):
-  - `note.up_semitone (90)` / `note.down_semitone (91)` / `note.up_octave (92)` / `note.down_octave (93)` — manual MIDI Learn binding 가능하나 어떤 logic_* tool로도 호출 path 없음.
-  - `view.toggle_smart_controls (54)` / `view.toggle_plugin_windows (58)` / `view.toggle_automation (57, 별도 — automation.toggle_view (85)와 다름)` — `NavigateDispatcher.swift:112-128` switch가 `mixer / piano_roll / score / step_editor / library / inspector / automation` 7개만 라우팅. `smart_controls`/`plugin_windows`는 dispatcher 노출 없음. `view.toggle_automation` (CC 57)은 mappingTable에 있으나 dispatcher의 `automation` view-key는 `automation.toggle_view` (CC 85) — 별도 op.
-  - `transport.capture_recording (73)` — cgEvent에 매핑 없음 (`CGEventChannel.swift:115` 미존재). routingTable는 `[.midiKeyCommands, .cgEvent]`이나 cgEvent에서 unmapped → 사실상 keycmd-only.
-  - **AC 결정 (v0.4)**: Orphan ops는 dispatcher entry 추가 follow-up issue (NG6) 등록 + docs에서 "manual binding 가능하나 자동 호출 path 없음 (현재 orphan)" 명시. `transport.capture_recording`은 cgEvent unmapped로 사실상 keycmd-only인 점 별도 명시 (orphan은 아니나 binding 사실상 필수).
+  **Orphan ops separate section** (registered in mappingTable + routingTable but not exposed in any dispatcher case — Loop 3 boomer P1-4 verification additions):
+  - `note.up_semitone (90)` / `note.down_semitone (91)` / `note.up_octave (92)` / `note.down_octave (93)` — manual MIDI Learn binding possible but no logic_* tool has a call path.
+  - `view.toggle_smart_controls (54)` / `view.toggle_plugin_windows (58)` / `view.toggle_automation (57, distinct — different from automation.toggle_view (85))` — `NavigateDispatcher.swift:112-128` switch routes only 7 view-keys: `mixer / piano_roll / score / step_editor / library / inspector / automation`. `smart_controls`/`plugin_windows` have no dispatcher exposure. `view.toggle_automation` (CC 57) is in mappingTable but the dispatcher's `automation` view-key maps to `automation.toggle_view` (CC 85) — a separate op.
+  - `transport.capture_recording (73)` — not mapped in cgEvent (`CGEventChannel.swift:115` absent). routingTable lists `[.midiKeyCommands, .cgEvent]` but cgEvent has no mapping → effectively keycmd-only.
+  - **AC decision (v0.4)**: Orphan ops → register follow-up issue (NG6) for dispatcher entry additions + document in docs as "manual binding possible but no automatic call path exists (currently orphan)". `transport.capture_recording` is separately noted as effectively keycmd-only due to unmapped cgEvent (not an orphan, but binding is practically required).
 
-  Matrix는 docs/SETUP.md `§MIDIKeyCommands coverage`에 명시 + manifest.json `description` link.
-- [ ] **AC-3.5**: `docs/TROUBLESHOOTING.md`에서 Logic 12.2 `.plist` import 회색 처리 증상 + manual MIDI Learn 정직 안내. v3.1.4 이전 SETUP 따라간 사용자에 대한 migration 안내.
-- [ ] **AC-3.6**: 다음 4개 파일에서 misleading "Import" 안내 모두 제거:
-  - `Scripts/install.sh` (line ~235 Import 안내)
-  - `Scripts/install-keycmds.sh` (출력 메시지)
-  - `Scripts/keycmd-preset.plist` 헤더 주석
-  - `docs/SETUP.md` (해당 섹션)
+  Matrix documented in `docs/SETUP.md §MIDIKeyCommands coverage` + linked from `manifest.json` description.
+- [ ] **AC-3.5**: `docs/TROUBLESHOOTING.md` includes Logic 12.2 `.plist` import greyed-out symptom + honest manual MIDI Learn guidance. Migration guidance for users who followed pre-v3.1.4 SETUP.
+- [ ] **AC-3.6**: Remove all misleading "Import" guidance from the following 4 files:
+  - `Scripts/install.sh` (line ~235 Import guidance)
+  - `Scripts/install-keycmds.sh` (output message)
+  - `Scripts/keycmd-preset.plist` header comment
+  - `docs/SETUP.md` (relevant section)
 
 ### US-4: Homebrew install on CLT-only host
-**As a** user with Command Line Tools but no full Xcode, **I want** `brew install logic-pro-mcp` 가 차단 없이 진행, **so that** ADHOC 바이너리를 정상 다운로드 + 설치할 수 있다.
+**As a** user with Command Line Tools but no full Xcode, **I want** `brew install logic-pro-mcp` to proceed without being blocked, **so that** the ADHOC binary downloads and installs normally.
 
 **Acceptance Criteria:**
-- [ ] **AC-4.1**: `Formula/logic-pro-mcp.rb` 의 `depends_on xcode: ["15.0", :build]` 라인이 제거된다. 코멘트로 "ADHOC pre-built binary download — no source-build, no Xcode dependency. Source build via Package.swift requires Xcode 15.0+ but is not the supported install path." 명시.
-- [ ] **AC-4.2**: `depends_on :macos => :sonoma` 는 유지 (런타임 OS 요구사항).
-- [ ] **AC-4.3**: Formula `test do` 블록(`shell_output "#{bin}/LogicProMCP --check-permissions"`)은 유지 — Xcode 없이도 통과해야 함.
-- [ ] **AC-4.4**: `brew audit --strict --new-formula Formula/logic-pro-mcp.rb` 로컬 통과. 로컬 검증 명령은 release notes에 명시.
-- [ ] **AC-4.5**: `brew style Formula/logic-pro-mcp.rb` 로컬 통과.
+- [ ] **AC-4.1**: The `depends_on xcode: ["15.0", :build]` line is removed from `Formula/logic-pro-mcp.rb`. Comment added: "ADHOC pre-built binary download — no source-build, no Xcode dependency. Source build via Package.swift requires Xcode 15.0+ but is not the supported install path."
+- [ ] **AC-4.2**: `depends_on :macos => :sonoma` remains (runtime OS requirement).
+- [ ] **AC-4.3**: Formula `test do` block (`shell_output "#{bin}/LogicProMCP --check-permissions"`) is retained — must pass without Xcode.
+- [ ] **AC-4.4**: `brew audit --strict --new-formula Formula/logic-pro-mcp.rb` passes locally. The local verification command is documented in release notes.
+- [ ] **AC-4.5**: `brew style Formula/logic-pro-mcp.rb` passes locally.
 
 ### US-5: Honest channel readiness reporting
-**As a** AI agent reading `logic_system.health`, **I want** MIDIKeyCommands channel detail이 정직하게 redundancy + 수동 설정 필요성 + channel-only ops를 보고, **so that** 채널을 신뢰하고 매핑되지 않은 명령 보내는 사고를 방지한다.
+**As an** AI agent reading `logic_system.health`, **I want** the MIDIKeyCommands channel detail to honestly report redundancy, required manual setup, and channel-only ops, **so that** I avoid the mistake of trusting the channel and sending unmapped commands.
 
 **Acceptance Criteria:**
-- [ ] **AC-5.1 (v0.3 정정)**: `MIDIKeyCommands` 채널 health `detail` 메시지가 다음을 포함:
-  - virtual MIDI port 상태 ("`LogicProMCP-KeyCmd-Internal` is ready")
+- [ ] **AC-5.1 (v0.3 corrected)**: `MIDIKeyCommands` channel health `detail` message includes:
+  - Virtual MIDI port status ("`LogicProMCP-KeyCmd-Internal` is ready")
   - "Manual MIDI Learn required — see docs/SETUP.md §<section>"
   - "Most preset operations are covered by logic_edit / logic_project / logic_navigate / logic_tracks / logic_transport — see audited coverage matrix in SETUP.md"
   - "Effectively keycmd-only (cgEvent fallback unmapped): `transport.capture_recording`. Manual MIDI Learn binding required for actual function activation."
   - "Orphan ops in mappingTable (no MCP tool currently exposes call path): `note.up_semitone`, `note.up_octave`, `note.down_semitone`, `note.down_octave`, `view.toggle_smart_controls`, `view.toggle_plugin_windows`, `view.toggle_automation` (CC 57; distinct from `automation.toggle_view` CC 85). Manual binding possible but MCP has no caller path; tracked in NG6 follow-up."
-- [ ] **AC-5.2**: `verification_status` 는 그대로 `manual_validation_required` 유지 (라이브 검증 불가능한 사실 변경 없음). `available: true`, `ready: false` 는 그대로.
-- [ ] **AC-5.3**: 채널 자체는 deprecate 하지 않음 (사용자 manual binding 완료 케이스 backward compat).
-- [ ] **AC-5.4**: Health detail 길이는 < 1 KB per channel (envelope size 검증).
+- [ ] **AC-5.2**: `verification_status` remains `manual_validation_required` (no change to the fact that live verification is impossible). `available: true`, `ready: false` unchanged.
+- [ ] **AC-5.3**: Channel itself is not deprecated (backward compat for users who have completed manual binding).
+- [ ] **AC-5.4**: Health detail length < 1 KB per channel (envelope size validated by unit test).
 
 ## 4. Technical Design
 
@@ -204,7 +204,7 @@ v3.1.1 사용자(`xaexx1`)가 Logic Pro 12.2 + macOS 26.5 환경에서 `MIDIKeyC
                  │    ("midi" | "keycmd"; default "midi")  │
                  │ 2) channel 1-based validation           │
                  │    (1..16, integer; reject 0/17+/float) │
-                 │ 3) operation key 분기:                   │
+                 │ 3) operation key branching:              │
                  │    port="midi"   → "midi.send_cc"       │
                  │    port="keycmd" → "midi.send_cc.keycmd"│
                  └────────────┬────────────────────────────┘
@@ -215,10 +215,13 @@ v3.1.1 사용자(`xaexx1`)가 Logic Pro 12.2 + macOS 26.5 환경에서 `MIDIKeyC
                  │   "midi.send_cc": [.coreMIDI]       │
                  │   "midi.send_cc.keycmd":            │
                  │       [.midiKeyCommands]            │
-                 │   ... (7 entry × 2 port = 14 entries; record_sequence 제외 NG7) │
+                 │   ... (7 entries × 2 ports = 14;   │
+                 │         record_sequence excluded    │
+                 │         per NG7)                    │
                  │                                     │
-                 │ 단일 채널 직접 라우팅 — fallthrough │
-                 │ 문제 / terminal State C 충돌 없음   │
+                 │ Single-channel direct routing —     │
+                 │ no fallthrough / terminal State C   │
+                 │ conflicts                           │
                  └────────────┬────────────────────────┘
                               │
                 ┌─────────────┴─────────────┐
@@ -230,36 +233,36 @@ v3.1.1 사용자(`xaexx1`)가 Logic Pro 12.2 + macOS 26.5 환경에서 `MIDIKeyC
     └──────────────────────┘   └──────────────────────────┘
 ```
 
-**라우팅 결정 (v0.3 — readiness bypass 추가)**:
+**Routing decisions (v0.3 — readiness bypass added)**:
 
-1. MIDIDispatcher가 `port` 파라미터 enum validation
-2. 미지정 시 `"midi"` default
-3. operation key를 `"midi.send_cc"` 또는 `"midi.send_cc.keycmd"` 로 직접 분기 (suffix 패턴 채택 — dynamic dictionary 옵션 폐기)
-4. ChannelRouter.routingTable에 정적 entries 추가 — **7 ops × 2 ports = 14개 routing entries** (record_sequence 제외, NG7)
-5. MIDIKeyCommandsChannel.execute에 `midi.send_*.keycmd` operation case 추가 (mappingTable 외 신규 직접 송신 path)
-6. **(v0.3 신규)** ChannelRouter에 `bypassReadinessOps: Set<String>` 신규 field 추가. **7 ops × keycmd suffix만** 등록 — `["midi.send_cc.keycmd", "midi.send_note.keycmd", "midi.send_chord.keycmd", "midi.send_program_change.keycmd", "midi.send_pitch_bend.keycmd", "midi.send_aftertouch.keycmd", "midi.play_sequence.keycmd"]`. `route()`의 readiness gate가 이 set에 포함된 operation은 `ready: false`도 통과 (manual_validation_required 채널이라도 가능).
-7. **(v0.4 신규 — Loop 3 Boomer P1-2 해소)** `available: false` (virtual port 미생성) 분기에서 ChannelRouter가 직접 `HonestContract.encodeStateC(error: .portUnavailable, hint: health.detail, extras: ["operation": op])` 반환. `.portUnavailable`은 `terminalErrorCodes` 등록되어 fallback chain에서 wrapping되지 않음 (다음 채널로 넘어가지 않음). 일반 ops는 기존 `lastError` 누적 + "All channels exhausted" 메시지 유지 (backward compat).
+1. MIDIDispatcher performs `port` parameter enum validation
+2. If unspecified, defaults to `"midi"`
+3. Branches directly to operation key `"midi.send_cc"` or `"midi.send_cc.keycmd"` (suffix pattern adopted — dynamic dictionary option discarded)
+4. Add static entries to ChannelRouter.routingTable — **7 ops × 2 ports = 14 routing entries** (record_sequence excluded, NG7)
+5. Add `midi.send_*.keycmd` operation cases to MIDIKeyCommandsChannel.execute (new direct-send path bypassing mappingTable)
+6. **(v0.3 new)** Add `bypassReadinessOps: Set<String>` field to ChannelRouter. Register **7 ops × keycmd suffix only** — `["midi.send_cc.keycmd", "midi.send_note.keycmd", "midi.send_chord.keycmd", "midi.send_program_change.keycmd", "midi.send_pitch_bend.keycmd", "midi.send_aftertouch.keycmd", "midi.play_sequence.keycmd"]`. The readiness gate in `route()` passes operations in this set even when `ready: false` (even for `manual_validation_required` channels).
+7. **(v0.4 new — Loop 3 Boomer P1-2 resolved)** In the `available: false` branch (virtual port not created), ChannelRouter returns `HonestContract.encodeStateC(error: .portUnavailable, hint: health.detail, extras: ["operation": op])` directly. `.portUnavailable` is registered in `terminalErrorCodes` so it is not wrapped in the fallback chain (does not pass to next channel). Normal ops retain existing `lastError` accumulation + "All channels exhausted" message (backward compat).
 
-**Readiness bypass rationale (v0.4 chicken-and-egg framing — Loop 3 Guardian P2-2 해소)**: Manual MIDI Learn seeding은 정의상 채널 승인 *전* 단계 (`--approve-channel MIDIKeyCommands` 호출 전). 사용자가 처음 v3.1.5 시작 → KeyCmd 채널 `available:true / ready:false`(manual_validation_required) → bypass 없으면 어떤 `*.keycmd` op도 실행 불가 → Manual MIDI Learn binding 자체가 시작될 수 없음. **Chicken-and-egg**: bypass 없으면 사용자가 channel을 활성화하기 위한 binding을 만들 방법이 없음. bypass는 이 lock-in을 푸는 유일한 메커니즘. `--approve-channel` 호출 후 `runtimeReady`가 되면 bypass 영향 무관 (어차피 readiness 통과). 일반 라우팅(`midi.send_cc` → coreMIDI primary)은 readiness 검사 그대로 유지.
+**Readiness bypass rationale (v0.4 chicken-and-egg framing — Loop 3 Guardian P2-2 resolved)**: Manual MIDI Learn seeding is by definition the step *before* channel approval (before `--approve-channel MIDIKeyCommands` is called). When a user first starts v3.1.5 → KeyCmd channel is `available:true / ready:false` (manual_validation_required) → without the bypass, no `*.keycmd` op can execute → Manual MIDI Learn binding itself cannot begin. **Chicken-and-egg**: without the bypass, there is no way for the user to create the binding needed to activate the channel. The bypass is the only mechanism to break this lock-in. After `--approve-channel` is called and `runtimeReady` is set, the bypass has no effect (readiness gate passes anyway). Normal routing (`midi.send_cc` → coreMIDI primary) retains the readiness check as-is.
 
-**ScripterChannel 미포함 (NG5)**: `port: "scripter"` 옵션은 v3.1.5 범위 외. ScripterChannel은 plugin parameter 송신 전용으로 transport / scope 다름.
+**ScripterChannel excluded (NG5)**: `port: "scripter"` option is out of scope for v3.1.5. ScripterChannel handles only plugin parameter transmission — different transport and scope.
 
-**record_sequence 미포함 (NG7)**: SMF import path (TrackDispatcher 소속), KeyCmd port 의미 없음. dispatcher-level enum validation에서 `port` 입력 시 invalid_params reject.
+**record_sequence excluded (NG7)**: SMF import path (owned by TrackDispatcher), unrelated to KeyCmd port. Providing `port` input is rejected at dispatcher-level enum validation with invalid_params.
 
 ### 4.2 Data Model Changes
-없음. 코드 레벨 변경만. routingTable에 entries 추가는 in-memory dictionary.
+None. Code-level changes only. Adding entries to routingTable is an in-memory dictionary operation.
 
 ### 4.3 API Design
 
-#### 변경: `logic_midi.send_*` 6종 + `play_sequence` + `record_sequence`
+#### Changed: `logic_midi.send_*` 6 ops + `play_sequence` + `record_sequence`
 
-**기존 (v3.1.4)**:
+**Previous (v3.1.4)**:
 ```jsonc
 {
   "controller": 30,        // 0..127
   "value": 127,            // 0..127
-  "channel": 16            // 0..16 — 16은 wire 0으로 wrap (off-by-one)
-                            // pitch_bend/aftertouch는 검증 부재 (UInt8 raw)
+  "channel": 16            // 0..16 — 16 wraps to wire 0 (off-by-one)
+                            // pitch_bend/aftertouch have no validation (UInt8 raw)
 }
 ```
 
@@ -275,12 +278,12 @@ v3.1.1 사용자(`xaexx1`)가 Logic Pro 12.2 + macOS 26.5 환경에서 `MIDIKeyC
 }
 ```
 
-#### Dispatcher 변경 명세
+#### Dispatcher change specification
 
-`Sources/LogicProMCP/Dispatchers/MIDIDispatcher.swift` 변경:
+`Sources/LogicProMCP/Dispatchers/MIDIDispatcher.swift` changes:
 
 ```swift
-// 신규 helper
+// New helper
 private static func validatePort(_ params: [String: Value]) -> Result<String, String> {
     let port = stringParam(params, "port", default: "midi")
     let validPorts = ["midi", "keycmd"]
@@ -322,7 +325,7 @@ private static func operationKey(base: String, port: String) -> String {
     return port == "midi" ? base : "\(base).\(port)"
 }
 
-// case "send_cc" 변경
+// case "send_cc" change
 case "send_cc":
     switch validatePort(params) {
     case .failure(let msg): return toolTextResult(HonestContract.encodeStateC(error: .invalidParams, hint: msg, ...), isError: true)
@@ -337,12 +340,12 @@ case "send_cc":
             ])
         }
     }
-// 6종 send_* + play_sequence 동일 패턴 — record_sequence는 NG7로 port 입력 시 invalid_params reject (E14, AC-1.6)
+// Same pattern for all 6 send_* ops + play_sequence — record_sequence is NG7: providing port input returns invalid_params at dispatcher-level (E14, AC-1.6)
 ```
 
-#### ChannelRouter 변경 명세
+#### ChannelRouter change specification
 
-`Sources/LogicProMCP/Channels/ChannelRouter.swift` `routingTable`에 추가:
+Add to `Sources/LogicProMCP/Channels/ChannelRouter.swift` `routingTable`:
 
 ```swift
 "midi.send_cc": [.coreMIDI],
@@ -352,30 +355,30 @@ case "send_cc":
 // ... 8 ops × 2 ports
 ```
 
-#### MIDIKeyCommandsChannel 변경 명세
+#### MIDIKeyCommandsChannel change specification
 
-`Sources/LogicProMCP/Channels/MIDIKeyCommandsChannel.swift`에 신규 case 추가:
+Add new cases to `Sources/LogicProMCP/Channels/MIDIKeyCommandsChannel.swift`:
 
 ```swift
 func execute(operation: String, params: [String: String]) async -> ChannelResult {
-    // 기존 mappingTable lookup logic 유지
-    // 신규 case — direct MIDI send via KeyCmd transport (manual MIDI Learn 시드용)
+    // Existing mappingTable lookup logic preserved
+    // New case — direct MIDI send via KeyCmd transport (for manual MIDI Learn seeding)
     switch operation {
     case "midi.send_cc.keycmd":
-        // wire bytes 직접 구성 후 transport.send 호출
-        // HC envelope (State B readback_unavailable — KeyCmd transport는 echo 없음)
+        // Construct wire bytes directly, call transport.send
+        // HC envelope (State B readback_unavailable — KeyCmd transport has no echo)
     case "midi.send_note.keycmd":
         // ...
     // 8 ops
     default:
-        // 기존 mappingTable lookup
+        // Existing mappingTable lookup
     }
 }
 ```
 
-#### Tool description 변경
+#### Tool description change
 
-`MIDIDispatcher.swift:7` description 업데이트:
+Update `MIDIDispatcher.swift:7` description:
 ```
 "... send_cc/program_change/pitch_bend/aftertouch -> controller payloads (channel: 1..16 (1-based), port: \"midi\"|\"keycmd\" default \"midi\"); ..."
 ```
@@ -390,22 +393,22 @@ func execute(operation: String, params: [String: String]) async -> ChannelResult
 | send_aftertouch | midi.send_aftertouch | midi.send_aftertouch.keycmd |
 | play_sequence | midi.play_sequence | midi.play_sequence.keycmd |
 
-> **record_sequence (v0.3 NG7)**: SMF import path, TrackDispatcher 소속, KeyCmd port 의미 없음. `port` 파라미터 입력 시 dispatcher-level validation에서 invalid_params reject. v3.1.5에서 channel 1-based 적용은 `NoteSequenceParser` API 변경(아래)을 통해 `record_sequence` 진입점에도 적용.
+> **record_sequence (v0.3 NG7)**: SMF import path, owned by TrackDispatcher, KeyCmd port has no meaning. Providing `port` input is rejected at dispatcher-level validation with invalid_params. Channel 1-based encoding is applied to `record_sequence` in v3.1.5 via the `NoteSequenceParser` API change (below).
 
-#### TrackDispatcher 변경 명세 (v0.3 신규)
+#### TrackDispatcher change specification (v0.3 new)
 
-`Sources/LogicProMCP/Dispatchers/TrackDispatcher.swift` (record_sequence 진입점):
-- `record_sequence` case에 `port` 파라미터 입력 시 invalid_params reject (NG7).
-- `notes` 문자열 파싱은 `NoteSequenceParser.parse(notes:)` API 변경 영향 받음 — 신규 `Result<[ParsedNote], NoteSequenceParseError>` 타입 핸들링.
+`Sources/LogicProMCP/Dispatchers/TrackDispatcher.swift` (record_sequence entry point):
+- `record_sequence` case rejects `port` parameter input with invalid_params (NG7).
+- `notes` string parsing is affected by the `NoteSequenceParser.parse(notes:)` API change — new `Result<[ParsedNote], NoteSequenceParseError>` type must be handled.
 
-#### NoteSequenceParser API 변경 (v0.3 신규)
+#### NoteSequenceParser API change (v0.3 new)
 
 `Sources/LogicProMCP/MIDI/NoteSequenceParser.swift`:
 
 ```swift
-// 기존 (v3.1.4):
+// Previous (v3.1.4):
 static func parse(_ notes: String) -> [ParsedNote]
-// 신규 (v3.1.5):
+// New (v3.1.5):
 enum NoteSequenceParseError: Error {
     case channelOutOfRange(segment: String, value: Int)
     case invalidPitch(segment: String)
@@ -414,67 +417,67 @@ enum NoteSequenceParseError: Error {
 }
 static func parse(_ notes: String) -> Result<[ParsedNote], NoteSequenceParseError>
 
-// ParsedNote.channel field semantics 변경:
-// 기존: UInt8 // 0..15 (wire value)
-// 신규: UInt8 // 0..15 (wire value) — input은 1..16 (1-based)에서 변환
-//        partial parse가 silent default-handle 하지 않음
+// ParsedNote.channel field semantics change:
+// Previous: UInt8 // 0..15 (wire value)
+// New:      UInt8 // 0..15 (wire value) — input is converted from 1..16 (1-based)
+//           partial parse no longer silently default-handles invalid segments
 ```
 
-호출부 변경 필요:
+Call sites requiring changes:
 - `Sources/LogicProMCP/Dispatchers/TrackDispatcher.swift` — `record_sequence` SMF generation
 - `Sources/LogicProMCP/Channels/CoreMIDIChannel.swift` — `play_sequence` real-time playback (line ~279)
-- 양쪽 모두 `.failure` 시 State C `invalid_params` + hint 반환.
+- Both must return State C `invalid_params` + hint on `.failure`.
 
-### 4.4 Key Technical Decisions (v0.2 갱신)
+### 4.4 Key Technical Decisions (v0.2 updated)
 
 | # | Decision | Options Considered | Chosen | Rationale |
 |---|----------|-------------------|--------|-----------|
-| D1 | Port routing 위치 | (A) Channel-side fallthrough / (B) Dispatcher-level direct | **B** | (A)는 ChannelRouter terminal State C 차단 + manual_validation_required skip과 충돌. v0.1 review에서 P1 발견. dispatcher-level이 라우팅 의미론 명확. |
-| D2 | Channel 1..16 enforcement | (A) Strict reject 0 / (B) Lenient — 0도 ch 1 매핑 / (C) Dual-mode (deprecation cycle) | **A** | Issue #1-3 정확한 fix. silent wrong-channel 재발 방지. (C)는 매력적이나 단일 release cycle에 끝내는 것이 명확. |
-| D3 | Backward compat for `port` | (A) Required param / (B) Optional default "midi" | **B** | 기존 호출 영향 0 + 동일 에러 메시지 wording. |
-| D4 | Port enum 값 | (A) `"midi"|"keycmd"|"scripter"` / (B) `"midi"|"keycmd"` only | **B** | ScripterChannel은 plugin param 전용, midi.send_* 처리 책임 없음. v3.1.5 범위에서 제외. |
-| D5 | MIDIKeyCommands 채널 처리 | (A) Deprecate + 제거 / (B) Deprecate flag만 / (C) 유지 + audited matrix | **C** | 외부 사용자 manual binding 완료 케이스 보호. note.up_*/down_* 등 channel-only ops 존재. health detail로 정직 보고. |
-| D6 | 1-based migration | (A) Silent / (B) BREAKING + CHANGELOG | **B** | Silent는 디버깅 악몽. CHANGELOG BEFORE/AFTER 표 + Issue #1 자동 댓글 + tool description inline. |
-| D7 | Homebrew xcode 의존 | (A) 완전 제거 / (B) `:optional` | **A** | ADHOC release는 사전 빌드 바이너리. depends_on :macos => :sonoma 만 충분. |
-| D8 | Channel encoding scope | (A) send_* 6종만 / (B) send_* + play_sequence + record_sequence | **B** | 동일 dispatcher 안 인코딩 일관성. PRD v0.1 review에서 P1. |
-| D9 | "All covered" docs 표현 | (A) 단순 문구 / (B) Audited coverage matrix | **B** | mappingTable 일부는 다른 dispatcher path 없음 (note.up_*). 정직한 matrix 필수. |
-| D10 | Issue #1 자동화 | (A) 수동 댓글 / (B) release.sh에 gh comment + close 단계 | **B** | 외부 사용자 communication 누락 방지 자동화. |
+| D1 | Port routing location | (A) Channel-side fallthrough / (B) Dispatcher-level direct | **B** | (A) conflicts with ChannelRouter terminal State C suppression + manual_validation_required skip. P1 found in v0.1 review. Dispatcher-level makes routing semantics clear. |
+| D2 | Channel 1..16 enforcement | (A) Strict reject 0 / (B) Lenient — 0 also maps to ch 1 / (C) Dual-mode (deprecation cycle) | **A** | Precise fix for Issue #1-3. Prevents silent wrong-channel recurrence. (C) is attractive but ending in a single release cycle is cleaner. |
+| D3 | Backward compat for `port` | (A) Required param / (B) Optional default "midi" | **B** | Zero impact on existing callers + identical error message wording. |
+| D4 | Port enum values | (A) `"midi"|"keycmd"|"scripter"` / (B) `"midi"|"keycmd"` only | **B** | ScripterChannel is plugin param-only, no responsibility for midi.send_*. Excluded from v3.1.5 scope. |
+| D5 | MIDIKeyCommands channel handling | (A) Deprecate + remove / (B) Deprecate flag only / (C) Retain + audited matrix | **C** | Protect external users who have completed manual binding. channel-only ops (note.up_*/down_*) exist. Honest reporting via health detail. |
+| D6 | 1-based migration | (A) Silent / (B) BREAKING + CHANGELOG | **B** | Silent is a debugging nightmare. CHANGELOG BEFORE/AFTER table + Issue #1 auto-comment + tool description inline. |
+| D7 | Homebrew xcode dependency | (A) Full removal / (B) `:optional` | **A** | ADHOC release is a pre-built binary. Only `depends_on :macos => :sonoma` is needed. |
+| D8 | Channel encoding scope | (A) send_* 6 ops only / (B) send_* + play_sequence + record_sequence | **B** | Encoding consistency within the same dispatcher. P1 found in PRD v0.1 review. |
+| D9 | "All covered" docs phrasing | (A) Simple text / (B) Audited coverage matrix | **B** | Some mappingTable entries have no other dispatcher path (note.up_*). Honest matrix required. |
+| D10 | Issue #1 automation | (A) Manual comment / (B) Add gh comment + close step to release.sh | **B** | Prevents missing external user communication — automated. |
 
-## 5. Edge Cases & Error Handling (v0.2 보강)
+## 5. Edge Cases & Error Handling (v0.2 expanded)
 
 | # | Scenario | Expected Behavior | Severity |
 |---|----------|-------------------|----------|
 | E1 | `port: "foo"` (invalid) | Dispatcher-level validation → State C `invalid_params` + hint: "port must be one of: midi, keycmd" | P1 |
-| E2 | `port: "scripter"` | E1과 동일 (NG5 — v3.1.5 비지원) + hint에 "scripter port deferred to future release" | P2 |
-| E3 | `port: "midi"` 명시 + 기존 callers | 기존 동작과 100% 동일 (CoreMIDIChannel 라우팅, 동일 에러 메시지 wording) | P0 |
+| E2 | `port: "scripter"` | Same as E1 (NG5 — unsupported in v3.1.5) + hint includes "scripter port deferred to future release" | P2 |
+| E3 | `port: "midi"` explicit + existing callers | 100% identical to prior behavior (CoreMIDIChannel routing, same error message wording) | P0 |
 | E4 | `channel: 0` | State C `invalid_params` + hint: "channel must be integer 1..16 (1-based)" — BREAKING | P1 |
-| E5 | `channel: 17` | E4와 동일 hint | P1 |
+| E5 | `channel: 17` | Same hint as E4 | P1 |
 | E6 | `channel: 1.5` (float) | Strict integer parser → State C `invalid_params` + hint | P2 |
-| E7 (v0.3 정정) | `port: "keycmd"` + KeyCmd virtual port 미초기화 (startup race) | `MIDIKeyCommandsChannel.healthCheck().available == false` 또는 `transport.readiness().available == false` 체크 → State C `port_unavailable` (HonestContract.FailureError 신규 case + terminalErrorCodes에 추가) + hint: "LogicProMCP-KeyCmd-Internal not yet published; check logic_system.health" | P1 |
-| E8 (v0.3 정정) | `port: "keycmd"` + 채널이 `manual_validation_required` 상태 (사용자 미승인) | **router-level bypass allowlist** (AC-1.7) 적용 → dispatcher-level direct routing이 readiness gate를 통과하여 execute 도달. KeyCmd virtual port 자체가 published면 송신 가능. 일반 라우팅(`midi.send_cc` → coreMIDI primary)은 readiness 검사 그대로 유지. | P1 |
-| E9 | Manual binding 완료한 외부 사용자가 v3.1.4 `channel:16` 입력 → v3.1.5 wire 변경 | (a) v3.1.4에서 ch16 입력 → wire 0x?0 (Ch 1) 매칭 binding이라면 v3.1.5에서 break. (b) ch16 입력 → 의도대로 ch16 매칭 binding이라면 v3.1.4에서는 작동 안 했을 것 (wire wrap → ch1 send) → 사실상 (a)만 가능. CHANGELOG BEFORE/AFTER 표로 명시 + 사용자에게 "v3.1.5 업그레이드 후 manual binding 1회 재바인딩 필요" 안내. | P1 |
-| E10 | Homebrew formula `xcode` 제거 후 brew audit | `brew audit --strict --new-formula Formula/logic-pro-mcp.rb` 로컬 PASS | P1 |
-| E11 | brew bottle CI re-build (있다면) | ADHOC binary download path 명시 → bottle/source-build 비지원 명기 | P2 |
-| E12 | SETUP.md 업데이트 후 신규 사용자 따라감 | Manual MIDI Learn 2개 예시로 최소 2 binding 성공 + 5분~25분 추정 명시 | P1 |
-| E13 | Health detail이 길어져 JSON envelope size 초과 | 현재 envelope size ~200 bytes → 새 detail ~600 bytes 예상 (audited matrix link 포함). < 1KB 한도 검증 unit test. | P2 |
-| E14 (v0.3 변경) | `record_sequence` / `mmc_*` / `send_sysex` / `step_input` / `create_virtual_port`에 `port` 입력 | dispatcher-level enum validation에서 즉시 reject → State C `invalid_params` + hint: `"port parameter not supported for <op_name>"`. silent ignore 폐기 (NG7/NG8). | P2 |
-| E15 | release.sh 실행 시 `gh issue comment 1` 실패 | release 자체는 성공으로 마침 + warning. Issue 댓글은 manual fallback (release notes에 명시 link 보유). | P2 |
+| E7 (v0.3 corrected) | `port: "keycmd"` + KeyCmd virtual port not initialized (startup race) | `MIDIKeyCommandsChannel.healthCheck().available == false` or `transport.readiness().available == false` → State C `port_unavailable` (new `HonestContract.FailureError` case + registered in terminalErrorCodes) + hint: "LogicProMCP-KeyCmd-Internal not yet published; check logic_system.health" | P1 |
+| E8 (v0.3 corrected) | `port: "keycmd"` + channel is `manual_validation_required` (user not yet approved) | **router-level bypass allowlist** (AC-1.7) applied → dispatcher-level direct routing passes readiness gate and reaches execute. If KeyCmd virtual port is published, transmission succeeds. Normal routing (`midi.send_cc` → coreMIDI primary) retains readiness check as-is. | P1 |
+| E9 | External user who completed manual binding on v3.1.4 with `channel:16` — wire changes in v3.1.5 | (a) If v3.1.4 binding with ch16 input → wire 0x?0 (Ch 1) match, it breaks in v3.1.5. (b) If ch16 input intended to match Ch 16 binding, the v3.1.4 wire-wrap → ch1 send would not have worked. So only (a) is possible. Documented in CHANGELOG BEFORE/AFTER table + users advised "one rebind cycle required after v3.1.5 upgrade". | P1 |
+| E10 | Homebrew formula `xcode` removal + brew audit | `brew audit --strict --new-formula Formula/logic-pro-mcp.rb` passes locally | P1 |
+| E11 | brew bottle CI re-build (if present) | ADHOC binary download path documented — bottle/source-build explicitly unsupported | P2 |
+| E12 | New user follows updated SETUP.md | Manual MIDI Learn 2 examples → at least 2 bindings succeed + 5–25 min estimate visible | P1 |
+| E13 | Health detail becomes large enough to exceed JSON envelope size | Current envelope ~200 bytes → new detail ~600 bytes expected (audited matrix link included). Unit test validates < 1KB limit. | P2 |
+| E14 (v0.3 changed) | `port` input for `record_sequence` / `mmc_*` / `send_sysex` / `step_input` / `create_virtual_port` | Dispatcher-level enum validation immediately rejects → State C `invalid_params` + hint: `"port parameter not supported for <op_name>"`. Silent ignore removed (NG7/NG8). | P2 |
+| E15 | `gh issue comment 1` fails during release.sh | Release itself completes as success + warning. Issue comment has manual fallback (release notes contains link). | P2 |
 
 ## 6. Security & Permissions
-변경 없음. 모든 dispatch는 server-local. `port` enum string membership check은 권한 우회 / DoS 벡터 없음.
+No changes. All dispatch is server-local. `port` enum string membership check has no permission bypass / DoS vector.
 
 ## 7. Performance & Monitoring
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| `send_cc` 호출 latency (p95) | < 5ms (CoreMIDI port write) | 라이브 검증 |
-| `port` 분기 overhead | < 0.1ms (dispatcher level enum check) | unit test 측정 |
+| `send_cc` call latency (p95) | < 5ms (CoreMIDI port write) | Live verification |
+| `port` branch overhead | < 0.1ms (dispatcher-level enum check) | Unit test measurement |
 | Health detail size | < 1 KB per channel | E13 unit test |
 
 ### 7.1 Monitoring & Alerting
-- **No remote telemetry**: logic-pro-mcp는 server-local + stdio MCP. Log.debug stderr only.
-- `port: "keycmd"` 사용 빈도는 사용자 자체 보고에 의존.
-- Channel routing 실패는 router-level warn log (subsystem: "router").
+- **No remote telemetry**: logic-pro-mcp is server-local + stdio MCP. Log.debug stderr only.
+- `port: "keycmd"` usage frequency depends on user self-reporting.
+- Channel routing failures produce router-level warn log (subsystem: "router").
 
 ## 8. Testing Strategy
 
@@ -491,22 +494,22 @@ static func parse(_ notes: String) -> Result<[ParsedNote], NoteSequenceParseErro
   - testChannel17Rejected
   - testFloatChannelRejected (E6)
   - testMissingChannelDefaultsToCh1Wire0
-- `MIDIDispatcherEntryPointConsistencyTests.swift` (NEW, v0.4 정정)
-  - testAllSendOpsAcceptPortParam (**7 ops × 2 ports = 14 cases** parametrized — record_sequence 제외, NG7)
+- `MIDIDispatcherEntryPointConsistencyTests.swift` (NEW, v0.4 corrected)
+  - testAllSendOpsAcceptPortParam (**7 ops × 2 ports = 14 cases** parametrized — record_sequence excluded, NG7)
   - testAllSendOpsValidateChannel1Based
-  - testRecordSequenceRejectsPortParam (E14, NG7 — silent ignore 폐기, invalid_params reject)
+  - testRecordSequenceRejectsPortParam (E14, NG7 — silent ignore removed, invalid_params reject)
   - testMmcOpsRejectPortParam (NG8 — mmc_*/sysex/step_input/create_virtual_port)
-  - testRoutingTableInvariant — 모든 `^midi\..*\.keycmd$` routing key가 `bypassReadinessOps` set에 포함됨을 검증 (Loop 3 Guardian P2-1 수정 — parallel-list trap 방지)
-- `NoteSequenceParserTests.swift` (확장)
+  - testRoutingTableInvariant — validates that every `^midi\..*\.keycmd$` routing key is included in the `bypassReadinessOps` set (Loop 3 Guardian P2-1 fix — prevents parallel-list trap)
+- `NoteSequenceParserTests.swift` (extended)
   - testNoteSequenceChChannelIs1Based
   - testNoteSequenceCh0Rejected
   - testNoteSequenceCh17Rejected
 - `MIDIKeyCommandsChannelDirectSendTests.swift` (NEW)
   - testKeyCmdChannelHandlesSendCCKeycmdOperation
   - testKeyCmdChannelTransportNotPublishedReturnsPortUnavailable (E7)
-- `ChannelRouterRoutingTableTests.swift` (확장)
+- `ChannelRouterRoutingTableTests.swift` (extended)
   - testRoutingTableContainsAllSendOpsKeycmdVariants
-- `HealthDispatcherTests.swift` (확장)
+- `HealthDispatcherTests.swift` (extended)
   - testKeyCmdChannelDetailIncludesManualLearnHint
   - testKeyCmdChannelDetailMentionsCoverageMatrix
   - testKeyCmdChannelDetailListsChannelOnlyOps
@@ -516,92 +519,92 @@ static func parse(_ notes: String) -> Result<[ParsedNote], NoteSequenceParseErro
   - testRoutingTableMidiSendCCKeyUnchanged
 
 ### 8.2 Integration Tests
-- 기존 `MIDIDispatcherTests` 의 `port` 미지정 호출이 모두 PASS (backward compat regression).
-- `ChannelRouterTests`에 routing entries 추가 검증.
+- All `port`-unspecified calls in existing `MIDIDispatcherTests` PASS (backward compat regression).
+- `ChannelRouterTests` extended to validate new routing entries.
 
 ### 8.3 Edge Case Tests
-- E1-E15 모두 unit test 케이스로 커버.
-- E9 manual binding compat — live verification only (Isaac 환경 + 보고자 환경).
-- E10/E11 brew test — 로컬 `brew audit --strict --new-formula` 통과 + Isaac CI/dev에서 검증.
+- E1–E15 all covered by unit test cases.
+- E9 manual binding compat — live verification only (Isaac's environment + reporter's environment).
+- E10/E11 brew test — local `brew audit --strict --new-formula` passes + verified in Isaac CI/dev environment.
 - E12 docs — review-time validation (Phase 6 strategist+guardian).
 
-### 8.4 Live Verification Required (v0.2 신규, v0.3 release-blocker 기준 추가)
-다음 시나리오는 unit test로 커버 불가 → release 전 라이브 검증 필수:
-1. **AC-1.1 라이브**: Logic 12.2 Controller Assignments → Learn Mode 진입 → MCP에서 `port:"keycmd"` 송신 → `LogicProMCP-KeyCmd-Internal` 입력으로 캡처 확인.
-2. **AC-2.1 라이브**: `channel:16` 송신 → Logic UI에서 Ch 16 표시 확인.
-3. **AC-3.2 라이브**: SETUP.md의 Manual MIDI Learn 2개 예시 step-by-step 실제 따라가서 binding 성공 확인.
-4. **AC-4.1/4.4/4.5 라이브**: CLT-only host 시뮬 또는 Isaac 환경에서 `brew install logic-pro-mcp` 통과 확인.
-5. **E9 라이브**: v3.1.4 + manual binding 완료 환경에서 v3.1.5 업그레이드 → 기존 binding 동작 / 재바인딩 필요 케이스 명시.
+### 8.4 Live Verification Required (v0.2 new, v0.3 release-blocker criteria added)
+The following scenarios cannot be covered by unit tests → live verification required before release:
+1. **AC-1.1 live**: Logic 12.2 Controller Assignments → Learn Mode active → MCP transmits with `port:"keycmd"` → confirm `LogicProMCP-KeyCmd-Internal` captured as input.
+2. **AC-2.1 live**: Transmit `channel:16` → confirm Logic UI displays Ch 16.
+3. **AC-3.2 live**: Follow the Manual MIDI Learn 2 example steps from SETUP.md → confirm binding succeeds.
+4. **AC-4.1/4.4/4.5 live**: Simulate CLT-only host or use Isaac's environment → confirm `brew install logic-pro-mcp` succeeds.
+5. **E9 live**: In environment with v3.1.4 + completed manual binding → upgrade to v3.1.5 → document which bindings work / which require rebinding.
 
-**Release blocker 기준 (v0.3 신규)**:
-- 시나리오 **1, 2, 4 PASS 필수** — release block. 실패 시 v3.1.5 release 보류.
-- 시나리오 **3** — Isaac follow-along 1회 PASS + 보고자 재검증 by Issue close 시점. 일부 step 모호 시 docs revision 후 재검증.
-- 시나리오 **5** — TROUBLESHOOTING.md migration note 추가로 acceptable. release block 아님 (docs ship + 사용자에게 재바인딩 안내).
+**Release blocker criteria (v0.3 new)**:
+- Scenarios **1, 2, 4 must PASS** — release blocked otherwise. If failure, v3.1.5 release postponed.
+- Scenario **3** — Isaac follow-along once PASS + reporter re-verification by Issue close time. If any step is ambiguous, revise docs and re-verify.
+- Scenario **5** — Acceptable with migration note in TROUBLESHOOTING.md. Not a release blocker (docs ship + users advised to rebind).
 
 ## 9. Rollout Plan
 
-### 9.1 Migration Strategy (v0.2 강화)
-- v3.1.4 → v3.1.5 binary 자동 호환 (backward compat for `port` 미지정).
+### 9.1 Migration Strategy (v0.2 strengthened)
+- v3.1.4 → v3.1.5 binary auto-compatible (backward compat for unspecified `port`).
 - **BREAKING for channel encoding**:
-  - CHANGELOG에 BEFORE/AFTER 표 (AC-2.6)
-  - GitHub Release notes prominent `### ⚠️ BREAKING` 섹션 + migration table
-  - Issue #1 자동 comment via `Scripts/release.sh` (AC-2.6, G7)
-  - Issue #1 자동 close
+  - CHANGELOG BEFORE/AFTER table (AC-2.6)
+  - GitHub Release notes prominent `### ⚠️ BREAKING` section + migration table
+  - Issue #1 auto-comment via `Scripts/release.sh` (AC-2.6, G7)
+  - Issue #1 auto-close
   - Tool description (`MIDIDispatcher.description`) inline "channel: 1..16 (1-based)"
-  - `LogicProMCP --check-permissions` 출력에 v3.1.5 BREAKING 한 줄 reminder (1회만)
-- Homebrew formula 변경: v3.1.5 release 시 새 formula 자동 갱신 (release.sh가 Formula sha256 업데이트). brew audit local 검증 (AC-4.4).
+  - `LogicProMCP --check-permissions` output includes v3.1.5 BREAKING one-line reminder (once only)
+- Homebrew formula change: auto-updated with v3.1.5 release (release.sh updates Formula sha256). Brew audit local validation (AC-4.4).
 
 ### 9.2 Feature Flag
-N/A. 모든 변경 v3.1.5 즉시 적용.
+N/A. All changes apply immediately in v3.1.5.
 
 ### 9.3 Rollback Plan
-- 사용자가 v3.1.4 다운그레이드 가능 — Homebrew tap에 v3.1.4 tag 보존됨.
-- channel encoding regression 발견 시 v3.1.6 hotfix.
-- Manual binding 사용자 break 시 (E9): docs/TROUBLESHOOTING.md에 "v3.1.5 업그레이드 후 manual binding 재구성" 1-page 안내.
+- Users can downgrade to v3.1.4 — v3.1.4 tag is preserved in the Homebrew tap.
+- If channel encoding regression is discovered, v3.1.6 hotfix.
+- If manual binding users break (E9): a 1-page "manual binding reconstruction after v3.1.5 upgrade" guide in docs/TROUBLESHOOTING.md.
 
-## 10. Dependencies & Risks (v0.2 보강)
+## 10. Dependencies & Risks (v0.2 expanded)
 
 ### 10.1 Dependencies
 | Dependency | Owner | Status | Risk if Delayed |
 |-----------|-------|--------|-----------------|
-| MIDIKeyCommandsChannel `KeyCmdTransportProtocol` | 내부 | 기존 코드 | 없음 (transport.send 가능) |
-| ChannelRouter routingTable in-memory | 내부 | 기존 코드 | 없음 |
-| HonestContract `FailureError` enum 확장 (`portUnavailable` 신규) | 내부 | 신규 추가 필요 | external envelope parser가 unknown reason gracefully ignore 가정 (low risk) |
-| `gh` CLI authenticated for Issue #1 comment | Isaac local | active | release.sh 자동화 — 실패 시 manual fallback (E15) |
-| Homebrew tap repo write access | Isaac | 활성 | release.sh 자동 push |
+| MIDIKeyCommandsChannel `KeyCmdTransportProtocol` | Internal | Existing code | None (transport.send available) |
+| ChannelRouter routingTable in-memory | Internal | Existing code | None |
+| HonestContract `FailureError` enum extension (`portUnavailable` new case) | Internal | Requires new addition | Assumes external envelope parsers gracefully ignore unknown reasons (low risk) |
+| `gh` CLI authenticated for Issue #1 comment | Isaac local | Active | release.sh automation — manual fallback on failure (E15) |
+| Homebrew tap repo write access | Isaac | Active | release.sh auto-push |
 
 ### 10.2 Risks
 | # | Risk | Probability | Impact | Mitigation |
 |---|------|------------|--------|------------|
-| R1 | Channel encoding 변경이 외부 manual-binding 사용자 break (E9) | Medium | High | CHANGELOG BEFORE/AFTER 표 + Issue #1 자동 댓글 + 보고자 사전 알림 + TROUBLESHOOTING.md migration |
-| R2 | dispatcher-level routing이 routingTable 키 폭증 (16 entries) | Low | Low | suffix 패턴 일관 — readability OK. Unit test가 모든 entry 검증 |
-| R3 | Docs 재작성이 모호한 step 포함 | Medium | Medium | Phase 6 strategist+guardian 리뷰 + 라이브 검증 (AC-3.2 step-by-step) |
-| R4 | Homebrew formula 변경이 brew audit 실패 | Low | Low | local `brew audit --strict --new-formula` + `brew style` 검증 (AC-4.4/4.5) |
-| R5 | brew bottle CI re-build 차단 (있다면) | Low | Low | ADHOC binary download path 명시 코멘트 — bottle/source-build 비지원 명기 (E11) |
-| R6 | port enum 미래 확장 (e.g. `"scripter"` 추가) | Low | Low | enum 자체는 string-based — 미래 확장 시 새 case 추가 + routingTable entry 추가만 |
-| R7 | HonestContract FailureError 확장이 외부 envelope parser break | Low | Medium | "unknown reason gracefully ignore" 가정 명시 in CHANGELOG |
-| R8 (v0.3 강화) | Issue #1 자동 댓글이 reporter 알림 폭주 (재오픈 시 v3.1.6+ 가 재댓글) | Low | Low | release.sh가 `gh issue view 1 --json state` 로 OPEN 상태일 때만 댓글 + close 시도. CLOSED면 skip. v3.1.5 release.sh가 close 후 만약 reporter가 reopen하면 향후 release는 새 issue 댓글로 분기 (자동 재close 금지). |
-| R9 | Manual MIDI Learn 2개 예시가 부족 | Medium | Medium | docs review에서 Isaac이 follow-along 1회 + 보고자 follow-along 요청 |
+| R1 | Channel encoding change breaks external manual-binding users (E9) | Medium | High | CHANGELOG BEFORE/AFTER table + Issue #1 auto-comment + reporter advance notice + TROUBLESHOOTING.md migration |
+| R2 | Dispatcher-level routing causes routingTable key proliferation (16 entries) | Low | Low | Suffix pattern is consistent — readability OK. Unit tests validate all entries |
+| R3 | Docs rewrite contains ambiguous steps | Medium | Medium | Phase 6 strategist+guardian review + live verification (AC-3.2 step-by-step) |
+| R4 | Homebrew formula change fails brew audit | Low | Low | Local `brew audit --strict --new-formula` + `brew style` validation (AC-4.4/4.5) |
+| R5 | brew bottle CI re-build blocked (if present) | Low | Low | ADHOC binary download path documented — bottle/source-build explicitly unsupported (E11) |
+| R6 | Port enum future extension (e.g., adding `"scripter"`) | Low | Low | Enum is string-based — future extension only requires adding a new case + routingTable entry |
+| R7 | HonestContract FailureError extension breaks external envelope parsers | Low | Medium | "Unknown reason gracefully ignored" assumption documented in CHANGELOG |
+| R8 (v0.3 strengthened) | Issue #1 auto-comment floods reporter notifications (v3.1.6+ re-commenting on reopen) | Low | Low | release.sh checks `gh issue view 1 --json state` — only comments + closes if OPEN. If CLOSED, skip. If reporter reopens after v3.1.5 closes, future releases comment on new issue instead (auto-reclose prohibited). |
+| R9 | Manual MIDI Learn 2 examples insufficient | Medium | Medium | Isaac follows along once + requests reporter follow-along in docs review |
 
 ## 11. Success Metrics
 
 | Metric | Baseline | Target | Measurement Method |
 |--------|----------|--------|--------------------|
 | GitHub Issue #1 closure | OPEN | CLOSED with v3.1.5 release link | Issue tracker |
-| 신규 사용자 setup time-to-first-success | ~25 min (보고자) | ≤ 10 min (manual MIDI Learn 안내 명확화) | 보고자 재테스트 요청 |
-| `port:"keycmd"` adoption | N/A | 1+ 외부 사용 사례 (3개월 내) | 사용자 자체 보고 |
-| Channel encoding 사용자 confusion | 1+ 보고됨 | 0 (BREAKING change 명시 + invalid_params hint) | future GitHub issues |
-| Tests: pass count | 917 (post-v3.1.5 thomas-doesburg) | 1000+ (+85 tests minimum across T1-T8) | swift test --no-parallel |
+| New user setup time-to-first-success | ~25 min (reporter) | ≤ 10 min (with clearer manual MIDI Learn guidance) | Reporter re-test request |
+| `port:"keycmd"` adoption | N/A | 1+ external use cases (within 3 months) | User self-reporting |
+| Channel encoding user confusion | 1+ reported | 0 (BREAKING change documented + invalid_params hint) | Future GitHub issues |
+| Tests: pass count | 917 (post-v3.1.5 thomas-doesburg) | 1000+ (+85 tests minimum across T1–T8) | swift test --no-parallel |
 | Tests: backward compat regression | 0 fail | 0 fail | BackwardCompatRegressionTests |
 
-## 12. Open Questions (v0.2 갱신)
+## 12. Open Questions (v0.2 updated)
 
-- [x] **OQ-1**: `port` 파라미터 값 네이밍 — `"midi"` 가 generic하지만 사용자 친화적. 결정 유지. tool description에 "default port (CoreMIDI virtual source for general MIDI output)" inline 명시.
-- [x] **OQ-2**: Health detail 길이. 결정: 단일 `detail` string + < 1 KB 한도 (E13).
-- [x] **OQ-3**: 모든 48 commands binding 의무? 결정: NO. minimal path (channel-only ops만) 권장 + audited matrix 명시.
-- [x] **OQ-4 (v0.2 신규)**: `port: "scripter"` 미래 추가 시 ScripterChannel 확장? 결정: 별도 PRD에서 검토. v3.1.5 NG5에 명시.
-- [x] **OQ-5 (v0.2 신규)**: `record_sequence`에 `port` 의미 없음 — silent ignore vs reject? 결정: warning log + ignore (E14, backward compat).
-- [x] **OQ-6 (v0.2 신규)**: `note.up_*` / `view.toggle_*` 등 channel-only ops에 dispatcher path 신규 추가? 결정: NG6, follow-up issue로 분리.
-- [x] **OQ-7 (v0.3 결정)**: HonestContract `FailureError`에 `portUnavailable` case 추가 — minor bump (v3.1.5)에서 enum 추가 OK + `terminalErrorCodes`에도 등록 (router fallback chain wrapping 방지). CHANGELOG에 명시: "New FailureError: `port_unavailable` (terminal). External envelope parsers must gracefully ignore unknown reasons; documented as part of HonestContract minor evolution policy." Migration: 외부 envelope 파서 영향 검증 — v3.1.4에 `port_unavailable` 케이스 트리거 path 자체가 없었으므로 사실상 추가만 발생, 기존 응답 변경 없음.
+- [x] **OQ-1**: `port` parameter value naming — `"midi"` is generic but user-friendly. Decision retained. Tool description inline: "default port (CoreMIDI virtual source for general MIDI output)".
+- [x] **OQ-2**: Health detail length. Decision: single `detail` string + < 1 KB limit (E13).
+- [x] **OQ-3**: Are all 48 command bindings mandatory? Decision: NO. Minimal path (channel-only ops only) recommended + audited matrix documented.
+- [x] **OQ-4 (v0.2 new)**: Future addition of `port: "scripter"` — ScripterChannel extension? Decision: review in separate PRD. Documented in v3.1.5 NG5.
+- [x] **OQ-5 (v0.2 new)**: `record_sequence` port has no meaning — silent ignore vs reject? Decision: warning log + ignore (E14, backward compat).
+- [x] **OQ-6 (v0.2 new)**: Add dispatcher paths for channel-only ops like `note.up_*` / `view.toggle_*`? Decision: NG6, separate follow-up issue.
+- [x] **OQ-7 (v0.3 decided)**: Add `portUnavailable` case to HonestContract `FailureError` — minor bump (v3.1.5) enum addition OK + registered in `terminalErrorCodes` (prevents router fallback chain wrapping). CHANGELOG: "New FailureError: `port_unavailable` (terminal). External envelope parsers must gracefully ignore unknown reasons; documented as part of HonestContract minor evolution policy." Migration: no existing v3.1.4 code triggers `port_unavailable` path — addition only, no existing response changes.
 
 ---
