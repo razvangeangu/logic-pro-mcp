@@ -72,6 +72,11 @@ struct EditDispatcher {
             return toolTextResult(result)
 
         case "quantize":
+            guard params["value"] != nil || params["grid"] != nil else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "quantize requires explicit 'value' or 'grid'"
+                )
+            }
             let value = stringParam(params, "value", "grid", default: "1/16")
             let validGrids = ["1/1","1/2","1/4","1/8","1/16","1/32","1/64","1/4T","1/8T","1/16T"]
             guard validGrids.contains(value) else {

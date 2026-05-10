@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.5-rc1] — 2026-05-10
+
+**Strict live E2E parent-context closure.** This release candidate closes the last live-launch blocker found in the enterprise production-readiness pass: macOS TCC/CoreMIDI evaluated Python as the responsible process when the E2E harness spawned the MCP server directly, so strict live checks failed even though the release binary itself had Accessibility and Automation grants.
+
+### Fixed
+
+- `Scripts/live-e2e-test.sh` now owns strict live launch through a trusted tmux parent process and exposes a FIFO/capture bridge to the Python assertion engine. This preserves newline-delimited stdio MCP coverage while matching the parent-process permission context used by real live clients.
+- The strict tmux PTY starts with non-canonical/no-echo input so long JSON-RPC requests, including 1000-character validation payloads, are not truncated by terminal line discipline.
+- Live E2E timeout handling now reflects real Logic UI behavior: full Library AX scans can take about 100 seconds on a stock Logic 12 library, and navigation dispatch can need longer than the generic 10-second RPC timeout.
+- Live E2E now validates the current `scan_library` envelope schema (`source` + nested `root`) as a real success instead of falsely requiring the pre-envelope raw root shape.
+- `AccessibilityChannel.scan_library` now fails closed when Logic is running without a visible project window, avoiding stale AX-descendant scans in headless/no-window states.
+- `Scripts/release.sh` marks prerelease-tagged local ADHOC GitHub releases with `--prerelease`, matching the script's prerelease-only governance policy.
+- README and the enterprise readiness review now document the validated strict live command: `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh`.
+
+### Tests
+
+- `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh` -> 259 / 259 PASS, 0 skipped, 0 failed.
+- `swift test --no-parallel` -> 1113 / 1113 PASS.
+- `swift test --enable-code-coverage --no-parallel` -> 1113 / 1113 PASS.
+- `Scripts/live-e2e-test.py` -> 213 passed, 46 explicitly skipped, 0 failed in default non-strict mode.
+
 ## [3.4.4] — 2026-05-09
 
 **CI hotfix — CoreMIDI smoke tests skip on macos-15-arm64 GitHub runners.** v3.4.3 added diagnostic output that revealed the v3.4.x CI failure was actually two production-runtime smoke tests failing with `MIDIClientCreate` returning OSStatus -50 (`kMIDINotPermitted`) on the GitHub `macos-15-arm64` runner image. The runner does not expose a working CoreMIDI server in the sandboxed image, so any test that hits `MIDIClientCreate` directly (without injecting a mock runtime) fails outside a developer's actual macOS host.

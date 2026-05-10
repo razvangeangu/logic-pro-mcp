@@ -52,6 +52,11 @@ struct TransportDispatcher {
             return toolTextResult(result)
 
         case "set_tempo":
+            guard params["tempo"] != nil || params["bpm"] != nil else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_tempo requires explicit 'tempo' or 'bpm'"
+                )
+            }
             let tempo = doubleParam(params, "tempo", "bpm", default: 120.0)
             // Logic Pro's tempo range is 5..990 BPM; the schema documents 20..999.
             // Accept a slightly-wider 5..999 to match Logic's actual behavior,
@@ -80,6 +85,11 @@ struct TransportDispatcher {
                 return toolTextResult(
                     "goto_position got unknown param(s): \(sorted). Allowed: bar, position. The legacy 'time' alias was removed in v3.0.0.",
                     isError: true
+                )
+            }
+            guard params["bar"] != nil || params["position"] != nil else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "goto_position requires explicit 'bar' or 'position'"
                 )
             }
             // intParam coerces int/double/string so `{"bar":"5"}` works too.
@@ -114,6 +124,11 @@ struct TransportDispatcher {
             return toolTextResult(result)
 
         case "set_cycle_range":
+            guard params["start"] != nil, params["end"] != nil else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_cycle_range requires explicit 'start' and 'end'"
+                )
+            }
             let start = intParam(params, "start", default: 1)
             let end = intParam(params, "end", default: 5)
             // Bounds: same window as goto_position.bar (1..9999).

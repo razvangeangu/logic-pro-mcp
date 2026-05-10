@@ -48,7 +48,7 @@ private func minimalNoteSpec() -> Value {
     // Pre-fill the cache with 2 tracks so that under the OLD cache-poll
     // verification, `tracksBefore = 2` and `tracksAfter` would also stay 2
     // (no live import in this test sandbox), producing the legacy
-    // "new track never appeared" error within 2s.
+    // "new track never appeared" cache-poll error.
     //
     // Under the NEW live-AX verification, the cache count is irrelevant —
     // verification reads AXLogicProElements.allTrackHeaders() directly. In a

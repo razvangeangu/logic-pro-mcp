@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Scripts/release.sh — local one-command ADHOC release.
+# Scripts/release.sh — local one-command ADHOC prerelease.
 #
 # Produces a v-tagged GitHub release with an ADHOC-signed binary, aliased
 # `universal` / `arm64` tarballs (bytes identical for tap backward-compat),
@@ -9,11 +9,9 @@
 # resolves correctly.
 #
 # RB-4 (2026-05-08 enterprise review): this script is for LOCAL / RC
-# releases ONLY. It will refuse to publish a stable tag (`vX.Y.Z` with no
-# `-prerelease` suffix) unless `LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1` is set
-# explicitly — same governance gate as `.github/workflows/release.yml`.
-# Production stable releases should use the GitHub Actions workflow with
-# Apple Developer ID + notarization secrets.
+# releases ONLY. It refuses stable tags (`vX.Y.Z` with no `-prerelease`
+# suffix) unconditionally. Production stable releases must use the GitHub
+# Actions workflow with Apple Developer ID + notarization secrets.
 #
 # Architecture honesty: pre-fix this script copied the arm64-only build
 # to `LogicProMCP-macOS-universal.tar.gz`. v3.4.0+ records the actual
@@ -23,7 +21,6 @@
 #
 # Usage:
 #   Scripts/release.sh v3.0.1-rc1                        # adhoc RC
-#   LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1 Scripts/release.sh v3.4.0
 #   DRY_RUN=1 Scripts/release.sh v3.0.1-rc1              # print steps only
 #
 # Preconditions:
@@ -46,28 +43,20 @@ if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
     exit 1
 fi
 
-# RB-4 (2026-05-08 enterprise review): refuse stable tags by default. Stable
-# = no `-prerelease` suffix. Set LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1 to opt
-# in (e.g. when the GitHub Actions workflow is unavailable and you need to
-# ship anyway — but the artifact will be ADHOC, not notarized).
+# RB-4 (2026-05-08 enterprise review): refuse stable tags. Stable = no
+# `-prerelease` suffix. There is intentionally no override because a stable
+# ADHOC artifact is indistinguishable from a production release to downstream
+# installers once published.
 if [[ "$VERSION" != *-* ]]; then
-    if [ "${LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE:-0}" != "1" ]; then
-        echo "Error: stable tag '$VERSION' refused for ADHOC release."
-        echo ""
-        echo "  Production stable releases should use the GitHub Actions"
-        echo "  workflow (.github/workflows/release.yml) with Apple Developer"
-        echo "  ID + notarization secrets configured."
-        echo ""
-        echo "  To override (e.g. for a private adhoc cut):"
-        echo "    LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1 Scripts/release.sh $VERSION"
-        echo ""
-        echo "  Or use a prerelease tag (no override needed):"
-        echo "    Scripts/release.sh ${VERSION}-rc1"
-        exit 1
-    fi
+    echo "Error: stable tag '$VERSION' refused for ADHOC release."
     echo ""
-    echo "  ⚠  ADHOC stable release: explicit LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE=1 set."
+    echo "  Production stable releases must use the GitHub Actions"
+    echo "  workflow (.github/workflows/release.yml) with Apple Developer"
+    echo "  ID + notarization secrets configured."
     echo ""
+    echo "  Use a prerelease tag for local ADHOC cuts:"
+    echo "    Scripts/release.sh ${VERSION}-rc1"
+    exit 1
 fi
 
 run() {
@@ -95,9 +84,18 @@ if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
     echo "Error: tag $VERSION already exists locally."
     exit 1
 fi
-if git ls-remote --tags origin "$VERSION" | grep -q "$VERSION"; then
-    echo "Error: tag $VERSION already exists on origin."
-    exit 1
+if [ "$DRY_RUN" = "1" ]; then
+    echo "DRY_RUN: skipping remote tag availability check for $VERSION."
+else
+    REMOTE_TAGS=$(git ls-remote --tags origin "$VERSION") || {
+        echo "Error: could not verify remote tag availability for $VERSION."
+        echo "  Refusing to continue because publishing could race or duplicate an existing tag."
+        exit 1
+    }
+    if printf '%s\n' "$REMOTE_TAGS" | grep -q "refs/tags/$VERSION"; then
+        echo "Error: tag $VERSION already exists on origin."
+        exit 1
+    fi
 fi
 
 # 2. Build + adhoc-sign
@@ -209,6 +207,10 @@ run "git push origin $VERSION"
 #    only said "See CHANGELOG.md", which violated AC-11.
 NOTES_FILE="$STAGE_DIR/release-notes.md"
 BREAKING_BLOCK=""
+RELEASE_FLAGS=""
+if [[ "$VERSION" == *-* ]]; then
+    RELEASE_FLAGS="--prerelease"
+fi
 case "$VERSION" in
     v3.1.6|v3.1.6-*)
         BREAKING_BLOCK=$(cat <<'BREAK_EOF'
@@ -275,6 +277,7 @@ EOF
 fi
 
 run "gh release create $VERSION \
+    $RELEASE_FLAGS \
     --title '$VERSION' \
     --target main \
     --notes-file '$NOTES_FILE' \

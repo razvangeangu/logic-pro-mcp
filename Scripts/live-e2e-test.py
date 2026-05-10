@@ -8,12 +8,17 @@ Coverage: 200+ tests across 20 sections.
 """
 
 import json
+import os
+import shlex
 import subprocess
 import sys
 import threading
 import time
+import uuid
 
-BINARY = ".build/debug/LogicProMCP"
+BINARY = os.environ.get("LOGIC_PRO_MCP_BINARY", ".build/release/LogicProMCP")
+STRICT_LIVE = os.environ.get("LOGIC_PRO_MCP_STRICT_LIVE", "0") == "1"
+TRANSPORT = os.environ.get("LOGIC_PRO_MCP_E2E_TRANSPORT", "tmux" if STRICT_LIVE else "popen")
 TIMEOUT = 10
 
 class MCPClient:
@@ -70,6 +75,154 @@ class MCPClient:
         except: self.proc.kill()
 
 
+class TmuxMCPClient:
+    """Run the server under tmux so strict live tests inherit a trusted GUI parent.
+
+    macOS TCC can evaluate the parent/responsible process for CLI children.
+    A Python-spawned LogicProMCP process may report Accessibility/CoreMIDI as
+    unavailable even when the same binary is trusted from the user's terminal or
+    MCP client context. tmux gives the server a real PTY under the user's shell
+    session while this harness still exchanges newline-delimited JSON-RPC.
+    """
+
+    def __init__(self):
+        self.session = f"logic-mcp-e2e-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        self.stderr_path = "/tmp/mcp-live-test-stderr.txt"
+        self.responses = {}
+        self.started = False
+
+        command = (
+            "stty -icanon -echo min 1 time 0; "
+            f"exec {shlex.quote(BINARY)} 2>{shlex.quote(self.stderr_path)}"
+        )
+        subprocess.run(["tmux", "new-session", "-d", "-x", "1000", "-y", "80",
+                        "-s", self.session, "-c", os.getcwd(), command],
+                       check=True)
+        subprocess.run(["tmux", "set-option", "-t", self.session,
+                        "history-limit", "200000"], check=False)
+        self.started = True
+        time.sleep(0.2)
+
+    def _tmux(self, args, check=True, capture_output=False):
+        return subprocess.run(["tmux", *args], check=check, text=True,
+                              capture_output=capture_output)
+
+    def _capture_lines(self):
+        result = self._tmux(
+            ["capture-pane", "-t", self.session, "-p", "-J", "-S", "-5000"],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            return []
+        return result.stdout.splitlines()
+
+    def _refresh_responses(self):
+        for line in self._capture_lines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg_id = msg.get("id")
+            if msg_id is None:
+                continue
+            # The PTY echoes JSON requests. Only cache real JSON-RPC replies.
+            if "result" in msg or "error" in msg:
+                self.responses[msg_id] = msg
+
+    def send(self, msg, timeout=None):
+        body = json.dumps(msg, ensure_ascii=False)
+        try:
+            self._tmux(["send-keys", "-t", self.session, "-l", body])
+            self._tmux(["send-keys", "-t", self.session, "Enter"])
+        except subprocess.CalledProcessError:
+            return None
+
+        msg_id = msg.get("id")
+        if msg_id is None:
+            return None
+
+        deadline = time.time() + (timeout if timeout is not None else TIMEOUT)
+        while time.time() < deadline:
+            self._refresh_responses()
+            if msg_id in self.responses:
+                return self.responses.pop(msg_id)
+            time.sleep(0.05)
+        return None
+
+    def close(self):
+        if not self.started:
+            return
+        self._tmux(["send-keys", "-t", self.session, "C-c"], check=False)
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            result = self._tmux(["has-session", "-t", self.session], check=False)
+            if result.returncode != 0:
+                self.started = False
+                return
+            time.sleep(0.1)
+        self._tmux(["kill-session", "-t", self.session], check=False)
+        self.started = False
+
+
+class ExternalTmuxMCPClient:
+    """Client side for the shell-owned tmux strict-live transport."""
+
+    def __init__(self):
+        self.request_fifo = os.environ["LOGIC_PRO_MCP_E2E_REQUEST_FIFO"]
+        self.capture_file = os.environ["LOGIC_PRO_MCP_E2E_CAPTURE_FILE"]
+        self.writer = open(self.request_fifo, "w", buffering=1)
+        self.responses = {}
+
+    def _capture_lines(self):
+        try:
+            with open(self.capture_file, "r") as file:
+                return file.read().splitlines()
+        except FileNotFoundError:
+            return []
+
+    def _refresh_responses(self):
+        lines = self._capture_lines()
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg_id = msg.get("id")
+            if msg_id is None:
+                continue
+            if "result" in msg or "error" in msg:
+                self.responses[msg_id] = msg
+
+    def send(self, msg, timeout=None):
+        self.writer.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        self.writer.flush()
+
+        msg_id = msg.get("id")
+        if msg_id is None:
+            return None
+
+        deadline = time.time() + (timeout if timeout is not None else TIMEOUT)
+        while time.time() < deadline:
+            self._refresh_responses()
+            if msg_id in self.responses:
+                return self.responses.pop(msg_id)
+            time.sleep(0.05)
+        return None
+
+    def close(self):
+        try:
+            self.writer.close()
+        except Exception:
+            pass
+
+
 def initialize(client):
     resp = client.send({
         "jsonrpc": "2.0", "id": 0, "method": "initialize",
@@ -123,7 +276,9 @@ def list_resource_templates(client, req_id=None):
 # ── Test runner ──
 PASS = 0
 FAIL = 0
+SKIP = 0
 FAILURES = []
+SKIPS = []
 
 def T(name, response, check):
     """Test helper. If response is None, the check still runs (for synthetic tests)."""
@@ -145,6 +300,21 @@ def T(name, response, check):
         FAIL += 1
         FAILURES.append(f"{name} — {e}")
         print(f"  \033[0;31m✘\033[0m {name} — {e}")
+
+
+def S(name, reason):
+    global SKIP
+    SKIP += 1
+    SKIPS.append(f"{name} — {reason}")
+    print(f"  \033[0;36m↷\033[0m {name} — skipped ({reason})")
+
+
+def T_LIVE(name, response, check, ready, reason):
+    """Run live-only checks when prerequisites exist; strict mode turns skips into failures."""
+    if ready or STRICT_LIVE:
+        T(name, response, check)
+    else:
+        S(name, reason)
 
 
 def tool_text(resp):
@@ -172,6 +342,38 @@ def safe_json(text):
     except: return None
 
 
+def is_library_root_json(value):
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("root"), dict)
+        and isinstance(value.get("categories"), list)
+        and isinstance(value.get("presetsByCategory"), dict)
+        and isinstance(value.get("nodeCount"), int)
+        and isinstance(value.get("leafCount"), int)
+        and isinstance(value.get("folderCount"), int)
+    )
+
+
+def is_library_scan_json(value):
+    if is_library_root_json(value):
+        return True
+    if not isinstance(value, dict):
+        return False
+    if value.get("source") in ("panel", "disk") and is_library_root_json(value.get("root")):
+        return True
+    if value.get("mode") == "both":
+        disk = value.get("disk")
+        ax = value.get("ax")
+        return (
+            isinstance(disk, dict)
+            and isinstance(ax, dict)
+            and isinstance(disk.get("leafCount"), int)
+            and isinstance(disk.get("nodeCount"), int)
+            and isinstance(ax.get("available"), bool)
+        )
+    return False
+
+
 def response_dump(resp):
     try: return json.dumps(resp, ensure_ascii=False)
     except: return ""
@@ -187,8 +389,20 @@ def main():
     print("══════════════════════════════════════════════════════")
     print(" Logic Pro MCP — Live E2E Test Suite (200+ tests)")
     print("══════════════════════════════════════════════════════")
+    print(f" Binary: {BINARY}")
+    print(f" Strict live mode: {'on' if STRICT_LIVE else 'off'}")
+    print(f" Transport: {TRANSPORT}")
 
-    client = MCPClient()
+    try:
+        if TRANSPORT == "external-tmux":
+            client = ExternalTmuxMCPClient()
+        elif TRANSPORT == "tmux":
+            client = TmuxMCPClient()
+        else:
+            client = MCPClient()
+    except (FileNotFoundError, subprocess.CalledProcessError) as error:
+        print(f"  \033[0;31m✘ failed to start {TRANSPORT} transport: {error}\033[0m")
+        sys.exit(1)
 
     section("§0 MCP Handshake")
     if not initialize(client):
@@ -242,17 +456,37 @@ def main():
     health_text = tool_text(r)
     health = safe_json(health_text)
     has_document = False
+    logic_running = False
+    accessibility_ready = False
+    automation_ready = False
+    core_midi_ready = False
+    live_logic_ready = False
+    midi_live_ready = False
     T("system.health is valid JSON", r, lambda _: health is not None)
     if health:
+        channels = health.get("channels", [])
+        channels_by_name = {
+            c.get("channel"): c for c in channels
+            if isinstance(c, dict) and c.get("channel") is not None
+        }
         has_document = health.get("logic_pro_has_document") is True
-        T("health.logic_pro_running is true", r, lambda _: health.get("logic_pro_running") is True)
+        logic_running = health.get("logic_pro_running") is True
+        permissions = health.get("permissions", {})
+        accessibility_ready = permissions.get("accessibility") is True
+        automation_ready = permissions.get("automation_granted") is True
+        core_midi = channels_by_name.get("CoreMIDI", {})
+        core_midi_ready = core_midi.get("available") is True and core_midi.get("ready") is True
+        live_logic_ready = logic_running and accessibility_ready
+        midi_live_ready = logic_running and core_midi_ready
+
+        T_LIVE("health.logic_pro_running is true", r, lambda _: logic_running, logic_running, "Logic Pro is not running")
         T("health.logic_pro_version present", r, lambda _: "logic_pro_version" in health)
-        T("health.channels is array of 7", r, lambda _: isinstance(health.get("channels"), list) and len(health["channels"]) == 7)
+        T("health.channels is array of 7", r, lambda _: isinstance(channels, list) and len(channels) == 7)
         T("health.mcu present", r, lambda _: "mcu" in health)
         T("health.cache present", r, lambda _: "cache" in health)
-        T("health.permissions.accessibility granted", r, lambda _: health["permissions"].get("accessibility") is True)
-        T("health.permissions.automation granted", r, lambda _: health["permissions"].get("automation_granted") is True)
-        T("health.permissions.post_event_access present", r, lambda _: "post_event_access" in health["permissions"])
+        T_LIVE("health.permissions.accessibility granted", r, lambda _: accessibility_ready, accessibility_ready, "Accessibility is not granted to this binary/session")
+        T_LIVE("health.permissions.automation granted", r, lambda _: automation_ready, automation_ready, "Automation is not verifiable/granted without a running Logic session")
+        T("health.permissions.post_event_access present", r, lambda _: "post_event_access" in permissions)
         T("health.process.memory_mb positive", r, lambda _: health["process"]["memory_mb"] > 0)
         T("health.process.uptime_sec non-negative", r, lambda _: health["process"]["uptime_sec"] >= 0)
 
@@ -314,11 +548,11 @@ def main():
 
     # Transport commands that route to MCU/CoreMIDI
     r = call_tool(client, "logic_transport", "toggle_cycle")
-    T("transport.toggle_cycle returns non-error", r, lambda _: not is_error(r))
+    T_LIVE("transport.toggle_cycle returns non-error", r, lambda _: not is_error(r), live_logic_ready, "Logic Pro + Accessibility are required")
     call_tool(client, "logic_transport", "toggle_cycle")  # restore
 
     r = call_tool(client, "logic_transport", "toggle_metronome")
-    T("transport.toggle_metronome returns non-error", r, lambda _: not is_error(r))
+    T_LIVE("transport.toggle_metronome returns non-error", r, lambda _: not is_error(r), live_logic_ready, "Logic Pro + Accessibility are required")
     call_tool(client, "logic_transport", "toggle_metronome")  # restore
 
     r = call_tool(client, "logic_transport", "toggle_count_in")
@@ -440,20 +674,16 @@ def main():
           or "Accessibility not trusted" in list_library_text,
     )
 
-    # scan_library walks the full Logic Library tree — up to ~60s on a stock
-    # install. Use a generous per-call timeout; server bails earlier if panel closed.
-    r = call_tool(client, "logic_tracks", "scan_library", timeout=90)
+    # scan_library walks the full Logic Library tree. A stock Logic 12 Library
+    # can take ~100s over live AX; server bails earlier if the panel is closed.
+    r = call_tool(client, "logic_tracks", "scan_library", timeout=180)
     scan_library_text = tool_text(r)
     scan_library_json = safe_json(scan_library_text)
     T(
         "track.scan_library returns tree or clear precondition error",
         r,
-        lambda _: (
-            isinstance(scan_library_json, dict)
-            and "root" in scan_library_json
-            and "nodeCount" in scan_library_json
-            and "leafCount" in scan_library_json
-        ) or "Library panel not found" in scan_library_text
+        lambda _: is_library_scan_json(scan_library_json)
+          or "Library panel not found" in scan_library_text
           or "Accessibility not trusted" in scan_library_text,
     )
 
@@ -558,69 +788,69 @@ def main():
     # Note range
     for note in [0, 21, 60, 108, 127]:
         r = call_tool(client, "logic_midi", "send_note", {"note": note, "velocity": 80, "duration_ms": 30})
-        T(f"midi.send_note({note}) succeeds", r, lambda _: not is_error(r))
+        T_LIVE(f"midi.send_note({note}) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # Velocity range
     for vel in [1, 64, 127]:
         r = call_tool(client, "logic_midi", "send_note", {"note": 60, "velocity": vel, "duration_ms": 30})
-        T(f"midi.send_note vel={vel} succeeds", r, lambda _: not is_error(r))
+        T_LIVE(f"midi.send_note vel={vel} succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # Channel range
     for ch in [1, 8, 16]:
         r = call_tool(client, "logic_midi", "send_note", {"note": 60, "channel": ch, "duration_ms": 30})
-        T(f"midi.send_note ch={ch} succeeds", r, lambda _: not is_error(r))
+        T_LIVE(f"midi.send_note ch={ch} succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # Chord
     r = call_tool(client, "logic_midi", "send_chord", {"notes": "60,64,67", "duration_ms": 30})
-    T("midi.send_chord C major succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.send_chord C major succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     r = call_tool(client, "logic_midi", "send_chord", {"notes": "60,63,67,70", "duration_ms": 30})
-    T("midi.send_chord Cm7 succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.send_chord Cm7 succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # CC range
     for cc in [1, 7, 10, 11, 64, 120, 123]:
         r = call_tool(client, "logic_midi", "send_cc", {"controller": cc, "value": 64})
-        T(f"midi.send_cc({cc}) succeeds", r, lambda _: not is_error(r))
+        T_LIVE(f"midi.send_cc({cc}) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # Program change
     r = call_tool(client, "logic_midi", "send_program_change", {"program": 0})
-    T("midi.send_program_change(0) succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.send_program_change(0) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     r = call_tool(client, "logic_midi", "send_program_change", {"program": 127})
-    T("midi.send_program_change(127) succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.send_program_change(127) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # Pitch bend
     r = call_tool(client, "logic_midi", "send_pitch_bend", {"value": 8192})
-    T("midi.send_pitch_bend(center) succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.send_pitch_bend(center) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     r = call_tool(client, "logic_midi", "send_pitch_bend", {"value": 16383})
-    T("midi.send_pitch_bend(max) succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.send_pitch_bend(max) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # Aftertouch
     r = call_tool(client, "logic_midi", "send_aftertouch", {"value": 100})
-    T("midi.send_aftertouch succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.send_aftertouch succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # MMC
     r = call_tool(client, "logic_midi", "mmc_play")
-    T("midi.mmc_play succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.mmc_play succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
     call_tool(client, "logic_midi", "mmc_stop")  # restore
 
     r = call_tool(client, "logic_midi", "mmc_stop")
-    T("midi.mmc_stop succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.mmc_stop succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     r = call_tool(client, "logic_midi", "mmc_locate", {"bar": 1})
-    T("midi.mmc_locate(bar=1) succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.mmc_locate(bar=1) succeeds", r, lambda _: not is_error(r), live_logic_ready, "Logic Pro + Accessibility are required")
 
     # Step input
     r = call_tool(client, "logic_midi", "step_input", {"note": 60, "duration": "1/4"})
-    T("midi.step_input(1/4) succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.step_input(1/4) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     r = call_tool(client, "logic_midi", "step_input", {"note": 60, "duration": "1/8"})
-    T("midi.step_input(1/8) succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.step_input(1/8) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # Duration cap (our P2 fix)
     r = call_tool(client, "logic_midi", "send_note", {"note": 60, "duration_ms": 50})
-    T("midi.send_note small duration succeeds", r, lambda _: not is_error(r))
+    T_LIVE("midi.send_note small duration succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # ═══════════════════════════════════════════════════════════════
     # §7 Edit Commands (14 tests)
@@ -628,10 +858,13 @@ def main():
     section("§7 Edit Commands")
 
     for cmd in ["undo", "redo", "cut", "copy", "paste", "delete",
-                "select_all", "split", "join", "quantize",
+                "select_all", "split", "join",
                 "bounce_in_place", "normalize", "duplicate", "toggle_step_input"]:
         r = call_tool(client, "logic_edit", cmd)
         T(f"edit.{cmd} dispatches", r, lambda _: len(tool_text(r)) > 0)
+
+    r = call_tool(client, "logic_edit", "quantize", {"value": "1/16"})
+    T("edit.quantize dispatches", r, lambda _: len(tool_text(r)) > 0)
 
     # ═══════════════════════════════════════════════════════════════
     # §8 Navigation (15 tests)
@@ -641,10 +874,10 @@ def main():
     r = call_tool(client, "logic_navigate", "get_markers")
     T("nav.get_markers returns data", r, lambda _: len(tool_text(r)) > 0)
 
-    r = call_tool(client, "logic_navigate", "goto_bar", {"bar": 1})
+    r = call_tool(client, "logic_navigate", "goto_bar", {"bar": 1}, timeout=30)
     T("nav.goto_bar(1) dispatches", r, lambda _: len(tool_text(r)) > 0)
 
-    r = call_tool(client, "logic_navigate", "goto_bar", {"bar": 8})
+    r = call_tool(client, "logic_navigate", "goto_bar", {"bar": 8}, timeout=30)
     T("nav.goto_bar(8) dispatches", r, lambda _: len(tool_text(r)) > 0)
 
     r = call_tool(client, "logic_navigate", "goto_marker", {"name": "Intro"})
@@ -673,7 +906,7 @@ def main():
     T("project.get_info returns data", r, lambda _: len(tool_text(r)) > 0)
 
     r = call_tool(client, "logic_project", "is_running")
-    T("project.is_running returns 'true'", r, lambda _: "true" in tool_text(r))
+    T_LIVE("project.is_running returns 'true'", r, lambda _: "true" in tool_text(r), logic_running, "Logic Pro is not running")
 
     # Save (non-destructive — Logic Pro will show dialog if no project)
     r = call_tool(client, "logic_project", "save")
@@ -812,6 +1045,31 @@ def main():
                          "params": {"name": tool, "arguments": {}}})
         T(f"{tool} handles missing command", r, lambda _: r is not None)
 
+    # Fail-closed semantic payload checks. These are environment-independent:
+    # the dispatcher must reject before it can route to Logic/CoreMIDI.
+    missing_payload_cases = [
+        ("logic_transport", "set_tempo"),
+        ("logic_transport", "goto_position"),
+        ("logic_transport", "set_cycle_range"),
+        ("logic_midi", "send_note"),
+        ("logic_midi", "send_cc"),
+        ("logic_midi", "send_program_change"),
+        ("logic_midi", "send_pitch_bend"),
+        ("logic_midi", "send_aftertouch"),
+        ("logic_midi", "mmc_locate"),
+        ("logic_midi", "step_input"),
+        ("logic_edit", "quantize"),
+        ("logic_navigate", "set_zoom"),
+        ("logic_navigate", "toggle_view"),
+    ]
+    for tool, cmd in missing_payload_cases:
+        r = call_tool(client, tool, cmd)
+        T(
+            f"{tool}.{cmd} rejects missing semantic payload",
+            r,
+            lambda _, resp=r: is_error(resp) and "invalid_params" in tool_text(resp),
+        )
+
     # ═══════════════════════════════════════════════════════════════
     # §13 Concurrent Stress Test (5 tests)
     # ═══════════════════════════════════════════════════════════════
@@ -841,7 +1099,7 @@ def main():
         r = call_tool(client, "logic_midi", "send_note", {"note": 60 + (i % 12), "duration_ms": 20})
         if r and not is_error(r):
             rapid_ok += 1
-    T(f"20 rapid MIDI notes: {rapid_ok}/20 ok", "ok", lambda _: rapid_ok >= 18)
+    T_LIVE(f"20 rapid MIDI notes: {rapid_ok}/20 ok", "ok", lambda _: rapid_ok >= 18, midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # 20 concurrent resource reads
     def read_n_times(n):
@@ -971,7 +1229,7 @@ def main():
     # Large duration should be capped to 30s (our P2 fix) — test with shorter value
     # to verify the capping logic doesn't hang the actor
     r = call_tool(client, "logic_midi", "send_note", {"note": 60, "duration_ms": 100})
-    T("midi.send_note short duration ok", r, lambda _: r is not None and not is_error(r))
+    T_LIVE("midi.send_note short duration ok", r, lambda _: r is not None and not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # MIDI port name edge case
     r = call_tool(client, "logic_midi", "create_virtual_port", {"name": "a" * 200})
@@ -1022,13 +1280,13 @@ def main():
         T("MIDI sources list present", "ok", lambda _: isinstance(sources, list))
         T("MIDI destinations list present", "ok", lambda _: isinstance(destinations, list))
         all_ports = " ".join(sources + destinations)
-        T("LogicProMCP-MCU virtual port visible", "ok", lambda _: "MCU" in all_ports or "LogicProMCP" in all_ports)
-        T("LogicProMCP-KeyCmd virtual port visible", "ok", lambda _: "KeyCmd" in all_ports or "LogicProMCP" in all_ports)
-        T("LogicProMCP-Scripter virtual port visible", "ok", lambda _: "Scripter" in all_ports or "LogicProMCP" in all_ports)
+        T_LIVE("LogicProMCP-MCU virtual port visible", "ok", lambda _: "MCU" in all_ports or "LogicProMCP" in all_ports, core_midi_ready, "CoreMIDI virtual ports are unavailable")
+        T_LIVE("LogicProMCP-KeyCmd virtual port visible", "ok", lambda _: "KeyCmd" in all_ports or "LogicProMCP" in all_ports, core_midi_ready, "CoreMIDI virtual ports are unavailable")
+        T_LIVE("LogicProMCP-Scripter virtual port visible", "ok", lambda _: "Scripter" in all_ports or "LogicProMCP" in all_ports, core_midi_ready, "CoreMIDI virtual ports are unavailable")
 
     # Send a full MIDI sequence (chord)
     r = call_tool(client, "logic_midi", "send_chord", {"notes": "60,64,67,72", "duration_ms": 30})
-    T("send chord (4 notes) completes", r, lambda _: not is_error(r))
+    T_LIVE("send chord (4 notes) completes", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # ═══════════════════════════════════════════════════════════════
     # §18 Performance (4 tests)
@@ -1066,7 +1324,7 @@ def main():
     t0 = time.time()
     r = call_tool(client, "logic_midi", "send_cc", {"controller": 7, "value": 100})
     elapsed = time.time() - t0
-    T(f"MIDI CC send < 0.5s ({elapsed:.3f}s)", r, lambda _: elapsed < 0.5 and not is_error(r))
+    T_LIVE(f"MIDI CC send < 0.5s ({elapsed:.3f}s)", r, lambda _: elapsed < 0.5 and not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     # ═══════════════════════════════════════════════════════════════
     # §19 Memory & Stability (3 tests)
@@ -1091,7 +1349,7 @@ def main():
 
     # Logic Pro still running after all tests
     r = call_tool(client, "logic_project", "is_running")
-    T("Logic Pro still running at end", r, lambda _: "true" in tool_text(r))
+    T_LIVE("Logic Pro still running at end", r, lambda _: "true" in tool_text(r), logic_running, "Logic Pro is not running")
 
     # Server still responsive
     r = list_tools(client)
@@ -1105,8 +1363,10 @@ def main():
     r = call_tool(client, "logic_system", "health")
     h = safe_json(tool_text(r))
     if h:
-        T("final health: all permissions granted", r,
-          lambda _: h["permissions"].get("accessibility") is True and h["permissions"].get("automation_granted") is True)
+        T_LIVE("final health: all permissions granted", r,
+          lambda _: h["permissions"].get("accessibility") is True and h["permissions"].get("automation_granted") is True,
+          logic_running and accessibility_ready and automation_ready,
+          "Logic Pro + Accessibility + Automation are required")
         T("final health: channels report started", r,
           lambda _: any(c.get("available") is True for c in h.get("channels", [])))
 
@@ -1117,15 +1377,20 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     print()
     print("══════════════════════════════════════════════════════")
-    total = PASS + FAIL
+    total = PASS + FAIL + SKIP
     if FAIL == 0:
-        print(f" \033[0;32m✔ All {total} tests passed\033[0m")
+        print(f" \033[0;32m✔ All executed tests passed\033[0m — {PASS} passed, {SKIP} skipped, {total} total")
     else:
-        print(f" \033[0;31m✘ {FAIL}/{total} failed\033[0m, \033[0;32m{PASS} passed\033[0m")
+        print(f" \033[0;31m✘ {FAIL}/{total} failed\033[0m, \033[0;32m{PASS} passed\033[0m, {SKIP} skipped")
         print()
         print("Failures:")
         for f in FAILURES:
             print(f"  \033[0;31m✘\033[0m {f}")
+    if SKIP:
+        print()
+        print("Skipped live-gated checks:")
+        for s in SKIPS:
+            print(f"  \033[0;36m↷\033[0m {s}")
     print("══════════════════════════════════════════════════════")
     print()
     sys.exit(min(FAIL, 125))

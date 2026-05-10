@@ -203,4 +203,41 @@ struct MIDIDispatcherRejectionTests {
         #expect(sharedToolText(result).contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
     }
+
+    @Test("MIDI mutating commands reject missing semantic payloads before routing")
+    func testMissingSemanticPayloadsRejectBeforeRouting() async {
+        let cases: [(String, [String: Value])] = [
+            ("send_note", [:]),
+            ("send_chord", [:]),
+            ("send_cc", ["controller": .int(7)]),
+            ("send_program_change", [:]),
+            ("send_pitch_bend", [:]),
+            ("send_aftertouch", [:]),
+            ("mmc_locate", [:]),
+            ("step_input", ["note": .int(60)]),
+        ]
+
+        for (command, params) in cases {
+            let router = ChannelRouter()
+            let coreMidi = MockChannel(id: .coreMIDI)
+            let mcu = MockChannel(id: .mcu)
+            let ax = MockChannel(id: .accessibility)
+            await router.register(coreMidi)
+            await router.register(mcu)
+            await router.register(ax)
+
+            let result = await MIDIDispatcher.handle(
+                command: command,
+                params: params,
+                router: router,
+                cache: StateCache()
+            )
+
+            #expect(result.isError == true, "\(command) should reject missing payload")
+            #expect(sharedToolText(result).contains("invalid_params"))
+            #expect(await coreMidi.executedOps.isEmpty)
+            #expect(await mcu.executedOps.isEmpty)
+            #expect(await ax.executedOps.isEmpty)
+        }
+    }
 }

@@ -52,13 +52,13 @@ private func scriptContents(_ relativePath: String) throws -> String {
 @Test func testReleaseWorkflowDualModesAndPublishesMetadata() throws {
     let workflow = try scriptContents(".github/workflows/release.yml")
 
-    // v3.0.1: dual-mode release (notarized if secrets present, else adhoc).
-    // ADHOC mode lets the CI pipeline succeed end-to-end even without an
-    // Apple Developer Program subscription, so validate-install runs on
-    // every tag push instead of being blocked by missing secrets.
+    // Dual-mode release: stable tags require notarization; prerelease tags may
+    // use ADHOC for release-candidate validation.
     #expect(workflow.contains("Detect release mode"))
     #expect(workflow.contains("mode=notarized"))
     #expect(workflow.contains("mode=adhoc"))
+    #expect(workflow.contains("Stable ADHOC releases are not permitted"))
+    #expect(!workflow.contains("ALLOW_ADHOC_STABLE"))
     #expect(workflow.contains("Validate notarization secrets"))
     #expect(workflow.contains("is required for a notarized release build"))
     #expect(workflow.contains("Codesign binary (Developer ID)"))
@@ -69,6 +69,17 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(workflow.contains("macos-15"))
     #expect(workflow.contains("macos-13"))
     #expect(workflow.contains("LOGIC_PRO_MCP_INSTALL_DIR"))
+}
+
+@Test func testLocalReleaseScriptIsPrereleaseOnlyAndFailClosedOnRemoteCheck() throws {
+    let script = try scriptContents("Scripts/release.sh")
+
+    #expect(script.contains("refuses stable tags"))
+    #expect(script.contains("There is intentionally no override"))
+    #expect(!script.contains("LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE"))
+    #expect(script.contains("RELEASE_FLAGS=\"--prerelease\""))
+    #expect(script.contains("could not verify remote tag availability"))
+    #expect(script.contains("Refusing to continue because publishing could race"))
 }
 
 @Test func testUninstallScriptRemovesClaudeRegistrationAndKeepsManualScripterReminder() throws {

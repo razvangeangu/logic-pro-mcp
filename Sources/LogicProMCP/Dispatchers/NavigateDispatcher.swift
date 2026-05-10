@@ -166,6 +166,11 @@ struct NavigateDispatcher {
             // matrix tests and real callers drift across both. Silently ignoring
             // a misnamed param was the class of bug that hid 100% false-positive
             // test coverage earlier in the hardening loop.
+            guard params["level"] != nil || params["direction"] != nil else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_zoom requires explicit 'level' or 'direction'"
+                )
+            }
             let level = stringParam(params, "level", "direction", default: "fit")
             switch level {
             case "in":
@@ -193,6 +198,11 @@ struct NavigateDispatcher {
             }
 
         case "toggle_view":
+            guard params["view"] != nil else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "toggle_view requires explicit 'view'"
+                )
+            }
             let view = stringParam(params, "view", default: "mixer")
             let operation: String
             switch view {

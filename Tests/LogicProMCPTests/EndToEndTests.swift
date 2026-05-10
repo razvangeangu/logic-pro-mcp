@@ -62,6 +62,8 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_transport", command: "set_tempo")
     let text = e2eText(r)
+    #expect(r.isError == true)
+    #expect(text.contains("invalid_params"))
     #expect(!text.isEmpty)
 }
 
@@ -322,7 +324,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 
 @Test func testE2EEditQuantizeDispatches() async {
     let h = await makeE2EHandlers()
-    let r = await e2eCall(h, tool: "logic_edit", command: "quantize")
+    let r = await e2eCall(h, tool: "logic_edit", command: "quantize", params: ["value": .string("1/16")])
     #expect(!e2eText(r).isEmpty)
 }
 

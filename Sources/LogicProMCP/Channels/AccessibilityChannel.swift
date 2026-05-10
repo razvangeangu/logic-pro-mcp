@@ -52,6 +52,7 @@ actor AccessibilityChannel: Channel {
     struct Runtime: @unchecked Sendable {
         let isTrusted: @Sendable () -> Bool
         let isLogicProRunning: @Sendable () -> Bool
+        let hasVisibleWindow: @Sendable () -> Bool
         let appRoot: @Sendable () -> AXUIElement?
         let transportState: @Sendable () -> ChannelResult
         let toggleTransportButton: @Sendable (String) -> ChannelResult
@@ -78,6 +79,7 @@ actor AccessibilityChannel: Channel {
         init(
             isTrusted: @escaping @Sendable () -> Bool,
             isLogicProRunning: @escaping @Sendable () -> Bool,
+            hasVisibleWindow: @escaping @Sendable () -> Bool = { true },
             appRoot: @escaping @Sendable () -> AXUIElement?,
             transportState: @escaping @Sendable () -> ChannelResult,
             toggleTransportButton: @escaping @Sendable (String) -> ChannelResult,
@@ -98,6 +100,7 @@ actor AccessibilityChannel: Channel {
         ) {
             self.isTrusted = isTrusted
             self.isLogicProRunning = isLogicProRunning
+            self.hasVisibleWindow = hasVisibleWindow
             self.appRoot = appRoot
             self.transportState = transportState
             self.toggleTransportButton = toggleTransportButton
@@ -120,6 +123,7 @@ actor AccessibilityChannel: Channel {
         static func axBacked(
             isTrusted: @escaping @Sendable () -> Bool = AXIsProcessTrusted,
             isLogicProRunning: @escaping @Sendable () -> Bool = { ProcessUtils.isLogicProRunning },
+            hasVisibleWindow: @escaping @Sendable () -> Bool = { ProcessUtils.hasVisibleWindow() },
             logicRuntime: AXLogicProElements.Runtime = .production,
             runTempoFallback: @escaping @Sendable (String) -> Bool = { tempo in
                 AccessibilityChannel.runTempoFallbackScript(tempo: tempo)
@@ -128,6 +132,7 @@ actor AccessibilityChannel: Channel {
             Runtime(
                 isTrusted: isTrusted,
                 isLogicProRunning: isLogicProRunning,
+                hasVisibleWindow: hasVisibleWindow,
                 appRoot: { AXLogicProElements.appRoot(runtime: logicRuntime) },
                 transportState: { AccessibilityChannel.defaultGetTransportState(runtime: logicRuntime) },
                 toggleTransportButton: { AccessibilityChannel.defaultToggleTransportButton(named: $0, runtime: logicRuntime) },
@@ -1515,6 +1520,15 @@ actor AccessibilityChannel: Channel {
     private func runLiveScan(runtime: AXLogicProElements.Runtime) async -> ChannelResult {
         let t0 = Date()
         Log.info("scan_all: entering runLiveScan", subsystem: "ax")
+
+        // Fail closed when Logic is running in a headless/no-window state.
+        // Without this guard, AX can expose stale Library descendants from a
+        // previous session and the scan may descend into a long probe despite
+        // there being no visible project window to operate on.
+        guard self.runtime.hasVisibleWindow() else {
+            Log.info("scan_all: preflight failed — no visible Logic window", subsystem: "ax")
+            return .error("Library panel not found. Open Library (⌘L) in Logic Pro.")
+        }
 
         // Precondition: only start the scan if the Library panel is actually open.
         // This is a < 100 ms AX check and avoids descending into a multi-second

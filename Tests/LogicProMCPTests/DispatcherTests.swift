@@ -191,21 +191,38 @@ private actor FailingExecuteChannel: Channel {
     ])
 }
 
-@Test func testTransportDispatcherGotoPositionDefaultsToStart() async {
+@Test func testTransportDispatcherRejectsMissingSemanticPayloads() async {
     let router = ChannelRouter()
     let mcu = MockChannel(id: .mcu)
     await router.register(mcu)
 
-    let result = await TransportDispatcher.handle(
+    let gotoResult = await TransportDispatcher.handle(
         command: "goto_position",
         params: [:],
         router: router,
         cache: StateCache()
     )
+    let tempoResult = await TransportDispatcher.handle(
+        command: "set_tempo",
+        params: [:],
+        router: router,
+        cache: StateCache()
+    )
+    let cycleResult = await TransportDispatcher.handle(
+        command: "set_cycle_range",
+        params: ["start": .int(1)],
+        router: router,
+        cache: StateCache()
+    )
 
-    #expect(!result.isError!)
+    #expect(gotoResult.isError == true)
+    #expect(tempoResult.isError == true)
+    #expect(cycleResult.isError == true)
+    #expect(dispatcherText(gotoResult).contains("invalid_params"))
+    #expect(dispatcherText(tempoResult).contains("invalid_params"))
+    #expect(dispatcherText(cycleResult).contains("invalid_params"))
     let ops = await mcu.executedOps
-    expectExecutedOps(ops, equals: [("transport.goto_position", ["position": "1.1.1.1"])])
+    #expect(ops.isEmpty)
 }
 
 @Test func testTransportDispatcherUnknownCommandFailsInDispatcherSuite() async {
@@ -1365,7 +1382,7 @@ private actor SelectiveFailChannel: Channel {
     }
 }
 
-@Test func testEditDispatcherQuantizeUsesExplicitAndDefaultValues() async {
+@Test func testEditDispatcherQuantizeRequiresExplicitGrid() async {
     let explicitRouter = ChannelRouter()
     let explicitKeyCmd = MockChannel(id: .midiKeyCommands)
     await explicitRouter.register(explicitKeyCmd)
@@ -1384,23 +1401,21 @@ private actor SelectiveFailChannel: Channel {
     #expect(explicitOps[0].0 == "edit.quantize")
     #expect(explicitOps[0].1["value"] == "1/8")
 
-    let defaultRouter = ChannelRouter()
-    let defaultKeyCmd = MockChannel(id: .midiKeyCommands)
-    await defaultRouter.register(defaultKeyCmd)
-    let defaultCache = StateCache()
+    let missingRouter = ChannelRouter()
+    let missingKeyCmd = MockChannel(id: .midiKeyCommands)
+    await missingRouter.register(missingKeyCmd)
+    let missingCache = StateCache()
 
-    let defaultResult = await EditDispatcher.handle(
+    let missingResult = await EditDispatcher.handle(
         command: "quantize",
         params: [:],
-        router: defaultRouter,
-        cache: defaultCache
+        router: missingRouter,
+        cache: missingCache
     )
 
-    #expect(!defaultResult.isError!)
-    let defaultOps = await defaultKeyCmd.executedOps
-    #expect(defaultOps.count == 1)
-    #expect(defaultOps[0].0 == "edit.quantize")
-    #expect(defaultOps[0].1["value"] == "1/16")
+    #expect(missingResult.isError == true)
+    #expect(dispatcherText(missingResult).contains("invalid_params"))
+    #expect(await missingKeyCmd.executedOps.isEmpty)
 }
 
 @Test func testEditDispatcherUnknownFails() async {
@@ -2119,6 +2134,32 @@ private actor SelectiveFailChannel: Channel {
     let cgEventOps = await cgEvent.executedOps
     #expect(keyCmdOps.isEmpty, "Router must not be invoked when target is missing")
     #expect(cgEventOps.isEmpty)
+}
+
+@Test func testNavigateDispatcherZoomAndViewRejectMissingSemanticPayloads() async {
+    let router = ChannelRouter()
+    let keyCmd = MockChannel(id: .midiKeyCommands)
+    await router.register(keyCmd)
+    let cache = StateCache()
+
+    let zoomResult = await NavigateDispatcher.handle(
+        command: "set_zoom",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+    let viewResult = await NavigateDispatcher.handle(
+        command: "toggle_view",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+
+    #expect(zoomResult.isError == true)
+    #expect(viewResult.isError == true)
+    #expect(dispatcherText(zoomResult).contains("invalid_params"))
+    #expect(dispatcherText(viewResult).contains("invalid_params"))
+    #expect(await keyCmd.executedOps.isEmpty)
 }
 
 @Test func testNavigateDispatcherDeleteMarkerRejectsNegativeIndex() async {

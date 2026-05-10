@@ -1,298 +1,79 @@
 #!/bin/bash
-# Live E2E test: sends JSON-RPC messages to the MCP server via stdio
-# Requires: Logic Pro running, Accessibility + Automation permissions granted
+# Compatibility wrapper for the maintained Python live E2E harness.
+#
+# In default mode this delegates directly to the Python stateful stdio client.
+# In strict live mode the server is started by this shell under tmux and the
+# Python harness only drives JSON-RPC through a FIFO/capture bridge. That avoids
+# macOS TCC treating Python as the responsible process for Accessibility and
+# CoreMIDI while preserving MCP newline-delimited stdio coverage.
 
 set -euo pipefail
 
-BINARY=".build/debug/LogicProMCP"
-PASS=0
-FAIL=0
-TOTAL=0
-FAILURES=""
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+export LOGIC_PRO_MCP_BINARY="${LOGIC_PRO_MCP_BINARY:-.build/release/LogicProMCP}"
 
-# Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
-
-send_and_check() {
-    local test_name="$1"
-    local request="$2"
-    local expect_pattern="$3"  # grep -E pattern to match in response
-    local reject_pattern="${4:-}"  # optional pattern that must NOT appear
-
-    TOTAL=$((TOTAL + 1))
-
-    # Send initialize + request via stdio, capture response
-    local init_msg='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
-    local initialized_msg='{"jsonrpc":"2.0","method":"notifications/initialized"}'
-
-    local response
-    response=$(printf '%s\n%s\n%s\n' "$init_msg" "$initialized_msg" "$request" | timeout 30 "$BINARY" 2>/dev/null || true)
-
-    if [ -z "$response" ]; then
-        FAIL=$((FAIL + 1))
-        FAILURES="${FAILURES}\n  ${RED}✘${NC} $test_name — empty response"
-        printf "  ${RED}✘${NC} %s — empty response\n" "$test_name"
-        return
-    fi
-
-    # Check for expected pattern in the last JSON-RPC response
-    local last_response
-    last_response=$(echo "$response" | grep '"id":1' | tail -1)
-
-    if [ -z "$last_response" ]; then
-        # Try to find any response with result
-        last_response=$(echo "$response" | grep '"result"' | tail -1)
-    fi
-
-    if [ -z "$last_response" ]; then
-        FAIL=$((FAIL + 1))
-        FAILURES="${FAILURES}\n  ${RED}✘${NC} $test_name — no JSON-RPC response found"
-        printf "  ${RED}✘${NC} %s — no JSON-RPC response\n" "$test_name"
-        return
-    fi
-
-    if echo "$last_response" | grep -qE "$expect_pattern"; then
-        if [ -n "$reject_pattern" ] && echo "$last_response" | grep -qE "$reject_pattern"; then
-            FAIL=$((FAIL + 1))
-            FAILURES="${FAILURES}\n  ${RED}✘${NC} $test_name — unexpected pattern: $reject_pattern"
-            printf "  ${RED}✘${NC} %s — unexpected pattern\n" "$test_name"
-        else
-            PASS=$((PASS + 1))
-            printf "  ${GREEN}✔${NC} %s\n" "$test_name"
-        fi
-    else
-        FAIL=$((FAIL + 1))
-        FAILURES="${FAILURES}\n  ${RED}✘${NC} $test_name — expected: $expect_pattern"
-        printf "  ${RED}✘${NC} %s — pattern not found\n" "$test_name"
-        # Show truncated response for debugging
-        printf "    response: %.200s\n" "$last_response"
-    fi
-}
-
-call_tool() {
-    local tool="$1"
-    local command="$2"
-    local params="${3:-}"
-
-    if [ -z "$params" ]; then
-        echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":{\"command\":\"$command\"}}}"
-    else
-        echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":{\"command\":\"$command\",\"params\":$params}}}"
-    fi
-}
-
-read_resource() {
-    local uri="$1"
-    echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"resources/read\",\"params\":{\"uri\":\"$uri\"}}"
-}
-
-list_tools() {
-    echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-}
-
-list_resources() {
-    echo '{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}'
-}
-
-echo ""
-echo "══════════════════════════════════════════════════════"
-echo " Logic Pro MCP — Live E2E Test Suite"
-echo "══════════════════════════════════════════════════════"
-echo ""
-
-# ─── §1: MCP Protocol ───
-echo "${YELLOW}§1 MCP Protocol${NC}"
-
-send_and_check \
-    "tools/list returns 8 tools" \
-    "$(list_tools)" \
-    "logic_transport.*logic_system|logic_system.*logic_transport"
-
-send_and_check \
-    "resources/list returns resources" \
-    "$(list_resources)" \
-    "logic://transport/state"
-
-# ─── §2: System Commands ───
-echo ""
-echo "${YELLOW}§2 System Commands${NC}"
-
-send_and_check \
-    "system.help returns tool list" \
-    "$(call_tool logic_system help)" \
-    "logic_transport"
-
-send_and_check \
-    "system.health returns valid JSON with logic_pro_running=true" \
-    "$(call_tool logic_system health)" \
-    "logic_pro_running.*true"
-
-send_and_check \
-    "system.health shows channels" \
-    "$(call_tool logic_system health)" \
-    "channels"
-
-send_and_check \
-    "system.health exposes post_event_access" \
-    "$(call_tool logic_system health)" \
-    "post_event_access"
-
-send_and_check \
-    "system.permissions shows granted" \
-    "$(call_tool logic_system permissions)" \
-    "[Gg]ranted"
-
-send_and_check \
-    "system.refresh completes" \
-    "$(call_tool logic_system refresh)" \
-    "result"
-
-# ─── §3: Transport ───
-echo ""
-echo "${YELLOW}§3 Transport (Live)${NC}"
-
-send_and_check \
-    "transport.get_state returns transport JSON" \
-    "$(call_tool logic_transport get_state)" \
-    "tempo|isPlaying|position"
-
-send_and_check \
-    "transport.toggle_cycle toggles" \
-    "$(call_tool logic_transport toggle_cycle)" \
-    "result"
-
-send_and_check \
-    "transport.toggle_metronome toggles" \
-    "$(call_tool logic_transport toggle_metronome)" \
-    "result"
-
-# ─── §4: Tracks ───
-echo ""
-echo "${YELLOW}§4 Tracks (Live)${NC}"
-
-send_and_check \
-    "track.get_tracks returns track array or error" \
-    "$(call_tool logic_tracks get_tracks)" \
-    "result"
-
-send_and_check \
-    "track.get_selected returns selected track or error" \
-    "$(call_tool logic_tracks get_selected)" \
-    "result"
-
-send_and_check \
-    "track.resolve_path without path errors" \
-    "$(call_tool logic_tracks resolve_path)" \
-    "error|isError.*true|Missing 'path'"
-
-send_and_check \
-    "track.set_instrument without selector errors" \
-    "$(call_tool logic_tracks set_instrument '{"index":"0"}')" \
-    "error|isError.*true|Missing path"
-
-send_and_check \
-    "track.scan_plugin_presets returns content or guidance" \
-    "$(call_tool logic_tracks scan_plugin_presets '{"submenuOpenDelayMs":"300"}')" \
-    "result|error|isError"
-
-# ─── §5: Mixer ───
-echo ""
-echo "${YELLOW}§5 Mixer (Live)${NC}"
-
-send_and_check \
-    "mixer.get_state returns mixer data" \
-    "$(call_tool logic_mixer get_state)" \
-    "result"
-
-# ─── §6: Project ───
-echo ""
-echo "${YELLOW}§6 Project (Live)${NC}"
-
-send_and_check \
-    "project.get_info returns project info" \
-    "$(call_tool logic_project get_info)" \
-    "result"
-
-send_and_check \
-    "project.is_running returns true" \
-    "$(call_tool logic_project is_running)" \
-    "true"
-
-# ─── §7: MIDI ───
-echo ""
-echo "${YELLOW}§7 MIDI${NC}"
-
-send_and_check \
-    "midi.list_ports returns port list" \
-    "$(call_tool logic_midi list_ports)" \
-    "sources|destinations|result"
-
-send_and_check \
-    "midi.send_cc dispatches" \
-    "$(call_tool logic_midi send_cc '{"controller":"7","value":"100"}')" \
-    "result"
-
-# ─── §8: Resources ───
-echo ""
-echo "${YELLOW}§8 Resources (Live)${NC}"
-
-send_and_check \
-    "resource logic://transport/state readable" \
-    "$(read_resource 'logic://transport/state')" \
-    "tempo|position|contents"
-
-send_and_check \
-    "resource logic://tracks readable" \
-    "$(read_resource 'logic://tracks')" \
-    "contents"
-
-send_and_check \
-    "resource logic://mixer readable" \
-    "$(read_resource 'logic://mixer')" \
-    "mcu_connected|contents"
-
-send_and_check \
-    "resource logic://system/health readable" \
-    "$(read_resource 'logic://system/health')" \
-    "logic_pro_running|contents"
-
-send_and_check \
-    "resource logic://midi/ports readable" \
-    "$(read_resource 'logic://midi/ports')" \
-    "contents"
-
-# ─── §9: Security ───
-echo ""
-echo "${YELLOW}§9 Security Validation${NC}"
-
-send_and_check \
-    "project.open rejects relative path" \
-    "$(call_tool logic_project open '{"path":"relative/song.logicx"}')" \
-    "error|isError.*true|invalid|reject"
-
-send_and_check \
-    "project.open rejects /dev/ path" \
-    "$(call_tool logic_project open '{"path":"/dev/null.logicx"}')" \
-    "error|isError.*true|invalid|reject"
-
-send_and_check \
-    "project.open rejects non-logicx extension" \
-    "$(call_tool logic_project open '{"path":"/tmp/file.txt"}')" \
-    "error|isError.*true|invalid|reject"
-
-# ─── Summary ───
-echo ""
-echo "══════════════════════════════════════════════════════"
-if [ $FAIL -eq 0 ]; then
-    printf " ${GREEN}✔ All $TOTAL tests passed${NC}\n"
-else
-    printf " ${RED}✘ $FAIL/$TOTAL failed${NC}, ${GREEN}$PASS passed${NC}\n"
-    printf "$FAILURES\n"
+if [ "${LOGIC_PRO_MCP_STRICT_LIVE:-0}" != "1" ]; then
+    exec python3 "$SCRIPT_DIR/live-e2e-test.py"
 fi
-echo "══════════════════════════════════════════════════════"
-echo ""
 
-exit $FAIL
+command -v tmux >/dev/null 2>&1 || {
+    echo "ERROR: strict live E2E requires tmux for trusted-parent stdio launch." >&2
+    exit 1
+}
+
+SESSION="logic-mcp-e2e-$$"
+TMPDIR="$(mktemp -d /private/tmp/logic-mcp-e2e.XXXXXX)"
+REQUEST_FIFO="$TMPDIR/requests.fifo"
+CAPTURE_FILE="$TMPDIR/capture.txt"
+OUTPUT_FILE="$TMPDIR/output.txt"
+STDERR_FILE="${LOGIC_PRO_MCP_E2E_STDERR:-/tmp/mcp-live-test-stderr.txt}"
+mkfifo "$REQUEST_FIFO"
+: > "$CAPTURE_FILE"
+BINARY_COMMAND="$(printf '%q' "$LOGIC_PRO_MCP_BINARY")"
+STDERR_COMMAND="$(printf '%q' "$STDERR_FILE")"
+
+cleanup() {
+    set +e
+    if [ -n "${CAPTURE_PID:-}" ]; then kill "$CAPTURE_PID" 2>/dev/null; fi
+    if [ -n "${SENDER_PID:-}" ]; then kill "$SENDER_PID" 2>/dev/null; fi
+    tmux send-keys -t "$SESSION" C-c 2>/dev/null
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        tmux has-session -t "$SESSION" 2>/dev/null || break
+        sleep 0.1
+    done
+    tmux kill-session -t "$SESSION" 2>/dev/null
+    rm -rf "$TMPDIR"
+}
+trap cleanup EXIT INT TERM
+
+tmux new-session -d -x 1000 -y 80 -s "$SESSION" -c "$ROOT_DIR" \
+    "stty -icanon -echo min 1 time 0; exec ${BINARY_COMMAND} 2>${STDERR_COMMAND}"
+tmux set-option -t "$SESSION" history-limit 200000 >/dev/null 2>&1 || true
+
+(
+    while tmux has-session -t "$SESSION" 2>/dev/null; do
+        tmux capture-pane -t "$SESSION" -p -J -S -5000 > "$CAPTURE_FILE.tmp" 2>/dev/null &&
+            mv "$CAPTURE_FILE.tmp" "$CAPTURE_FILE"
+        sleep 0.05
+    done
+) &
+CAPTURE_PID=$!
+
+(
+    while IFS= read -r line; do
+        tmux send-keys -t "$SESSION" -l "$line" || exit 1
+        tmux send-keys -t "$SESSION" Enter || exit 1
+    done < "$REQUEST_FIFO"
+) &
+SENDER_PID=$!
+
+export LOGIC_PRO_MCP_E2E_TRANSPORT=external-tmux
+export LOGIC_PRO_MCP_E2E_REQUEST_FIFO="$REQUEST_FIFO"
+export LOGIC_PRO_MCP_E2E_CAPTURE_FILE="$CAPTURE_FILE"
+
+set +e
+PYTHONUNBUFFERED=1 python3 "$SCRIPT_DIR/live-e2e-test.py" > "$OUTPUT_FILE" 2>&1
+PY_STATUS=$?
+cat "$OUTPUT_FILE"
+exit "$PY_STATUS"

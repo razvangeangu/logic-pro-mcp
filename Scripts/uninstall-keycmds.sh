@@ -55,14 +55,20 @@ if [ -d "$BACKUP_DIR" ]; then
                 echo "  Pick a different backup with LOGIC_PRO_MCP_KEYCMD_RESTORE_FROM=<path>"
                 echo "  or remove the corrupt backup directory manually."
             else
-                cp "$LATEST"/* "$KEYCMD_DIR/" 2>/dev/null || true
+                if ! cp "$LATEST"/* "$KEYCMD_DIR/" 2>/dev/null; then
+                    echo "ERROR: failed to restore files from: $(basename "$LATEST")"
+                    exit 1
+                fi
                 echo "✓ Restored $BACKUP_FILE_COUNT files from: $(basename "$LATEST")"
             fi
         elif [ -t 0 ]; then
             read -p "Restore from $(basename "$LATEST")? [y/N] " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
-                cp "$LATEST"/* "$KEYCMD_DIR/" 2>/dev/null || true
+                if ! cp "$LATEST"/* "$KEYCMD_DIR/" 2>/dev/null; then
+                    echo "ERROR: failed to restore files from: $(basename "$LATEST")"
+                    exit 1
+                fi
                 echo "✓ Restored from: $(basename "$LATEST")"
             else
                 echo "Skipped restore."

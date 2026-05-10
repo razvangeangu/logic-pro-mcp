@@ -16,6 +16,9 @@ struct MIDIDispatcher {
     ) async -> CallTool.Result {
         switch command {
         case "send_note":
+            guard params["note"] != nil else {
+                return invalidParamsResult(hint: "send_note requires explicit 'note'")
+            }
             return await dispatchSendOp(
                 baseOp: "midi.send_note",
                 params: params,
@@ -28,6 +31,9 @@ struct MIDIDispatcher {
             )
 
         case "send_chord":
+            guard params["notes"] != nil else {
+                return invalidParamsResult(hint: "send_chord requires explicit 'notes'")
+            }
             return await dispatchSendOp(
                 baseOp: "midi.send_chord",
                 params: params,
@@ -56,6 +62,9 @@ struct MIDIDispatcher {
             }
 
         case "send_cc":
+            guard params["controller"] != nil, params["value"] != nil else {
+                return invalidParamsResult(hint: "send_cc requires explicit 'controller' and 'value'")
+            }
             return await dispatchSendOp(
                 baseOp: "midi.send_cc",
                 params: params,
@@ -67,6 +76,9 @@ struct MIDIDispatcher {
             )
 
         case "send_program_change":
+            guard params["program"] != nil else {
+                return invalidParamsResult(hint: "send_program_change requires explicit 'program'")
+            }
             return await dispatchSendOp(
                 baseOp: "midi.send_program_change",
                 params: params,
@@ -77,6 +89,9 @@ struct MIDIDispatcher {
             )
 
         case "send_pitch_bend":
+            guard params["value"] != nil else {
+                return invalidParamsResult(hint: "send_pitch_bend requires explicit 'value'")
+            }
             return await dispatchSendOp(
                 baseOp: "midi.send_pitch_bend",
                 params: params,
@@ -87,6 +102,9 @@ struct MIDIDispatcher {
             )
 
         case "send_aftertouch":
+            guard params["value"] != nil else {
+                return invalidParamsResult(hint: "send_aftertouch requires explicit 'value'")
+            }
             return await dispatchSendOp(
                 baseOp: "midi.send_aftertouch",
                 params: params,
@@ -144,6 +162,9 @@ struct MIDIDispatcher {
             if let reject = rejectIfPortPresent(params, command: command) {
                 return reject
             }
+            guard params["bar"] != nil || params["time"] != nil else {
+                return invalidParamsResult(hint: "mmc_locate requires explicit 'bar' or 'time'")
+            }
             // Prefer `bar` (int) → expand to bar.beat.sub.tick, else SMPTE `time`.
             // intParam handles int/double/string coercion, so a stringified bar
             // ("5") is accepted too.
@@ -163,6 +184,9 @@ struct MIDIDispatcher {
         case "step_input":
             if let reject = rejectIfPortPresent(params, command: command) {
                 return reject
+            }
+            guard params["note"] != nil, params["duration"] != nil else {
+                return invalidParamsResult(hint: "step_input requires explicit 'note' and 'duration'")
             }
             return await routedTextResult(router, operation: "midi.step_input", params: [
                 "note": String(intParam(params, "note", default: 60)),
