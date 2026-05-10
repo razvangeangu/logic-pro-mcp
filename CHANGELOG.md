@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.5-rc4] — 2026-05-10
+
+**Installer metadata parser hotfix for the final v3.4.5 release candidate.** `v3.4.5-rc3` passed local and GitHub CI, but a post-release installer smoke test caught a real same-origin install failure: `RELEASE-METADATA.json` is emitted as one-line JSON and the installer's `awk -F'"'` parser selected the `version` field instead of `team_id`, producing `expected: v3.4.5-rc3` during code-signature verification. The parser now matches the `team_id` key explicitly, and the Setup guide's pinned installer URLs are current.
+
+### Fixed
+
+- `Scripts/install.sh` now extracts `team_id` from one-line `RELEASE-METADATA.json` with an explicit key regex instead of relying on quote-field position.
+- `InstallScriptContractTests` guards against reintroducing the old quote-field parser.
+- README, Setup guide, manifest, installer defaults, Formula metadata, and startup-banner tests now point at `v3.4.5-rc4`.
+- `v3.4.5-rc3` remains published but is superseded by this candidate because its same-origin installer path could reject the ADHOC release metadata.
+
+### Tests
+
+- `swift test --no-parallel` -> 1114 / 1114 PASS locally.
+- `swift test --enable-code-coverage --no-parallel` -> 1114 / 1114 PASS locally; coverage 70.47% region / 77.29% line.
+- `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh` -> 259 / 259 PASS, 0 skipped, 0 failed.
+- `Scripts/live-e2e-test.py` -> 213 PASS, 46 correctly skipped on the direct Python parent path, 0 failed.
+- `LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 LOGIC_PRO_MCP_INSTALL_DIR=/private/tmp/logic-pro-mcp-install-rc4 LOGIC_PRO_MCP_REGISTER_CLAUDE=0 LOGIC_PRO_MCP_INSTALL_KEYCMDS=0 LOGIC_PRO_MCP_SKIP_SUDO=1 bash Scripts/install.sh` -> post-publish release install smoke gate for rc4.
+- Full local and GitHub CI gates remain required before treating this tag as final.
+
 ## [3.4.5-rc3] — 2026-05-10
 
 **Final CI-readiness release candidate for v3.4.5.** `v3.4.5-rc2` fixed the workflow's parallel-test mismatch, but the GitHub run exposed a separate test-harness race in `ProductionMCUTransport` packet-sink assertions: packet capture used a fire-and-forget `Task`, so the assertion could observe an empty packet list before the recorder actor handled the message. The production send path was already synchronous; this candidate makes the recorder synchronous too and prevents a count failure from cascading into an array-index trap.

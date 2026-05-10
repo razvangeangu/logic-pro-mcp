@@ -5,7 +5,7 @@ REPO="MongLong0214/logic-pro-mcp"
 BINARY="LogicProMCP"
 INSTALL_DIR="${LOGIC_PRO_MCP_INSTALL_DIR:-/usr/local/bin}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION="${LOGIC_PRO_MCP_VERSION:-v3.4.5-rc3}"
+VERSION="${LOGIC_PRO_MCP_VERSION:-v3.4.5-rc4}"
 SHA256="${LOGIC_PRO_MCP_SHA256:-}"
 EXPECTED_TEAM_ID="${LOGIC_PRO_MCP_TEAM_ID:-}"
 REGISTER_CLAUDE="${LOGIC_PRO_MCP_REGISTER_CLAUDE:-1}"
@@ -91,7 +91,7 @@ fi
 
 if [ "$VERSION" = "latest" ]; then
     echo "  Error: mutable 'latest' installs are not allowed in enterprise mode."
-    echo "    Set LOGIC_PRO_MCP_VERSION to a pinned tag, e.g. v3.4.5-rc3."
+    echo "    Set LOGIC_PRO_MCP_VERSION to a pinned tag, e.g. v3.4.5-rc4."
     exit 1
 fi
 
@@ -145,7 +145,8 @@ fi
 if [ -z "$EXPECTED_TEAM_ID" ]; then
     REMOTE_PROVENANCE_USED=1
     echo "  Fetching release metadata..."
-    EXPECTED_TEAM_ID=$(curl -fsSL "$METADATA_URL" | awk -F'"' '/"team_id"[[:space:]]*:/ {print $4; exit}')
+    METADATA_JSON=$(curl -fsSL "$METADATA_URL")
+    EXPECTED_TEAM_ID=$(printf '%s\n' "$METADATA_JSON" | sed -n 's/.*"team_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
     if [ -z "$EXPECTED_TEAM_ID" ]; then
         echo "  Error: could not resolve TeamIdentifier from release metadata."
         echo "    Expected signed release metadata at: $METADATA_URL"

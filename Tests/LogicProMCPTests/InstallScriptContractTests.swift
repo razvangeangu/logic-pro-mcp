@@ -32,6 +32,14 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(script.contains("could not resolve TeamIdentifier from release metadata"))
 }
 
+@Test func testInstallScriptExtractsTeamIDFromSingleLineReleaseMetadata() throws {
+    let script = try scriptContents("Scripts/install.sh")
+
+    #expect(script.contains("METADATA_JSON=$(curl -fsSL \"$METADATA_URL\")"))
+    #expect(script.contains("\"team_id\"[[:space:]]*:[[:space:]]*\""))
+    #expect(!script.contains("awk -F'\"' '/\"team_id\"[[:space:]]*:/ {print $4; exit}'"))
+}
+
 @Test func testInstallScriptRegistersClaudeAndKeyCommandsByDefault() throws {
     let script = try scriptContents("Scripts/install.sh")
 
