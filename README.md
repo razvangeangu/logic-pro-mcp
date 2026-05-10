@@ -81,7 +81,7 @@ The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew 
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.0/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.4/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=ADHOC \
@@ -92,7 +92,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.0/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.4/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
@@ -154,48 +154,50 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 ## Status
 
-**v3.2.0** (2026-05-07) — Marker provenance. `MarkerState` now surfaces the origin of `position` as `position_source` (`parser` / `fallback` / `unknown`). `goto_marker` adds `marker_position_uncertain: true` to the response extras when routing to a fallback/unknown provenance marker. **Sub-bar navigation accuracy (NG10) is honestly deferred to v3.3** — the T0 live spike found that the Logic 12.2 position dialog is a 4-segment AXSlider structure, which makes the keystroke approach non-viable. Codable backward compat — decoding v3.1.x snapshots yields `.unknown`. See [CHANGELOG §3.2.0](CHANGELOG.md#320--2026-05-07).
+**Current release: v3.4.4 (2026-05-09)** — CI green on `macos-15-arm64` GitHub Actions, 1110+ tests passing locally, all P0/P1 items from the 2026-05-08 enterprise production-readiness review closed except `swift-testing` package dependency removal (deferred — Apple has not yet shipped the SwiftPM-side glue that lets the bundled Swift 6 Testing framework resolve `_TestingInternals` without the explicit package dep).
 
-**v3.1.11** (2026-05-07) — Issue #9 (`thomas-doesburg`): English Logic 12.2 marker position parser accuracy + 13-locale menu path documentation + lenient 1–3 component policy removed (NG11). v3.1.10 → v3.1.11 behavior change: `"17 2"` (2-component lenient) now returns nil — Logic UI always exposes 4 components, so 1–3 component strings are likely non-position cells (e.g. tempo) that would silently manufacture an incorrect bar value. See [CHANGELOG §3.1.11](CHANGELOG.md#3111--2026-05-07).
+### Active contracts (the things callers most care about)
 
-**v3.1.10** (2026-05-07) — `goto_marker` routing fix (boomer P1): now routes via `transport.goto_position` to navigate to the exact cached position.
+- **Honest Contract envelope** — every mutating op returns one of three states (`State A` confirmed, `State B` uncertain with `reason`, `State C` hard failure with `error`). Clients can switch on the envelope without parsing free-form text. See [docs/HONEST-CONTRACT.md](docs/HONEST-CONTRACT.md).
+- **Fail-closed mutation targets** — mixer faders, plugin params, marker delete/rename, track delete/duplicate require explicit `track`/`index`. Pre-v3.3.0 missing target silently mutated row 0; v3.3.0+ rejects with `requires explicit '<param>'`.
+- **Target-faithful navigation** — `goto_marker` returns `element_not_found` (State C) on a cold cache instead of advancing the marker pointer to "next." Caller must `system.refresh_cache` and retry, or supply a `name`.
+- **1-based MIDI channel** — `send_note` / `send_cc` / `record_sequence`-`notes`-`ch` accept 1..16 (matches Logic's UI). Pre-v3.1.6 was 0-based.
+- **Audit phase split** — `[AUDIT] project.<command> rejected | confirmation_required | executed` distinguishes invalid calls, confirmation prompts, and actual route invocations. Pre-v3.4.0 emitted `executed` before validation.
 
-**v3.1.9** (2026-05-07) — Logic Pro 12.2 marker walker fix. Apple removed the `AXRuler` role from the arrange window's AX subtree on 12.2; user markers now live exclusively in the dedicated **Marker List** window's `AXTable`. v3.1.9 ships a 13-locale title-suffix matcher for that window plus a `StateCache.updateMarkers` invariant fix (advance `markersFetchedAt` even on empty-to-empty polls — pre-fix made "honest empty" indistinguishable from "never polled"). Caveat: requires Marker List window to be open; auto-open is opt-in via `LOGIC_PRO_MCP_AUTO_OPEN_MARKER_LIST=1` (planned).
+### Recent releases (one line each)
 
-**v3.1.8** (2026-05-06) — Logic Pro 12.x read-path recovery. v3.1.5/3.1.6/3.1.7 all closed Issues #3/#4/#5 via AppleScript-primary reads (`tell front document → tracks/markers/tempo`); 12.x ships a dictionary that does not expose any of those terms. v3.1.8 reads `Alternatives/000/MetaData.plist` for project tempo/timesig/trackCount (per-field merge with cache), hardens the AX walker to refuse Inspector subtree leaks, and removes ~270 LOC of dead AppleScript-primary code. Tier-merge happens at the resource handler (not the channel) so placeholder rows never poison `StateCache`.
+| Version | Date | Headline |
+|---------|------|----------|
+| **v3.4.4** | 2026-05-09 | CI hotfix — `MIDIClientCreate(-50)` smoke-test skip on macos-15-arm64 (sandboxed runner has no CoreMIDI server) |
+| v3.4.3 | 2026-05-09 | CI Coverage step `find`-based path resolution + diagnostic output |
+| v3.4.2 | 2026-05-08 | `ProjectAuditPhaseTests` parallel-execution race fix (`NSLock` + `@Suite(.serialized)`) |
+| v3.4.1 | 2026-05-08 | Boomer P2 sweep — fail-loud `lipo` parsing, audit-phase contract docstring, `ci.yml` awk validation, `uninstall-keycmds.sh` empty-backup guard |
+| **v3.4.0** | 2026-05-08 | Enterprise deferred-blocker closure (8/9): stdio launch parity (RB-2), release-workflow notarization gate (RB-4), install/uninstall non-TTY safety (RB-6), audit-phase split (H-1, **BREAKING**), `goto_marker` target-faithful (H-2, **BREAKING**), docs drift, CI coverage gate re-armed, AXValue force-cast hardening |
+| **v3.3.0** | 2026-05-08 | Enterprise P0 closure: mixer/marker fail-closed (**BREAKING**), `track.duplicate` State-A verified gate (**BREAKING**), signal-cleanup contract (`SIGTERM`/`SIGINT` → coordinated shutdown), `live-e2e-test.py` false-positive expectation removed |
+| v3.2.0 | 2026-05-07 | Marker `position_source` provenance surfaced in resource extras; sub-bar nav accuracy honestly deferred to v3.3 (T0 live spike found Logic 12.2 dialog is a 4-segment `AXSlider`) |
+| v3.1.11 | 2026-05-07 | Logic 12.2 marker parser strict 4-component, 13-locale menu paths, lenient 1–3 component policy removed (Issue #9) |
+| v3.1.6 | 2026-05-04 | `port: "keycmd"` routing for `logic_midi.send_*`, 1-based MIDI channel (**BREAKING**), audited coverage matrix (Issue #1) |
+| v3.1.0 | 2026-04-25 | Honest Contract introduced (resource envelope **BREAKING**) |
 
-**v3.1.1** (2026-04-26) — Honest Contract Extension. v3.1.0 covered 4 ops; v3.1.1 promotes 13 more AX-channel mutating ops (track lifecycle, transport, region, midi.import_file, project.save_as, mixer AC fallback) to the same 3-state envelope, plus unifies `logic://transport/state` under the `{cache_age_sec, fetched_at, data}` envelope. MCU-routed `track.set_automation` and the V-Pot pan State-A enabler are deferred to v3.1.2.
+Per-release detail: [CHANGELOG.md](CHANGELOG.md).
 
-**What changed from v3.0.9**
-- `track.set_instrument` now reads back the loaded patch name and reports `verified:true` only when it matches the request; mismatches return `verified:false` with `reason:"readback_mismatch"`.
-- `track.select` reads back `AXSelectedChildren` with a 6× retry (100ms each, 600ms budget). A read-back that returns a different index returns `verified:false` with `reason:"readback_mismatch"`; a read-back that never surfaces across the retry budget returns `verified:false` with `reason:"retry_exhausted"`. Neither path silently claims a bare success.
-- `mixer.set_volume` / `mixer.set_master_volume` now poll the MCU fader echo into `StateCache` for 500ms (override via `MCU_ECHO_TIMEOUT_MS=250|500|1000`) and return `verified:true` only when a freshly-written echo matches within ±2 LSB (14-bit resolution, tolerance `2/16383`). The freshness stamp prevents an identical-value re-send from being confirmed by a stale cache value left over from the prior call.
-- `mixer.set_pan` returns `verified:false` with `reason:"readback_unavailable"` — V-Pot feedback is relative and not yet plumbed through to `StateCache`; the honest answer beats a silent lie.
-- `transport.set_cycle_range` (AX path) now returns the `verified` field that the osascript fallback already had.
-- `scan_library {mode:"disk"}` no longer poisons the `lastScan` cache that `resolve_path` / `set_instrument` consult; disk-only entries are annotated and do not claim `loadable:true`.
-- State resources (`logic://tracks`, `logic://library/inventory`, …) expose `cache_age_sec` + `fetched_at` so clients can detect staleness.
+### Distribution
 
-**Compatibility**: mutating-op responses are additive (new `verified` / `reason` / `observed` fields). **Breaking** at the resource layer: `logic://tracks` and `logic://library/inventory` now wrap their payload in `{cache_age_sec, fetched_at, data: …}`, and `logic_tracks.scan_library` wraps its result in `{source, root: …}`. v3.0.9 clients that parsed those payloads directly must read `.data` / `.root` to reach the legacy shape. See CHANGELOG §Compatibility for the full migration diff.
-
-`scan_library` continues to enumerate `~/Music/Logic Pro Library.bundle/Patches/Instrument/` (5,000+ leaves on a full factory install). The v3.0.5 wording that "every patch on disk is addressable via `track.set_instrument`" is withdrawn — paths that the Panel-taxonomy mapper cannot route are now surfaced honestly instead of silently pretending to load.
-
-Notarized (Apple-signed) release requires Apple Developer Program membership ($99/year). Until that's set up, the installer operates in ADHOC mode: SHA256 pin + `codesign --verify` still protect against tampering, but macOS Gatekeeper assessment is skipped and the installer strips the quarantine attribute so the binary runs without warnings.
-
-See [SECURITY.md §Release types](SECURITY.md#release-types) for the trust model detail.
+ADHOC release until Apple Developer Program membership lands. SHA256 pin + `codesign --verify` protect against tampering; Gatekeeper assessment is skipped and the installer strips the quarantine attribute. Stable production tags must use the GitHub Actions workflow with notarization secrets; the local `Scripts/release.sh` refuses stable tags without prerelease suffix. See [SECURITY.md §Release types](SECURITY.md#release-types).
 
 ### Testing
 
-- **1110+ unit + integration tests passing** on the v3.4.4 branch (`swift test --no-parallel`). Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker, transport/MIDI/edit/navigation semantic payloads, track.duplicate State-A verification), routing-audit invariants, AX hardening (track headers, marker list window, marker AX walker locale matrix), `LogicProjectFileReader` plist parsing + path validation (10 MB cap, mtime-jitter retry, `..` rejection), tier-merge at the resource layer, signal-cleanup contract for the stdio supervised-restart path, and audit-phase splitting for L1+ project lifecycle ops.
-- **Live E2E** (`Scripts/live-e2e-test.py` or `Scripts/live-e2e-test.sh`): defaults to `.build/release/LogicProMCP`. Protocol/security/validation assertions run everywhere; Logic/CoreMIDI-dependent checks are explicitly skipped unless the host has a running Logic Pro session. Set `LOGIC_PRO_MCP_STRICT_LIVE=1` for release attestation where skipped live checks must fail.
-- Stable production tags require Developer ID signing + notarization. ADHOC artifacts are limited to prerelease/local validation and cannot be published as stable releases by the bundled release automation.
-- **v3.0.3+ AX-native control surface**: primary GUI touchpoints (track selection, plugin Setting popup) prefer Apple AX actions (AXPress, AXShowMenu, AXSelectedChildren) with CGEvent only as a last-resort fallback — reduces fragility under Logic UI updates
-- **v3.0.4 N-column Library navigation**: `track.set_instrument` delegates to the new `LibraryAccessor.selectPath` which clicks every segment in order; the 2-segment legacy caller path still works unchanged.
-- **v3.0.5 filesystem-backed `scan_library`**: `LibraryDiskScanner` enumerates the Logic factory bundle on disk (no AX, no Library Panel clicks) and produces a schema-identical `LibraryRoot` with full coverage. Default mode is `disk`; legacy AX scan is available via `{mode:"ax"}`; a diff report is available via `{mode:"both"}`.
+- **1110+ unit + integration tests** on the v3.4.4 branch — `swift test --no-parallel` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker), routing-audit invariants, AX hardening (track headers, marker list window walker, 13-locale matrix), `LogicProjectFileReader` plist parsing + path validation (10 MB cap, mtime-jitter retry, `..` rejection), tier-merge at the resource layer, `LogicProServer.stop()` signal-cleanup contract, and audit-phase splitting for L1+ project lifecycle ops.
+- **Live E2E** (`Scripts/live-e2e-test.py`) defaults to the release binary. Protocol/security/validation assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a live Logic Pro session is detected. Set `LOGIC_PRO_MCP_STRICT_LIVE=1` for attestation runs where a skipped live check must fail.
+- **CI coverage gate** — `region ≥ 65%`, `line ≥ 72%` (baseline 70.65 / 77.71%, ~5pp slack). Re-armed in v3.4.0 after the v3.1.5 disable.
+- **CoreMIDI smoke tests skip on macos-15-arm64 GitHub runners** (`MIDIClientCreate` returns `-50` in the sandboxed image; production code path coverage on real macOS hosts is unchanged).
 
 ### Known limitations
 
-- **`transport.set_tempo`** currently requires the Logic tempo display to be accessible via AX; it returns an error if the control bar layout hides the BPM field. Workaround: set tempo manually in Logic once before calling MCP tempo operations.
-- **MIDI File import cosmetics**: `record_sequence` regions start at bar 1 and extend to the target bar (padding CC technique). Note timing inside the region is exact; the leading padding is inaudible. If you need a tight region, trim after import via Logic's **Edit → Trim** menu.
+- **`transport.set_tempo`** typed-entry path falls back to slider increment (10-BPM granularity) when Logic's tempo display can't accept text input. Set tempo manually in Logic once before relying on MCP tempo operations for sub-10-BPM precision.
+- **`record_sequence`** regions start at bar 1 and extend to the target bar (padding-CC strategy). Note timing inside the region is exact; the leading padding is inaudible but cosmetic. Trim after import via Logic's **Edit → Trim** menu if a tight region matters.
+- **`MIDIKeyCommands` channel** — Logic 12.2 doesn't accept the legacy `.plist` Key Commands import (the menu item is grayed out). The bundled `keycmd-preset.plist` is staged as a Manual MIDI Learn reference; eight ops are effectively keycmd-only and require a one-time MIDI Learn binding. See [docs/SETUP.md §4](docs/SETUP.md) for the audited coverage matrix.
+- **Marker list resource** (`logic://markers`) returns `[]` honestly when Logic 12.2's Marker List window is closed — Apple removed the `AXRuler` role from the arrange window subtree on 12.2, and user markers now live exclusively in that window's `AXTable`. Auto-open is intentionally not shipped (would change focus without consent); track an opt-in via the issue tracker if you'd like it.
 
 ## License
 
