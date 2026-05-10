@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.5-rc2] — 2026-05-10
+
+**CI gate determinism hotfix for the v3.4.5 release candidate.** `v3.4.5-rc1` closed the strict live E2E blocker, but the published tag exposed a separate CI-only false failure: the workflow still used default `swift test`, so suites that temporarily replace the process-wide `Log.output` singleton could interleave with one another under Swift Testing's parallel scheduler. The project has used `swift test --no-parallel` as the deterministic local and coverage gate since the enterprise review; this release candidate aligns the main CI test step to the same authoritative path instead of treating global-output capture tests as safely parallelizable.
+
+### Fixed
+
+- `.github/workflows/ci.yml` now runs `swift test --no-parallel` for the primary test gate, matching the coverage-test path and documented production-readiness evidence.
+- README, manifest, installer defaults, Formula metadata, and startup-banner tests now point at `v3.4.5-rc2`.
+- `v3.4.5-rc1` remains published but is superseded by this candidate because its GitHub Actions run used the wrong parallel test mode.
+
+### Tests
+
+- `swift test --no-parallel` -> expected deterministic gate for all 1113 tests.
+- `swift test --enable-code-coverage --no-parallel` -> expected coverage gate.
+- `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh` -> strict live attestation command unchanged from rc1.
+
 ## [3.4.5-rc1] — 2026-05-10
 
 **Strict live E2E parent-context closure.** This release candidate closes the last live-launch blocker found in the enterprise production-readiness pass: macOS TCC/CoreMIDI evaluated Python as the responsible process when the E2E harness spawned the MCP server directly, so strict live checks failed even though the release binary itself had Accessibility and Automation grants.

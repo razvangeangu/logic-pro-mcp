@@ -22,7 +22,7 @@ jobs:
         run: swift build -c release
 
       - name: Run tests
-        run: swift test
+        run: swift test --no-parallel
 
       - name: Coverage report
         # H-4 (2026-05-08 enterprise review) closed in v3.4.0: re-armed
@@ -33,7 +33,7 @@ jobs:
         # The step now runs in TWO phases:
         #   1. Generate the report (always succeeds — `||true` on the
         #      coverage-test step lets transient instrumentation flakes
-        #      through; the prior `swift test` step at line 24 is the
+        #      through; the prior `swift test --no-parallel` step is the
         #      authoritative pass/fail signal).
         #   2. Enforce thresholds (this is the actual gate).
         #
