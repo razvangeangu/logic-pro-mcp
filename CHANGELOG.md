@@ -372,22 +372,6 @@ Ticket review by 4 agents (boomer + strategist + tester + guardian):
 - **Tester**: added Korean whole-bar integration regression (G3 both-direction verification)
 - **Guardian**: added TODO/FIXME grep verification step (AC-4.2)
 
-### 11-principle mapping (user directive)
-
-| # | Principle | Application |
-|---|-----------|-------------|
-| 1 | Top 0.1% | 4-agent review × 2 phases (PRD + ticket) + live e2e |
-| 2 | Foundation-quality | Foundation API only, 13-line body, ASCII narrow via `Int(_:String)` |
-| 3 | Zero edge-case escapes | 25 parameterized cases + 3 integration tests |
-| 4 | No over-engineering | NG2/3/4/5/7/8/9/10/11 explicitly scoped; hypothetical cases removed (lenient removed) |
-| 5 | Zero dead code | grep verification + lenient policy removed |
-| 6 | Compact | Parser body 13 lines |
-| 7 | Standard references | Swift API Design Guidelines + swift-testing parameterized |
-| 8 | Junior-readable | Step-by-step inline comments |
-| 9 | Inline comments | All new/modified code |
-| 10 | SOLID/SRP | Pure function, zero side effects |
-| 11 | Compact | 25 parameterized cases → 2 test functions |
-
 ## [3.1.10] — 2026-05-07
 
 **boomer P1-1 hotfix on top of v3.1.9: `goto_marker` was a silent no-op relative to its parameter.** Final BOOMER-6 review caught that `NavigateDispatcher.handle("goto_marker", ...)` resolved the target marker correctly (by name from cache, or by index) and then routed `nav.goto_marker { index: <id> }` to `MIDIKeyCommandsChannel`, which ignores all params and fires fixed CC 38 — Logic's "go to next marker" hotkey. Both index- and name-based goto therefore advanced the marker pointer by one regardless of which marker the caller asked for. The cache lookup did its job; the routing throw the result away.
