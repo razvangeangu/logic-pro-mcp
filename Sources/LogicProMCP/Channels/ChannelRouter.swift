@@ -388,13 +388,14 @@ actor ChannelRouter {
 
         // v3.4.5-rc5 (Issues #10/#11) — wrap the "channels exhausted" fallthrough
         // in a Honest Contract State C envelope so external tooling can branch
-        // on a structured `error: "port_unavailable"` instead of regex-matching
-        // a free-form string. Symmetrical with the bypass-op short-circuit
-        // above. `last_error` carries the original chain detail for debugging;
-        // `operation` lets the harness route to per-op recovery (e.g. prompt
-        // the user to register Mackie Control on a mixer.* exhaustion).
+        // on a structured error code instead of regex-matching a free-form
+        // string. Uses the dedicated `.channelsExhausted` error rather than
+        // `.portUnavailable` (which is reserved for the bypass-op "this
+        // channel's port is unwired" semantic — see Boomer BOOMER-6 / U,
+        // v3.4.5-rc5). `last_error` carries the original chain detail for
+        // debugging; `operation` lets the harness route to per-op recovery.
         return .error(HonestContract.encodeStateC(
-            error: .portUnavailable,
+            error: .channelsExhausted,
             hint: lastError,
             extras: [
                 "operation": operation,

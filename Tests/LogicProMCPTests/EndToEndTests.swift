@@ -225,8 +225,8 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 // These E2E tests pin Shape A — the floor a safety harness sees on a
 // fresh install where Logic isn't running. They prove that the wire is
 // structured JSON (not the legacy "All channels exhausted" free-form
-// string) so harnesses can branch on `error: "port_unavailable"`.
-@Test func testE2EMixerSetVolumeShapeAIsStateCPortUnavailable() async {
+// string) so harnesses can branch on `error: "channels_exhausted"`.
+@Test func testE2EMixerSetVolumeShapeAIsStateCChannelsExhausted() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(
         h, tool: "logic_mixer", command: "set_volume",
@@ -241,15 +241,15 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     }
     #expect(obj["success"] as? Bool == false)
     #expect(
-        obj["error"] as? String == "port_unavailable",
-        "MCU channel unavailable must surface as port_unavailable on the wire"
+        obj["error"] as? String == "channels_exhausted",
+        "MCU chain exhaustion must surface as channels_exhausted on the wire"
     )
     #expect(obj["operation"] as? String == "mixer.set_volume")
     #expect(obj["hint"] != nil, "hint must carry the upstream healthCheck detail")
     #expect(obj["last_error"] != nil)
 }
 
-@Test func testE2EMixerSetPanShapeAIsStateCPortUnavailable() async {
+@Test func testE2EMixerSetPanShapeAIsStateCChannelsExhausted() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(
         h, tool: "logic_mixer", command: "set_pan",
@@ -262,11 +262,16 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         return
     }
     #expect(obj["success"] as? Bool == false)
-    #expect(obj["error"] as? String == "port_unavailable")
+    #expect(obj["error"] as? String == "channels_exhausted")
     #expect(obj["operation"] as? String == "mixer.set_pan")
+    // Tester P2-3 (rc5 review) — all three Shape A tests must validate the
+    // same diagnostic contract: hint + last_error must not be silently
+    // dropped when a new dispatcher is added.
+    #expect(obj["hint"] != nil)
+    #expect(obj["last_error"] != nil)
 }
 
-@Test func testE2EMixerSetMasterVolumeShapeAIsStateCPortUnavailable() async {
+@Test func testE2EMixerSetMasterVolumeShapeAIsStateCChannelsExhausted() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(
         h, tool: "logic_mixer", command: "set_master_volume",
@@ -279,8 +284,10 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         return
     }
     #expect(obj["success"] as? Bool == false)
-    #expect(obj["error"] as? String == "port_unavailable")
+    #expect(obj["error"] as? String == "channels_exhausted")
     #expect(obj["operation"] as? String == "mixer.set_master_volume")
+    #expect(obj["hint"] != nil)
+    #expect(obj["last_error"] != nil)
 }
 
 // Regression guard: the previous wire format leaked the free-form
@@ -298,8 +305,14 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         !text.contains("All channels exhausted"),
         "wire must never emit the legacy free-form exhaustion string"
     )
+    // Tester P2-4 (rc5 review) — JSONSerialization round-trip is the
+    // strongest available wire-shape guard. The previous hasPrefix/hasSuffix
+    // check passed for any string starting with `{` and ending with `}`,
+    // including multiline JSON-ish strings or arrays embedded in text.
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let parsed = try? JSONSerialization.jsonObject(with: Data(trimmed.utf8))
     #expect(
-        text.hasPrefix("{") && text.hasSuffix("}"),
+        parsed is [String: Any],
         "wire must be a JSON object envelope, got: \(text)"
     )
 }

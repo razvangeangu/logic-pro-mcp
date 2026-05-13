@@ -36,15 +36,51 @@ The Honest Contract lets **clients (LLM agents) clearly distinguish between conf
 ```
 - The AX write itself returned a `kAXError` or an explicit failure.
 - Retrying will produce the same state — a different path is required.
-- `error` values: `ax_write_failed`, `element_not_found`, `permission_denied`, `logic_not_running`, etc.
+- `error` values: `ax_write_failed`, `element_not_found`, `permission_denied`, `logic_not_running`, `invalid_params`, `readback_mismatch`, `not_implemented`, `port_unavailable`, `channels_exhausted`.
+- **Terminal codes** (router suppresses fallback to the next channel): `element_not_found`, `invalid_params`, `not_implemented`, `port_unavailable`, `channels_exhausted`. Any of these means "no other channel in the chain can improve on this answer."
+- `port_unavailable` vs `channels_exhausted` (v3.4.5-rc5+, Boomer BOOMER-6 / U):
+  - `port_unavailable` — a specific channel's transport/port is missing (e.g. KeyCmd virtual port not yet published, CoreMIDI device absent). Emitted by a single channel that knows its own port is unwired.
+  - `channels_exhausted` — the router walked the full chain for this operation and every channel reported `healthCheck.unavailable` or its readiness gate failed. Aggregate signal, distinct from any single channel's port state. Extras include `operation`, `hint`, and `last_error` carrying the final downstream message.
+
+## Channel-specific extras (mixer writes — v3.4.5-rc5+)
+
+`mixer.set_volume`, `mixer.set_pan`, and `mixer.set_master_volume` carry three additional diagnostic fields on **every** State A and State B response (purely additive — existing parsers keep working):
+
+```json
+{
+  "success": true, "verified": true | false, "reason": "<…>",
+  "requested": 0.5, "observed": null,
+  "track": 3,
+  "mcu_connected": true,
+  "mcu_registered": true,
+  "mcu_last_feedback_age_ms": 142
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `mcu_connected` (Bool) | `true` once MCU feedback has been observed at least once this session; reset to `false` only when the channel restarts. |
+| `mcu_registered` (Bool) | `true` once the virtual port has received at least one well-formed feedback frame on the LogicProMCP-MCU-Internal port. |
+| `mcu_last_feedback_age_ms` (Int? / null) | Milliseconds since the most recent MCU feedback event. `null` when no feedback has been observed yet. Clamped to 0 to defend against system-clock-jump-induced negative intervals. |
+
+Decision table for harnesses on State B `echo_timeout_<ms>ms`:
+
+| `mcu_connected` | `mcu_last_feedback_age_ms` | Root cause |
+| --- | --- | --- |
+| `false` | `null` | Mackie Control device not registered in Logic Pro (or virtual port unbridged). Setup gap. |
+| `true` | high (e.g. > 5000) | MCU pairing went stale mid-session. |
+| `true` | low (sub-second) | Connection healthy, but this specific fader/V-Pot echo didn't land — points at a Logic-build regression or bank-offset mismatch. |
 
 ## Which operations return the 3-state contract
 
-As of v3.1.0:
+As of v3.1.0 (envelope) + v3.4.5-rc5 (mixer extras):
 - `track.select`
 - `track.set_instrument`
-- `mixer.set_volume`, `mixer.set_pan`, `mixer.set_master_volume`
+- `mixer.set_volume`, `mixer.set_pan`, `mixer.set_master_volume` — plus MCU connection extras
 - `transport.set_cycle_range`
+
+Router-level (v3.4.5-rc5+):
+- Any operation whose channel chain is fully exhausted returns State C `channels_exhausted` instead of a free-form error string.
 
 Planned for future releases:
 - All remaining `track.*`, `mixer.*`, `transport.*` mutating operations.

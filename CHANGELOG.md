@@ -18,7 +18,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
-- `ChannelRouter.route` — when every channel in the chain is exhausted or skipped, the response is now `HonestContract.encodeStateC(error: .portUnavailable, hint: lastError, extras: ["operation": op, "last_error": lastError])`. Symmetrical with the bypass-op short-circuit. The previous free-form error string forced safety harnesses into regex-based root-cause detection.
+- `ChannelRouter.route` — when every channel in the chain is exhausted or skipped, the response is now `HonestContract.encodeStateC(error: .channelsExhausted, hint: lastError, extras: ["operation": op, "last_error": lastError])`. The new `.channelsExhausted` enum case is **semantically distinct from `.portUnavailable`** (Boomer BOOMER-6 / U review fix): `port_unavailable` is scoped to a single channel whose specific port is unwired (e.g. KeyCmd virtual port not yet published), while `channels_exhausted` is the chain-level aggregate signal when no channel in the chain could handle the operation. The previous wrap reused `port_unavailable` for both meanings, which would have caused a harness branching on `error: "port_unavailable"` to mis-diagnose a "Logic not running" exhaustion as a port-wiring problem. The previous free-form error string forced safety harnesses into regex-based root-cause detection.
+- `HonestContract.FailureError` — new `.channelsExhausted` case (raw: `channels_exhausted`) added to `terminalErrorCodes` alongside `.portUnavailable`. Documented in `docs/HONEST-CONTRACT.md`.
+- `MCUChannel.pollFaderEcho` / `pollPanEcho` — TOCTOU fix (Boomer BOOMER-6 / B2 review). The two functions previously read `cache.getChannelStrip(...).volume` and `cache.getFaderUpdatedAt(...)` in two separate actor turns, which left a window where a concurrent MCU feedback event could pair an old value with a new timestamp and false-positive State A on a disconnected transport. Both functions now use the new atomic `StateCache.getFaderEchoSnapshot(strip:)` / `getPanEchoSnapshot(strip:)` helpers that return `(value, updatedAt)` in a single actor turn. Closes the race the `testSetVolumeStateAIncludesMCUDiagnostics_connectedFresh` test was flagging by tolerating either State A or State B.
+- `StateCache` — new atomic snapshot helpers `getFaderEchoSnapshot(strip:) -> (volume: Double?, updatedAt: Date?)` and `getPanEchoSnapshot(strip:) -> (pan: Double?, updatedAt: Date?)`.
+
+### Documentation
+
+- `docs/HONEST-CONTRACT.md` — new "Channel-specific extras" section documenting the `mcu_connected` / `mcu_registered` / `mcu_last_feedback_age_ms` triplet plus the decision table for harnesses on State B `echo_timeout_<ms>ms`. New `channels_exhausted` error code documented in the State C section alongside the `port_unavailable` distinction.
+- `docs/API.md` — common-error table now references the structured `channels_exhausted` envelope instead of the legacy free-form string.
+- `docs/ARCHITECTURE.md` — three diagrams updated (router aggregate, transport routing example, and error propagation block) to reflect the new HC State C envelope.
+- `docs/SETUP.md` — MCU registration warning now references the actual rc5 wire shapes (both `channels_exhausted` and the State B `echo_timeout` shape) so users searching for either error string land on the right page.
 
 ### Honest scope
 

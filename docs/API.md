@@ -560,7 +560,7 @@ Common messages:
 |-----------------|---------|
 | `Unknown {category} command: {name}` | Command not in dispatcher |
 | `Missing '{param}' parameter` | Required param absent |
-| `All channels exhausted for {op}. Last error: ...` | Fallback chain exhausted — see `detail` for final error |
+| HC State C `{ "success": false, "error": "channels_exhausted", "operation": "{op}", "hint": "…", "last_error": "…" }` (rc5+) | Fallback chain exhausted — every channel in the chain was unavailable, manual-validation-required, or returned a non-terminal error. The `hint` / `last_error` extras carry the upstream detail. Pre-rc5 this surfaced as a free-form `"All channels exhausted for {op}. Last error: ..."` string. |
 | `Invalid path: must be absolute and end in .logicx` | Path validation failed |
 | `Confirmation required` | Destructive op without `confirmed: true` |
 | `MCU feedback not detected. Register 'LogicProMCP-MCU-Internal' in Logic Pro > Control Surfaces > Setup` | MCU handshake incomplete — see [SETUP.md §3](SETUP.md#3-register-mcu-control-surface-mandatory-for-mixer-control) |

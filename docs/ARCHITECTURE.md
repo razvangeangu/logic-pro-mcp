@@ -33,7 +33,7 @@ Logic Pro MCP Server is a Swift 6 actor-based system that multiplexes **7 native
 │                       ChannelRouter (actor)                            │
 │   ~90 operation → [ChannelID] priority chain                           │
 │   Skips unavailable / manual_validation_required channels              │
-│   Aggregates errors: "All channels exhausted for {op}. Last: ..."      │
+│   Aggregates errors: HC State C `channels_exhausted` (rc5+)            │
 └───┬──────┬──────┬──────┬──────┬──────┬──────┬─────────────────────────┘
     │      │      │      │      │      │      │
 ┌───▼──┐┌──▼───┐┌─▼───┐┌─▼───┐┌─▼───┐┌─▼───┐┌─▼────────┐
@@ -81,7 +81,7 @@ Legend — `↕` bidirectional, `↑` read, `↓` write.
      a. channel.healthCheck() — skip if unavailable or manual_validation_required
      b. channel.execute(operation, params)
      c. Return first .success; accumulate errors
-6. If all fail: .error("All channels exhausted for transport.play. Last error: ...")
+6. If all fail: HC State C envelope { error: "channels_exhausted", operation: "transport.play", hint, last_error } (rc5+)
 7. Result wrapped in CallTool.Result and returned to Claude
 ```
 
@@ -215,7 +215,14 @@ Channel.execute → ChannelResult
 
 ChannelRouter aggregates:
   if all channels fail:
-    .error("All channels exhausted for {op}. Last error: {msg}")
+    .error(HC State C {
+      success: false,
+      error: "channels_exhausted",     // terminal per terminalErrorCodes
+      operation: "<op>",
+      hint: "<lastError>",
+      last_error: "<lastError>"
+    })
+  // pre-rc5: free-form "All channels exhausted for {op}. Last error: {msg}"
 
 Dispatchers wrap:
   → CallTool.Result with isError flag

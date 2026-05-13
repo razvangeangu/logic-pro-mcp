@@ -53,6 +53,16 @@ enum HonestContract {
         /// published). Terminal — falling back to another channel cannot
         /// recover the missing port. v3.1.6 T1 (PRD Issue#1 R7).
         case portUnavailable
+        /// The router walked the full channel chain for this operation and
+        /// every channel reported `healthCheck.unavailable` (or its readiness
+        /// gate failed). Terminal — the chain itself produced no usable
+        /// candidate. Distinct from `.portUnavailable` (a specific channel's
+        /// port is missing) and `.logicNotRunning` (a single channel's
+        /// process gone): exhaustion is the chain-level aggregate signal.
+        /// v3.4.5-rc5 (Boomer BOOMER-6 / U — fixes semantic overload where
+        /// every router fallthrough was being mis-classified as
+        /// `port_unavailable` regardless of root cause).
+        case channelsExhausted
 
         var rawValue: String {
             switch self {
@@ -64,6 +74,7 @@ enum HonestContract {
             case .readbackMismatch: return "readback_mismatch"
             case .notImplemented: return "not_implemented"
             case .portUnavailable: return "port_unavailable"
+            case .channelsExhausted: return "channels_exhausted"
             }
         }
     }
@@ -143,6 +154,7 @@ enum HonestContract {
         FailureError.invalidParams.rawValue,
         FailureError.notImplemented.rawValue,
         FailureError.portUnavailable.rawValue,
+        FailureError.channelsExhausted.rawValue,
     ]
 
     /// Returns true if the given message is a State-C envelope whose `error`

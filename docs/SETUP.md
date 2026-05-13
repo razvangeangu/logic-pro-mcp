@@ -76,7 +76,7 @@ LogicProMCP --check-permissions
 
 The MCP server controls Logic Pro's mixer via the Mackie Control Universal (MCU) protocol over a virtual MIDI port.
 
-> ⚠️ **MCU registration is the single most failure-prone step** — if you skip it, mixer writes will fail with "All channels exhausted" errors. Follow it exactly.
+> ⚠️ **MCU registration is the single most failure-prone step** — if you skip it, mixer writes will fail with a structured `{ "success": false, "error": "channels_exhausted", "operation": "mixer.set_volume", … }` envelope (or, when MCU has handshaken at least once but echoes never land, State B `{ "success": true, "verified": false, "reason": "echo_timeout_500ms", "mcu_connected": false, … }`). Both paths point to the same fix — finish the registration steps below.
 
 1. Launch **Logic Pro**. The MCP server auto-starts when Claude Code connects.
 2. Menu: **Logic Pro → Control Surfaces → Setup…** (KR: `컨트롤 서피스 → 설정…`)

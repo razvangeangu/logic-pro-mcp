@@ -278,6 +278,29 @@ actor StateCache {
         return cs.pan
     }
 
+    /// v3.4.5-rc5 (Boomer BOOMER-6 / B2 — TOCTOU race fix). Atomic snapshot
+    /// of (volume, faderUpdatedAt) for a strip in a single actor turn.
+    ///
+    /// Background: `pollFaderEcho` previously read the volume and the
+    /// timestamp in two separate `await cache.…` calls. Between those
+    /// awaits a concurrent MCU feedback event could land via
+    /// `updateFader`, pairing an old value from the first read with a new
+    /// timestamp from the second — and a stale value could then pass the
+    /// `writtenAt > sendAt` freshness guard and false-positive State A on
+    /// a disconnected transport. Reading both in one actor turn closes the
+    /// window. Returns `(nil, nil)` when the strip has no cached state.
+    func getFaderEchoSnapshot(strip: Int) -> (volume: Double?, updatedAt: Date?) {
+        return (channelStrips.indices.contains(strip) ? channelStrips[strip].volume : nil,
+                faderUpdatedAt[strip])
+    }
+
+    /// v3.4.5-rc5 (Boomer BOOMER-6 / B2). Pan counterpart to
+    /// `getFaderEchoSnapshot`. Same atomicity rationale.
+    func getPanEchoSnapshot(strip: Int) -> (pan: Double?, updatedAt: Date?) {
+        return (channelStrips.indices.contains(strip) ? channelStrips[strip].pan : nil,
+                panUpdatedAt[strip])
+    }
+
     func updateMCUConnection(_ state: MCUConnectionState) {
         mcuConnection = state
     }

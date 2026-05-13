@@ -92,15 +92,16 @@ import Foundation
     let result = await router.route(operation: "mixer.set_volume", params: ["index": "0", "volume": "0.5"])
     // No channels registered → error but no crash. v3.4.5-rc5 (Issues
     // #10/#11): the router now wraps chain exhaustion in a HC State C
-    // `port_unavailable` envelope instead of the legacy free-form
-    // "All channels exhausted" string so harnesses can branch on a
-    // stable error code.
+    // `channels_exhausted` envelope (semantically distinct from
+    // `port_unavailable` per Boomer BOOMER-6 / U) instead of the legacy
+    // free-form "All channels exhausted" string so harnesses can branch
+    // on a stable error code.
     #expect(!result.isSuccess)
     if let obj = try? JSONSerialization.jsonObject(
         with: Data(result.message.utf8)
     ) as? [String: Any] {
         #expect(obj["success"] as? Bool == false)
-        #expect(obj["error"] as? String == "port_unavailable")
+        #expect(obj["error"] as? String == "channels_exhausted")
         #expect(obj["operation"] as? String == "mixer.set_volume")
     } else {
         // Unknown-op path (e.g. typo) still falls through as a free-form

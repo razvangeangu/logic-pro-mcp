@@ -64,33 +64,33 @@ actor MCUChannel: Channel {
         let pollIntervalNs: UInt64 = 25_000_000
         let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
         while Date() < deadline {
-            if let observed = await cache.getChannelStrip(at: strip)?.volume,
-               abs(observed - target) <= tolerance {
+            // v3.4.5-rc5 (Boomer BOOMER-6 / B2): read volume + timestamp
+            // in a single actor turn. Two separate awaits left a TOCTOU
+            // window where a concurrent `updateFader` could pair an old
+            // value with a new timestamp and false-positive State A.
+            let snapshot = await cache.getFaderEchoSnapshot(strip: strip)
+            if let observed = snapshot.volume, abs(observed - target) <= tolerance {
                 if let sendAt = requireFreshAfter {
-                    // Fresh only if the parser wrote a post-send timestamp.
-                    if let writtenAt = await cache.getFaderUpdatedAt(strip: strip),
-                       writtenAt > sendAt {
+                    if let writtenAt = snapshot.updatedAt, writtenAt > sendAt {
                         return observed
                     }
-                    // Value matches but it's stale — keep polling until
-                    // either a new echo arrives or the deadline elapses.
+                    // Value matches but stale — keep polling until either a
+                    // new echo arrives or the deadline elapses.
                 } else {
                     return observed
                 }
             }
             try? await Task.sleep(nanoseconds: pollIntervalNs)
         }
-        // Deadline hit. Report the most-recent fresh observation (or nil if
-        // nothing fresh arrived). When freshness isn't required, fall back
-        // to the raw cached value for backward compat.
+        // Deadline hit. Re-snapshot atomically before deciding.
+        let finalSnap = await cache.getFaderEchoSnapshot(strip: strip)
         if let sendAt = requireFreshAfter {
-            if let writtenAt = await cache.getFaderUpdatedAt(strip: strip),
-               writtenAt > sendAt {
-                return await cache.getChannelStrip(at: strip)?.volume
+            if let writtenAt = finalSnap.updatedAt, writtenAt > sendAt {
+                return finalSnap.volume
             }
             return nil
         }
-        return await cache.getChannelStrip(at: strip)?.volume
+        return finalSnap.volume
     }
 
     /// v3.1.3 (#1) — poll StateCache for a matching V-Pot pan echo. Mirrors
@@ -121,32 +121,29 @@ actor MCUChannel: Channel {
         let pollIntervalNs: UInt64 = 25_000_000
         let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
         while Date() < deadline {
-            if let observed = await cache.getPanValue(strip: strip),
-               abs(observed - target) <= tolerance {
+            // v3.4.5-rc5 (Boomer BOOMER-6 / B2): atomic (pan, updatedAt)
+            // snapshot — same TOCTOU rationale as pollFaderEcho.
+            let snapshot = await cache.getPanEchoSnapshot(strip: strip)
+            if let observed = snapshot.pan, abs(observed - target) <= tolerance {
                 if let sendAt = requireFreshAfter {
-                    if let writtenAt = await cache.getPanUpdatedAt(strip: strip),
-                       writtenAt > sendAt {
+                    if let writtenAt = snapshot.updatedAt, writtenAt > sendAt {
                         return observed
                     }
-                    // Stale — keep polling until a fresh write arrives or
-                    // the deadline elapses.
                 } else {
                     return observed
                 }
             }
             try? await Task.sleep(nanoseconds: pollIntervalNs)
         }
-        // Deadline hit: surface the most-recent fresh observation when
-        // freshness is required, else fall back to the raw cached value
-        // (parity with pollFaderEcho's backward-compat behaviour).
+        // Deadline hit: re-snapshot atomically before deciding.
+        let finalSnap = await cache.getPanEchoSnapshot(strip: strip)
         if let sendAt = requireFreshAfter {
-            if let writtenAt = await cache.getPanUpdatedAt(strip: strip),
-               writtenAt > sendAt {
-                return await cache.getPanValue(strip: strip)
+            if let writtenAt = finalSnap.updatedAt, writtenAt > sendAt {
+                return finalSnap.pan
             }
             return nil
         }
-        return await cache.getPanValue(strip: strip)
+        return finalSnap.pan
     }
 
     func start() async throws {
