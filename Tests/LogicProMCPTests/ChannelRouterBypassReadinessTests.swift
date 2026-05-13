@@ -166,19 +166,23 @@ private func parseEnvelope(_ msg: String) -> [String: Any]? {
     #expect(ops.isEmpty)
 
     // The router must surface portUnavailable when the routing chain is
-    // active and the bypass op meets the available:false condition. Since
-    // the chain is not yet registered for keycmd ops in T4, we instead
-    // assert the gate handles a non-keycmd available:false channel
-    // *without* leaking a portUnavailable envelope (negative control).
+    // active and the bypass op meets the available:false condition. The
+    // earlier T4 negative-control on non-bypass ops asserted a free-form
+    // error string, but v3.4.5-rc5 (Issues #10/#11) wraps the chain
+    // exhaustion path in HC State C `port_unavailable` too for wire
+    // consistency. The remaining differentiator is the `operation` extra:
+    // bypass routes echo `midi.send_cc.keycmd`, non-bypass routes echo
+    // their own operation name (e.g. `edit.undo`) and add `last_error`.
     let nonBypassResult = await router.route(operation: "edit.undo")
     if case .error(let msg) = nonBypassResult {
         let nonBypassParsed = parseEnvelope(msg)
-        // For non-bypass ops, the message is the legacy "All channels
-        // exhausted" string (or similar) — definitely NOT a State C
-        // portUnavailable envelope.
+        // Both paths surface port_unavailable now; the discriminator is
+        // the operation extra plus `last_error` on the chain path.
+        #expect(nonBypassParsed?["error"] as? String == "port_unavailable")
+        #expect(nonBypassParsed?["operation"] as? String == "edit.undo")
         #expect(
-            nonBypassParsed?["error"] as? String != "port_unavailable",
-            "non-bypass op must not surface port_unavailable envelope"
+            nonBypassParsed?["last_error"] != nil,
+            "chain-exhaustion path must carry last_error for diagnostics"
         )
     }
 }

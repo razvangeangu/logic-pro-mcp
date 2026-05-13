@@ -206,6 +206,104 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(!e2eText(r).isEmpty)
 }
 
+// v3.4.5-rc5 (Issues #10/#11) — wire-level E2E. The full
+// `tools/call` → MixerDispatcher → ChannelRouter → MCUChannel path has
+// two production-visible shapes when MCU is the only channel for a
+// mixer write:
+//
+//   Shape A: MCU healthCheck.unavailable (Logic not running, or virtual
+//   port unbridged + zero feedback ever received). Router never enters
+//   MCUChannel.execute, so it short-circuits with HC State C
+//   `port_unavailable`. The triplet diagnostic isn't appended here
+//   because no MCU read happened — adding it would be dishonest.
+//
+//   Shape B: MCU healthCheck.healthy (some feedback observed at least
+//   once) → MCUChannel.execute runs, polls for echo, returns State A or
+//   State B with the connection diagnostic triplet. Covered by
+//   MCUMixerWriteDiagnosticsTests at the unit level.
+//
+// These E2E tests pin Shape A — the floor a safety harness sees on a
+// fresh install where Logic isn't running. They prove that the wire is
+// structured JSON (not the legacy "All channels exhausted" free-form
+// string) so harnesses can branch on `error: "port_unavailable"`.
+@Test func testE2EMixerSetVolumeShapeAIsStateCPortUnavailable() async {
+    let h = await makeE2EHandlers()
+    let r = await e2eCall(
+        h, tool: "logic_mixer", command: "set_volume",
+        params: ["track": .string("0"), "volume": .string("0.5")]
+    )
+    let text = e2eText(r)
+    #expect(!text.isEmpty)
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8))
+            as? [String: Any] else {
+        Issue.record("set_volume Shape A must be structured HC State C JSON, got: \(text)")
+        return
+    }
+    #expect(obj["success"] as? Bool == false)
+    #expect(
+        obj["error"] as? String == "port_unavailable",
+        "MCU channel unavailable must surface as port_unavailable on the wire"
+    )
+    #expect(obj["operation"] as? String == "mixer.set_volume")
+    #expect(obj["hint"] != nil, "hint must carry the upstream healthCheck detail")
+    #expect(obj["last_error"] != nil)
+}
+
+@Test func testE2EMixerSetPanShapeAIsStateCPortUnavailable() async {
+    let h = await makeE2EHandlers()
+    let r = await e2eCall(
+        h, tool: "logic_mixer", command: "set_pan",
+        params: ["track": .string("0"), "value": .string("-0.3")]
+    )
+    let text = e2eText(r)
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8))
+            as? [String: Any] else {
+        Issue.record("set_pan Shape A must be structured HC JSON, got: \(text)")
+        return
+    }
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "port_unavailable")
+    #expect(obj["operation"] as? String == "mixer.set_pan")
+}
+
+@Test func testE2EMixerSetMasterVolumeShapeAIsStateCPortUnavailable() async {
+    let h = await makeE2EHandlers()
+    let r = await e2eCall(
+        h, tool: "logic_mixer", command: "set_master_volume",
+        params: ["volume": .string("0.4")]
+    )
+    let text = e2eText(r)
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8))
+            as? [String: Any] else {
+        Issue.record("set_master_volume Shape A must be structured HC JSON, got: \(text)")
+        return
+    }
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "port_unavailable")
+    #expect(obj["operation"] as? String == "mixer.set_master_volume")
+}
+
+// Regression guard: the previous wire format leaked the free-form
+// "All channels exhausted" string, which forced safety harnesses into
+// regex-based root-cause detection. This test pins the structured HC
+// envelope so any future refactor that reverts the wrap fails loudly.
+@Test func testE2EMixerExhaustionNeverEmitsFreeFormString() async {
+    let h = await makeE2EHandlers()
+    let r = await e2eCall(
+        h, tool: "logic_mixer", command: "set_volume",
+        params: ["track": .string("0"), "volume": .string("0.5")]
+    )
+    let text = e2eText(r)
+    #expect(
+        !text.contains("All channels exhausted"),
+        "wire must never emit the legacy free-form exhaustion string"
+    )
+    #expect(
+        text.hasPrefix("{") && text.hasSuffix("}"),
+        "wire must be a JSON object envelope, got: \(text)"
+    )
+}
+
 @Test func testE2EMixerSetPanDispatches() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_mixer", command: "set_pan", params: ["index": .string("0"), "value": .string("0.3")])

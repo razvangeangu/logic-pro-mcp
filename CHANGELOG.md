@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+**Diagnostic surface improvements for mixer write wire contract — Issues #10 and #11 from thomas-doesburg (v3.4.5-rc4 + Logic Pro 12.2).** Both reports describe the same wire shape (`success:true, verified:false, reason:echo_timeout_500ms` on `mixer.set_volume` / `set_pan`; `logic://mixer` not reflecting the written value) but the envelope didn't carry enough context to distinguish three distinct root causes (Mackie Control unregistered / connection went stale / specific echo lost) without a second round-trip. The Honest Contract response now embeds an MCU connection snapshot inline on every mixer write, and `ChannelRouter` wraps chain exhaustion in a structured `port_unavailable` State C envelope so harnesses no longer regex-match a free-form "All channels exhausted" string.
+
+### Added
+
+- `MCUChannel.mcuConnectionExtras()` — snapshot helper that injects `mcu_connected` (Bool), `mcu_registered` (Bool), and `mcu_last_feedback_age_ms` (Int? — `null` when no feedback has been observed; clamped to 0 to defend against system-clock-jump-induced negative intervals per Boomer BOOMER-6 / E review) into the HC envelope extras of every `set_volume`, `set_pan`, and `set_master_volume` response. State A and State B both carry the triplet so provenance logs remain uniform.
+- `MCUMixerWriteDiagnosticsTests` — 6 unit tests covering the disconnected default (no feedback ever), registered-and-fresh State A, registered-but-stale State B, the clock-jump clamp, and parity across all three mixer write paths.
+- `EndToEndTests` mixer additions — 4 wire-level E2E tests that walk `tools/call` → `MixerDispatcher` → `ChannelRouter` → MCU and pin the structured `port_unavailable` State C envelope as the production wire shape when MCU is unavailable, plus a regression guard against the legacy "All channels exhausted" free-form string ever leaking back.
+
+### Changed
+
+- `ChannelRouter.route` — when every channel in the chain is exhausted or skipped, the response is now `HonestContract.encodeStateC(error: .portUnavailable, hint: lastError, extras: ["operation": op, "last_error": lastError])`. Symmetrical with the bypass-op short-circuit. The previous free-form error string forced safety harnesses into regex-based root-cause detection.
+
+### Honest scope
+
+This change does not fix the underlying echo-timeout if one exists on Logic Pro 12.2 — it makes the failure mode legible so the reporter (and we) can tell setup gaps from code regressions before the T0 live spike on 12.2 happens. The most likely root cause (Mackie Control device not registered in `Logic Pro → Control Surfaces → Setup`) shows up as `mcu_connected: false, mcu_last_feedback_age_ms: null` on the new wire surface and falls out of the harness's first-pass diagnostic without any extra probe.
+
+### Tests
+
+- `swift test` → 1124 / 1124 PASS locally (10 new tests added for this change).
+- `swift build` → clean.
+- Boomer (Codex gpt-5.5 xhigh) BOOMER-6 review → ALL PASS with 2 P2s addressed inline: clock-jump clamp landed in `mcuConnectionExtras`, and the additive wire-shape change is called out for harness operators in this CHANGELOG entry.
+
+### Wire-shape note for harness operators
+
+The three new top-level keys (`mcu_connected`, `mcu_registered`, `mcu_last_feedback_age_ms`) are purely additive on existing envelopes. Existing parsers that read `success` / `verified` / `reason` / `requested` / `observed` / `track` continue to work unchanged. If your harness applies strict-schema validation against the HC envelope, allow these three keys before upgrading. The chain-exhaustion path on `ChannelRouter` is now a structured State C envelope (`error: "port_unavailable"`, `operation`, `last_error`, `hint`) instead of the free-form error string it returned previously.
+
 ## [3.4.5-rc4] — 2026-05-10
 
 **Installer metadata parser hotfix for the final v3.4.5 release candidate.** `v3.4.5-rc3` passed local and GitHub CI, but a post-release installer smoke test caught a real same-origin install failure: `RELEASE-METADATA.json` is emitted as one-line JSON and the installer's `awk -F'"'` parser selected the `version` field instead of `team_id`, producing `expected: v3.4.5-rc3` during code-signature verification. The parser now matches the `team_id` key explicitly, and the Setup guide's pinned installer URLs are current.

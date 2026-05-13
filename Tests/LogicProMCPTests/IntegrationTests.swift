@@ -90,9 +90,24 @@ import Foundation
     // All channels should handle unavailability gracefully
     let router = ChannelRouter()
     let result = await router.route(operation: "mixer.set_volume", params: ["index": "0", "volume": "0.5"])
-    // No channels registered → error but no crash
+    // No channels registered → error but no crash. v3.4.5-rc5 (Issues
+    // #10/#11): the router now wraps chain exhaustion in a HC State C
+    // `port_unavailable` envelope instead of the legacy free-form
+    // "All channels exhausted" string so harnesses can branch on a
+    // stable error code.
     #expect(!result.isSuccess)
-    #expect(result.message.contains("exhausted") || result.message.contains("Unknown"))
+    if let obj = try? JSONSerialization.jsonObject(
+        with: Data(result.message.utf8)
+    ) as? [String: Any] {
+        #expect(obj["success"] as? Bool == false)
+        #expect(obj["error"] as? String == "port_unavailable")
+        #expect(obj["operation"] as? String == "mixer.set_volume")
+    } else {
+        // Unknown-op path (e.g. typo) still falls through as a free-form
+        // error from `routeUnknownOp`. Accept either shape so this test
+        // remains a soft gate on "no crash" semantics.
+        #expect(result.message.contains("Unknown"))
+    }
 }
 
 @Test func testKeyCommandFallbackToCGEvent() async {
