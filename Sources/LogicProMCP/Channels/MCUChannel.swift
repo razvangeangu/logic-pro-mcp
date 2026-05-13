@@ -257,6 +257,41 @@ actor MCUChannel: Channel {
         await transport.send(bytes)
     }
 
+    // MARK: - Diagnostic snapshot
+
+    /// v3.4.5-rc5 (Issues #10 / #11) — snapshot the MCU connection state into
+    /// HC envelope extras. Surfacing `mcu_connected` / `mcu_registered` /
+    /// `mcu_last_feedback_age_ms` on every mixer write lets a safety harness
+    /// distinguish the three echo-timeout root causes without an extra
+    /// round-trip to `logic://mixer` or `logic_system`:
+    ///   - `mcu_connected:false` → control surface not registered or the
+    ///     virtual port is unbridged on this Logic install.
+    ///   - `mcu_connected:true, mcu_last_feedback_age_ms` large → connection
+    ///     went stale mid-session (Logic dropped MCU).
+    ///   - `mcu_connected:true, age small, verified:false` → this specific
+    ///     fader/V-Pot echo didn't land (Logic 12.2 regression, bank-offset
+    ///     mismatch, etc.) — the only shape that points at a code issue.
+    /// Returned as plain `[String: Any]` so callers merge it into existing
+    /// extras dictionaries.
+    private func mcuConnectionExtras() async -> [String: Any] {
+        let conn = await cache.getMCUConnection()
+        let ageMs: Any
+        if let last = conn.lastFeedbackAt {
+            // Clamp to 0 — a backwards system-clock adjustment (NTP slew,
+            // user time change) between `last` and now would otherwise emit
+            // a negative age on the wire. Boomer P2 (BOOMER-6 / E): future
+            // timestamps and clock jumps must not leak through extras.
+            ageMs = max(0, Int(Date().timeIntervalSince(last) * 1000.0))
+        } else {
+            ageMs = NSNull()
+        }
+        return [
+            "mcu_connected": conn.isConnected,
+            "mcu_registered": conn.registeredAsDevice,
+            "mcu_last_feedback_age_ms": ageMs,
+        ]
+    }
+
     // MARK: - Command Implementations
 
     private func executeSetVolume(_ params: [String: String]) async -> ChannelResult {
@@ -281,11 +316,14 @@ actor MCUChannel: Channel {
                 strip: track, target: value, timeoutMs: timeoutMs,
                 requireFreshAfter: sendAt
             )
-            let extras: [String: Any] = [
+            // v3.4.5-rc5 (Issues #10/#11) — merge MCU connection diagnostics
+            // *after* the poll window so age reflects the write-time snapshot.
+            var extras: [String: Any] = [
                 "requested": value,
                 "observed": observed ?? NSNull(),
                 "track": track
             ]
+            for (k, v) in await self.mcuConnectionExtras() { extras[k] = v }
             if let observed, abs(observed - value) <= 2.0 / 16383.0 {
                 return .success(HonestContract.encodeStateA(extras: extras))
             }
@@ -319,11 +357,12 @@ actor MCUChannel: Channel {
                 strip: track, target: value, timeoutMs: timeoutMs,
                 requireFreshAfter: sendAt
             )
-            let extras: [String: Any] = [
+            var extras: [String: Any] = [
                 "requested": value,
                 "observed": observed ?? NSNull(),
                 "track": track
             ]
+            for (k, v) in await self.mcuConnectionExtras() { extras[k] = v }
             if let observed, abs(observed - value) <= 0.1 {
                 return .success(HonestContract.encodeStateA(extras: extras))
             }
@@ -348,11 +387,12 @@ actor MCUChannel: Channel {
             strip: 8, target: value, timeoutMs: timeoutMs,
             requireFreshAfter: sendAt
         )
-        let extras: [String: Any] = [
+        var extras: [String: Any] = [
             "requested": value,
             "observed": observed ?? NSNull(),
             "track": "master"
         ]
+        for (k, v) in await mcuConnectionExtras() { extras[k] = v }
         if let observed, abs(observed - value) <= 2.0 / 16383.0 {
             return .success(HonestContract.encodeStateA(extras: extras))
         }
