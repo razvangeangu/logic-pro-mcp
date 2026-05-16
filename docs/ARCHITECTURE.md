@@ -224,6 +224,14 @@ ChannelRouter aggregates:
     })
   // pre-rc5: free-form "All channels exhausted for {op}. Last error: {msg}"
 
+// MCU write envelopes (mixer.set_volume / set_pan / set_master_volume) additionally
+// carry an MCU connection snapshot (rc5+): mcu_connected, mcu_registered,
+// mcu_last_feedback_age_ms. NOTE: this snapshot is a *diagnostic* read of cache
+// state, not a verification read — the v3.1.2 cache-poll rule ("never use cache
+// reads to verify AX mutations") still applies. Verification is gated on the
+// MCU echo poll (pollFaderEcho / pollPanEcho) using a send-time freshness stamp
+// + atomic snapshot helpers added in rc5 for TOCTOU safety.
+
 Dispatchers wrap:
   → CallTool.Result with isError flag
 

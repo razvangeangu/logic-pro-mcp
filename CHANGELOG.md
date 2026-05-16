@@ -8,13 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-**Diagnostic surface improvements for mixer write wire contract — Issues #10 and #11 from thomas-doesburg (v3.4.5-rc4 + Logic Pro 12.2).** Both reports describe the same wire shape (`success:true, verified:false, reason:echo_timeout_500ms` on `mixer.set_volume` / `set_pan`; `logic://mixer` not reflecting the written value) but the envelope didn't carry enough context to distinguish three distinct root causes (Mackie Control unregistered / connection went stale / specific echo lost) without a second round-trip. The Honest Contract response now embeds an MCU connection snapshot inline on every mixer write, and `ChannelRouter` wraps chain exhaustion in a structured `port_unavailable` State C envelope so harnesses no longer regex-match a free-form "All channels exhausted" string.
+**Diagnostic surface improvements for mixer write wire contract — Issues #10 and #11 from thomas-doesburg (v3.4.5-rc4 + Logic Pro 12.2).** Both reports describe the same wire shape (`success:true, verified:false, reason:echo_timeout_500ms` on `mixer.set_volume` / `set_pan`; `logic://mixer` not reflecting the written value) but the envelope didn't carry enough context to distinguish three distinct root causes (Mackie Control unregistered / connection went stale / specific echo lost) without a second round-trip. The Honest Contract response now embeds an MCU connection snapshot inline on every mixer write, and `ChannelRouter` wraps chain exhaustion in a structured `channels_exhausted` State C envelope so harnesses no longer regex-match a free-form "All channels exhausted" string.
 
 ### Added
 
 - `MCUChannel.mcuConnectionExtras()` — snapshot helper that injects `mcu_connected` (Bool), `mcu_registered` (Bool), and `mcu_last_feedback_age_ms` (Int? — `null` when no feedback has been observed; clamped to 0 to defend against system-clock-jump-induced negative intervals per Boomer BOOMER-6 / E review) into the HC envelope extras of every `set_volume`, `set_pan`, and `set_master_volume` response. State A and State B both carry the triplet so provenance logs remain uniform.
 - `MCUMixerWriteDiagnosticsTests` — 6 unit tests covering the disconnected default (no feedback ever), registered-and-fresh State A, registered-but-stale State B, the clock-jump clamp, and parity across all three mixer write paths.
-- `EndToEndTests` mixer additions — 4 wire-level E2E tests that walk `tools/call` → `MixerDispatcher` → `ChannelRouter` → MCU and pin the structured `port_unavailable` State C envelope as the production wire shape when MCU is unavailable, plus a regression guard against the legacy "All channels exhausted" free-form string ever leaking back.
+- `EndToEndTests` mixer additions — 4 wire-level E2E tests that walk `tools/call` → `MixerDispatcher` → `ChannelRouter` → MCU and pin the structured `channels_exhausted` State C envelope as the production wire shape when MCU is unavailable, plus a regression guard against the legacy "All channels exhausted" free-form string ever leaking back.
 
 ### Changed
 
@@ -42,7 +42,7 @@ This change does not fix the underlying echo-timeout if one exists on Logic Pro 
 
 ### Wire-shape note for harness operators
 
-The three new top-level keys (`mcu_connected`, `mcu_registered`, `mcu_last_feedback_age_ms`) are purely additive on existing envelopes. Existing parsers that read `success` / `verified` / `reason` / `requested` / `observed` / `track` continue to work unchanged. If your harness applies strict-schema validation against the HC envelope, allow these three keys before upgrading. The chain-exhaustion path on `ChannelRouter` is now a structured State C envelope (`error: "port_unavailable"`, `operation`, `last_error`, `hint`) instead of the free-form error string it returned previously.
+The three new top-level keys (`mcu_connected`, `mcu_registered`, `mcu_last_feedback_age_ms`) are purely additive on existing envelopes. Existing parsers that read `success` / `verified` / `reason` / `requested` / `observed` / `track` continue to work unchanged. If your harness applies strict-schema validation against the HC envelope, allow these three keys before upgrading. The chain-exhaustion path on `ChannelRouter` is now a structured State C envelope (`error: "channels_exhausted"`, `operation`, `last_error`, `hint`) instead of the free-form error string it returned previously. The new `channels_exhausted` code is **semantically distinct** from the pre-existing `port_unavailable` code: `port_unavailable` is scoped to bypass-op channels reporting their own specific port is unwired (e.g. KeyCmd virtual port not yet published), while `channels_exhausted` is the chain-level aggregate when every channel in the operation's chain reported `healthCheck.unavailable` or failed its readiness gate. Harnesses branching on `error` should treat them as two distinct root-cause families.
 
 ## [3.4.5-rc4] — 2026-05-10
 

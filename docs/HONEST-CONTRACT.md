@@ -44,6 +44,8 @@ The Honest Contract lets **clients (LLM agents) clearly distinguish between conf
 
 ## Channel-specific extras (mixer writes — v3.4.5-rc5+)
 
+The diagnostic triplet below is **MCU-specific**: it is emitted only by the three mixer fader/V-Pot write paths that depend on MCU echo for verification. Other mutating operations (`track.select`, `track.set_instrument`, `track.set_mute`, automation mode buttons, transport commands, etc.) do **not** carry these fields because their channels either do not depend on MCU feedback at all, or fall through the `readback_unavailable` State B branch where MCU connection state isn't part of the actionable diagnostic.
+
 `mixer.set_volume`, `mixer.set_pan`, and `mixer.set_master_volume` carry three additional diagnostic fields on **every** State A and State B response (purely additive — existing parsers keep working):
 
 ```json

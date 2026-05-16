@@ -223,6 +223,48 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     }
 }
 
+// v3.4.5-rc5 (tester P2 followup) — the *reporter's actual case*: MCU has
+// handshaken at least once (isConnected:true, registered:true) and the
+// feedback age is fresh (<500ms), but the specific fader pitch-bend echo
+// for this write didn't arrive within the poll window. This is the wire
+// shape the corrective comment on Issues #10/#11 promised the harness
+// would see, so a deterministic unit test is the right contract gate.
+@Test func testSetVolumeStateBSurfacesRegisteredAndFreshButEchoMissing() async {
+    let transport = MockMCUTransport()
+    let cache = StateCache()
+    // Pre-seed the connection as healthy + recently-seen, but do NOT
+    // dispatch a matching pitch-bend echo. pollFaderEcho will time out
+    // and the envelope must surface State B with the diagnostic triplet
+    // showing connected:true + small (sub-second) age — pointing the
+    // harness at root cause #3 (Logic-side echo regression / bank
+    // offset) rather than #1 (Mackie Control unregistered).
+    var conn = await cache.getMCUConnection()
+    conn.isConnected = true
+    conn.registeredAsDevice = true
+    conn.portName = "LogicProMCP-MCU-Internal"
+    conn.lastFeedbackAt = Date()
+    await cache.updateMCUConnection(conn)
+
+    let channel = MCUChannel(transport: transport, cache: cache)
+    let result = await channel.execute(
+        operation: "mixer.set_volume",
+        params: ["index": "0", "volume": "0.5"]
+    )
+    #expect(result.isSuccess)
+    let obj = decodeMixerJSON(result.message)
+    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
+    // The smoking-gun shape from the reporter's environment:
+    #expect(obj["mcu_connected"] as? Bool == true)
+    #expect(obj["mcu_registered"] as? Bool == true)
+    if let ageMs = obj["mcu_last_feedback_age_ms"] as? Int {
+        // Sub-second: the 500ms poll plus a few ms of test overhead.
+        #expect(ageMs < 2000, "fresh feedback case must report sub-2s age, got \(ageMs)")
+    } else {
+        Issue.record("fresh-feedback case must produce an Int age, not null")
+    }
+}
+
 @Test func testSetVolumeStateBSurfacesConnectionRegisteredButStale() async {
     // Emulate: MCU was connected (e.g. a Device Response arrived during
     // startup) but no further feedback during the write window. This is
