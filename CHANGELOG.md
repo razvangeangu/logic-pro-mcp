@@ -8,7 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-No unreleased changes after v3.4.5-rc5.
+### Documentation
+
+- Added detailed `v3.4.5-rc5` release notes with post-release asset, installer, MCP stdio, and strict live E2E verification evidence.
 
 ## [3.4.5-rc5] — 2026-06-05
 
