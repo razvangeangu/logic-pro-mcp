@@ -1,4 +1,4 @@
-# Live Verification Runbook — v3.4.5-rc5 Prep
+# Live Verification Runbook — v3.4.5-rc5
 
 Date: 2026-06-05 KST
 Scope: current main hardening, release binary, live Logic Pro 12.2 session, and final MIDI-only v4 composition artifact.
@@ -58,4 +58,4 @@ Artifact constraints:
 
 - AX viewport reads can report fewer visible tracks than the saved package contains. For artifact completion, package-level `ProjectData` verification is authoritative.
 - `project/info.trackCount` is metadata, not a visible-row counter. Use `logic://tracks` for live visible rows and `logic://project/info` for provenance-tagged project metadata.
-- Public install docs still point at `v3.4.5-rc4` until rc5 is tagged and released.
+- Public install docs point at `v3.4.5-rc5`.

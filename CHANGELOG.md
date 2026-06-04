@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+No unreleased changes after v3.4.5-rc5.
+
+## [3.4.5-rc5] — 2026-06-05
+
 **2026-06-05 production-readiness hardening and MIDI-only composition E2E.** This branch now carries the final v4 composition workflow and the server-side readback fixes needed to make repeated Logic Pro automation runs honest: `project.save_as` verifies the `.logicx` package on disk, `logic_midi.import_file` is an explicit dispatcher command with hardened path validation and new-track readback, `logic://project/info` uses live transport tempo/sample-rate without inflating track counts from visible AX rows, and Logic process detection has an on-screen-window fallback for hosts where `ps`/`pgrep` are restricted.
 
 ### 2026-06-05 Added

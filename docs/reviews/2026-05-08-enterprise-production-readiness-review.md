@@ -7,7 +7,7 @@ Decision: `GO` for deterministic CI, prerelease validation, and the validated st
 
 ## 2026-06-05 Addendum
 
-Current main has an additional rc5-prep hardening pass beyond this May review. Fresh local evidence: `swift test` passed `1143/1143`, `swift build -c release` passed, the v4 MIDI import runner compiled, and a live `.build/release/LogicProMCP` session against Logic Pro 12.2 reported all 7 channels ready. The live pass verified `transport.set_tempo` at `127 BPM`, `project.save_as` with `.logicx` package mtime readback, and the final MIDI-only v4 acid composition package with 11 expected MIDI region names and no packaged audio files.
+Current main has an additional v3.4.5-rc5 hardening pass beyond this May review. Fresh local evidence: `swift test` passed `1143/1143`, `swift build -c release` passed, the v4 MIDI import runner compiled, and a live `.build/release/LogicProMCP` session against Logic Pro 12.2 reported all 7 channels ready. The live pass verified `transport.set_tempo` at `127 BPM`, `project.save_as` with `.logicx` package mtime readback, and the final MIDI-only v4 acid composition package with 11 expected MIDI region names and no packaged audio files.
 
 This addendum does not change the broad-release caveats below: notarized clean-host installer evidence, Homebrew tap-context install/test, alternate MCP parent-app TCC validation, and multi-version Logic matrix coverage are still required before claiming a stable commercial release.
 

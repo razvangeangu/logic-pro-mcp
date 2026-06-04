@@ -13,7 +13,7 @@
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
   <img src="https://img.shields.io/badge/tests-1143_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.4.5--rc5--prep-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.4.5--rc5-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -81,7 +81,7 @@ The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew 
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc4/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc5/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=ADHOC \
@@ -92,7 +92,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc4/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc5/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
@@ -155,7 +155,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 ## Status
 
-**Published prerelease: v3.4.5-rc4 (2026-05-10). Current main hardening: v3.4.5-rc5-prep (validated 2026-06-05 KST).** Local production-readiness now has `swift test` at `1143/1143` passing, `swift build -c release` passing, Python syntax validation for the v4 import runner passing, and a live Logic Pro 12.2 MCP session confirming all 7 channels ready, `transport.set_tempo` at `127 BPM`, `project.save_as` with package mtime readback, and an 11-part MIDI-only acid composition saved under `artifacts/acid-track-composition-v4/acid-track-composed-midi-v4.logicx`. `v3.4.5-rc4` remains the public installer target until the next release is cut; the rc5-prep work in this branch is an unreleased hardening set.
+**Current prerelease: v3.4.5-rc5 (2026-06-05 KST).** Local production-readiness has `swift test` at `1143/1143` passing, `swift build -c release` passing, Python syntax validation for the v4 import runner passing, and a live Logic Pro 12.2 MCP session confirming all 7 channels ready, `transport.set_tempo` at `127 BPM`, `project.save_as` with package mtime readback, and an 11-part MIDI-only acid composition saved under `artifacts/acid-track-composition-v4/acid-track-composed-midi-v4.logicx`.
 
 ### Active contracts (the things callers most care about)
 
@@ -172,7 +172,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 | Version | Date | Headline |
 |---------|------|----------|
-| main / rc5-prep | 2026-06-05 | Save/readback and MIDI import hardening, live `project/info` tier merge, ProcessUtils Logic detection fallback, Library duplicate-name column targeting, and final v4 MIDI-only composition E2E |
+| **v3.4.5-rc5** | 2026-06-05 | Save/readback and MIDI import hardening, live `project/info` tier merge, ProcessUtils Logic detection fallback, Library duplicate-name column targeting, and final v4 MIDI-only composition E2E |
 | **v3.4.5-rc4** | 2026-05-10 | Installer metadata parser fix — same-origin install path now reads `team_id` from one-line `RELEASE-METADATA.json` |
 | v3.4.5-rc3 | 2026-05-10 | CI green, but superseded by rc4 because same-origin installer metadata parsing selected `version` instead of `team_id` |
 | v3.4.5-rc2 | 2026-05-10 | CI gate aligned to deterministic `swift test --no-parallel`; superseded by rc3 due transport packet-sink recorder race in CI |
