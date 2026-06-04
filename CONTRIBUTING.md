@@ -15,7 +15,7 @@ git clone https://github.com/MongLong0214/logic-pro-mcp.git
 cd logic-pro-mcp
 
 swift build              # debug
-swift test               # 690 unit + integration tests
+swift test               # 1143 unit + integration tests on current main
 swift build -c release   # release binary at .build/release/LogicProMCP
 ```
 
@@ -31,7 +31,9 @@ swift test --filter <testName>
 With Logic Pro launched and the MCP server registered, run the live test script:
 
 ```bash
-python3 Scripts/live-e2e-test.py
+Scripts/live-e2e-test.py
+# Strict live release-candidate attestation:
+LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh
 ```
 
 This exercises every tool against a real Logic Pro instance. Requires:
@@ -52,9 +54,10 @@ Sources/LogicProMCP/
 ├── Server/            LogicProServer + ServerConfig
 └── Utilities/         DestructivePolicy, AppleScriptSafety, Logger, PermissionChecker
 
-Tests/LogicProMCPTests/  690 tests across ~40 files
+Tests/LogicProMCPTests/  1143 tests across the Swift test target
 Scripts/                 install / uninstall / live E2E / Scripter JS
-docs/                    SETUP, API, ARCHITECTURE, TROUBLESHOOTING, MAINTAINERS
+docs/                    SETUP, API, ARCHITECTURE, TROUBLESHOOTING, MAINTAINERS, live verification notes
+artifacts/               generated local artifacts; only final v4 MIDI-only package is allowed in git
 ```
 
 ## Channel Priority
@@ -76,11 +79,12 @@ Register the operation in `ChannelRouter.v2RoutingTable` as an ordered list; the
 ## Pull Request Checklist
 
 - [ ] `swift build` clean
-- [ ] `swift test` green (all 690 tests)
+- [ ] `swift test` green (all 1143 tests on current main)
 - [ ] New behavior covered by at least one unit test
 - [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`
 - [ ] New dependency → justification in PR description
 - [ ] Security-sensitive change → update `SECURITY.md`
+- [ ] Logic-facing write/readback change → update `docs/API.md`, `docs/TROUBLESHOOTING.md`, and the current `docs/live-verify-*.md`
 
 ## Security Reports
 

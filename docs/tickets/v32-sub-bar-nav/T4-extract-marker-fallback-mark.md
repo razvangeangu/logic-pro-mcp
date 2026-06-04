@@ -1,5 +1,7 @@
 # T4 — `extractMarkerPosition` Both Caller Fallback Sites `.fallback` Marking
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Status**: Todo
 **Size**: S
 **Depends on**: T3

@@ -111,6 +111,9 @@ After any release, exercise these against live Logic Pro 12:
 6. `logic_project.open` (with `confirmed: true`)
 7. `logic_navigate.goto_bar` / `.goto_marker` by name
 8. `logic_system.health` — recheck after operations
+9. `logic_project.save_as` (with `confirmed: true`) — require HC `verified:true`, `observed`, and `observed_mtime`
+10. `logic_midi.import_file` — import a staged `/tmp/LogicProMCP/*.mid` and require a new live AX track before the next import
+11. `logic://project/info` — confirm live transport tempo/sample-rate provenance and saved metadata fallback behave as documented
 
 Evidence to capture for a release:
 
@@ -118,6 +121,8 @@ Evidence to capture for a release:
 - `LogicProMCP --check-permissions` output
 - `LogicProMCP --list-approvals` output
 - `logic_system.health` JSON payload
+- `swift test` and `swift build -c release` output
+- For composition artifacts, a `ProjectData` or package-level check proving expected MIDI regions exist and no unintended audio files were packaged
 
 ## Destructive Operation Policy
 

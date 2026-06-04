@@ -7,7 +7,8 @@ import Testing
 // Tier 1: cache (live AX, source "ax_live" or "cache")
 // Tier 2: LogicProjectFileReader (source "project_file" + last_saved_age_sec)
 // Tier 3: defaults (source "default")
-// Critical: file values NEVER mix into ProjectInfo when cache is fresh.
+// Critical: live cache values win when present; project file values only fill
+// fields the live cache has not observed.
 
 private func makeFileReaderRuntime(
     tempo: Double? = 80,
@@ -81,6 +82,43 @@ func cacheLive_filePresent_cachePreferred_sourceAxLive() async throws {
     #expect(data["tempo"] as? Double == 95, "cache wins; got \(String(describing: data["tempo"]))")
     #expect(data["timeSignature"] as? String == "3/4")
     #expect(envelope["source"] as? String == "ax_live")
+}
+
+@Test
+func cacheProjectNameOnly_usesLiveTransportButDoesNotPromoteVisibleTrackRowsToProjectTrackCount() async throws {
+    let cache = StateCache()
+
+    var liveProject = ProjectInfo()
+    liveProject.name = "Untitled Live"
+    liveProject.lastUpdated = Date()
+    await cache.updateProject(liveProject)
+
+    var transport = TransportState()
+    transport.tempo = 127
+    transport.sampleRate = 48_000
+    transport.lastUpdated = Date()
+    await cache.updateTransport(transport)
+
+    await cache.updateTracks((0..<11).map {
+        TrackState(id: $0, name: "Track \($0 + 1)", type: .softwareInstrument)
+    })
+
+    let bundle = ensureFixtureBundle(at: FileManager.default.temporaryDirectory
+        .appendingPathComponent("LiveSiblingCacheBundle.logicx", isDirectory: true))
+    let runtime = makeFileReaderRuntime(tempo: 120, trackCount: 0, bundlePath: bundle)
+
+    let result = try await ResourceHandlers.read(
+        uri: "logic://project/info", cache: cache, router: ChannelRouter(), fileReader: runtime
+    )
+    let envelope = try parseEnvelope(result)
+    guard let data = envelope["data"] as? [String: Any] else {
+        Issue.record("data missing"); return
+    }
+    #expect(data["tempo"] as? Double == 127)
+    #expect(data["sampleRate"] as? Int == 48_000)
+    #expect(data["trackCount"] as? Int == 0)
+    #expect(envelope["source"] as? String == "ax_live")
+    #expect(envelope["last_saved_age_sec"] == nil)
 }
 
 @Test

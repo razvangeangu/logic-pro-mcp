@@ -50,6 +50,7 @@ import Testing
     #expect(HonestContract.FailureError.notImplemented.rawValue == "not_implemented")
     #expect(HonestContract.FailureError.permissionDenied.rawValue == "permission_denied")
     #expect(HonestContract.FailureError.logicNotRunning.rawValue == "logic_not_running")
+    #expect(HonestContract.FailureError.readbackUnavailable.rawValue == "readback_unavailable")
     #expect(HonestContract.FailureError.readbackMismatch.rawValue == "readback_mismatch")
 
     // Existing terminal codes still present.

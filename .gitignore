@@ -20,3 +20,9 @@ AGENTS.md
 Resources/*-inventory.json
 Resources/*-inventory-*.json
 .claude/
+
+# Generated composition attempts and captured media are local artifacts.
+# Only the final MIDI-only v4 package is allowed back into the repo.
+artifacts/*
+!artifacts/acid-track-composition-v4/
+!artifacts/acid-track-composition-v4/**

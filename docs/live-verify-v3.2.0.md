@@ -1,5 +1,7 @@
 # Live Verification Runbook — v3.2.0 (Marker Provenance, NG10 Deferred)
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Verification timing**: Immediately before v3.2.0 release + permanent T0 spike record.
 **Scope**: Marker `position_source` provenance + `goto_marker` uncertainty surfacing.
 **Honest Deferred**: NG10 (sub-bar navigation accuracy) — Logic 12.2 position dialog uses a 4-segment AXSlider structure; the v3.2.0 approach failed. Requires deep analysis of raw slider value mapping in v3.3.

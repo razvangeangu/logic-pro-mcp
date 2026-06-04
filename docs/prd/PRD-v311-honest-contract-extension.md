@@ -1,5 +1,7 @@
 # PRD — Logic Pro MCP v3.1.1 "Honest Contract" Extension + GUI-Click Elimination
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Status**: Draft v0.2 (post-strategist REVISE)
 **Author**: Isaac (via Claude orchestrator)
 **Date**: 2026-04-25

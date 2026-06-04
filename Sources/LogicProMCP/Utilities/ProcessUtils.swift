@@ -16,10 +16,14 @@ enum ProcessUtils {
                 ProcessUtils.logicProApp()?.processIdentifier
             },
             fallbackLogicProPID: {
-                ProcessUtils.logicProPIDViaProcessList() ?? ProcessUtils.logicProPIDViaSystemEvents()
+                ProcessUtils.logicProPIDViaVisibleWindow()
+                    ?? ProcessUtils.logicProPIDViaProcessList()
+                    ?? ProcessUtils.logicProPIDViaSystemEvents()
             },
             logicProRunning: {
-                ProcessUtils.logicProApp() != nil || ProcessUtils.logicProPIDViaProcessList() != nil
+                ProcessUtils.logicProApp() != nil
+                    || ProcessUtils.logicProPIDViaVisibleWindow() != nil
+                    || ProcessUtils.logicProPIDViaProcessList() != nil
             },
             activateLogicPro: {
                 guard let app = ProcessUtils.logicProApp() else { return false }
@@ -118,7 +122,7 @@ enum ProcessUtils {
             return false
         }
         return windowList.contains { info in
-            guard let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t,
+            guard let ownerPID = pidValue(from: info[kCGWindowOwnerPID as String]),
                   ownerPID == pid,
                   let bounds = info[kCGWindowBounds as String] as? [String: Any],
                   let width = (bounds["Width"] as? NSNumber)?.doubleValue,
@@ -195,6 +199,52 @@ enum ProcessUtils {
         return nil
     }
 
+    static func logicProPID(fromWindowList windowList: [[String: Any]]) -> pid_t? {
+        for info in windowList {
+            guard let ownerName = info[kCGWindowOwnerName as String] as? String,
+                  ownerName == ServerConfig.logicProProcessName,
+                  let ownerPID = pidValue(from: info[kCGWindowOwnerPID as String]),
+                  ownerPID > 0 else {
+                continue
+            }
+
+            if let bounds = info[kCGWindowBounds as String] as? [String: Any],
+               let width = (bounds["Width"] as? NSNumber)?.doubleValue,
+               let height = (bounds["Height"] as? NSNumber)?.doubleValue {
+                if width > 0, height > 0 {
+                    return ownerPID
+                }
+            } else {
+                return ownerPID
+            }
+        }
+
+        return nil
+    }
+
+    private static func pidValue(from value: Any?) -> pid_t? {
+        if let pid = value as? pid_t {
+            return pid
+        }
+        if let number = value as? NSNumber {
+            return pid_t(number.int32Value)
+        }
+        if let int = value as? Int {
+            return pid_t(int)
+        }
+        return nil
+    }
+
+    private static func logicProPIDViaVisibleWindow() -> pid_t? {
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return nil
+        }
+        return logicProPID(fromWindowList: windowList)
+    }
+
     private static func logicProPIDViaProcessList() -> pid_t? {
         let now = Date()
         pidCacheLock.lock()
@@ -205,12 +255,20 @@ enum ProcessUtils {
         }
         pidCacheLock.unlock()
 
-        let output = runProcessAndCaptureStdout(
+        let psOutput = runProcessAndCaptureStdout(
             executablePath: "/bin/ps",
             arguments: ["-axo", "pid=,comm="],
             timeout: subprocessTimeout
-        ) ?? ""
-        let pid = parseLogicProPID(fromProcessList: output)
+        )
+        let pgrepOutput = psOutput.flatMap(parseLogicProPID(fromProcessList:)) == nil
+            ? runProcessAndCaptureStdout(
+                executablePath: "/usr/bin/pgrep",
+                arguments: ["-fl", ServerConfig.logicProProcessName],
+                timeout: subprocessTimeout
+            )
+            : nil
+        let pid = psOutput.flatMap(parseLogicProPID(fromProcessList:))
+            ?? pgrepOutput.flatMap(parseLogicProPID(fromProcessList:))
 
         pidCacheLock.lock()
         pidProcessListCache = TimedPIDCache(value: pid, expiresAt: now.addingTimeInterval(pidCacheTTL))

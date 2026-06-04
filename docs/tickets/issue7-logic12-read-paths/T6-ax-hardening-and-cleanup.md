@@ -1,5 +1,7 @@
 # T6: AX hardening (tracks + markers) + delete dead AppleScript-primary helpers
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **PRD Ref**: PRD-issue7-logic12-read-paths > US-3, AC-2.3, NG4 (revised)
 **Priority**: P0 (Blocker)
 **Size**: M (2-3h)

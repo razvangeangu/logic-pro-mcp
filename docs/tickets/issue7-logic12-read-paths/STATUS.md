@@ -1,5 +1,7 @@
 # Pipeline Status: Issue #7 Logic 12.x Read-Path Recovery
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **PRD**: docs/prd/PRD-issue7-logic12-read-paths.md (v0.2 Approved)
 **Size**: L
 **Current Phase**: 3 (Tickets generated; Phase 4 review next)

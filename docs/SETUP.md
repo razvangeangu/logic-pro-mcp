@@ -257,6 +257,22 @@ Expected — all 7 channels `ready`:
 
 If any channel is `manual_validation_required`, return to step 4 or 5 and complete the approval.
 
+### 6.1 Production-readiness smoke checks
+
+For release-candidate validation, run a release build and then exercise one readback-sensitive write in each risky family:
+
+```bash
+swift test
+swift build -c release
+```
+
+In a live Logic Pro 12.2 project, verify:
+
+- `logic_transport set_tempo` returns an Honest Contract response with `verified:true` or a hard State C error; do not proceed on unverified fallback output.
+- `logic_midi import_file` uses a real `.mid` under `/tmp/LogicProMCP/` and waits for `verified:true` before the next import.
+- `logic_project save_as` returns `verified:true` and includes `observed` / `observed_mtime` for the `.logicx` package.
+- `logic://project/info` reports live/cache/project-file/default provenance honestly; visible track rows are not a whole-project track-count substitute.
+
 ---
 
 ## Uninstall

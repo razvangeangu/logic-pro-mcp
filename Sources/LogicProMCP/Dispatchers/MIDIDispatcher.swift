@@ -4,7 +4,7 @@ import MCP
 struct MIDIDispatcher {
     static let tool = commandTool(
         name: "logic_midi",
-        description: "MIDI operations in Logic Pro. Commands: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, play_sequence, create_virtual_port, step_input, mmc_play, mmc_stop, mmc_record, mmc_locate. Params: send_note/send_chord -> MIDI note payloads; send_cc/program_change/pitch_bend/aftertouch -> controller payloads; send_sysex -> { bytes: [Int] } or { data: String }; play_sequence -> { notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" } (≤256 events, tight server-side timing); mmc_locate -> { bar: Int } or { time: \"HH:MM:SS:FF\" }; create_virtual_port -> { name: String }. The 7 send-style ops (send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, play_sequence) accept an optional { port: \"midi\"|\"keycmd\" } selector — default \"midi\" routes to the CoreMIDI virtual port; \"keycmd\" routes to the MIDIKeyCommands KeyCmd virtual port (requires one-time MIDI Learn in Logic). Channel is 1-based (1..16). All other ops reject `port` with invalid_params.",
+        description: "MIDI operations in Logic Pro. Commands: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, play_sequence, import_file, create_virtual_port, step_input, mmc_play, mmc_stop, mmc_record, mmc_locate. Params: send_note/send_chord -> MIDI note payloads; send_cc/program_change/pitch_bend/aftertouch -> controller payloads; send_sysex -> { bytes: [Int] } or { data: String }; play_sequence -> { notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" } (≤256 events, tight server-side timing); import_file -> { path: \"/tmp/LogicProMCP/name.mid\" } and wait for verified:true before issuing the next import; mmc_locate -> { bar: Int } or { time: \"HH:MM:SS:FF\" }; create_virtual_port -> { name: String }. The 7 send-style ops (send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, play_sequence) accept an optional { port: \"midi\"|\"keycmd\" } selector — default \"midi\" routes to the CoreMIDI virtual port; \"keycmd\" routes to the MIDIKeyCommands KeyCmd virtual port (requires one-time MIDI Learn in Logic). Channel is 1-based (1..16). All other ops reject `port` with invalid_params.",
         commandDescription: "MIDI command to execute"
     )
 
@@ -132,6 +132,17 @@ struct MIDIDispatcher {
             }
             return await routedTextResult(router, operation: "midi.send_sysex", params: ["data": data])
 
+        case "import_file":
+            if let reject = rejectIfPortPresent(params, command: command) {
+                return reject
+            }
+            guard params["path"] != nil else {
+                return invalidParamsResult(hint: "import_file requires explicit 'path'")
+            }
+            return await routedTextResult(router, operation: "midi.import_file", params: [
+                "path": stringParam(params, "path"),
+            ])
+
         case "create_virtual_port":
             if let reject = rejectIfPortPresent(params, command: command) {
                 return reject
@@ -195,7 +206,7 @@ struct MIDIDispatcher {
 
         default:
             return toolTextResult(
-                "Unknown MIDI command: \(command). Available: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, create_virtual_port, step_input, mmc_play, mmc_stop, mmc_record, mmc_locate",
+                "Unknown MIDI command: \(command). Available: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, play_sequence, import_file, create_virtual_port, step_input, mmc_play, mmc_stop, mmc_record, mmc_locate",
                 isError: true
             )
         }

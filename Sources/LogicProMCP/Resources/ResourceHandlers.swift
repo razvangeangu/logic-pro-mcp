@@ -306,10 +306,12 @@ extension ResourceHandlers {
     ) async throws -> ReadResource.Result {
         let cached = await cache.getProject()
         let projectFetchedAt = await cache.getProjectFetchedAt()
+        let cachedTransport = await cache.getTransport()
         // Cache is "fresh" if either (a) the poller has timestamped a write,
         // or (b) ProjectInfo's own lastUpdated is non-default. Either signal
         // means downstream consumers wrote real data.
         let cacheFresh = projectFetchedAt > .distantPast || cached.lastUpdated > .distantPast
+        let transportFresh = cachedTransport.lastUpdated > .distantPast
 
         // Per-field merge (boomer P0): the existing AX `defaultGetProjectInfo`
         // populates ONLY `name` + `lastUpdated`; tempo / timeSignature /
@@ -326,26 +328,32 @@ extension ResourceHandlers {
         var info = cacheFresh ? cached : ProjectInfo()
 
         var fileContributed = false
-        var cacheContributedNonDefault = false
+        var cacheContributedLive = false
 
         // tempo
         if cacheFresh && cached.tempo != 120.0 {
-            cacheContributedNonDefault = true
+            cacheContributedLive = true
+        } else if transportFresh {
+            info.tempo = cachedTransport.tempo
+            cacheContributedLive = true
         } else if let tempo = metadata?.tempo {
             info.tempo = tempo
             fileContributed = true
         }
+        if transportFresh {
+            info.sampleRate = cachedTransport.sampleRate
+        }
         // timeSignature
         if cacheFresh && cached.timeSignature != "4/4" {
-            cacheContributedNonDefault = true
+            cacheContributedLive = true
         } else if let tsig = metadata?.timeSignatureString {
             info.timeSignature = tsig
             fileContributed = true
         }
         // trackCount
         if cacheFresh && cached.trackCount != 0 {
-            cacheContributedNonDefault = true
-        } else if let count = metadata?.trackCount {
+            cacheContributedLive = true
+        } else if let count = metadata?.trackCount, count > 0 {
             info.trackCount = count
             fileContributed = true
         }
@@ -357,11 +365,15 @@ extension ResourceHandlers {
 
         var source: String
         var lastSavedAgeSec: Double?
-        if !cacheFresh && !fileContributed {
+        if !cacheFresh && !fileContributed && !cacheContributedLive {
             source = "default"
-        } else if cacheContributedNonDefault {
+        } else if cacheContributedLive {
             // Cache supplied at least one real value — promote to ax_live/cache.
-            let referenceDate = cached.lastUpdated > .distantPast ? cached.lastUpdated : projectFetchedAt
+            let referenceDate = [
+                cached.lastUpdated,
+                projectFetchedAt,
+                cachedTransport.lastUpdated
+            ].filter { $0 > .distantPast }.max() ?? .distantPast
             let age = Date().timeIntervalSince(referenceDate)
             source = age < 5 ? "ax_live" : "cache"
         } else if fileContributed {

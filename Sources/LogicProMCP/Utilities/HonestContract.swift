@@ -42,6 +42,7 @@ enum HonestContract {
         case permissionDenied
         case logicNotRunning
         case invalidParams
+        case readbackUnavailable
         case readbackMismatch
         /// Operation explicitly not implemented via this channel / build of
         /// Logic. Distinct from `.elementNotFound` (target absent) and
@@ -71,6 +72,7 @@ enum HonestContract {
             case .permissionDenied: return "permission_denied"
             case .logicNotRunning: return "logic_not_running"
             case .invalidParams: return "invalid_params"
+            case .readbackUnavailable: return "readback_unavailable"
             case .readbackMismatch: return "readback_mismatch"
             case .notImplemented: return "not_implemented"
             case .portUnavailable: return "port_unavailable"
@@ -154,6 +156,7 @@ enum HonestContract {
         FailureError.invalidParams.rawValue,
         FailureError.notImplemented.rawValue,
         FailureError.portUnavailable.rawValue,
+        FailureError.readbackUnavailable.rawValue,
         FailureError.channelsExhausted.rawValue,
     ]
 

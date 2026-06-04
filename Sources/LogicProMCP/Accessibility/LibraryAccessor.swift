@@ -614,12 +614,12 @@ enum LibraryAccessor {
         let texts = AXHelpers.findAllDescendants(
             of: browser, role: kAXStaticTextRole, maxDepth: 6, runtime: runtime.ax
         )
-        let matches = texts.compactMap { t -> (text: String, element: AXUIElement)? in
-            guard let value: String = AXHelpers.getAttribute(t, kAXValueAttribute, runtime: runtime.ax)
-            else { return nil }
-            return (value, t)
-        }
-        guard let targetEl = matches.first(where: { $0.text == name })?.element else { return false }
+        guard let targetEl = textElement(
+            named: name,
+            in: texts,
+            prefer: .leftmost,
+            runtime: runtime.ax
+        ) else { return false }
         // v3.0.3 — AX-native selection (same pattern as selectPreset). AXList
         // parent's AXSelectedChildren attribute commits the category switch
         // and AXPress fires the column expand. Works regardless of viewport.
@@ -658,11 +658,6 @@ enum LibraryAccessor {
         let texts = AXHelpers.findAllDescendants(
             of: browser, role: kAXStaticTextRole, maxDepth: 6, runtime: runtime.ax
         )
-        let matches = texts.compactMap { t -> (text: String, element: AXUIElement)? in
-            guard let value: String = AXHelpers.getAttribute(t, kAXValueAttribute, runtime: runtime.ax)
-            else { return nil }
-            return (value, t)
-        }
         // v3.0.3 breakthrough — no click, no coordinates, no scroll guesses.
         // Pure AX API two-step:
         //   1. Set AXSelectedChildren on the parent AXList to include the
@@ -675,7 +670,12 @@ enum LibraryAccessor {
         // Works on rows that are scrolled far below the viewport (verified
         // live — TR-909 at logical y=3541 on a 1325px screen loaded cleanly).
         // No CGEvent, so screen geometry / multi-monitor setups don't matter.
-        guard let targetEl = matches.first(where: { $0.text == name })?.element else { return false }
+        guard let targetEl = textElement(
+            named: name,
+            in: texts,
+            prefer: .rightmost,
+            runtime: runtime.ax
+        ) else { return false }
         guard let parent = AXHelpers.getAttribute(
             targetEl, kAXParentAttribute, runtime: runtime.ax
         ) as AXUIElement? else {
@@ -691,6 +691,35 @@ enum LibraryAccessor {
         let pressResult = AXUIElementPerformAction(targetEl, kAXPressAction as CFString)
         Thread.sleep(forTimeInterval: 0.30)   // let Logic swap the plugin chain
         return pressResult == .success
+    }
+
+    private enum ColumnPreference {
+        case leftmost
+        case rightmost
+    }
+
+    /// Pick a Library row by visible column. Logic's Library can show duplicate
+    /// names in multiple columns, such as top-level "Bass" and
+    /// Synthesizer/Bass. Category clicks should target the left column; preset
+    /// and folder clicks should target the right-most active column.
+    private static func textElement(
+        named name: String,
+        in texts: [AXUIElement],
+        prefer: ColumnPreference,
+        runtime: AXHelpers.Runtime
+    ) -> AXUIElement? {
+        let matches = texts.compactMap { t -> (element: AXUIElement, x: CGFloat)? in
+            guard let value: String = AXHelpers.getAttribute(t, kAXValueAttribute, runtime: runtime),
+                  value == name
+            else { return nil }
+            return (t, position(of: t, runtime: runtime)?.x ?? 0)
+        }
+        switch prefer {
+        case .leftmost:
+            return matches.min { $0.x < $1.x }?.element
+        case .rightmost:
+            return matches.max { $0.x < $1.x }?.element
+        }
     }
 
     /// Convenience: set category then preset with a short delay for Logic to

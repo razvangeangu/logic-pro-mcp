@@ -1,0 +1,90 @@
+[
+  {
+    "name": "v4_909_kick",
+    "patch": "Electronic Drums/Roland TR-909",
+    "role": "909 four-on-floor kick with end-of-section doubles.",
+    "note_count": 188,
+    "midi_path": "/tmp/LogicProMCP/v4_909_kick.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_909_kick.mid"
+  },
+  {
+    "name": "v4_909_clap_snare",
+    "patch": "Electronic Drums/Roland TR-909",
+    "role": "909 clap/snare backbeat and bar-end fills.",
+    "note_count": 160,
+    "midi_path": "/tmp/LogicProMCP/v4_909_clap_snare.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_909_clap_snare.mid"
+  },
+  {
+    "name": "v4_909_hats",
+    "patch": "Electronic Drums/Modern 909",
+    "role": "Offbeat open hats, closed-hat sixteenth ticks, final drive.",
+    "note_count": 504,
+    "midi_path": "/tmp/LogicProMCP/v4_909_hats.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_909_hats.mid"
+  },
+  {
+    "name": "v4_house_percussion",
+    "patch": "Electronic Drums/Hacienda",
+    "role": "Additional tom/cowbell/perc movement and fills.",
+    "note_count": 176,
+    "midi_path": "/tmp/LogicProMCP/v4_house_percussion.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_house_percussion.mid"
+  },
+  {
+    "name": "v4_acid_main_303",
+    "patch": "Synthesizer/Bass/Acid Etched Bass",
+    "role": "Primary TB-303-style acid line in A minor.",
+    "note_count": 616,
+    "midi_path": "/tmp/LogicProMCP/v4_acid_main_303.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_acid_main_303.mid"
+  },
+  {
+    "name": "v4_acid_answer_303",
+    "patch": "Synthesizer/Bass/Acid Wash Bass",
+    "role": "Higher resonant answer acid line, enters after intro.",
+    "note_count": 184,
+    "midi_path": "/tmp/LogicProMCP/v4_acid_answer_303.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_acid_answer_303.mid"
+  },
+  {
+    "name": "v4_sub_pump",
+    "patch": "Synthesizer/Bass/Deep Sub Bass",
+    "role": "Longer low root pulses to support the kick.",
+    "note_count": 72,
+    "midi_path": "/tmp/LogicProMCP/v4_sub_pump.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_sub_pump.mid"
+  },
+  {
+    "name": "v4_rave_chord_stabs",
+    "patch": "Synthesizer/Lead/Classic Rave Chord",
+    "role": "Warehouse chord stabs and offbeat harmonic accents.",
+    "note_count": 400,
+    "midi_path": "/tmp/LogicProMCP/v4_rave_chord_stabs.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_rave_chord_stabs.mid"
+  },
+  {
+    "name": "v4_metallic_lead",
+    "patch": "Synthesizer/Lead/Chicago Chords",
+    "role": "Metallic syncopated lead hits in the second half.",
+    "note_count": 104,
+    "midi_path": "/tmp/LogicProMCP/v4_metallic_lead.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_metallic_lead.mid"
+  },
+  {
+    "name": "v4_vocal_like_synth",
+    "patch": "Synthesizer/Sound Effects/Trill Riser",
+    "role": "Short synth phrases standing in for vocal/noise gestures without audio.",
+    "note_count": 36,
+    "midi_path": "/tmp/LogicProMCP/v4_vocal_like_synth.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_vocal_like_synth.mid"
+  },
+  {
+    "name": "v4_noise_transitions",
+    "patch": "Synthesizer/Sound Effects/Zippy Build-Up",
+    "role": "Noise-rise MIDI gestures at section boundaries.",
+    "note_count": 56,
+    "midi_path": "/tmp/LogicProMCP/v4_noise_transitions.mid",
+    "artifact_midi_path": "/Users/isaac/projects/logic-pro-mcp/artifacts/acid-track-composition-v4/midi/v4_noise_transitions.mid"
+  }
+]

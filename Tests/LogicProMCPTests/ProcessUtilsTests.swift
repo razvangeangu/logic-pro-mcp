@@ -1,4 +1,5 @@
 import Darwin
+import CoreGraphics
 import Foundation
 import Testing
 @testable import LogicProMCP
@@ -95,6 +96,35 @@ private func makeBundleURL(version: String) throws -> URL {
     """
 
     #expect(ProcessUtils.parseLogicProPID(fromProcessList: output) == 63416)
+}
+
+@Test func testProcessUtilsParsesLogicProPIDFromPgrepOutput() {
+    let output = """
+    7174 /Applications/Logic Pro.app/Contents/MacOS/Logic Pro
+    23187 /Applications/Logic Pro.app/Contents/PlugIns/LogicProThumbnailExtension.appex/Contents/MacOS/LogicProThumbnailExtension
+    50950 osascript -e tell application "System Events" to get unix id of first application process whose name is "Logic Pro"
+    """
+
+    #expect(ProcessUtils.parseLogicProPID(fromProcessList: output) == 7174)
+}
+
+@Test func testProcessUtilsParsesLogicProPIDFromWindowList() {
+    let output: [[String: Any]] = [
+        [
+            kCGWindowOwnerName as String: "Finder",
+            kCGWindowOwnerPID as String: NSNumber(value: 101),
+        ],
+        [
+            kCGWindowOwnerName as String: "Logic Pro",
+            kCGWindowOwnerPID as String: NSNumber(value: 7174),
+            kCGWindowBounds as String: [
+                "Width": NSNumber(value: 1600),
+                "Height": NSNumber(value: 900),
+            ],
+        ],
+    ]
+
+    #expect(ProcessUtils.logicProPID(fromWindowList: output) == 7174)
 }
 
 @Test func testProcessUtilsIgnoresUnrelatedProcessListRows() {

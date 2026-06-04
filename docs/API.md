@@ -39,7 +39,7 @@ All tool invocations use:
 | `logic://tracks` | `TrackState[]` JSON | Cache (MCU + AX) |
 | `logic://mixer` | `{ mcu_connected, registered, strips }` | Cache |
 | `logic://markers` | `MarkerState[]` JSON | Cache (AX poll, every 5 cycles) — see [Marker semantics](#marker-semantics) |
-| `logic://project/info` | `ProjectInfo` JSON wrapped in cache envelope (v3.1.8+) — see [Tempo semantics](#tempo-semantics-projectinfo-vs-transportstate) | Tier-merge: cache → MetaData.plist → defaults (3s AX poll) |
+| `logic://project/info` | `ProjectInfo` JSON wrapped in cache envelope (v3.1.8+) — see [Tempo semantics](#tempo-semantics-projectinfo-vs-transportstate) | Tier-merge: live transport/cache → MetaData.plist → defaults (3s AX poll) |
 | `logic://midi/ports` | `{ sources, destinations }` | CoreMIDI live query |
 | `logic://mcu/state` | `{ connection, display }` — MCU handshake + LCD state | Cache |
 | `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`). All candidates must sit under the path allowlist (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` (colon-separated, additive). |
@@ -184,7 +184,7 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 1. Parses the `notes` spec into internal `NoteEvent` structs.
 2. Generates a Type 0 Standard MIDI File with `SMFWriter` — tempo and time-signature meta events + byte-exact note positions computed from `ms` offsets via round-half-up tick conversion.
 3. Writes to `/tmp/LogicProMCP/{uuid}.mid` (cleaned up via `defer` on return and via server-startup sweep for crash recovery).
-4. Routes `midi.import_file` → `AccessibilityChannel` which drives `파일 → 가져오기 → MIDI 파일… (File → Import → MIDI File…)` via AppleScript, dismissing the `템포 가져오기 (Import Tempo)` sub-dialog with `아니요 (No)` so the project's tempo is authoritative.
+4. Routes `midi.import_file` → `AccessibilityChannel` which validates the `.mid` file after symlink/path cleanup, drives `파일 → 가져오기 → MIDI 파일… (File → Import → MIDI File…)` via AppleScript, dismisses the `템포 가져오기 (Import Tempo)` sub-dialog with `아니요 (No)`, and waits for a new live AX track before returning success.
 5. Reads the live AX track-header tree for up to 500 ms until a new track appears. Returns `{ recorded_to_track, created_track, bar, note_count, method: "smf_import" }`. If the new track never appears within the readback window, the command returns an error instead of lying about `created_track`. `recorded_to_track` is a legacy alias for `created_track`; new clients should prefer `created_track`.
 
 **Error conditions for `record_sequence`**:
@@ -192,7 +192,7 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 - `hasDocument` is false (no project open)
 - `notes` is empty, or no valid events parsed
 - Playhead reset (`transport.goto_position` with `bar=1`) fails — treated as a hard precondition because Logic's MIDI File Import anchors the region at playhead; without the reset, notes would land at the wrong bar
-- `midi.import_file` fails
+- `midi.import_file` fails, rejects the path, or completes without a new live AX track
 - No new track is observed via live AX within 500 ms of import (v3.1.2+ switched from 2s cache polling to live `AXLogicProElements.allTrackHeaders` after the cache-poll race documented in CHANGELOG §3.1.2)
 
 **Strategy D — tick-0 padding CC**: Logic Pro's MIDI File import strips leading empty delta before the first MIDI channel event, which would silently place every imported region at bar 1 regardless of the caller's `bar` parameter. SMFWriter counters this by emitting `CC#110 value 0` on channel 0 at tick 0 whenever `bar > 1`. Logic preserves the full tick timeline because a MIDI channel event now exists at tick 0. The resulting region spans bar 1 through the target bar; the caller's notes land at exactly the encoded positions inside the region. Verified on Logic Pro 12 — a `bar=50` request produces a region that Logic describes as starting at bar 1 and ending at bar 51, with the note at the trailing edge.
@@ -286,6 +286,7 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 | `send_pitch_bend` | `{ value: 0–16383 \| -8192..8191, channel?: 1–16 }` | text | CoreMIDI |
 | `send_aftertouch` | `{ value: 0–127, channel?: 1–16 }` | text | CoreMIDI |
 | `send_sysex` | `{ bytes: "F0 ... F7" \| int[] }` | text | CoreMIDI |
+| `import_file` | `{ path: "/tmp/LogicProMCP/name.mid" }` | HC JSON text; State A only after a new AX track appears | Accessibility |
 | `step_input` | `{ note: 0–127, duration?: "1/1"\|"1/2"\|"1/4"\|"1/8"\|"1/16"\|"1/32" \| int_ms }` | text | CoreMIDI |
 | `create_virtual_port` | `{ name: string }` (max 63 chars, no newlines/nulls) | text | CoreMIDI |
 | `mmc_play` | — | text | CoreMIDI |
@@ -309,6 +310,7 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 | `velocity` | 0–127; default `100` |
 | `channel` | 1–16 (wire: 0–15); default `1` |
 | `duration_ms` | Capped at **30,000** to prevent actor DoS |
+| `import_file.path` | Must resolve to a regular `.mid` file under `/tmp/LogicProMCP/`; symlinks/path traversal/control characters are rejected |
 | `port name` | Newlines/nulls stripped; truncated to 63 chars |
 | SysEx bytes | Must start `0xF0`, end `0xF7`; 7-bit body |
 
@@ -319,6 +321,7 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 {"command": "send_chord", "params": {"notes": "60,64,67,72", "duration_ms": 1000}}
 {"command": "send_cc", "params": {"controller": 7, "value": 100}}
 {"command": "send_pitch_bend", "params": {"value": 0}}
+{"command": "import_file", "params": {"path": "/tmp/LogicProMCP/part-01.mid"}}
 {"command": "step_input", "params": {"note": 60, "duration": "1/4"}}
 {"command": "mmc_locate", "params": {"bar": 9}}
 ```
@@ -398,7 +401,7 @@ On Logic Pro 12.x the new `AXRuler`-structural walker (v3.1.8) succeeds for typi
 | `new` | — | text | CGEvent | L1 |
 | `open` | `{ path: string, confirmed?: bool }` | text | AppleScript | L2 |
 | `save` | — | text | MIDIKeyCommands → CGEvent → AppleScript | L1 |
-| `save_as` | `{ path: string, confirmed?: bool }` | text | Accessibility → AppleScript | L2 |
+| `save_as` | `{ path: string, confirmed?: bool }` | HC JSON text; State A only after package existence/mtime readback | Accessibility → AppleScript | L2 |
 | `close` | `{ saving?: "yes"\|"no"\|"ask", confirmed?: bool }` | text | AppleScript → CGEvent | L3 |
 | `bounce` | `{ confirmed?: bool }` | text | MIDIKeyCommands → CGEvent | L2 |
 | `is_running` | — | `"true"` or `"false"` | (direct) | L0 |
@@ -432,17 +435,17 @@ These two resources expose **two semantically different tempos** and callers mus
 
 | Resource | Tempo semantic | When to use |
 |----------|----------------|-------------|
-| `logic://project/info.tempo` | **Saved/initial BPM** of the project — the "song identity" tempo from `Alternatives/000/MetaData.plist`'s `BeatsPerMinute`. Stable across the file's lifetime; doesn't change during playback. | Grid alignment, project metadata, song-identity tagging, sequence generation that targets the project's intended grid (`record_sequence`, `play_sequence`). |
+| `logic://project/info.tempo` | **Best available project tempo field.** Live transport tempo wins when the transport cache is fresh; otherwise saved `MetaData.plist` `BeatsPerMinute` is used; otherwise the default is `120`. | Project metadata, generation defaults, and UI summaries where a single best-known BPM is acceptable. Read `source` to distinguish live/cache/project-file/default provenance. |
 | `logic://transport/state.state.tempo` | **Live tempo at current playhead position** — read from Logic's transport bar (AX scrape). On projects with mid-song tempo automation, this changes as the playhead moves. | Live monitoring, "follow-along" UIs, tempo-sync visualizations. |
 
 **Worked example.** Project `Hope_master4.logicx` saves with `tempo: 64`, `timeSignature: "5/4"`, but contains a tempo automation that ramps to 70 BPM by bar 186. With the playhead parked at bar 186:
 
 ```
-logic://project/info       → { tempo: 64,  timeSignature: "5/4", trackCount: 117, source: "project_file" }
+logic://project/info       → { tempo: 70,  timeSignature: "5/4", trackCount: 117, source: "ax_live" }
 logic://transport/state    → { state: { tempo: 70, position: "186.1.1.1", ... } }
 ```
 
-Both responses are correct given their semantics.
+If the live transport tier is unavailable, `logic://project/info` falls back to the saved `64 BPM` and reports `source: "project_file"`. Both shapes are correct given their provenance.
 
 **Out of scope (v3.1.8):** the full tempo map / time-signature change list is **not** exposed by either resource. `ProjectData` (the binary blob containing the automation curves) is not parsed — see PRD-issue7-logic12-read-paths.md §NG1/NG2. If you need the full curve, the path forward is project-file binary reverse-engineering; track a follow-up issue if this is on your critical path.
 
@@ -452,12 +455,16 @@ The `source` field tells you which transport tier produced each response:
 
 | `source` | Meaning |
 |----------|---------|
-| `"ax_live"` | Cache value, refreshed within the last 3 seconds by the AX poller. |
-| `"cache"` | Cache value, older than 3 seconds. Treat as potentially stale. |
+| `"ax_live"` | Live/cache value refreshed within the last 3 seconds by AX or transport polling. Tempo/sample-rate may come from `TransportState`. |
+| `"cache"` | Live/cache value older than 3 seconds. Treat as potentially stale. |
 | `"project_file"` | Read from `MetaData.plist`. Reflects last-saved state — `lastSavedAgeSec` shows how stale relative to the on-disk file. |
 | `"default"` | Struct defaults (`tempo: 120`, `timeSignature: "4/4"`, `trackCount: 0`). Logic not running, no document open, or all tiers unavailable. |
 
-The cache layer is the live tier; `MetaData.plist` is the saved-state tier. `ResourceHandlers.readProjectInfo` performs **per-field merge**: cache values win for any field where the cache holds a non-default value; otherwise the field falls through to `MetaData.plist`. Cache itself is read-only at this layer — `MetaData.plist` reads do not poison `StateCache`, so name-routed write actions (`track.select { name: ... }`) continue to consult only the live AX-derived state.
+The cache layer is the live tier; `MetaData.plist` is the saved-state tier. `ResourceHandlers.readProjectInfo` performs **per-field merge**: live cache/transport values win where available, otherwise fields fall through to `MetaData.plist`. Cache itself is read-only at this layer — `MetaData.plist` reads do not poison `StateCache`, so name-routed write actions (`track.select { name: ... }`) continue to consult only the live AX-derived state. `trackCount` intentionally does **not** promote visible AX track rows to a whole-project total; use saved project metadata or `logic://tracks` depending on whether you need package metadata or currently visible live rows.
+
+#### `project.save_as` readback
+
+`project.save_as` requires `{ "confirmed": true }` and validates the path before touching Logic. On success, the AppleScript fallback wraps the result in Honest Contract State A only after the requested `.logicx` package is observed on disk. For an existing package, the modification time must advance or be at least as new as the save start time. Missing packages, unreadable mtimes, or stale mtimes return State C `readback_mismatch` with `path`, `observed`, and mtime extras when available.
 
 ### Destructive Policy
 
@@ -485,6 +492,8 @@ Re-call with `{"confirmed": true}` to execute.
 - Directory exists and contains `Resources/ProjectInformation.plist` and `Alternatives/*/ProjectData`
 
 Invalid paths return an error **before** any AppleScript execution.
+
+`midi.import_file` has a separate, stricter input boundary: the path must resolve to a regular `.mid` under `/tmp/LogicProMCP/`. This keeps raw MCP callers from steering the AX open panel at arbitrary user files.
 
 ---
 

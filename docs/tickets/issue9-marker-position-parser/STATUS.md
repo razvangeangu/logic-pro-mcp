@@ -1,5 +1,7 @@
 # Pipeline Status: Issue #9 Marker Position Parser
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **PRD**: docs/prd/PRD-issue9-marker-position-parser.md (v0.3 Approved)
 **Size**: M (change scope) / XL (review depth — 4-agent × 3 phases)
 **Current Phase**: 7 (Release Done)

@@ -119,7 +119,7 @@ protocol Channel: Actor {
 | **CoreMIDI** | CoreMIDI native | Note/chord/CC/PC/PB/AT/SysEx, MMC | Bidirectional (port listing) |
 | **Accessibility** | macOS AX API | Track metadata, regions, markers, project info | ✅ Read-only |
 | **CGEvent** | Keyboard event injection | Last-resort shortcut fallback | ✖ Write-only |
-| **AppleScript** | `NSWorkspace.open()` + `NSAppleScript` | Project lifecycle (open/save/close) | ✖ Write-only |
+| **AppleScript** | `NSWorkspace.open()` + `NSAppleScript` | Project lifecycle (open/save/close) | Package existence / mtime readback for `save_as` |
 
 ---
 
@@ -138,8 +138,9 @@ The complete table is `ChannelRouter.v2RoutingTable` (90+ entries). Excerpt:
 | `track.set_mute` | MCU | Accessibility → CGEvent | Full fallback |
 | `edit.undo` | MIDIKeyCommands | CGEvent | KeyCmd preferred if approved |
 | `midi.send_note` | CoreMIDI | *(none)* | CoreMIDI exclusive |
+| `midi.import_file` | Accessibility | *(none)* | `/tmp/LogicProMCP/*.mid` only; new-track readback required |
 | `project.open` | AppleScript | *(none)* | Uses `NSWorkspace.open()` |
-| `project.save_as` | Accessibility | AppleScript | AX dialog primary |
+| `project.save_as` | Accessibility | AppleScript | AX dialog primary; AppleScript fallback verifies package mtime |
 
 ---
 
@@ -152,7 +153,7 @@ The complete table is `ChannelRouter.v2RoutingTable` (90+ entries). Excerpt:
 │  • TransportState (tempo, position, ...)│
 │  • [TrackState] (name, mute, solo, arm) │
 │  • [ChannelStripState] (volume, pan)    │
-│  • ProjectInfo (name, version)          │
+│  • ProjectInfo (name, tempo, version)   │
 │  • MCUConnectionState (isConnected, ...)│
 │  • MCUDisplayState (upper/lower LCD)    │
 │  • [RegionState], [MarkerState]         │
@@ -232,6 +233,16 @@ ChannelRouter aggregates:
 // MCU echo poll (pollFaderEcho / pollPanEcho) using a send-time freshness stamp
 // + atomic snapshot helpers added in rc5 for TOCTOU safety.
 
+Save/import readbacks:
+  project.save_as
+    → State A only after `.logicx` package exists and existing-package mtime moves
+    → State C `readback_mismatch` for missing/stale package readback
+
+  midi.import_file
+    → validates a real `.mid` file under `/tmp/LogicProMCP/` after symlink cleanup
+    → State A only after Logic's AX track headers show a new imported track
+    → State C `readback_mismatch` when the menu flow completes but no track appears
+
 Dispatchers wrap:
   → CallTool.Result with isError flag
 
@@ -250,6 +261,7 @@ Server emits:
 |----------|--------|-----------|
 | MCP tool arguments → AppleScript | Command injection | `AppleScriptSafety.isValidProjectPath` — rejects control chars, `/dev/`, relative paths, non-`.logicx` |
 | MCP path → AX Save-As dialog | Unchecked path to AX attribute | `AppleScriptSafety.isValidProjectPath` guard added in `saveAsViaAXDialog` |
+| MCP path → AX MIDI import dialog | Arbitrary file import / path traversal | `AccessibilityChannel.validatedMIDIImportPath` resolves symlinks, rejects control chars, enforces `.mid`, and requires a regular file under `/tmp/LogicProMCP/` |
 | MCP name → AX rename | Unbounded string → UI corruption | `String(name.prefix(255))` truncation |
 | MCP name → Virtual MIDI port | Newlines / null bytes → CoreMIDI property corruption | `.filter { !$0.isNewline && $0 != "\0" }.prefix(63)` |
 | MCP duration → actor | DoS via `UInt64.max` sleep | `min(duration_ms, 30_000)` cap on step_input/send_note/send_chord |

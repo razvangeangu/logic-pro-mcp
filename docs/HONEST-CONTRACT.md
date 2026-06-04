@@ -36,8 +36,8 @@ The Honest Contract lets **clients (LLM agents) clearly distinguish between conf
 ```
 - The AX write itself returned a `kAXError` or an explicit failure.
 - Retrying will produce the same state — a different path is required.
-- `error` values: `ax_write_failed`, `element_not_found`, `permission_denied`, `logic_not_running`, `invalid_params`, `readback_mismatch`, `not_implemented`, `port_unavailable`, `channels_exhausted`.
-- **Terminal codes** (router suppresses fallback to the next channel): `element_not_found`, `invalid_params`, `not_implemented`, `port_unavailable`, `channels_exhausted`. Any of these means "no other channel in the chain can improve on this answer."
+- `error` values: `ax_write_failed`, `element_not_found`, `permission_denied`, `logic_not_running`, `invalid_params`, `readback_unavailable`, `readback_mismatch`, `not_implemented`, `port_unavailable`, `channels_exhausted`.
+- **Terminal codes** (router suppresses fallback to the next channel): `element_not_found`, `invalid_params`, `readback_unavailable`, `not_implemented`, `port_unavailable`, `channels_exhausted`. Any of these means "no other channel in the chain can improve on this answer."
 - `port_unavailable` vs `channels_exhausted` (v3.4.5-rc5+, Boomer BOOMER-6 / U):
   - `port_unavailable` — a specific channel's transport/port is missing (e.g. KeyCmd virtual port not yet published, CoreMIDI device absent). Emitted by a single channel that knows its own port is unwired.
   - `channels_exhausted` — the router walked the full chain for this operation and every channel reported `healthCheck.unavailable` or its readiness gate failed. Aggregate signal, distinct from any single channel's port state. Extras include `operation`, `hint`, and `last_error` carrying the final downstream message.
@@ -80,6 +80,9 @@ As of v3.1.0 (envelope) + v3.4.5-rc5 (mixer extras):
 - `track.set_instrument`
 - `mixer.set_volume`, `mixer.set_pan`, `mixer.set_master_volume` — plus MCU connection extras
 - `transport.set_cycle_range`
+- `transport.set_tempo` — State C `readback_unavailable` when fallback execution cannot be verified
+- `project.save_as` — State A only after the target `.logicx` package exists and existing-package mtime advances; State C `readback_mismatch` otherwise
+- `midi.import_file` — State A only after Logic imports a `/tmp/LogicProMCP/*.mid` file and a new live AX track appears; State C `readback_mismatch` otherwise
 
 Router-level (v3.4.5-rc5+):
 - Any operation whose channel chain is fully exhausted returns State C `channels_exhausted` instead of a free-form error string.

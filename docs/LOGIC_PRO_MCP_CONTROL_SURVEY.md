@@ -4,6 +4,8 @@ Written: 2026-04-21
 Target repo: `/Users/isaac/projects/logic-pro-mcp`
 Purpose: Consolidate realistic control paths, constraints, and implementation priorities for building a Logic Pro MCP server into a single document.
 
+Latest implementation note (2026-06-05): the current production path keeps the same multi-channel thesis, but the high-risk write paths now require readback before claiming success. `project.save_as` verifies `.logicx` package existence/mtime, `logic_midi.import_file` is constrained to `/tmp/LogicProMCP/*.mid` with new-track readback, and `logic://project/info` uses live transport/cache data before project-file fallback.
+
 ---
 
 ## 0. Summary

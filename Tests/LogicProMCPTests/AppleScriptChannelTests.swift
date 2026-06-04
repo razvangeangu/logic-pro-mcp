@@ -61,7 +61,9 @@ private func makeAppleScriptRuntime(
     isRunning: Bool = true,
     scriptRecorder: AppleScriptRecorder = AppleScriptRecorder(),
     openRecorder: OpenFileRecorder = OpenFileRecorder(),
-    transportRecorder: TransportActionRecorder = TransportActionRecorder()
+    transportRecorder: TransportActionRecorder = TransportActionRecorder(),
+    fileExists: @escaping @Sendable (String) -> Bool = { _ in true },
+    fileModificationDate: @escaping @Sendable (String) -> Date? = { _ in Date.distantFuture }
 ) -> AppleScriptChannel.Runtime {
     AppleScriptChannel.Runtime(
         isLogicProRunning: { isRunning },
@@ -76,7 +78,9 @@ private func makeAppleScriptRuntime(
         },
         executeTransportAction: { action in
             await transportRecorder.run(action)
-        }
+        },
+        fileExists: fileExists,
+        fileModificationDate: fileModificationDate
     )
 }
 
@@ -268,6 +272,71 @@ private func makeAppleScriptRuntime(
     #expect(scripts[3].contains("close front document saving yes"))
     #expect(scripts[4].contains("close front document saving ask"))
     #expect(scripts[5].contains("close front document saving no"))
+}
+
+@Test func testAppleScriptSaveAsReturnsVerifiedWhenPackageExists() async throws {
+    let recorder = AppleScriptRecorder()
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            fileExists: { $0 == "/tmp/export.logicx" }
+        )
+    )
+
+    let result = await channel.execute(
+        operation: "project.save_as",
+        params: ["path": "/tmp/export.logicx"]
+    )
+
+    #expect(result.isSuccess)
+    let obj = try JSONSerialization.jsonObject(
+        with: Data(result.message.utf8), options: []
+    ) as! [String: Any]
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["observed"] as? String == "/tmp/export.logicx")
+}
+
+@Test func testAppleScriptSaveAsErrorsWhenPackageMissingAfterScriptSuccess() async throws {
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(fileExists: { _ in false })
+    )
+
+    let result = await channel.execute(
+        operation: "project.save_as",
+        params: ["path": "/tmp/missing.logicx"]
+    )
+
+    #expect(!result.isSuccess)
+    let obj = try JSONSerialization.jsonObject(
+        with: Data(result.message.utf8), options: []
+    ) as! [String: Any]
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "readback_mismatch")
+}
+
+@Test func testAppleScriptSaveAsErrorsWhenExistingPackageMtimeDoesNotAdvance() async throws {
+    let staleDate = Date(timeIntervalSince1970: 1_000)
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            fileExists: { $0 == "/tmp/export.logicx" },
+            fileModificationDate: { _ in staleDate }
+        )
+    )
+
+    let result = await channel.execute(
+        operation: "project.save_as",
+        params: ["path": "/tmp/export.logicx"]
+    )
+
+    #expect(!result.isSuccess)
+    let obj = try JSONSerialization.jsonObject(
+        with: Data(result.message.utf8), options: []
+    ) as! [String: Any]
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "readback_mismatch")
+    #expect((obj["hint"] as? String)?.contains("modification time did not advance") == true)
+    #expect(obj["observed"] as? String == "/tmp/export.logicx")
 }
 
 @Test func testAppleScriptTransportCommandsGenerateExpectedScripts() async {

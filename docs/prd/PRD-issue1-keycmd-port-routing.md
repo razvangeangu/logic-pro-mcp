@@ -1,5 +1,7 @@
 # PRD: Issue #1 — MIDIKeyCommands port routing + channel encoding + setup honesty
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Version**: 0.4
 **Author**: Isaac (orchestrated via Claude Opus 4.7)
 **Date**: 2026-05-04

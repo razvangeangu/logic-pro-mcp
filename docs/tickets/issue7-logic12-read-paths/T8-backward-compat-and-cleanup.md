@@ -1,5 +1,7 @@
 # T8: BackwardCompat regression + cleanup
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **PRD Ref**: PRD-issue7-logic12-read-paths > §9.3, AC-4.4
 **Priority**: P2 (Medium)
 **Size**: S (1h)

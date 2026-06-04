@@ -1,4 +1,5 @@
 @preconcurrency import ApplicationServices
+import Foundation
 import Testing
 @testable import LogicProMCP
 
@@ -406,11 +407,93 @@ private func makeAXBackedAccessibilityChannel(
     )
 
     let result = await channel.execute(operation: "transport.set_tempo", params: ["tempo": "126"])
-    // Post-hardening: osascript fallback removed (was causing FD leaks under
-    // sustained calls, killing MCP server). AX tempo field absent → clear error.
     #expect(!result.isSuccess)
-    #expect(result.message.contains("\"error\":\"element_not_found\""))
-    #expect(result.message.contains("tempo slider not located"))
+    #expect(result.message.contains("\"error\":\"readback_unavailable\""))
+    #expect(result.message.contains("\"via\":\"keyboard-fallback\""))
+    #expect(result.message.contains("\"requested\":126"))
+}
+
+@Test func testAccessibilityChannelImportMIDIFileReturnsErrorWhenTrackCountDoesNotIncrease() async throws {
+    let tempFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LogicProMCP-import-mismatch-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile)
+    defer { try? FileManager.default.removeItem(at: tempFile) }
+
+    let result = await AccessibilityChannel.defaultImportMIDIFile(
+        path: tempFile.path,
+        executeScript: { _ in .success("OK") },
+        trackCount: { 3 },
+        settle: {}
+    )
+
+    #expect(!result.isSuccess)
+    #expect(result.message.contains("\"error\":\"readback_mismatch\""))
+    #expect(result.message.contains("did not create a new track"))
+    #expect(result.message.contains("\"observed_delta\":0"))
+}
+
+@Test func testAccessibilityChannelImportMIDIFileVerifiedWhenTrackCountIncreases() async throws {
+    let tempFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LogicProMCP-import-verified-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile)
+    defer { try? FileManager.default.removeItem(at: tempFile) }
+
+    final class Counter: @unchecked Sendable {
+        var values = [2, 3]
+        func next() -> Int {
+            values.removeFirst()
+        }
+    }
+    let counter = Counter()
+
+    let result = await AccessibilityChannel.defaultImportMIDIFile(
+        path: tempFile.path,
+        executeScript: { _ in .success("OK") },
+        trackCount: { counter.next() },
+        settle: {}
+    )
+
+    #expect(result.isSuccess)
+    #expect(result.message.contains("\"verified\":true"))
+    #expect(result.message.contains("\"observed_delta\":1"))
+}
+
+@Test func testAccessibilityChannelValidatedMIDIImportPathAcceptsManagedTempMID() throws {
+    let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
+    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+    let file = managedDirectory.appendingPathComponent("validated-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: file)
+    defer { try? FileManager.default.removeItem(at: file) }
+
+    let validated = AccessibilityChannel.validatedMIDIImportPath(file.path)
+
+    #expect(validated?.hasSuffix("/LogicProMCP/\(file.lastPathComponent)") == true)
+}
+
+@Test func testAccessibilityChannelValidatedMIDIImportPathRejectsSymlinkEscape() throws {
+    let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
+    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+    let outside = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LogicProMCP-outside-\(UUID().uuidString).mid")
+    let link = managedDirectory.appendingPathComponent("link-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: outside)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+    defer {
+        try? FileManager.default.removeItem(at: link)
+        try? FileManager.default.removeItem(at: outside)
+    }
+
+    #expect(AccessibilityChannel.validatedMIDIImportPath(link.path) == nil)
+}
+
+@Test func testAccessibilityChannelValidatedMIDIImportPathRejectsControlCharacters() throws {
+    let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
+    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+    let file = managedDirectory.appendingPathComponent("control-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: file)
+    defer { try? FileManager.default.removeItem(at: file) }
+
+    #expect(AccessibilityChannel.validatedMIDIImportPath(file.path + "\n") == nil)
 }
 
 @Test func testAccessibilityChannelAXBackedTempoReturnsErrorWhenAXFieldMissing() async {
@@ -426,7 +509,7 @@ private func makeAXBackedAccessibilityChannel(
     let channel = makeAXBackedAccessibilityChannel(
         builder: builder,
         app: app,
-        runTempoFallback: { tempo in tempo == "126" }
+        runTempoFallback: { _ in false }
     )
 
     let result = await channel.execute(operation: "transport.set_tempo", params: ["tempo": "126"])

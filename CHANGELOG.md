@@ -8,6 +8,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+**2026-06-05 production-readiness hardening and MIDI-only composition E2E.** This branch now carries the final v4 composition workflow and the server-side readback fixes needed to make repeated Logic Pro automation runs honest: `project.save_as` verifies the `.logicx` package on disk, `logic_midi.import_file` is an explicit dispatcher command with hardened path validation and new-track readback, `logic://project/info` uses live transport tempo/sample-rate without inflating track counts from visible AX rows, and Logic process detection has an on-screen-window fallback for hosts where `ps`/`pgrep` are restricted.
+
+### 2026-06-05 Added
+
+- `logic_midi.import_file` dispatcher command — routes to `midi.import_file`, rejects `port`, requires explicit `path`, and documents sequential callers waiting for `verified:true` before issuing the next import.
+- `AppleScriptChannel.wrapSaveAsResult` — wraps successful `project.save_as` responses in Honest Contract State A only after observing the requested `.logicx` package. Existing package saves must show an advanced modification time; missing/stale packages return State C `readback_mismatch`.
+- `AccessibilityChannel.validatedMIDIImportPath` — resolves symlinks, standardizes the URL, rejects control characters, enforces `.mid`, and only accepts regular files under `/tmp/LogicProMCP/`.
+- `HonestContract.FailureError.readbackUnavailable` — terminal State C code for write paths that executed a fallback but could not obtain the readback required to claim success.
+- `docs/live-verify-v3.4.5-rc5.md` — current production-readiness evidence covering local tests, release build, live Logic Pro 12.2 health, tempo readback, save-as package readback, and the v4 MIDI-only composition artifact.
+
+### 2026-06-05 Changed
+
+- `AccessibilityChannel.defaultImportMIDIFile` now treats "import completed but no new AX track appeared" as State C `readback_mismatch` instead of uncertain success. This prevents a sequencer from stacking additional imports on top of a failed Logic import.
+- `ResourceHandlers.readProjectInfo` now promotes live `TransportState` tempo/sample-rate when available, still falls back per-field to `MetaData.plist`, and only uses project-file `trackCount` when the saved count is positive. Visible AX rows are not promoted to whole-project totals.
+- `LibraryAccessor` resolves duplicate visible Library names by column intent: category clicks target the leftmost match, and preset/folder clicks target the rightmost active match. This prevents duplicate labels such as top-level `Bass` and `Synthesizer/Bass` from selecting the wrong column.
+- `ProcessUtils` now detects Logic Pro from on-screen window metadata before falling back to `ps`, `pgrep`, or System Events. CGWindow owner PIDs are parsed from `pid_t`, `NSNumber`, or `Int` values so the helper stays resilient across CoreGraphics payload shapes.
+- `.gitignore` now ignores generated composition attempts and captured media under `artifacts/*`, while explicitly allowing the final MIDI-only v4 package directory back into the repository.
+
+### 2026-06-05 Tests
+
+- `swift test` -> `1143 / 1143` PASS locally.
+- `swift build -c release` -> PASS locally.
+- `PYTHONPYCACHEPREFIX=/private/tmp/logic-pro-mcp-pycache python3 -m py_compile artifacts/acid-track-composition-v4/import_v4_sequential.py` -> PASS.
+- Live `.build/release/LogicProMCP` MCP session against Logic Pro 12.2 -> all 7 channels ready; `logic_transport set_tempo` verified at `127`; `logic_project save_as` returned `verified:true` with observed package mtime; saved `ProjectData` contained all 11 v4 MIDI region names and no packaged audio files.
+
 **Diagnostic surface improvements for mixer write wire contract — Issues #10 and #11 from thomas-doesburg (v3.4.5-rc4 + Logic Pro 12.2).** Both reports describe the same wire shape (`success:true, verified:false, reason:echo_timeout_500ms` on `mixer.set_volume` / `set_pan`; `logic://mixer` not reflecting the written value) but the envelope didn't carry enough context to distinguish three distinct root causes (Mackie Control unregistered / connection went stale / specific echo lost) without a second round-trip. The Honest Contract response now embeds an MCU connection snapshot inline on every mixer write, and `ChannelRouter` wraps chain exhaustion in a structured `channels_exhausted` State C envelope so harnesses no longer regex-match a free-form "All channels exhausted" string.
 
 ### Added

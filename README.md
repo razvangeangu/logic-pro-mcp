@@ -12,8 +12,8 @@
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14+-000000.svg?style=flat-square&logo=apple" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
-  <img src="https://img.shields.io/badge/tests-1114_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.4.5--rc2-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-1143_passing-brightgreen.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.4.5--rc5--prep-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -148,13 +148,14 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |
 | [Maintainer Guide](docs/MAINTAINERS.md) | Maintainers | Release, approvals, E2E checklist |
+| [Live Verify v3.4.5-rc5](docs/live-verify-v3.4.5-rc5.md) | Maintainers, QA | Current production-readiness and Logic Pro 12.2 E2E evidence |
 | [Security Policy](SECURITY.md) | Security reviewers | Threat model, reporting, hardening |
 | [Changelog](CHANGELOG.md) | Everyone | Per-release changes |
 | [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, PR workflow |
 
 ## Status
 
-**Current prerelease: v3.4.5-rc4 (2026-05-10)** — CI baseline uses the deterministic `swift test --no-parallel` gate on `macos-15-arm64` GitHub Actions, `1114` deterministic tests pass locally, strict live E2E passes (`259/259`, `0` skipped, `0` failed) in the validated shell/tmux stdio parent context, and all P0/P1 items from the 2026-05-08 enterprise production-readiness review are closed except `swift-testing` package dependency removal (deferred — Apple has not yet shipped the SwiftPM-side glue that lets the bundled Swift 6 Testing framework resolve `_TestingInternals` without the explicit package dep). `v3.4.5-rc1` is superseded because the published tag used CI's default parallel `swift test` path; `v3.4.5-rc2` is superseded because the transport packet-sink test recorder still raced on GitHub runners; `v3.4.5-rc3` is superseded because the same-origin installer metadata parser read `version` instead of `team_id` from one-line `RELEASE-METADATA.json`.
+**Published prerelease: v3.4.5-rc4 (2026-05-10). Current main hardening: v3.4.5-rc5-prep (validated 2026-06-05 KST).** Local production-readiness now has `swift test` at `1143/1143` passing, `swift build -c release` passing, Python syntax validation for the v4 import runner passing, and a live Logic Pro 12.2 MCP session confirming all 7 channels ready, `transport.set_tempo` at `127 BPM`, `project.save_as` with package mtime readback, and an 11-part MIDI-only acid composition saved under `artifacts/acid-track-composition-v4/acid-track-composed-midi-v4.logicx`. `v3.4.5-rc4` remains the public installer target until the next release is cut; the rc5-prep work in this branch is an unreleased hardening set.
 
 ### Active contracts (the things callers most care about)
 
@@ -163,11 +164,15 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 - **Target-faithful navigation** — `goto_marker` returns `element_not_found` (State C) on a cold cache instead of advancing the marker pointer to "next." Caller must `system.refresh_cache` and retry, or supply a `name`.
 - **1-based MIDI channel** — `send_note` / `send_cc` / `record_sequence`-`notes`-`ch` accept 1..16 (matches Logic's UI). Pre-v3.1.6 was 0-based.
 - **Audit phase split** — `[AUDIT] project.<command> rejected | confirmation_required | executed` distinguishes invalid calls, confirmation prompts, and actual route invocations. Pre-v3.4.0 emitted `executed` before validation.
+- **Verified project saves** — `project.save_as` no longer trusts a successful AppleScript return alone. It verifies that the target `.logicx` package exists and that an existing package's modification time advanced; stale or missing packages return State C `readback_mismatch`.
+- **Constrained MIDI imports** — `logic_midi.import_file` is exposed for sequenced import workflows, but only accepts a real `.mid` file that resolves under `/tmp/LogicProMCP/` after symlink and traversal cleanup. Each successful import must create a new live AX track; otherwise it returns State C `readback_mismatch`.
+- **Live project metadata** — `logic://project/info` promotes live transport tempo/sample-rate when available, falls back per-field to saved project metadata, and does not pretend visible AX track rows are a full project track count.
 
 ### Recent releases (one line each)
 
 | Version | Date | Headline |
 |---------|------|----------|
+| main / rc5-prep | 2026-06-05 | Save/readback and MIDI import hardening, live `project/info` tier merge, ProcessUtils Logic detection fallback, Library duplicate-name column targeting, and final v4 MIDI-only composition E2E |
 | **v3.4.5-rc4** | 2026-05-10 | Installer metadata parser fix — same-origin install path now reads `team_id` from one-line `RELEASE-METADATA.json` |
 | v3.4.5-rc3 | 2026-05-10 | CI green, but superseded by rc4 because same-origin installer metadata parsing selected `version` instead of `team_id` |
 | v3.4.5-rc2 | 2026-05-10 | CI gate aligned to deterministic `swift test --no-parallel`; superseded by rc3 due transport packet-sink recorder race in CI |
@@ -191,8 +196,9 @@ ADHOC release until Apple Developer Program membership lands. SHA256 pin + `code
 
 ### Testing
 
-- **1114 unit + integration tests** on the v3.4.5-rc4 branch — `swift test --no-parallel` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker), routing-audit invariants, AX hardening (track headers, marker list window walker, 13-locale matrix), `LogicProjectFileReader` plist parsing + path validation (10 MB cap, mtime-jitter retry, `..` rejection), tier-merge at the resource layer, `LogicProServer.stop()` signal-cleanup contract, audit-phase splitting for L1+ project lifecycle ops, deterministic transport packet-sink capture, and installer metadata parsing.
+- **1143 unit + integration tests** on current main — `swift test` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker/MIDI import), routing-audit invariants, AX hardening, `LogicProjectFileReader` plist parsing + path validation, live `project/info` tier-merge, `project.save_as` package-mtime readback, `LogicProServer.stop()` signal-cleanup contract, deterministic transport packet-sink capture, and installer metadata parsing.
 - **Live E2E** (`Scripts/live-e2e-test.py`) defaults to the release binary. Protocol/security/validation assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a live Logic Pro session is detected. For attestation runs, use `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh`; the shell wrapper launches the MCP server under a trusted tmux parent so macOS TCC evaluates the same stdio parent context instead of Python.
+- **Current live Logic Pro 12.2 validation** — `.build/release/LogicProMCP` launched cleanly, health reported all 7 channels ready, tempo set/readback reached `127`, `project.save_as` returned `verified:true`, and the saved package's `ProjectData` contained all 11 v4 MIDI regions with no packaged audio files.
 - **CI coverage gate** — `region ≥ 65%`, `line ≥ 72%` (current 70.47 / 77.29%, ~5pp slack). Re-armed in v3.4.0 after the v3.1.5 disable.
 - **CoreMIDI smoke tests skip on macos-15-arm64 GitHub runners** (`MIDIClientCreate` returns `-50` in the sandboxed image; production code path coverage on real macOS hosts is unchanged).
 

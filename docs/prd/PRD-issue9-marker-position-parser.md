@@ -1,5 +1,7 @@
 # PRD: Marker List Position Parser Accuracy + English Logic 12.2 Menu Path (Issue #9)
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Version**: 0.3 (Phase 2 review — 3-agent fully integrated — Approved)
 **Author**: Claude (autonomous — delegated by Isaac)
 **Date**: 2026-05-07

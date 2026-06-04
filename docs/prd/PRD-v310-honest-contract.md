@@ -1,5 +1,7 @@
 # PRD — Logic Pro MCP v3.1.0 "Honest Contract"
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Status**: Approved
 **Size**: L
 **Level**: 1.5 (no irreversible changes, external user contract impact → 3-party consensus required)

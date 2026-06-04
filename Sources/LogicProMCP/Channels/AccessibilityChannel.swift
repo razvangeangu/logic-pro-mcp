@@ -49,6 +49,28 @@ actor AccessibilityChannel: Channel {
         return ScanMode(rawValue: raw) ?? .ax
     }
 
+    static func validatedMIDIImportPath(_ path: String) -> String? {
+        guard path.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
+
+        let requestedURL = URL(fileURLWithPath: path)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        guard requestedURL.pathExtension.lowercased() == "mid" else { return nil }
+
+        let allowedDirectoryURL = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let allowedDirectoryPath = allowedDirectoryURL.path.hasSuffix("/")
+            ? allowedDirectoryURL.path
+            : allowedDirectoryURL.path + "/"
+        guard requestedURL.path.hasPrefix(allowedDirectoryPath) else { return nil }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: requestedURL.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else { return nil }
+        return requestedURL.path
+    }
+
     struct Runtime: @unchecked Sendable {
         let isTrusted: @Sendable () -> Bool
         let isLogicProRunning: @Sendable () -> Bool
@@ -389,16 +411,14 @@ actor AccessibilityChannel: Channel {
             guard let path = params["path"] else {
                 return .error("midi.import_file requires 'path'")
             }
-            // Restrict to the SMFWriter-managed temp dir. Raw MCP callers
-            // cannot point the AX open-panel keystroke at arbitrary files
-            // on the user's filesystem — the only legitimate producer of
-            // this operation is TrackDispatcher.record_sequence.
-            guard path.hasPrefix("/tmp/LogicProMCP/"),
-                  path.hasSuffix(".mid"),
-                  !path.contains("..") else {
+            // Restrict to the SMFWriter-managed temp dir after resolving
+            // symlinks and path traversal. Raw MCP callers cannot point the
+            // AX open-panel keystroke at arbitrary files on the user's
+            // filesystem; the legitimate producer is TrackDispatcher.record_sequence.
+            guard let safePath = AccessibilityChannel.validatedMIDIImportPath(path) else {
                 return .error("midi.import_file path must be /tmp/LogicProMCP/*.mid")
             }
-            return await runtime.importMIDIFile(path)
+            return await runtime.importMIDIFile(safePath)
 
         // MARK: - Navigation
         case "nav.get_markers":
@@ -612,7 +632,13 @@ actor AccessibilityChannel: Channel {
             }
         }
 
-        _ = runFallback
+        if runFallback(tempoStr) {
+            return .error(HonestContract.encodeStateC(
+                error: .readbackUnavailable,
+                hint: "tempo fallback executed but no tempo readback was available",
+                extras: baseExtras.merging(["via": "keyboard-fallback"]) { _, new in new }
+            ))
+        }
         return .error(HonestContract.encodeStateC(
             error: .elementNotFound,
             hint: "tempo slider not located in Logic control bar; ensure Logic Pro is frontmost with an open project",
@@ -2676,7 +2702,10 @@ actor AccessibilityChannel: Channel {
     /// Uses osascript to coordinate the menu click, path-entry keystroke, and dialog dismissals.
     static func defaultImportMIDIFile(
         path: String,
-        runtime: AXLogicProElements.Runtime = .production
+        runtime: AXLogicProElements.Runtime = .production,
+        executeScript: @escaping @Sendable (String) async -> ChannelResult = { await AppleScriptChannel.executeAppleScript($0) },
+        trackCount: (@Sendable () -> Int)? = nil,
+        settle: @escaping @Sendable () async -> Void = { try? await Task.sleep(nanoseconds: 500_000_000) }
     ) async -> ChannelResult {
         guard FileManager.default.fileExists(atPath: path) else {
             return .error(HonestContract.encodeStateC(
@@ -2685,7 +2714,8 @@ actor AccessibilityChannel: Channel {
                 extras: ["requested": path]
             ))
         }
-        let beforeCount = AXLogicProElements.allTrackHeaders(runtime: runtime).count
+        let readTrackCount = trackCount ?? { AXLogicProElements.allTrackHeaders(runtime: runtime).count }
+        let beforeCount = readTrackCount()
         let escapedPath = path.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let typedPath = escapedPath.hasPrefix("/") ? String(escapedPath.dropFirst()) : escapedPath
@@ -2744,7 +2774,7 @@ actor AccessibilityChannel: Channel {
         end importMIDI
         return importMIDI()
         """
-        let result = await AppleScriptChannel.executeAppleScript(script)
+        let result = await executeScript(script)
         switch result {
         case .success(let output):
             if output.hasPrefix("MENU_ERROR") || output.hasPrefix("IMPORT_BTN_ERROR") {
@@ -2757,8 +2787,8 @@ actor AccessibilityChannel: Channel {
             // Read-back via track count delta. Logic always creates a new track
             // for MIDI import (OQ-3 confirmed). Allow a short settle window
             // for the AX tree to reflect the new track header.
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            let afterCount = AXLogicProElements.allTrackHeaders(runtime: runtime).count
+            await settle()
+            let afterCount = readTrackCount()
             let extras: [String: Any] = [
                 "requested": path,
                 "track_count_before": beforeCount,
@@ -2769,8 +2799,9 @@ actor AccessibilityChannel: Channel {
             if afterCount > beforeCount {
                 return .success(HonestContract.encodeStateA(extras: extras))
             }
-            return .success(HonestContract.encodeStateB(
-                reason: .readbackMismatch,
+            return .error(HonestContract.encodeStateC(
+                error: .readbackMismatch,
+                hint: "midi.import_file did not create a new track",
                 extras: extras
             ))
         case .error(let msg):

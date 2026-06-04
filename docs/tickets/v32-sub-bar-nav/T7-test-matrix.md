@@ -1,5 +1,7 @@
 # T7 — Parameterized Matrix + Integration Regression Tests
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Status**: Todo
 **Depends on**: T1-T6
 **Size**: M

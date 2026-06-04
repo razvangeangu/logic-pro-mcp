@@ -1,0 +1,11 @@
+{"jsonrpc": "2.0", "id": 20, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_909_kick.mid"}}}}
+{"jsonrpc": "2.0", "id": 21, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_909_clap_snare.mid"}}}}
+{"jsonrpc": "2.0", "id": 22, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_909_hats.mid"}}}}
+{"jsonrpc": "2.0", "id": 23, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_house_percussion.mid"}}}}
+{"jsonrpc": "2.0", "id": 24, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_acid_main_303.mid"}}}}
+{"jsonrpc": "2.0", "id": 25, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_acid_answer_303.mid"}}}}
+{"jsonrpc": "2.0", "id": 26, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_sub_pump.mid"}}}}
+{"jsonrpc": "2.0", "id": 27, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_rave_chord_stabs.mid"}}}}
+{"jsonrpc": "2.0", "id": 28, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_metallic_lead.mid"}}}}
+{"jsonrpc": "2.0", "id": 29, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_vocal_like_synth.mid"}}}}
+{"jsonrpc": "2.0", "id": 30, "method": "tools/call", "params": {"name": "logic_midi", "arguments": {"command": "import_file", "params": {"path": "/tmp/LogicProMCP/v4_noise_transitions.mid"}}}}

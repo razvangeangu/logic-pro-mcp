@@ -1,5 +1,7 @@
 # PRD: Logic Pro 12.x Read-Path Recovery — Project File + Hardened AX (v0.2)
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Version**: 0.2
 **Author**: Claude (autonomous, on behalf of Isaac)
 **Date**: 2026-05-06

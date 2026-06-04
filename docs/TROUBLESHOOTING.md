@@ -169,6 +169,24 @@ Or use Scripter for deterministic plugin parameter control (no track routing nee
 - `{"bytes": "F0 7F 7F 06 02 F7"}` (hex string, space-separated)
 - `{"bytes": [240, 127, 127, 6, 2, 247]}` (integer array)
 
+### `logic_midi import_file` rejects the path
+
+**Cause:** `import_file` intentionally accepts only Standard MIDI Files generated or staged under `/tmp/LogicProMCP/`. The server resolves symlinks and standardized paths before checking the boundary, so traversal tricks and symlink escapes are rejected.
+
+**Fix:**
+1. Copy or generate the `.mid` file under `/tmp/LogicProMCP/`.
+2. Ensure the path has a `.mid` extension and is a regular file, not a directory.
+3. Send imports sequentially and wait for `verified:true` before sending the next file.
+
+### `logic_midi import_file` returns `readback_mismatch`
+
+**Cause:** Logic's menu flow completed, but the live AX track-header count did not increase. Treat this as a failed import, not an uncertain success.
+
+**Fix:**
+1. Bring Logic Pro frontmost and dismiss any modal dialog.
+2. Confirm a project window is open.
+3. Retry with one `.mid` file. If the same file still fails, open **File → Import → MIDI File…** manually once to see the Logic-side error.
+
 ---
 
 ## MIDIKeyCommands / Scripter
@@ -240,13 +258,15 @@ ls "/path/to/project.logicx/Resources/ProjectInformation.plist"  # must exist
 ls "/path/to/project.logicx/Alternatives"/*/ProjectData           # must exist
 ```
 
-### `project.save_as` fails silently
+### `project.save_as` returns `readback_mismatch`
 
-**Cause:** Logic Pro's Save As dialog didn't appear (window focus issue).
+**Cause:** Logic Pro returned from Save As, but the server could not verify the requested `.logicx` package on disk. For existing packages, the package modification time did not advance; for new packages, the package or its mtime was missing.
 
 **Fix:**
 1. Bring Logic Pro to front: `osascript -e 'tell application "Logic Pro" to activate'`
-2. Retry.
+2. Verify the parent directory is writable.
+3. Retry with an explicit absolute path ending in `.logicx`.
+4. If overwriting an existing package, check that external backup/sync tooling is not holding the bundle open.
 
 ---
 
@@ -338,6 +358,12 @@ For a fresh diagnosis dump, restart the MCP server with `LOG_LEVEL=debug` and gr
 **Cause:** Likely running v3.1.7 or older. v3.1.8 introduced project-file (`MetaData.plist`) tier-merge; before that, the AX path only filled `name` and left tempo/timesig/trackCount at struct defaults.
 
 **Fix:** `brew upgrade logic-pro-mcp` to v3.1.8+. Verify via `serverInfo.version` after `tools/list` — it should show 3.1.8 or newer. If you can't upgrade, restart Logic with the project saved (the AppleScript-primary path that v3.1.5 introduced was always-failing on 12.x and has been removed in v3.1.8).
+
+### `logic://project/info.trackCount` is lower than visible Logic tracks
+
+**Cause:** Current `project/info` does not infer whole-project `trackCount` from the visible AX row count. Visible rows are viewport-dependent and can undercount large projects. The resource only reports a live cache count when the project cache owns that value, or a positive saved project-file count when available.
+
+**Fix:** Use `logic://tracks` when you need currently visible/live track rows. Use `logic://project/info.trackCount` only as project metadata with `source` provenance.
 
 ---
 

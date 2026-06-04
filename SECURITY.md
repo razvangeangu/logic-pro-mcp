@@ -53,6 +53,19 @@ All file paths passed to `project.open` and `project.save_as` must satisfy:
 
 Validation occurs **before** any AppleScript or AX dialog interaction. See `Sources/LogicProMCP/Utilities/AppleScriptSafety.swift`.
 
+`project.save_as` also performs a post-write readback before returning State A: the target `.logicx` package must exist, and an existing package's modification time must advance or be at least as new as the save start time. Missing or stale package readback returns State C `readback_mismatch`.
+
+### MIDI import path boundary
+
+`logic_midi.import_file` / `midi.import_file` drives Logic's MIDI File import dialog, so its path boundary is stricter than ordinary project paths. The requested path is rejected unless all of the following hold:
+
+- No control characters
+- Resolves, after symlink cleanup and standardization, to a `.mid` path
+- Sits under `/tmp/LogicProMCP/`
+- Exists as a regular file, not a directory
+
+This prevents raw MCP callers from steering the AX open panel toward arbitrary user files.
+
 ### AppleScript injection prevention
 
 - `project.open` uses `NSWorkspace.open(URL)` instead of AppleScript string interpolation. No user-controlled string reaches a script template.
@@ -69,6 +82,7 @@ Validation occurs **before** any AppleScript or AX dialog interaction. See `Sour
 | `midi.step_input.duration_ms` | 30,000 ms | `CoreMIDIChannel.stepInputDurationMs` |
 | `track.rename.name` | 255 chars | `AccessibilityChannel.defaultRenameTrack` |
 | `midi.create_virtual_port.name` | 63 chars, newlines/nulls stripped | `CoreMIDIChannel.swift` |
+| `midi.import_file.path` | Real `.mid` under `/tmp/LogicProMCP/` after symlink resolution | `AccessibilityChannel.validatedMIDIImportPath` |
 
 Duration caps prevent an MCP client from hanging a channel actor with `UInt64.max` sleeps.
 

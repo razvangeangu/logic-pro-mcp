@@ -78,6 +78,23 @@ import Testing
     #expect(obj["hint"] == nil)
 }
 
+@Test func testStateCReadbackUnavailableError() {
+    let json = HonestContract.encodeStateC(
+        error: .readbackUnavailable,
+        hint: "write executed but could not be verified"
+    )
+    let obj = try! JSONSerialization.jsonObject(
+        with: json.data(using: .utf8)!, options: []
+    ) as! [String: Any]
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "readback_unavailable")
+    #expect(obj["hint"] as? String == "write executed but could not be verified")
+}
+
+@Test func testReadbackUnavailableInTerminalErrorCodes() {
+    #expect(HonestContract.terminalErrorCodes.contains("readback_unavailable"))
+}
+
 @Test func testJSONIsSortedKeyDeterministic() {
     let a = HonestContract.jsonString(["b": 1, "a": 2])
     let b = HonestContract.jsonString(["a": 2, "b": 1])

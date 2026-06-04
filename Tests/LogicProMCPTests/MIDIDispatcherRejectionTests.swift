@@ -7,8 +7,8 @@ import MCP
 // PRD: issue1-keycmd-port-routing AC-5, AC-6 (NG7 + NG8)
 //
 // `record_sequence` (TrackDispatcher) and the MIDI surface ops that don't
-// route through the 7 send-style operations (mmc_*, send_sysex, step_input,
-// create_virtual_port) MUST reject any `port` argument with
+// route through the 7 send-style operations (mmc_*, send_sysex, import_file,
+// step_input, create_virtual_port) MUST reject any `port` argument with
 // `invalid_params`. Silently ignoring `port` here would let a caller assume
 // a `port:"keycmd"` request was honored when in fact the op only ever runs
 // over CoreMIDI, masking a wiring mistake.
@@ -124,6 +124,29 @@ struct MIDIDispatcherRejectionTests {
         #expect(result.isError == true)
         #expect(sharedToolText(result).contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
+    }
+
+    // MARK: - 13b. import_file rejects port
+
+    @Test("import_file + port → invalid_params")
+    func testImportFileRejectsPortParam() async {
+        let router = ChannelRouter()
+        let ax = MockChannel(id: .accessibility)
+        await router.register(ax)
+
+        let result = await MIDIDispatcher.handle(
+            command: "import_file",
+            params: [
+                "path": .string("/tmp/LogicProMCP/acid.mid"),
+                "port": .string("keycmd"),
+            ],
+            router: router,
+            cache: StateCache()
+        )
+
+        #expect(result.isError == true)
+        #expect(sharedToolText(result).contains("invalid_params"))
+        #expect(await ax.executedOps.isEmpty)
     }
 
     // MARK: - 14. step_input rejects port

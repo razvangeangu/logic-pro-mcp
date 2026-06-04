@@ -12,6 +12,26 @@ actor AppleScriptChannel: Channel {
         let openFile: @Sendable (String) -> Bool
         let runScript: @Sendable (String) async -> ChannelResult
         let executeTransportAction: @Sendable (String) async -> ChannelResult
+        let fileExists: @Sendable (String) -> Bool
+        let fileModificationDate: @Sendable (String) -> Date?
+
+        init(
+            isLogicProRunning: @escaping @Sendable () -> Bool,
+            openFile: @escaping @Sendable (String) -> Bool,
+            runScript: @escaping @Sendable (String) async -> ChannelResult,
+            executeTransportAction: @escaping @Sendable (String) async -> ChannelResult,
+            fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+            fileModificationDate: @escaping @Sendable (String) -> Date? = {
+                (try? FileManager.default.attributesOfItem(atPath: $0)[.modificationDate]) as? Date
+            }
+        ) {
+            self.isLogicProRunning = isLogicProRunning
+            self.openFile = openFile
+            self.runScript = runScript
+            self.executeTransportAction = executeTransportAction
+            self.fileExists = fileExists
+            self.fileModificationDate = fileModificationDate
+        }
 
         static let production = Runtime(
             isLogicProRunning: { ProcessUtils.isLogicProRunning },
@@ -76,8 +96,24 @@ actor AppleScriptChannel: Channel {
             guard let path = params["path"] else {
                 return .error("Missing 'path' parameter for project.save_as")
             }
+            let saveStartedAt = Date()
+            let candidatePaths = Self.saveAsCandidatePaths(path: path)
+            let preexistingPaths = Set(candidatePaths.filter(runtime.fileExists))
+            let beforeModificationDates = candidatePaths.reduce(into: [String: Date]()) { dates, candidate in
+                if runtime.fileExists(candidate), let date = runtime.fileModificationDate(candidate) {
+                    dates[candidate] = date
+                }
+            }
             let raw = await runScript(saveProjectAsScript(path: path))
-            return Self.wrapMutatingResult(raw, operation: operation, extras: ["path": path])
+            return Self.wrapSaveAsResult(
+                raw,
+                path: path,
+                saveStartedAt: saveStartedAt,
+                preexistingPaths: preexistingPaths,
+                beforeModificationDates: beforeModificationDates,
+                fileExists: runtime.fileExists,
+                fileModificationDate: runtime.fileModificationDate
+            )
 
         // Transport fallbacks — AppleScript is only authoritative for commands
         // confirmed to exist in Logic Pro's scripting dictionary.
@@ -133,6 +169,76 @@ actor AppleScriptChannel: Channel {
         return .success(HonestContract.encodeStateB(
             reason: .readbackUnavailable, extras: merged
         ))
+    }
+
+    static func wrapSaveAsResult(
+        _ result: ChannelResult,
+        path: String,
+        saveStartedAt: Date,
+        preexistingPaths: Set<String>,
+        beforeModificationDates: [String: Date],
+        fileExists: @Sendable (String) -> Bool,
+        fileModificationDate: @Sendable (String) -> Date?
+    ) -> ChannelResult {
+        guard result.isSuccess else { return result }
+        if HonestContractEnvelopeDetector.isAlreadyEnvelope(result.message) {
+            return result
+        }
+
+        let observedPath = saveAsCandidatePaths(path: path).first(where: fileExists)
+
+        var extras: [String: Any] = [
+            "operation": "project.save_as",
+            "method": "applescript",
+            "path": path,
+            "raw": result.message
+        ]
+
+        guard let observedPath else {
+            return .error(HonestContract.encodeStateC(
+                error: .readbackMismatch,
+                hint: "project.save_as completed but no .logicx package was observed at the requested path",
+                extras: extras
+            ))
+        }
+
+        let afterModificationDate = fileModificationDate(observedPath)
+        if let afterModificationDate {
+            extras["observed_mtime"] = iso8601String(afterModificationDate)
+        }
+        if let beforeModificationDate = beforeModificationDates[observedPath] {
+            extras["previous_mtime"] = iso8601String(beforeModificationDate)
+        }
+        if preexistingPaths.contains(observedPath) {
+            guard let beforeModificationDate = beforeModificationDates[observedPath],
+                  let afterModificationDate,
+                  afterModificationDate > beforeModificationDate ||
+                    afterModificationDate >= saveStartedAt else {
+                return .error(HonestContract.encodeStateC(
+                    error: .readbackMismatch,
+                    hint: "project.save_as completed but the existing .logicx package modification time did not advance",
+                    extras: extras.merging(["observed": observedPath]) { _, new in new }
+                ))
+            }
+        } else if afterModificationDate == nil {
+            return .error(HonestContract.encodeStateC(
+                error: .readbackMismatch,
+                hint: "project.save_as completed but no modification time could be read from the new .logicx package",
+                extras: extras.merging(["observed": observedPath]) { _, new in new }
+            ))
+        }
+
+        return .success(HonestContract.encodeStateA(
+            extras: extras.merging(["observed": observedPath]) { _, new in new }
+        ))
+    }
+
+    static func saveAsCandidatePaths(path: String) -> [String] {
+        path.hasSuffix(".logicx") ? [path] : [path, path + ".logicx"]
+    }
+
+    private static func iso8601String(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
     }
 
     func healthCheck() async -> ChannelHealth {

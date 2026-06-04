@@ -1,5 +1,7 @@
 # T10 — Release v3.2.0 + Final Report
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **Status**: Todo
 **Depends on**: T1-T9 all complete + Phase G final review ALL PASS
 **Size**: S

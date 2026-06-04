@@ -1,5 +1,7 @@
 # T3: NoteSequenceParser API Change — `Result<[ParsedNote], NoteSequenceParseError>`
 
+> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+
 **PRD Ref**: PRD-issue1-keycmd-port-routing > §4.3 NoteSequenceParser API, AC-2.1, AC-2.6 table #2
 **Priority**: P1 (High — foundational, blocks T5/play_sequence/record_sequence)
 **Size**: M (2-4h)

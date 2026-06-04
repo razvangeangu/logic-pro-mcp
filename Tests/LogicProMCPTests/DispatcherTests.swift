@@ -1982,6 +1982,24 @@ private actor SelectiveFailChannel: Channel {
     ])
 }
 
+@Test func testMIDIDispatcherRoutesImportFileCommand() async {
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+
+    let result = await MIDIDispatcher.handle(
+        command: "import_file",
+        params: ["path": .string("/tmp/LogicProMCP/acid.mid")],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(!result.isError!)
+    expectExecutedOps(await ax.executedOps, equals: [
+        ("midi.import_file", ["path": "/tmp/LogicProMCP/acid.mid"]),
+    ])
+}
+
 @Test func testMIDIDispatcherUnknownCommandFailsInDispatcherSuite() async {
     let result = await MIDIDispatcher.handle(
         command: "panic_all_channels",
