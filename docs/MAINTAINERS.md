@@ -8,7 +8,7 @@ Operator and maintainer reference. End users do not need to read this — start 
 |------|-----------|
 | macOS | 14+ (Sonoma, Sequoia) |
 | Logic Pro | 12.0.1+ |
-| Architectures | `arm64` native (via local ADHOC). Universal `arm64`+`x86_64` requires full Xcode + CI `--arch arm64 --arch x86_64`. Intel via Rosetta |
+| Architectures | GitHub Actions release assets are universal (`arm64` + `x86_64`). Local ADHOC prerelease script output remains `arm64` only and records that fact in `RELEASE-METADATA.json`. |
 | MCP clients | Claude Code, Claude Desktop |
 
 ## Manual-validation Channels
@@ -39,9 +39,9 @@ Revoke whenever the preset is removed, the Scripter instance is removed, or the 
 ```bash
 swift build -c release
 codesign --force --sign - .build/release/LogicProMCP
-VERSION=v3.0.2
+VERSION=v3.0.2-rc1
 shasum -a 256 .build/release/LogicProMCP | awk '{print $1"  LogicProMCP"}' > SHA256SUMS.txt
-echo '{"version":"'$VERSION'","team_id":"ADHOC","signing":"adhoc"}' > RELEASE-METADATA.json
+echo '{"version":"'$VERSION'","team_id":"ADHOC","signing":"adhoc","architectures":["arm64"]}' > RELEASE-METADATA.json
 
 gh release create $VERSION \
   .build/release/LogicProMCP \
@@ -70,7 +70,7 @@ git tag v3.0.2
 git push origin v3.0.2
 ```
 
-`.github/workflows/release.yml` builds a universal binary, signs, notarizes, staples, and publishes to a GitHub release with full signature validation in a downstream install job.
+`.github/workflows/release.yml` builds a true universal binary, signs/notarizes it, publishes both `LogicProMCP-macOS-universal.tar.gz` and the backward-compatible `LogicProMCP-macOS-arm64.tar.gz` alias, and records the actual architecture list in `RELEASE-METADATA.json`. The downstream install validation job runs on both Apple Silicon and Intel runners so the release asset path is exercised on each architecture.
 
 ### Post-tag steps (both release modes)
 

@@ -3,16 +3,13 @@ class LogicProMcp < Formula
   homepage "https://github.com/MongLong0214/logic-pro-mcp"
   # Single source of truth is Sources/LogicProMCP/Server/ServerConfig.swift
   # (ServerConfig.serverVersion). Bump both together.
-  version "3.4.5-rc5"
+  version "3.4.5-rc6"
   license "MIT"
 
-  # arm64-native binary. Intel Macs run under Rosetta 2 — functional but
-  # slower + with minor CoreMIDI / AX timing differences. The release workflow
-  # with full Xcode + `swift build --arch arm64 --arch x86_64` would emit a
-  # true universal binary; ADHOC local releases ship arm64 only. The tarball
-  # is published under both `-arm64` and `-universal` names for backward
-  # compatibility with taps that hardcoded the older URL — the bytes are
-  # identical.
+  # GitHub Actions release artifacts are expected to be true universal
+  # tarballs. Historical/local ADHOC prerelease cuts may still record
+  # arm64-only metadata, so inspect RELEASE-METADATA.json when auditing a
+  # specific tag.
   #
   # NOTE: sha256 below is the current adhoc-signed tarball shipped on GitHub.
   #       Update every release from the published SHA256SUMS.txt.
@@ -24,11 +21,9 @@ class LogicProMcp < Formula
   depends_on :macos => :sonoma
 
   # NOTE (v3.1.6): no `depends_on xcode:` — this Formula installs the
-  # ADHOC pre-built arm64 binary published in the GitHub release; it does
-  # not invoke `swift build` or any Apple toolchain. CLT-only hosts (macOS
-  # Command Line Tools without a full Xcode.app install) install cleanly.
-  # Source builds via `Package.swift` still require Xcode 15.0+ (Swift 6.0+),
-  # but that is not the supported install path — see CONTRIBUTING.md.
+  # pre-built GitHub release binary; it does not invoke `swift build` or any
+  # Apple toolchain. Source builds via `Package.swift` still require Xcode
+  # 15.0+ (Swift 6.0+).
 
   def install
     bin.install "LogicProMCP"

@@ -104,26 +104,39 @@ jobs:
           done
 
       - name: Build universal binary
-        # Universal swift-pm output path varies by Xcode/Swift version (16.0
-        # placed it at `.build/apple/Products/Release/`; 16.4 sometimes lands
-        # the executable at a different staging location and the previous
-        # hard-coded `cp` failed silently after a successful build, taking the
-        # whole release pipeline down with `set -e`). Locate the binary via
-        # `find` so future Xcode bumps don't regress this.
+        # Xcode 16.x can leave both arch-specific staging outputs and the final
+        # fat Mach-O under `.build`. The old `find ... | head -1` logic could
+        # pick `.build/arm64-apple-macosx/release/LogicProMCP` even after the
+        # later `Create universal binary LogicProMCP` step had already
+        # succeeded. Scan every release candidate and select the first Mach-O
+        # that already contains both required slices.
         run: |
           swift build -c release --arch arm64 --arch x86_64
-          BIN=$(find .build -type f -name LogicProMCP -perm -u+x \
-                | grep -iE '/release/' | head -1)
+
+          BIN=""
+          while IFS= read -r candidate; do
+            FILE_OUT=$(file "$candidate")
+            echo "Candidate: $candidate"
+            echo "$FILE_OUT"
+            if echo "$FILE_OUT" | grep -q "Mach-O universal binary" \
+              && echo "$FILE_OUT" | grep -q "arm64" \
+              && echo "$FILE_OUT" | grep -q "x86_64"; then
+              BIN="$candidate"
+              break
+            fi
+          done < <(find .build -type f -name LogicProMCP -perm -u+x | grep -iE '/release/' | sort)
+
           if [ -z "$BIN" ]; then
-            echo "::error::Built LogicProMCP binary not located; tree below:"
-            find .build -type f -name LogicProMCP
+            echo "::error::Universal LogicProMCP binary not located; candidates below:"
+            while IFS= read -r candidate; do
+              file "$candidate"
+            done < <(find .build -type f -name LogicProMCP -perm -u+x | sort)
             exit 1
           fi
+
           echo "Built binary: $BIN"
           cp "$BIN" LogicProMCP
           chmod +x LogicProMCP
-          # Universal Mach-O 검증 — 단일 arch staging 결과를 ship 하면
-          # Intel Mac on Rosetta 시 nil-binary 사고. 한 번 capture 후 3 슬라이스 검사.
           FILE_OUT=$(file LogicProMCP)
           echo "$FILE_OUT"
           for need in "Mach-O universal binary" "arm64" "x86_64"; do
@@ -190,9 +203,28 @@ jobs:
             TEAM_ID="ADHOC"
             SIGNING="adhoc"
           fi
-          printf '{"version":"%s","team_id":"%s","signing":"%s"}\n' \
-            "$GITHUB_REF_NAME" "$TEAM_ID" "$SIGNING" > RELEASE-METADATA.json
-          # Universal tarball (arm64 + x86_64 from --arch arm64 --arch x86_64 build)
+          LIPO_OUT=$(lipo -info LogicProMCP 2>/dev/null || true)
+          if [ -z "$LIPO_OUT" ]; then
+            echo "::error::lipo -info LogicProMCP returned no output"
+            exit 1
+          fi
+          if echo "$LIPO_OUT" | grep -q "Non-fat file"; then
+            ARCH_FIELD=$(echo "$LIPO_OUT" | sed -E 's/.*architecture: ([a-zA-Z0-9_]+).*/\1/')
+            if [ -z "$ARCH_FIELD" ] || ! echo "$ARCH_FIELD" | grep -qE '^[a-zA-Z0-9_]+$'; then
+              echo "::error::Could not parse architecture from lipo output: $LIPO_OUT"
+              exit 1
+            fi
+            ARCH_JSON="[\"$ARCH_FIELD\"]"
+          else
+            ARCH_LIST=$(echo "$LIPO_OUT" | sed -E 's/.*are: //' | tr ' ' '\n' | grep -v '^$' | sed 's/.*/"&"/' | paste -sd, -)
+            if [ -z "$ARCH_LIST" ]; then
+              echo "::error::Could not parse fat-file architectures from lipo output: $LIPO_OUT"
+              exit 1
+            fi
+            ARCH_JSON="[$ARCH_LIST]"
+          fi
+          printf '{"version":"%s","team_id":"%s","signing":"%s","architectures":%s}\n' \
+            "$GITHUB_REF_NAME" "$TEAM_ID" "$SIGNING" "$ARCH_JSON" > RELEASE-METADATA.json
           tar czf LogicProMCP-macOS-universal.tar.gz \
             LogicProMCP \
             docs/SETUP.md \
@@ -200,7 +232,7 @@ jobs:
             Scripts/uninstall-keycmds.sh \
             Scripts/keycmd-preset.plist \
             Scripts/LogicProMCP-Scripter.js
-          # arm64 alias — same binary (fat-universal), different name for
+          # arm64 alias, same universal payload, different filename for
           # backward-compat with taps hardcoded to the older URL.
           cp LogicProMCP-macOS-universal.tar.gz LogicProMCP-macOS-arm64.tar.gz
           shasum -a 256 LogicProMCP-macOS-universal.tar.gz > SHA256SUMS.txt

@@ -8,9 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-### Documentation
+## [3.4.5-rc6] — 2026-06-05
 
-- Added detailed `v3.4.5-rc5` release notes with post-release asset, installer, MCP stdio, and strict live E2E verification evidence.
+### Changed
+
+- Fixed the release workflow's universal-binary selection after `swift build --arch arm64 --arch x86_64`: packaging now selects the final fat Mach-O instead of whichever release-path candidate `find ... | head -1` returns.
+- Documented the split between workflow-built universal releases and local ADHOC arm64-only prerelease artifacts.
+- Bumped installer, manifest, formula, and server identity surfaces to `v3.4.5-rc6` for the packaging hotfix release.
 
 ## [3.4.5-rc5] — 2026-06-05
 
