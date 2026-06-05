@@ -307,7 +307,8 @@ jobs:
           LOGIC_PRO_MCP_SHA256=$(curl -fsSL "$BASE/SHA256SUMS.txt" \
               | awk '$2 == "LogicProMCP" {print $1}')
           LOGIC_PRO_MCP_TEAM_ID=$(curl -fsSL "$BASE/RELEASE-METADATA.json" \
-              | awk -F'"' '/"team_id"[[:space:]]*:/ {print $4; exit}')
+              | sed -n 's/.*"team_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+              | head -n 1)
           export LOGIC_PRO_MCP_SHA256 LOGIC_PRO_MCP_TEAM_ID
           echo "Using LOGIC_PRO_MCP_SHA256=$LOGIC_PRO_MCP_SHA256"
           echo "Using LOGIC_PRO_MCP_TEAM_ID=$LOGIC_PRO_MCP_TEAM_ID"
