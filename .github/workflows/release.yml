@@ -105,16 +105,23 @@ jobs:
 
       - name: Build universal binary
         # Xcode 16.x can leave both arch-specific staging outputs and the final
-        # fat Mach-O under `.build`. The old `find ... | head -1` logic could
-        # pick `.build/arm64-apple-macosx/release/LogicProMCP` even after the
-        # later `Create universal binary LogicProMCP` step had already
-        # succeeded. Scan every release candidate and select the first Mach-O
-        # that already contains both required slices.
+        # fat Mach-O under `.build`, and the exact path layout is runner-
+        # specific (`.build/apple/Products/Release/...` vs arch staging dirs).
+        # The old `find ... | head -1` logic could pick an arch-only artifact,
+        # and the first rc6 fix still overfit to `/release/` path segments.
+        # Scan every executable LogicProMCP candidate and select the first
+        # Mach-O that already contains both required slices.
         run: |
           swift build -c release --arch arm64 --arch x86_64
 
+          mapfile -t CANDIDATES < <(find .build -type f -name LogicProMCP -perm -u+x | sort)
+          if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+            echo "::error::No executable LogicProMCP candidates found under .build"
+            exit 1
+          fi
+
           BIN=""
-          while IFS= read -r candidate; do
+          for candidate in "${CANDIDATES[@]}"; do
             FILE_OUT=$(file "$candidate")
             echo "Candidate: $candidate"
             echo "$FILE_OUT"
@@ -124,13 +131,13 @@ jobs:
               BIN="$candidate"
               break
             fi
-          done < <(find .build -type f -name LogicProMCP -perm -u+x | grep -iE '/release/' | sort)
+          done
 
           if [ -z "$BIN" ]; then
             echo "::error::Universal LogicProMCP binary not located; candidates below:"
-            while IFS= read -r candidate; do
+            for candidate in "${CANDIDATES[@]}"; do
               file "$candidate"
-            done < <(find .build -type f -name LogicProMCP -perm -u+x | sort)
+            done
             exit 1
           fi
 

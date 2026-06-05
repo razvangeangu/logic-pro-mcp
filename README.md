@@ -81,7 +81,7 @@ The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew 
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc6/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc7/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=ADHOC \
@@ -92,7 +92,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc6/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc7/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
@@ -155,7 +155,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 ## Status
 
-**Current prerelease: v3.4.5-rc6 (2026-06-05 KST).** rc6 is a release-workflow hotfix: it keeps universal GitHub Actions releases intact while fixing post-build artifact selection so packaging verifies the final fat Mach-O instead of an arch-specific staging binary. App-level production-readiness evidence remains the rc5 live run: `swift test` at `1143/1143` passing, `swift build -c release` passing, Python syntax validation for the v4 import runner passing, and a live Logic Pro 12.2 MCP session confirming all 7 channels ready, `transport.set_tempo` at `127 BPM`, `project.save_as` with package mtime readback, and an 11-part MIDI-only acid composition saved under `artifacts/acid-track-composition-v4/acid-track-composed-midi-v4.logicx`.
+**Current prerelease: v3.4.5-rc7 (2026-06-05 KST).** rc7 is the rerolled release-workflow hotfix: it keeps universal GitHub Actions releases intact while removing the overfit release-path filter, so packaging selects the final fat Mach-O by actual slice inspection instead of path shape. App-level production-readiness evidence remains the rc5 live run: `swift test` at `1143/1143` passing, `swift build -c release` passing, Python syntax validation for the v4 import runner passing, and a live Logic Pro 12.2 MCP session confirming all 7 channels ready, `transport.set_tempo` at `127 BPM`, `project.save_as` with package mtime readback, and an 11-part MIDI-only acid composition saved under `artifacts/acid-track-composition-v4/acid-track-composed-midi-v4.logicx`.
 
 ### Active contracts (the things callers most care about)
 
@@ -172,7 +172,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 | Version | Date | Headline |
 |---------|------|----------|
-| **v3.4.5-rc6** | 2026-06-05 | Release-workflow hotfix, universal binary selection now targets the final fat Mach-O instead of an arch-specific staging artifact |
+| **v3.4.5-rc7** | 2026-06-05 | Release-workflow hotfix reroll, universal binary selection now scans all executable candidates under `.build` and picks the first real fat Mach-O |
 | **v3.4.5-rc5** | 2026-06-05 | Save/readback and MIDI import hardening, live `project/info` tier merge, ProcessUtils Logic detection fallback, Library duplicate-name column targeting, and final v4 MIDI-only composition E2E |
 | **v3.4.5-rc4** | 2026-05-10 | Installer metadata parser fix — same-origin install path now reads `team_id` from one-line `RELEASE-METADATA.json` |
 | v3.4.5-rc3 | 2026-05-10 | CI green, but superseded by rc4 because same-origin installer metadata parsing selected `version` instead of `team_id` |

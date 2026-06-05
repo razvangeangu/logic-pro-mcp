@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.4.5-rc7] — 2026-06-05
+
+### Changed
+
+- Removed the release-path grep heuristic from the universal-binary selection step. The workflow now scans every executable `LogicProMCP` candidate under `.build` and picks the first Mach-O that actually contains both `arm64` and `x86_64` slices.
+- Bumped installer, manifest, formula, and server identity surfaces to `v3.4.5-rc7` for the rerolled packaging hotfix release.
+
 ## [3.4.5-rc6] — 2026-06-05
 
 ### Changed
