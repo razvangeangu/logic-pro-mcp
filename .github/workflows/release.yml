@@ -110,18 +110,22 @@ jobs:
         # The old `find ... | head -1` logic could pick an arch-only artifact,
         # and the first rc6 fix still overfit to `/release/` path segments.
         # Scan every executable LogicProMCP candidate and select the first
-        # Mach-O that already contains both required slices.
+        # Mach-O that already contains both required slices. Use a temp file
+        # instead of `mapfile` because GitHub's macOS runners still default to
+        # Bash 3.2, which lacks `mapfile`.
         run: |
           swift build -c release --arch arm64 --arch x86_64
 
-          mapfile -t CANDIDATES < <(find .build -type f -name LogicProMCP -perm -u+x | sort)
-          if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+          CANDIDATES_FILE="$RUNNER_TEMP/logicpromcp-candidates.txt"
+          find .build -type f -name LogicProMCP -perm -u+x | sort > "$CANDIDATES_FILE"
+
+          if [ ! -s "$CANDIDATES_FILE" ]; then
             echo "::error::No executable LogicProMCP candidates found under .build"
             exit 1
           fi
 
           BIN=""
-          for candidate in "${CANDIDATES[@]}"; do
+          while IFS= read -r candidate; do
             FILE_OUT=$(file "$candidate")
             echo "Candidate: $candidate"
             echo "$FILE_OUT"
@@ -131,15 +135,17 @@ jobs:
               BIN="$candidate"
               break
             fi
-          done
+          done < "$CANDIDATES_FILE"
 
           if [ -z "$BIN" ]; then
             echo "::error::Universal LogicProMCP binary not located; candidates below:"
-            for candidate in "${CANDIDATES[@]}"; do
+            while IFS= read -r candidate; do
               file "$candidate"
-            done
+            done < "$CANDIDATES_FILE"
             exit 1
           fi
+
+          rm -f "$CANDIDATES_FILE"
 
           echo "Built binary: $BIN"
           cp "$BIN" LogicProMCP
