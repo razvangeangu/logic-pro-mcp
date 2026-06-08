@@ -75,7 +75,7 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(workflow.contains("RELEASE-METADATA.json"))
     #expect(workflow.contains("validate-install"))
     #expect(workflow.contains("macos-15"))
-    #expect(workflow.contains("macos-13"))
+    #expect(workflow.contains("macos-14"))
     #expect(workflow.contains("LOGIC_PRO_MCP_INSTALL_DIR"))
 }
 
