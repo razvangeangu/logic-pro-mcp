@@ -33,6 +33,22 @@
 - No workflow is marked production-ready without matching evidence.
 - `swift build -c release`, `swift test --no-parallel`, and doc/schema validation pass.
 
+## Hardening Round (2026-06-10)
+
+Adversarial review (Codex gpt-5.5 xhigh + full-repo review cross-check) returned 2 P1 / 3 P2 / 1 P3 findings. All addressed:
+
+- [x] `R1` Lint-gate bypass removed: `currentResourceURIs()` no longer hardcodes phantom `logic://stock-plugins*` URIs. The linter resolves references against the real `ResourceProvider` surface with template-aware matching; refs that don't resolve must be declared per-workflow in `depends_on` or the lint fails.
+- [x] `R2` Honesty surfaced at read time: every served workflow now carries computed `dependencies_resolved` + `unresolved_resources`. The two stock-dependent workflows are served with `dependencies_resolved: false` on this branch (tested); once #14 merges and this branch rebases, they flip to `true` mechanically (tested via injected surface).
+- [x] `R3` Command-level validation: `WorkflowStep.command` added and linted against a per-tool public command census (`publicCommands`), which is itself pinned to the dispatcher sources by `WorkflowCommandCensusTests`. The stale `midi_import` reference was corrected to `logic_midi.import_file` (with `logic_tracks.record_sequence` as the declared alternative), and the marker recipe now names `create_marker`/`rename_marker` explicitly.
+- [x] `R4` Mutation-kind truth lint: `read_only` with mutating steps and `guarded_mutation` without mutating steps both fail (`mutation_kind_mismatch`).
+- [x] `R5` Confirmation levels restricted to `L1`/`L2`; mutating steps must be covered by a declared confirmation in both level and command (`mutating_step_not_covered_by_confirmation`); mutating steps without a command fail (`mutating_step_missing_command`).
+- [x] `R6` `live_verified` workflows must reference an evidence file (`live_verified_missing_evidence_file`), and a deterministic test verifies referenced evidence files exist in the repo.
+- [x] `R7` Placeholder convention unified on `{query}`/`{id}` template forms; schema `fields` generated from `WorkflowSkill.CodingKeys` (drift-proof, tested); lint rule census exposed in the schema resource.
+- [x] `R8` Fail-closed `URLComponents` URI routing for workflow resources (unknown subpaths/params rejected); search query double-decode bug fixed and regression-tested. Shared JSON helpers moved to `ResourceJSONHelpers.swift` (byte-identical with #14's branch to avoid merge collisions).
+- [x] `R9` Truth-faithful recipe limitations: `set_pan` relative V-Pot semantics, keycmd-only `delete_marker`/indexed `goto_marker`/`project.bounce` documented in the affected workflows.
+
+Release identity note: `serverVersion` stays `3.4.6` on this branch by design — packaging surfaces pin the published v3.4.6 artifacts. Merging this PR requires the next release to ship as `v3.5.0`; do not rebuild/redistribute as `3.4.6`.
+
 ## Verification
 
-See `docs/tickets/issue15-workflow-skills-pack/VERIFICATION-2026-06-09.md`.
+See `docs/tickets/issue15-workflow-skills-pack/VERIFICATION-2026-06-09.md` and `docs/tickets/issue15-workflow-skills-pack/VERIFICATION-2026-06-10.md` (hardening round).

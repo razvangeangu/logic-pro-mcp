@@ -103,17 +103,8 @@ extension ResourceHandlers {
 
         await cache.recordToolAccess()
 
-        if uri == "logic://workflow-skills" {
-            return readWorkflowSkills(uri: uri)
-        }
-        if uri == "logic://workflow-skills/schema" {
-            return readWorkflowSkillSchema(uri: uri)
-        }
-        if uri.hasPrefix("logic://workflow-skills/search") {
-            return readWorkflowSkillSearch(uri: uri)
-        }
-        if uri.hasPrefix("logic://workflow-skills/") {
-            return try readWorkflowSkillDetail(uri: uri)
+        if uri == "logic://workflow-skills" || uri.hasPrefix("logic://workflow-skills/") || uri.hasPrefix("logic://workflow-skills?") {
+            return try readWorkflowSkillResource(uri: uri)
         }
 
         // hasDocument gate removed (post-hardening): the StatePoller's view
@@ -195,13 +186,50 @@ extension ResourceHandlers {
         )
     }
 
+    /// Workflow skill routing. Parsed with `URLComponents` so path and query
+    /// are matched exactly: unknown subpaths, nested segments, and stray query
+    /// parameters fail closed instead of silently degrading to a search or a
+    /// detail lookup.
+    private static func readWorkflowSkillResource(uri: String) throws -> ReadResource.Result {
+        guard let components = URLComponents(string: uri),
+              components.scheme == "logic",
+              components.host == "workflow-skills" else {
+            throw MCPError.invalidParams("Malformed workflow skill resource URI: \(uri)")
+        }
+        let segments = components.path.split(separator: "/").map(String.init)
+        let queryItems = components.queryItems ?? []
+        let unknownParams = queryItems.map(\.name).filter { $0 != "query" }
+
+        if segments.isEmpty {
+            guard queryItems.isEmpty else {
+                throw MCPError.invalidParams("logic://workflow-skills does not accept query parameters")
+            }
+            return readWorkflowSkills(uri: uri)
+        }
+        guard segments.count == 1 else {
+            throw MCPError.invalidParams("Unknown workflow skill resource path: \(components.path)")
+        }
+        let segment = segments[0]
+
+        if segment == "search" {
+            guard unknownParams.isEmpty else {
+                throw MCPError.invalidParams("Unsupported search parameters: \(unknownParams.joined(separator: ", "))")
+            }
+            return readWorkflowSkillSearch(uri: uri, query: queryItemValue(from: uri, name: "query") ?? "")
+        }
+        guard queryItems.isEmpty else {
+            throw MCPError.invalidParams("logic://workflow-skills/\(segment) does not accept query parameters")
+        }
+        if segment == "schema" { return readWorkflowSkillSchema(uri: uri) }
+        return try readWorkflowSkillDetail(uri: uri, id: segment)
+    }
+
     private static func readWorkflowSkills(uri: String) -> ReadResource.Result {
         let json = encodeJSON(WorkflowSkillCatalog.defaultSnapshot(), compact: true)
         return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
     }
 
-    private static func readWorkflowSkillDetail(uri: String) throws -> ReadResource.Result {
-        let id = String(uri.dropFirst("logic://workflow-skills/".count)).removingPercentEncoding ?? ""
+    private static func readWorkflowSkillDetail(uri: String, id: String) throws -> ReadResource.Result {
         let snapshot = WorkflowSkillCatalog.defaultSnapshot()
         guard let workflow = WorkflowSkillCatalog.workflow(id: id, snapshot: snapshot) else {
             throw MCPError.invalidParams("Unknown workflow skill id: \(id)")
@@ -215,9 +243,8 @@ extension ResourceHandlers {
         return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
     }
 
-    private static func readWorkflowSkillSearch(uri: String) -> ReadResource.Result {
+    private static func readWorkflowSkillSearch(uri: String, query: String) -> ReadResource.Result {
         let snapshot = WorkflowSkillCatalog.defaultSnapshot()
-        let query = queryValue(from: uri) ?? ""
         let workflows = WorkflowSkillCatalog.search(query: query, snapshot: snapshot).map(jsonObject)
         let json = encodeJSONObject([
             "schema_version": snapshot.schemaVersion,
@@ -233,28 +260,6 @@ extension ResourceHandlers {
     private static func readWorkflowSkillSchema(uri: String) -> ReadResource.Result {
         let json = encodeJSONObject(WorkflowSkillCatalog.schema())
         return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
-    }
-
-    private static func queryValue(from uri: String) -> String? {
-        URLComponents(string: uri)?
-            .queryItems?
-            .first { $0.name == "query" }?
-            .value?
-            .removingPercentEncoding
-    }
-
-    private static func jsonObject<T: Encodable>(_ value: T) -> Any {
-        let text = encodeJSON(value, compact: true)
-        return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) ?? [:]
-    }
-
-    private static func encodeJSONObject(_ object: Any) -> String {
-        guard JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else {
-            return #"{"error":"resource JSON encoding failed"}"#
-        }
-        return text
     }
 
     /// v3.1.8 (Issue #7) — tier-merged track list read.

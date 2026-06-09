@@ -59,7 +59,15 @@ Prefer resources over repeated tool calls — they are cheap and safe to poll at
 
 `logic://workflow-skills` is also read-only. It returns workflow recipes that tell clients which resources/tools to call, which state checks must pass, when confirmation is required, and which response fields prove success. Reading a workflow never executes it.
 
-Mutating workflows are not marked `production_ready` unless they have matching `live_verified` evidence. `logic.workflow.plugins.stock_chain_plan` is planning-only and declares its #14 stock-catalog dependency; `logic.workflow.plugins.stock_insert_gain_live_verified` is the guarded L2 Gain insert recipe backed by the existing Logic Pro 12.2 live evidence file and still requires current-session confirmation/readback.
+The pack is linted against the **real server surface** — no hand-maintained allowlists:
+
+- Tool references must name registered MCP tools, and every mutating step must carry an exact public `command` that exists in the per-tool command census (the census itself is pinned to the dispatcher sources by test).
+- Resource references must be servable by this build (exact static URI, a registered template, or a concrete instantiation of one) or be covered by the workflow's declared `depends_on` external dependencies.
+- `mutation_kind` must agree with step mutability in both directions; mutating steps must be covered by a declared confirmation (level `L1`/`L2` only, matching command); `live_verified` workflows must reference their evidence file.
+
+Each served workflow carries computed honesty fields: `dependencies_resolved` says whether every referenced resource is servable by **this** running build, and `unresolved_resources` lists the gaps. The stock-plugin workflows (`logic.workflow.plugins.stock_chain_plan`, `logic.workflow.plugins.stock_insert_gain_live_verified`) declare the #14 stock catalog via `depends_on`; until #14 is merged into the running build they are served with `dependencies_resolved: false`, and clients must not execute them against a server that cannot serve their resources.
+
+Mutating workflows are not marked `production_ready` unless they have matching `live_verified` evidence. `logic.workflow.plugins.stock_insert_gain_live_verified` is the guarded L2 Gain insert recipe backed by the existing Logic Pro 12.2 live evidence file and still requires current-session confirmation/readback.
 
 ---
 
