@@ -126,12 +126,80 @@ struct WorkflowSkillLinterTests {
     func mutatingStepConfirmationCoverage() {
         var workflow = WorkflowSkillCatalog.defaultWorkflows().first { $0.id == "logic.workflow.midi.idea_sketch" }!
         workflow.requiredConfirmations = [
-            WorkflowConfirmation(level: "L2", requiredFor: ["record_sequence"], message: "covers a different level and command"),
+            WorkflowConfirmation(level: "L2", requiredFor: ["record_sequence"], message: "covers a different level"),
         ]
 
         let issues = WorkflowSkillLinter.validate([workflow]).issues
-        #expect(issues.filter { $0.code == "mutating_step_not_covered_by_confirmation" }.count == 2,
-                "step level L1 is undeclared and import_file is unconfirmed: \(issues)")
+        #expect(issues.contains { $0.code == "mutating_step_not_covered_by_confirmation" },
+                "step level L1 is undeclared: \(issues)")
+    }
+
+    @Test("confirmation coverage is an exact (level, command) pair")
+    func confirmationCoverageIsPairwise() {
+        // import_file is confirmed — but only at L1, while the step demands
+        // L2. Independent set-based checks would pass this; pair validation
+        // must reject it.
+        var workflow = WorkflowSkillCatalog.defaultWorkflows().first { $0.id == "logic.workflow.midi.idea_sketch" }!
+        workflow.requiredConfirmations = [
+            WorkflowConfirmation(level: "L1", requiredFor: ["import_file"], message: "right command, wrong level"),
+            WorkflowConfirmation(level: "L2", requiredFor: ["record_sequence"], message: "right level, wrong command"),
+        ]
+        workflow.steps = workflow.steps.map { step in
+            guard step.mutates else { return step }
+            return WorkflowStep(
+                id: step.id,
+                title: step.title,
+                operationType: step.operationType,
+                tool: step.tool,
+                command: step.command,
+                resource: nil,
+                mutates: true,
+                requiresConfirmationLevel: "L2",
+                expectedResponseFields: step.expectedResponseFields,
+                stopConditions: step.stopConditions
+            )
+        }
+
+        let issues = WorkflowSkillLinter.validate([workflow]).issues
+        #expect(issues.contains { $0.code == "mutating_step_not_covered_by_confirmation" },
+                "L2 step with import_file confirmed only at L1 must fail: \(issues)")
+    }
+
+    @Test("dependency roots must be well-formed logic:// URIs")
+    func dependencyRootsValidated() {
+        #expect(WorkflowSkillCatalog.isValidDependencyRoot("logic://stock-plugins"))
+        #expect(!WorkflowSkillCatalog.isValidDependencyRoot("logic:"))
+        #expect(!WorkflowSkillCatalog.isValidDependencyRoot("logic:/"))
+        #expect(!WorkflowSkillCatalog.isValidDependencyRoot("logic://"))
+        #expect(!WorkflowSkillCatalog.isValidDependencyRoot("http://evil"))
+        #expect(!WorkflowSkillCatalog.refCoveredByDependencies("logic://anything/at/all", dependsOn: ["logic:"]),
+                "a bare scheme must not cover the whole URI space")
+
+        var workflow = WorkflowSkillCatalog.defaultWorkflows().first { $0.id == "logic.workflow.readiness.project" }!
+        workflow = WorkflowSkill(
+            id: workflow.id,
+            title: workflow.title,
+            intent: workflow.intent,
+            scope: workflow.scope,
+            prerequisites: workflow.prerequisites,
+            allowedTools: workflow.allowedTools,
+            allowedResources: workflow.allowedResources,
+            requiredConfirmations: workflow.requiredConfirmations,
+            stateChecks: workflow.stateChecks,
+            steps: workflow.steps,
+            verification: workflow.verification,
+            failureModes: workflow.failureModes,
+            rollbackOrRecovery: workflow.rollbackOrRecovery,
+            evidenceLevel: workflow.evidenceLevel,
+            productionReady: workflow.productionReady,
+            dependsOn: ["logic:"],
+            limitations: workflow.limitations,
+            mutationKind: workflow.mutationKind,
+            dependenciesResolved: nil,
+            unresolvedResources: nil
+        )
+        let issues = WorkflowSkillLinter.validate([workflow]).issues
+        #expect(issues.contains { $0.code == "invalid_dependency" })
     }
 
     @Test("production-ready mutating workflows must be live verified")
@@ -214,6 +282,10 @@ struct WorkflowSkillCatalogTests {
         #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://stock-plugins", staticURIs: [], templateURIs: templates))
         #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://mixer/3/extra", staticURIs: [], templateURIs: templates))
         #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://stock-plugins/search?other=x", staticURIs: [], templateURIs: templates))
+        #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://mixer/3/", staticURIs: [], templateURIs: templates),
+                "trailing slash must fail closed")
+        #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://mixer//3", staticURIs: [], templateURIs: templates),
+                "doubled slash must fail closed")
         // Bare /search structurally matches the {id} template — and the live
         // surface does serve it (empty-query search), so it must resolve.
         #expect(WorkflowSkillCatalog.resourceRefResolves("logic://stock-plugins/search", staticURIs: [], templateURIs: templates))
@@ -295,6 +367,7 @@ struct WorkflowSkillCatalogTests {
         #expect(fields == WorkflowSkill.CodingKeys.allCases.map(\.rawValue))
         #expect((schema["confirmation_levels"] as? [String]) == ["L1", "L2"])
         #expect((schema["lint_rules"] as? [String])?.contains("unknown_command") == true)
+        #expect((schema["lint_rules"] as? [String])?.contains("invalid_dependency") == true)
     }
 }
 
@@ -311,7 +384,7 @@ struct WorkflowCommandCensusTests {
         "logic_system": "SystemDispatcher.swift",
     ]
 
-    @Test("every census command exists as a case label in its dispatcher source")
+    @Test("every census command exists as an executable case label in its dispatcher source")
     func censusMatchesDispatcherSources() throws {
         for (tool, commands) in WorkflowSkillCatalog.publicCommands {
             let file = try #require(Self.dispatcherFiles[tool], "no dispatcher source mapped for \(tool)")
@@ -320,9 +393,35 @@ struct WorkflowCommandCensusTests {
                 .appendingPathComponent(file)
             let source = try String(contentsOf: url, encoding: .utf8)
             for command in commands {
-                #expect(source.contains("\"\(command)\""),
-                        "census command \(tool).\(command) not found in \(file)")
+                guard let caseRange = source.range(of: "case \"\(command)\"") else {
+                    Issue.record("census command \(tool).\(command) not found in \(file)")
+                    continue
+                }
+                // A census command must actually execute. If the case body
+                // immediately returns a "not exposed" stub, the census lies.
+                let bodyStart = caseRange.upperBound
+                let bodyEnd = source.index(bodyStart, offsetBy: 240, limitedBy: source.endIndex) ?? source.endIndex
+                let body = source[bodyStart..<bodyEnd]
+                #expect(!body.contains("not exposed in the production MCP contract"),
+                        "census command \(tool).\(command) is a not-exposed stub in \(file)")
             }
+        }
+    }
+
+    @Test("not-exposed dispatcher stubs are excluded from the census")
+    func notExposedStubsExcluded() {
+        let stubs: [(String, String)] = [
+            ("logic_tracks", "set_color"),
+            ("logic_mixer", "set_send"),
+            ("logic_mixer", "set_output"),
+            ("logic_mixer", "set_input"),
+            ("logic_mixer", "toggle_eq"),
+            ("logic_mixer", "reset_strip"),
+            ("logic_mixer", "bypass_plugin"),
+        ]
+        for (tool, command) in stubs {
+            #expect(WorkflowSkillCatalog.publicCommands[tool]?.contains(command) == false,
+                    "\(tool).\(command) returns a not-exposed error and must not be in the census")
         }
     }
 }
@@ -368,6 +467,8 @@ struct WorkflowSkillResourceTests {
             "logic://workflow-skills/logic.workflow.readiness.project/extra",
             "logic://workflow-skills/unknown.workflow.id",
             "logic://workflow-skills/schema?x=1",
+            "logic://workflow-skills//schema",
+            "logic://workflow-skills/schema/",
         ]
         for uri in malformed {
             #expect(await workflowResourceThrows(uri), "expected fail-closed read for \(uri)")

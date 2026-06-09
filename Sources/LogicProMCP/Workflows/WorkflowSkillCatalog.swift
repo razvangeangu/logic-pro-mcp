@@ -185,6 +185,14 @@ enum WorkflowSkillLinter {
             for tool in workflow.allowedTools where !toolNames.contains(tool) {
                 issues.append(issue("unknown_tool", "\(base).allowed_tools", "unknown MCP tool \(tool)"))
             }
+            for (depIndex, dep) in workflow.dependsOn.enumerated()
+                where !WorkflowSkillCatalog.isValidDependencyRoot(dep) {
+                issues.append(issue(
+                    "invalid_dependency",
+                    "\(base).depends_on[\(depIndex)]",
+                    "dependency \(dep) must be a logic://<host> URI root"
+                ))
+            }
             validateResourceRefs(
                 workflow.allowedResources,
                 workflow: workflow,
@@ -261,8 +269,6 @@ enum WorkflowSkillLinter {
                 ))
             }
 
-            let declaredLevels = Set(workflow.requiredConfirmations.map(\.level))
-            let confirmedCommands = Set(workflow.requiredConfirmations.flatMap(\.requiredFor))
             for (stepIndex, step) in workflow.steps.enumerated() {
                 let stepPath = "\(base).steps[\(stepIndex)]"
                 if let tool = step.tool, !toolNames.contains(tool) {
@@ -303,19 +309,25 @@ enum WorkflowSkillLinter {
                                 "\(stepPath).requires_confirmation_level",
                                 "confirmation level must be one of \(allowedConfirmationLevels.sorted().joined(separator: ", "))"
                             ))
-                        } else if !declaredLevels.contains(level) {
-                            issues.append(issue(
-                                "mutating_step_not_covered_by_confirmation",
-                                stepPath,
-                                "step confirmation level \(level) is not declared in required_confirmations"
-                            ))
-                        }
-                        if let command = step.command, !confirmedCommands.contains(command) {
-                            issues.append(issue(
-                                "mutating_step_not_covered_by_confirmation",
-                                stepPath,
-                                "mutating command \(command) is not listed in any required_confirmations.required_for"
-                            ))
+                        } else {
+                            // Coverage is validated as an exact (level, command)
+                            // pair: a command confirmed at L1 does not license an
+                            // L2 step, and vice versa.
+                            let sameLevel = workflow.requiredConfirmations.filter { $0.level == level }
+                            if sameLevel.isEmpty {
+                                issues.append(issue(
+                                    "mutating_step_not_covered_by_confirmation",
+                                    stepPath,
+                                    "step confirmation level \(level) is not declared in required_confirmations"
+                                ))
+                            } else if let command = step.command,
+                                      !sameLevel.contains(where: { $0.requiredFor.contains(command) }) {
+                                issues.append(issue(
+                                    "mutating_step_not_covered_by_confirmation",
+                                    stepPath,
+                                    "mutating command \(command) is not listed in a level-\(level) required_confirmations entry"
+                                ))
+                            }
                         }
                     } else {
                         issues.append(issue("mutating_step_missing_confirmation", stepPath, "mutating steps need confirmation level"))
@@ -448,6 +460,7 @@ enum WorkflowSkillCatalog {
                 "unknown_tool",
                 "unknown_command",
                 "unknown_resource",
+                "invalid_dependency",
                 "invalid_confirmation_level",
                 "mutation_kind_mismatch",
                 "mutating_missing_confirmation",
@@ -473,9 +486,12 @@ enum WorkflowSkillCatalog {
         Set(publicCommands.keys)
     }
 
-    /// Public command census per MCP tool. Kept in lockstep with the
-    /// dispatcher `case` labels by `WorkflowCommandCensusTests`, which reads
-    /// the dispatcher sources and fails when a census command disappears.
+    /// Public command census per MCP tool. Error-only stubs ("not exposed in
+    /// the production MCP contract") are deliberately excluded — a census
+    /// command must actually execute, not merely parse. Kept in lockstep with
+    /// the dispatcher `case` labels by `WorkflowCommandCensusTests`, which
+    /// reads the dispatcher sources and fails when a census command
+    /// disappears or degrades into a not-exposed stub.
     static let publicCommands: [String: Set<String>] = [
         "logic_transport": [
             "play", "stop", "record", "pause", "rewind", "fast_forward",
@@ -486,13 +502,12 @@ enum WorkflowSkillCatalog {
             "select", "create_audio", "create_instrument", "create_drummer",
             "create_external_midi", "delete", "duplicate", "rename",
             "mute", "solo", "arm", "arm_only", "record_sequence",
-            "set_color", "set_automation", "set_instrument",
+            "set_automation", "set_instrument",
             "resolve_path", "list_library", "scan_library", "scan_plugin_presets",
         ],
         "logic_mixer": [
-            "set_volume", "set_pan", "set_send", "set_output", "set_input",
-            "set_master_volume", "toggle_eq", "reset_strip",
-            "insert_plugin", "bypass_plugin", "set_plugin_param",
+            "set_volume", "set_pan", "set_master_volume",
+            "insert_plugin", "set_plugin_param",
         ],
         "logic_midi": [
             "send_note", "send_chord", "play_sequence", "send_cc",
@@ -533,8 +548,15 @@ enum WorkflowSkillCatalog {
         return templateURIs.contains { template in refMatchesTemplate(ref, template: template) }
     }
 
+    /// Declared external dependency roots must be well-formed `logic://host`
+    /// URIs (optionally with a path). Bare schemes like `logic:` would
+    /// otherwise cover the entire URI space and neuter the lint.
+    static func isValidDependencyRoot(_ dep: String) -> Bool {
+        dep.range(of: "^logic://[a-z0-9-]+(/[A-Za-z0-9._/-]+)?$", options: .regularExpression) != nil
+    }
+
     static func refCoveredByDependencies(_ ref: String, dependsOn: [String]) -> Bool {
-        dependsOn.contains { dep in
+        dependsOn.filter(isValidDependencyRoot).contains { dep in
             ref == dep || ref.hasPrefix(dep + "/") || ref.hasPrefix(dep + "?")
         }
     }
@@ -557,8 +579,11 @@ enum WorkflowSkillCatalog {
     }
 
     private static func pathMatches(_ refPath: String, templatePath: String) -> Bool {
-        let refSegments = refPath.split(separator: "/").map(String.init)
-        let templateSegments = templatePath.split(separator: "/").map(String.init)
+        // Empty subsequences are kept so refs with doubled or trailing
+        // slashes ("logic://mixer//3", "logic://mixer/3/") fail closed
+        // instead of collapsing onto a template.
+        let refSegments = refPath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let templateSegments = templatePath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard refSegments.count == templateSegments.count else { return false }
         return zip(refSegments, templateSegments).allSatisfy { refSegment, templateSegment in
             isPlaceholder(templateSegment) ? !refSegment.isEmpty : refSegment == templateSegment

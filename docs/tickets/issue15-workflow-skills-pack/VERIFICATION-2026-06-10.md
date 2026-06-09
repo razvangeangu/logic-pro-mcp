@@ -60,6 +60,19 @@ Additional hardening: `live_verified_missing_evidence_file` lint + repo-file exi
 
 The key honesty change: the live-verified Gain insert workflow is now served with `dependencies_resolved: false` and an explicit `unresolved_resources` list on this branch, because the #14 stock catalog is not part of this build. After #14 merges and this branch rebases, the same computation flips to `true` mechanically (covered by `dependenciesResolveWithStockSurface`).
 
+## Convergence Round 2→3
+
+Round-2 re-review (Codex gpt-5.5 xhigh): all 6 round-1 findings **CLOSED**; verdict PASS-WITH-CONDITIONS with 4 new edges, all fixed in the follow-up commit:
+
+| New finding | Fix |
+|---|---|
+| Confirmation coverage validated as independent level/command sets (P2) | Exact `(level, command)` pair validation + regression test |
+| Empty path segments accepted (`//schema`, trailing `/`) (P2) | Canonical-path guard in routing; `omittingEmptySubsequences: false` in template matching; tests |
+| Census contained not-exposed stubs (`set_color`, `set_send`, `set_output`, `set_input`, `toggle_eq`, `reset_strip`, `bypass_plugin`) (P2) | Stubs removed; census test fails on "not exposed" case bodies; explicit exclusion test |
+| `depends_on` accepted arbitrary prefixes like `logic:` (P3) | `invalid_dependency` lint; only `logic://<host>` roots cover refs |
+
+Round-3 gates: `swift test --no-parallel` → **1232 tests passed**; `swift build -c release` PASS; `git diff --check` PASS.
+
 ## Live Mutation Evidence (unchanged)
 
 The live-verified mutating workflow remains backed by `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md` (Logic Pro 12.2, `insert_plugin` State A with `verified:true`, `verify_source:"ax_plugin_slot"`, fail-closed `slot_occupied` repeat). A deterministic test now proves the referenced evidence file exists in the repo.

@@ -47,6 +47,15 @@ Adversarial review (Codex gpt-5.5 xhigh + full-repo review cross-check) returned
 - [x] `R8` Fail-closed `URLComponents` URI routing for workflow resources (unknown subpaths/params rejected); search query double-decode bug fixed and regression-tested. Shared JSON helpers moved to `ResourceJSONHelpers.swift` (byte-identical with #14's branch to avoid merge collisions).
 - [x] `R9` Truth-faithful recipe limitations: `set_pan` relative V-Pot semantics, keycmd-only `delete_marker`/indexed `goto_marker`/`project.bounce` documented in the affected workflows.
 
+## Convergence Round 2→3 (2026-06-10)
+
+Round-2 adversarial re-review (Codex gpt-5.5 xhigh) confirmed all round-1 findings closed and surfaced 3 P2 / 1 P3 new edges — all fixed:
+
+- [x] `R10` Confirmation coverage is now an exact `(level, command)` pair: a command confirmed at L1 no longer licenses an L2 step (`confirmationCoverageIsPairwise` test).
+- [x] `R11` Doubled/trailing-slash URIs fail closed in both resource routing (canonical path reconstruction) and template matching (`omittingEmptySubsequences: false`).
+- [x] `R12` Command census purged of not-exposed stubs (`set_color`, `set_send`, `set_output`, `set_input`, `toggle_eq`, `reset_strip`, `bypass_plugin`); the census test now fails if a census command's case body is a "not exposed" stub.
+- [x] `R13` `depends_on` roots must be well-formed `logic://<host>` URIs (`invalid_dependency` lint); bare `logic:` prefixes no longer cover the URI space.
+
 Release identity note: `serverVersion` stays `3.4.6` on this branch by design — packaging surfaces pin the published v3.4.6 artifacts. Merging this PR requires the next release to ship as `v3.5.0`; do not rebuild/redistribute as `3.4.6`.
 
 ## Verification
