@@ -116,13 +116,41 @@ Fix: Run `scan_library` once. The in-memory cache persists until the MCP process
 
 ## MCU / Mixer
 
-### `mixer.set_volume` returns "All channels exhausted … MCU feedback not detected"
+### `mixer.set_volume`/`set_pan` returns `error: "channels_exhausted"`
 
-**Cause:** MCU control surface not registered in Logic Pro, or handshake failed.
+**Wire (rc5+):** structured HC State C — `{"success":false,"error":"channels_exhausted","operation":"mixer.set_volume","hint":"…","last_error":"…"}`. Branch on the `error` field. (Pre-rc5 this was a free-form `"All channels exhausted … MCU feedback not detected"` string — that legacy text is gone.)
 
-**Fix:** See [SETUP.md §3](SETUP.md#3-register-mcu-control-surface-mandatory-for-mixer-control) — register `LogicProMCP-MCU-Internal` in **Control Surfaces → Setup**.
+**Cause:** MCU control surface not registered in Logic Pro, or handshake failed — the MCU chain has no fallback.
 
-Mixer operations have **no fallback** — MCU registration is mandatory.
+**Fix:** See [SETUP.md §3](SETUP.md#3-register-mcu-control-surface-mandatory-for-mixer-control) — register `LogicProMCP-MCU-Internal` in **Control Surfaces → Setup**. Mixer writes are MCU-only.
+
+### `mixer.set_volume`/`set_pan` returns `verified:false, reason:"echo_timeout_500ms", observed:null` while `mcu_connected:true`
+
+This is the honest HC **State B** "the bytes left the adapter, but Logic never echoed back" shape — success at the send layer, *not* a confirmed write.
+
+**Cause (Logic 12.2):** when `mcu_connected:true` and `mcu_last_feedback_age_ms` is fresh yet `observed:null`, the MCU pairing is healthy but **Logic 12.2 emits no fader pitch-bend / V-Pot echo for host-originated writes** (general feedback flows; the host-write echo does not — tracked in #10). It is **not** a setup gap: registration, bank-offset, and a longer `MCU_ECHO_TIMEOUT_MS` (max 1000) cannot recover an echo Logic never sends.
+
+**Contract:** on current builds, `set_volume` first waits for MCU echo and then falls back to AX mixer readback. A confirmed AX fallback returns State A with `verify_source:"ax_readback"`, `observed_ax`, and `observed_mcu:null`; if both echo and AX readback are unavailable or mismatched, treat State B as unverified. For `set_pan`, note `pan_write_mode:"relative_vpot"` — the MCU V-Pot has no absolute-position command, so `set_pan` is a relative nudge (not idempotent).
+
+**Diagnose:** `MCU_TRACE=1` (below) + one `set_volume` confirms whether any inbound frame arrives after the write.
+
+### `logic://mixer` readback does not reflect a just-written volume/pan
+
+**Cause (#11):** strip values derive from MCU echo and the AX mixer scrape. On current builds, Logic 12.2 mixer matching is restored; a trustworthy live scrape reports `data_source:"ax_poll"` and post-write fader state should refresh from AX even when Logic emits no host-write MCU echo. Judge trust from the envelope's `data_source` + `mcu_connected` + `mcu_last_feedback_age_ms`: `data_source:"cache_stale"`, `"mixer_not_visible"`, or `mcu_connected:false` ⇒ treat `strips` as last-known-good, not current.
+
+### `logic://mixer` `plugins: []` appears empty
+
+**Contract (#12):** occupied insert-slot names and bypass states are populated from AX when the mixer is readable. `plugins_source:"ax"` means `plugins[]` is a live AX snapshot; `plugins_read_error` means the slot scan failed; `plugins:[]` with `plugins_source:"ax"` means the insert chain is genuinely empty at the snapshot level. Full per-parameter plugin value readback is still not provided by the Scripter CC path.
+
+### `MCU_TRACE` — raw MIDI diagnostics
+
+Set `MCU_TRACE=1` to dump every outbound/inbound MCU frame to **stderr** (`MCU TX: …` / `MCU RX: …`); stdout stays clean JSON-RPC:
+
+```bash
+MCU_TRACE=1 /opt/homebrew/Cellar/logic-pro-mcp/<version>/bin/LogicProMCP
+```
+
+Use it to confirm whether Logic echoes a host write (see the `echo_timeout` entry above). Frames are dumped pre-decode, so even undecoded bytes appear — proving "nothing came back", not "nothing recognised".
 
 ### MCU was registered but `health.mcu.feedback_stale: true`
 

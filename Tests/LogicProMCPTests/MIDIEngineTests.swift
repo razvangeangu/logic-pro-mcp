@@ -313,8 +313,42 @@ private final class MIDIEngineRuntimeHarness: @unchecked Sendable {
     }
 
     await engine.stop()
-    let finished = await iterator.next()
-    #expect(finished == nil)
+    // v3.4.5 (H1 / P1-6): stop() no longer finishes the inbound stream — the
+    // continuation is kept alive so the same MIDIEngine instance is
+    // restart-safe (see testMIDIEngineRestartDeliversInbound). Only deinit
+    // terminates the stream. Asserting via lifecycle state instead of a
+    // would-block iterator read.
+    #expect(await engine.isActive == false)
+}
+
+// T-H1 (P1-6) — start → stop → start must restore the inbound feedback path.
+// Before the fix, stop() called inboundContinuation.finish(), permanently
+// terminating the single stream created in init(); the second start()
+// re-captured the already-finished continuation, so inbound MIDI was silently
+// dropped after any restart.
+@Test func testMIDIEngineRestartDeliversInbound() async throws {
+    let harness = MIDIEngineRuntimeHarness()
+    let engine = MIDIEngine(runtime: harness.makeRuntime())
+    let stream = await engine.inboundMessages
+    var iterator = stream.makeAsyncIterator()
+
+    try await engine.start()
+    harness.deliverInbound([0x90, 0x3C, 0x64])
+    let first = await iterator.next()
+    guard case .noteOn(_, 0x3C, _)? = first else {
+        Issue.record("Expected inbound noteOn 0x3C before restart, got \(String(describing: first))")
+        return
+    }
+
+    await engine.stop()
+    try await engine.start()
+
+    harness.deliverInbound([0x90, 0x3E, 0x60])
+    let afterRestart = await iterator.next()
+    guard case .noteOn(_, 0x3E, _)? = afterRestart else {
+        Issue.record("restart-unsafe: inbound noteOn 0x3E not delivered after stop→start, got \(String(describing: afterRestart))")
+        return
+    }
 }
 
 @Test func testMIDIEngineProductionRuntimeStartStopSmoke() async throws {

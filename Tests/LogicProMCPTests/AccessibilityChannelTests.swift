@@ -3,6 +3,10 @@ import Foundation
 import Testing
 @testable import LogicProMCP
 
+private func decodeAccessibilityJSON(_ s: String) -> [String: Any] {
+    (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
+}
+
 private final class AccessibilityRuntimeRecorder: @unchecked Sendable {
     var transportButtons: [String] = []
     var tempoParams: [[String: String]] = []
@@ -897,6 +901,246 @@ private func makeAXBackedAccessibilityChannel(
     #expect(projectResult.isSuccess)
     let project = try decoder.decode(ProjectInfo.self, from: Data(projectResult.message.utf8))
     #expect(project.name == "Song.logicx")
+}
+
+@Test func testAccessibilityChannelMixerNormalizesLogic12SliderRanges() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(390)
+    let window = builder.element(391)
+    let mixer = builder.element(392)
+    let strip = builder.element(393)
+    let fader = builder.element(394)
+    let pan = builder.element(395)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [mixer])
+    builder.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(mixer, kAXDescriptionAttribute as String, "믹서")
+    builder.setChildren(mixer, [strip])
+    builder.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setChildren(strip, [fader, pan])
+
+    builder.setAttribute(fader, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(fader, kAXDescriptionAttribute as String, "볼륨 페이더")
+    builder.setAttribute(fader, kAXValueAttribute as String, 70)
+    builder.setAttribute(fader, kAXMinValueAttribute as String, 0)
+    builder.setAttribute(fader, kAXMaxValueAttribute as String, 233)
+
+    builder.setAttribute(pan, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(pan, kAXDescriptionAttribute as String, "패닝")
+    builder.setAttribute(pan, kAXValueAttribute as String, 0)
+    builder.setAttribute(pan, kAXMinValueAttribute as String, -64)
+    builder.setAttribute(pan, kAXMaxValueAttribute as String, 63)
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let mixerResult = await channel.execute(operation: "mixer.get_state", params: [:])
+    #expect(mixerResult.isSuccess)
+    let strips = try decoder.decode([ChannelStripState].self, from: Data(mixerResult.message.utf8))
+    #expect(strips.count == 1)
+    #expect(abs(strips[0].volume - 0.4) < 0.002)
+    #expect(strips[0].pan == 0.0)
+
+    let stripResult = await channel.execute(operation: "mixer.get_channel_strip", params: ["index": "0"])
+    #expect(stripResult.isSuccess)
+    let stripState = try decoder.decode(ChannelStripState.self, from: Data(stripResult.message.utf8))
+    #expect(abs(stripState.volume - 0.4) < 0.002)
+    #expect(stripState.pan == 0.0)
+}
+
+@Test func testAccessibilityChannelMixerPopulatesAXPluginSlotsAndSource() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(430)
+    let window = builder.element(431)
+    let mixer = builder.element(432)
+    let strip = builder.element(433)
+    let fader = builder.element(434)
+    let pan = builder.element(435)
+    let emptyAudioSlot = builder.element(436)
+    let pluginGroup = builder.element(437)
+    let bypass = builder.element(438)
+    let open = builder.element(439)
+    let menu = builder.element(440)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [mixer])
+    builder.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(mixer, kAXDescriptionAttribute as String, "Mixer")
+    builder.setChildren(mixer, [strip])
+    builder.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setChildren(strip, [fader, pan, emptyAudioSlot, pluginGroup])
+    builder.setAttribute(fader, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(fader, kAXDescriptionAttribute as String, "Volume Fader")
+    builder.setAttribute(fader, kAXValueAttribute as String, 0.75)
+    builder.setAttribute(pan, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(pan, kAXDescriptionAttribute as String, "Pan")
+    builder.setAttribute(pan, kAXValueAttribute as String, 0.0)
+
+    builder.setAttribute(emptyAudioSlot, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(emptyAudioSlot, kAXDescriptionAttribute as String, "오디오 플러그인")
+    builder.setAttribute(emptyAudioSlot, kAXHelpAttribute as String, "오디오 이펙트 슬롯. 오디오 이펙트를 삽입합니다.")
+
+    builder.setAttribute(pluginGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(pluginGroup, kAXDescriptionAttribute as String, "Drum Machine Designer")
+    builder.setChildren(pluginGroup, [bypass, open, menu])
+    builder.setAttribute(bypass, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(bypass, kAXDescriptionAttribute as String, "바이패스")
+    builder.setAttribute(bypass, kAXValueAttribute as String, 0)
+    builder.setAttribute(open, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(open, kAXDescriptionAttribute as String, "열기")
+    builder.setAttribute(menu, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(menu, kAXDescriptionAttribute as String, "목록")
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let mixerResult = await channel.execute(operation: "mixer.get_state", params: [:])
+    #expect(mixerResult.isSuccess)
+    #expect(mixerResult.message.contains("\"plugins_source\":\"ax\""))
+    let strips = try decoder.decode([ChannelStripState].self, from: Data(mixerResult.message.utf8))
+    #expect(strips[0].pluginsSource == "ax")
+    #expect(strips[0].plugins.count == 1)
+    #expect(strips[0].plugins[0].index == 0)
+    #expect(strips[0].plugins[0].name == "Drum Machine Designer")
+    #expect(strips[0].plugins[0].isBypassed == false)
+}
+
+@Test func testAccessibilityChannelInsertPluginRejectsOccupiedSlotBeforeMenuSelection() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(450)
+    let window = builder.element(451)
+    let mixer = builder.element(452)
+    let strip = builder.element(453)
+    let pluginGroup = builder.element(454)
+    let bypass = builder.element(455)
+    let open = builder.element(456)
+    let menu = builder.element(457)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [mixer])
+    builder.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(mixer, kAXDescriptionAttribute as String, "Mixer")
+    builder.setChildren(mixer, [strip])
+    builder.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setChildren(strip, [pluginGroup])
+    builder.setAttribute(pluginGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(pluginGroup, kAXDescriptionAttribute as String, "Compressor")
+    builder.setChildren(pluginGroup, [bypass, open, menu])
+    builder.setAttribute(bypass, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(bypass, kAXDescriptionAttribute as String, "Bypass")
+    builder.setAttribute(open, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(open, kAXDescriptionAttribute as String, "Open")
+    builder.setAttribute(menu, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(menu, kAXDescriptionAttribute as String, "Menu")
+
+    let result = await AccessibilityChannel.defaultInsertPlugin(
+        params: ["track": "0", "slot": "0", "plugin_name": "Gain"],
+        runtime: builder.makeLogicRuntime(appElement: app),
+        selectPlugin: { _, _, _ in
+            Issue.record("occupied slot must fail before menu selection")
+            return true
+        }
+    )
+
+    #expect(!result.isSuccess)
+    #expect(result.message.contains("slot_occupied"))
+    #expect(builder.actionCalls.isEmpty)
+}
+
+@Test func testAccessibilityChannelInsertPluginVerifiesSlotAfterMenuSelection() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(470)
+    let window = builder.element(471)
+    let mixer = builder.element(472)
+    let strip = builder.element(473)
+    let emptyAudioSlot = builder.element(474)
+    let gainGroup = builder.element(475)
+    let bypass = builder.element(476)
+    let open = builder.element(477)
+    let menu = builder.element(478)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [mixer])
+    builder.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(mixer, kAXDescriptionAttribute as String, "Mixer")
+    builder.setChildren(mixer, [strip])
+    builder.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setChildren(strip, [emptyAudioSlot])
+    builder.setAttribute(emptyAudioSlot, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(emptyAudioSlot, kAXDescriptionAttribute as String, "Audio Plugin")
+    builder.setAttribute(emptyAudioSlot, kAXHelpAttribute as String, "Audio effect slot. Insert an audio effect.")
+
+    builder.setAttribute(gainGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(gainGroup, kAXDescriptionAttribute as String, "Gain")
+    builder.setChildren(gainGroup, [bypass, open, menu])
+    builder.setAttribute(bypass, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(bypass, kAXDescriptionAttribute as String, "Bypass")
+    builder.setAttribute(bypass, kAXValueAttribute as String, 0)
+    builder.setAttribute(open, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(open, kAXDescriptionAttribute as String, "Open")
+    builder.setAttribute(menu, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(menu, kAXDescriptionAttribute as String, "Menu")
+
+    let result = await AccessibilityChannel.defaultInsertPlugin(
+        params: ["track": "0", "slot": "0", "plugin_name": "Gain"],
+        runtime: builder.makeLogicRuntime(appElement: app),
+        selectPlugin: { spec, _, _ in
+            #expect(spec.canonicalName == "Gain")
+            builder.setChildren(strip, [gainGroup])
+            return true
+        }
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["verify_source"] as? String == "ax_plugin_slot")
+    #expect(obj["observed_plugin_name"] as? String == "Gain")
+    #expect(builder.actionCalls.map(\.elementID).contains(builder.elementID(emptyAudioSlot)))
+}
+
+@Test func testAccessibilityChannelInsertPluginRollsBackWhenReadbackUnavailable() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(490)
+    let window = builder.element(491)
+    let mixer = builder.element(492)
+    let strip = builder.element(493)
+    let emptyAudioSlot = builder.element(494)
+    final class RollbackBox: @unchecked Sendable { var called = false }
+    let rollbackBox = RollbackBox()
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [mixer])
+    builder.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(mixer, kAXDescriptionAttribute as String, "Mixer")
+    builder.setChildren(mixer, [strip])
+    builder.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setChildren(strip, [emptyAudioSlot])
+    builder.setAttribute(emptyAudioSlot, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(emptyAudioSlot, kAXDescriptionAttribute as String, "Audio Plugin")
+    builder.setAttribute(emptyAudioSlot, kAXHelpAttribute as String, "Audio effect slot. Insert an audio effect.")
+
+    let result = await AccessibilityChannel.defaultInsertPlugin(
+        params: ["track": "0", "slot": "0", "plugin_name": "Gain"],
+        runtime: builder.makeLogicRuntime(appElement: app),
+        selectPlugin: { _, _, _ in true },
+        rollback: {
+            rollbackBox.called = true
+            return true
+        },
+        readbackTimeoutMs: 50
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["reason"] as? String == "readback_unavailable")
+    #expect(obj["rollback_attempted"] as? Bool == true)
+    #expect(obj["rollback_succeeded"] as? Bool == true)
+    #expect(rollbackBox.called)
 }
 
 @Test func testAccessibilityChannelAXBackedMixerAndProjectErrorPaths() async {

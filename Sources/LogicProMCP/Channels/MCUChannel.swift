@@ -11,9 +11,23 @@ protocol MCUTransportProtocol: Actor {
 actor MCUChannel: Channel {
     nonisolated let id = ChannelID.mcu
 
+    struct AXReadback: Sendable {
+        let readVolume: @Sendable (Int) async -> Double?
+        let readPan: @Sendable (Int) async -> Double?
+
+        init(
+            readVolume: @escaping @Sendable (Int) async -> Double?,
+            readPan: @escaping @Sendable (Int) async -> Double?
+        ) {
+            self.readVolume = readVolume
+            self.readPan = readPan
+        }
+    }
+
     private let transport: any MCUTransportProtocol
     private let cache: StateCache
     private let feedbackParser: MCUFeedbackParser
+    private let axReadback: AXReadback?
     private(set) var currentBank: Int = 0
     private var bankingQueue: [CheckedContinuation<Void, Never>] = []
     private var isBanking: Bool = false
@@ -33,9 +47,14 @@ actor MCUChannel: Channel {
     // Instead of blocking on feedback, we rely on MCUFeedbackParser updating
     // StateCache asynchronously. Callers check StateCache after a short delay if needed.
 
-    init(transport: any MCUTransportProtocol, cache: StateCache) {
+    init(
+        transport: any MCUTransportProtocol,
+        cache: StateCache,
+        axReadback: AXReadback? = nil
+    ) {
         self.transport = transport
         self.cache = cache
+        self.axReadback = axReadback
         self.feedbackParser = MCUFeedbackParser(cache: cache)
     }
 
@@ -272,20 +291,12 @@ actor MCUChannel: Channel {
     /// extras dictionaries.
     private func mcuConnectionExtras() async -> [String: Any] {
         let conn = await cache.getMCUConnection()
-        let ageMs: Any
-        if let last = conn.lastFeedbackAt {
-            // Clamp to 0 — a backwards system-clock adjustment (NTP slew,
-            // user time change) between `last` and now would otherwise emit
-            // a negative age on the wire. Boomer P2 (BOOMER-6 / E): future
-            // timestamps and clock jumps must not leak through extras.
-            ageMs = max(0, Int(Date().timeIntervalSince(last) * 1000.0))
-        } else {
-            ageMs = NSNull()
-        }
+        // Clamp + nil handling live in MCUConnectionState.lastFeedbackAgeMs so
+        // the write envelope and logic://mixer (B1) share one definition.
         return [
             "mcu_connected": conn.isConnected,
             "mcu_registered": conn.registeredAsDevice,
-            "mcu_last_feedback_age_ms": ageMs,
+            "mcu_last_feedback_age_ms": conn.lastFeedbackAgeMs() ?? NSNull(),
         ]
     }
 
@@ -318,12 +329,28 @@ actor MCUChannel: Channel {
             var extras: [String: Any] = [
                 "requested": value,
                 "observed": observed ?? NSNull(),
+                "observed_mcu": observed ?? NSNull(),
+                "observed_ax": NSNull(),
                 "track": track
             ]
             for (k, v) in await self.mcuConnectionExtras() { extras[k] = v }
             if let observed, abs(observed - value) <= 2.0 / 16383.0 {
+                extras["verify_source"] = "mcu_echo"
                 return .success(HonestContract.encodeStateA(extras: extras))
             }
+
+            if let observedAX = await self.axReadback?.readVolume(track) {
+                extras["observed"] = observedAX
+                extras["observed_ax"] = observedAX
+                extras["verify_source"] = "ax_readback"
+                if abs(observedAX - value) <= 0.03 {
+                    return .success(HonestContract.encodeStateA(extras: extras))
+                }
+                return .success(HonestContract.encodeStateB(
+                    reason: .readbackMismatch, extras: extras
+                ))
+            }
+
             return .success(HonestContract.encodeStateB(
                 reason: .echoTimeout(ms: timeoutMs), extras: extras
             ))
@@ -354,10 +381,18 @@ actor MCUChannel: Channel {
                 strip: track, target: value, timeoutMs: timeoutMs,
                 requireFreshAfter: sendAt
             )
+            // v3.4.5 (A4 / P1-5 / R8): set_pan transmits a *relative* V-Pot
+            // rotation (MCUProtocol.encodeVPot), not an absolute pan set —
+            // the MCU protocol has no absolute-position command. Disclose
+            // this on the wire so a duplicate-and-readback harness does not
+            // treat set_pan as an idempotent absolute target (an idempotent
+            // absolute pan needs the AX write path, F2). `observed` reflects
+            // the LED-ring echo when present; absent it stays null (State B).
             var extras: [String: Any] = [
                 "requested": value,
                 "observed": observed ?? NSNull(),
-                "track": track
+                "track": track,
+                "pan_write_mode": "relative_vpot"
             ]
             for (k, v) in await self.mcuConnectionExtras() { extras[k] = v }
             if let observed, abs(observed - value) <= 0.1 {

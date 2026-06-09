@@ -34,10 +34,14 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 // MARK: - §1 Tool Dispatch: Transport (10 tests)
 // ═══════════════════════════════════════════════════════════════════════
 
-@Test func testE2ETransportGetStateReturnsStructuredJSON() async {
+// P1-1 (D1): `get_state` is NOT a tool command — transport reads are served by
+// the logic://transport/state resource (see ResourceSchemaTests). The tool must
+// REJECT it as unknown, not appear alive via a non-empty error string.
+@Test func testE2ETransportGetStateRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_transport", command: "get_state")
-    #expect(!e2eText(r).isEmpty)
+    #expect(r.isError == true)
+    #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2ETransportPlayDispatchesWithoutCrash() async {
@@ -102,16 +106,20 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 // MARK: - §2 Tool Dispatch: Tracks (10 tests)
 // ═══════════════════════════════════════════════════════════════════════
 
-@Test func testE2ETracksGetTracksDispatches() async {
+// P1-1 (D1): track reads are served by logic://tracks. get_tracks/get_selected
+// are not tool commands and must be rejected as unknown (false-green guard).
+@Test func testE2ETracksGetTracksRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_tracks", command: "get_tracks")
-    #expect(!e2eText(r).isEmpty)
+    #expect(r.isError == true)
+    #expect(e2eText(r).contains("Unknown"))
 }
 
-@Test func testE2ETracksGetSelectedDispatches() async {
+@Test func testE2ETracksGetSelectedRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_tracks", command: "get_selected")
-    #expect(!e2eText(r).isEmpty)
+    #expect(r.isError == true)
+    #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2ETracksSelectRequiresIndex() async {
@@ -126,16 +134,25 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(!e2eText(r).isEmpty)
 }
 
-@Test func testE2ETracksSetMuteWithIndex() async {
+// P1-1 (D1): `mute`/`solo` are the production commands (old set_* names were
+// stale). With no live Logic the channel chain exhausts, so the wire must be a
+// structured HC envelope (success key present), never an "Unknown command".
+@Test func testE2ETracksMuteIsStructuredNotUnknown() async {
     let h = await makeE2EHandlers()
-    let r = await e2eCall(h, tool: "logic_tracks", command: "set_mute", params: ["index": .string("0"), "enabled": .string("true")])
-    #expect(!e2eText(r).isEmpty)
+    let r = await e2eCall(h, tool: "logic_tracks", command: "mute", params: ["index": .string("0"), "enabled": .string("true")])
+    let text = e2eText(r)
+    #expect(!text.contains("Unknown"))
+    let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
+    #expect(obj?["success"] != nil, "mute must produce a structured HC envelope, got: \(text)")
 }
 
-@Test func testE2ETracksSetSoloWithIndex() async {
+@Test func testE2ETracksSoloIsStructuredNotUnknown() async {
     let h = await makeE2EHandlers()
-    let r = await e2eCall(h, tool: "logic_tracks", command: "set_solo", params: ["index": .string("0"), "enabled": .string("true")])
-    #expect(!e2eText(r).isEmpty)
+    let r = await e2eCall(h, tool: "logic_tracks", command: "solo", params: ["index": .string("0"), "enabled": .string("true")])
+    let text = e2eText(r)
+    #expect(!text.contains("Unknown"))
+    let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
+    #expect(obj?["success"] != nil, "solo must produce a structured HC envelope, got: \(text)")
 }
 
 @Test func testE2ETracksRenameWithParams() async {
@@ -194,10 +211,13 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 // MARK: - §3 Tool Dispatch: Mixer (8 tests)
 // ═══════════════════════════════════════════════════════════════════════
 
-@Test func testE2EMixerGetStateDispatches() async {
+// P1-1 (D1): mixer reads are served by logic://mixer. get_state is not a tool
+// command and must be rejected as unknown (false-green guard).
+@Test func testE2EMixerGetStateRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_mixer", command: "get_state")
-    #expect(!e2eText(r).isEmpty)
+    #expect(r.isError == true)
+    #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2EMixerSetVolumeDispatches() async {
@@ -323,10 +343,13 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(!e2eText(r).isEmpty)
 }
 
-@Test func testE2EMixerGetChannelStripDispatches() async {
+// P1-1 (D1): single-strip reads are served by logic://mixer/{strip}.
+// get_channel_strip is not a tool command and must be rejected as unknown.
+@Test func testE2EMixerGetChannelStripRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_mixer", command: "get_channel_strip", params: ["index": .string("0")])
-    #expect(!e2eText(r).isEmpty)
+    #expect(r.isError == true)
+    #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2EMixerSetVolumeRequiresParams() async {
@@ -387,10 +410,13 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(!e2eText(r).isEmpty)
 }
 
-@Test func testE2EMIDIListPortsDispatches() async {
+// P1-1 (D1): MIDI ports are served by logic://midi/ports. list_ports is not a
+// tool command and must be rejected as unknown (false-green guard).
+@Test func testE2EMIDIListPortsRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_midi", command: "list_ports")
-    #expect(!e2eText(r).isEmpty)
+    #expect(r.isError == true)
+    #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2EMIDIStepInputDispatches() async {
@@ -455,10 +481,13 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(!e2eText(r).isEmpty)
 }
 
-@Test func testE2ENavigateGetMarkersDispatches() async {
+// P1-1 (D1): markers are served by logic://markers. get_markers is not a tool
+// command and must be rejected as unknown (false-green guard).
+@Test func testE2ENavigateGetMarkersRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_navigate", command: "get_markers")
-    #expect(!e2eText(r).isEmpty)
+    #expect(r.isError == true)
+    #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2ENavigateCreateMarkerDispatches() async {
@@ -483,10 +512,13 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 // MARK: - §7 Tool Dispatch: Project (8 tests)
 // ═══════════════════════════════════════════════════════════════════════
 
-@Test func testE2EProjectGetInfoDispatches() async {
+// P1-1 (D1): project info is served by logic://project/info. get_info is not a
+// tool command and must be rejected as unknown (false-green guard).
+@Test func testE2EProjectGetInfoRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "get_info")
-    #expect(!e2eText(r).isEmpty)
+    #expect(r.isError == true)
+    #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2EProjectOpenInvalidPathFails() async {

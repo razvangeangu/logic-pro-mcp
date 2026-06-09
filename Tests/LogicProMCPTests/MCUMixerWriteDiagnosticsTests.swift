@@ -113,6 +113,40 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     #expect(obj["mcu_last_feedback_age_ms"] is NSNull)
 }
 
+// T-A4 (P1-5 / R8) — set_pan is a relative V-Pot nudge, not an absolute
+// target set (MCU has no absolute-position command; speed = max(1, …) so
+// even pan 0.0 moves one tick). The envelope must disclose `pan_write_mode`
+// so a harness does not treat set_pan as an idempotent absolute write.
+@Test func testSetPanCarriesRelativeModeExtra() async {
+    let transport = MockMCUTransport()
+    let cache = StateCache()
+    let channel = MCUChannel(transport: transport, cache: cache)
+
+    let result = await channel.execute(
+        operation: "mixer.set_pan",
+        params: ["index": "0", "pan": "0.0"]
+    )
+    #expect(result.isSuccess)
+    let obj = decodeMixerJSON(result.message)
+    #expect(obj["pan_write_mode"] as? String == "relative_vpot")
+    // No echo from the mock → must not claim verification.
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["observed"] is NSNull)
+}
+
+// set_volume must NOT carry pan_write_mode (relative disclosure is pan-only).
+@Test func testSetVolumeHasNoPanWriteMode() async {
+    let transport = MockMCUTransport()
+    let cache = StateCache()
+    let channel = MCUChannel(transport: transport, cache: cache)
+    let result = await channel.execute(
+        operation: "mixer.set_volume",
+        params: ["index": "0", "volume": "0.5"]
+    )
+    let obj = decodeMixerJSON(result.message)
+    #expect(obj["pan_write_mode"] == nil)
+}
+
 @Test func testSetMasterVolumeStateBIncludesMCUDiagnostics_disconnected() async {
     let transport = MockMCUTransport()
     let cache = StateCache()
@@ -263,6 +297,67 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     } else {
         Issue.record("fresh-feedback case must produce an Int age, not null")
     }
+}
+
+@Test func testSetVolumeUsesAXReadbackAfterMCUEchoTimeout() async {
+    let transport = MockMCUTransport()
+    let cache = StateCache()
+    let channel = MCUChannel(
+        transport: transport,
+        cache: cache,
+        axReadback: .init(
+            readVolume: { track in track == 0 ? 0.5 : nil },
+            readPan: { _ in nil }
+        )
+    )
+
+    let result = await channel.execute(
+        operation: "mixer.set_volume",
+        params: ["index": "0", "volume": "0.5"]
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeMixerJSON(result.message)
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["verify_source"] as? String == "ax_readback")
+    #expect(obj["observed"] as? Double == 0.5)
+    #expect(obj["observed_ax"] as? Double == 0.5)
+    #expect(obj["observed_mcu"] is NSNull)
+
+    let echo = await cache.getFaderEchoSnapshot(strip: 0)
+    #expect(echo.updatedAt == nil, "AX readback must not be written into the MCU echo cache")
+}
+
+@Test func testSetVolumeAXReadbackMismatchReturnsStateBWithoutCachePollution() async {
+    let transport = MockMCUTransport()
+    let cache = StateCache()
+    let channel = MCUChannel(
+        transport: transport,
+        cache: cache,
+        axReadback: .init(
+            readVolume: { track in track == 0 ? 0.2 : nil },
+            readPan: { _ in nil }
+        )
+    )
+
+    let result = await channel.execute(
+        operation: "mixer.set_volume",
+        params: ["index": "0", "volume": "0.5"]
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeMixerJSON(result.message)
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["reason"] as? String == "readback_mismatch")
+    #expect(obj["verify_source"] as? String == "ax_readback")
+    #expect(obj["observed"] as? Double == 0.2)
+    #expect(obj["observed_ax"] as? Double == 0.2)
+    #expect(obj["observed_mcu"] is NSNull)
+
+    let echo = await cache.getFaderEchoSnapshot(strip: 0)
+    #expect(echo.updatedAt == nil, "mismatched AX readback must not be written into the MCU echo cache")
 }
 
 @Test func testSetVolumeStateBSurfacesConnectionRegisteredButStale() async {

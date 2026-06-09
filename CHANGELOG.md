@@ -8,6 +8,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
+## [3.4.5] — 2026-06-09
+
+**Mixer write/read verification honesty — Issues #10–13 (thomas-doesburg).** Finalizes the v3.4.5 release with the Logic Pro 12.2 mixer AX matcher restored and live-verified. Host-originated fader writes can still receive no MCU echo on Logic 12.2, but `set_volume` now falls back to independent AX fader readback and can return State A when the observed fader matches tolerance. `logic://mixer` carries provenance, AX-sourced `plugins[]` snapshots identify occupied insert slots, and `insert_plugin` is exposed only as a guarded, Level-2-confirmed, stock-plugin allowlisted path.
+
+### Added
+
+- **`MCU_TRACE=1`** env var (#10) — dumps every outbound/inbound MCU MIDI frame to **stderr** (`MCU TX/RX: <hex>`), pre-decode, rate-limiter-bypassed; stdout stays clean JSON-RPC. Lets a harness confirm whether Logic echoes a host write. (`Sources/LogicProMCP/MIDI/MCUTrace.swift`)
+- **`logic://mixer` provenance** (#11) — new `data_source` (`ax_poll`/`cache_stale`/`mixer_not_visible`), `mcu_registered`, and `mcu_last_feedback_age_ms`; `registered` retained as a one-release alias. `logic://mixer/{strip}` now returns the same cache envelope (`cache_age_sec`/`fetched_at`/`data_source`/`strip`) instead of a bare object.
+- **`pan_write_mode:"relative_vpot"`** on `set_pan` envelopes (P1-5) — honestly discloses that MCU pan is a relative V-Pot nudge (no absolute-position command), so callers do not treat it as idempotent.
+- **`plugins_source:"ax"`** on mixer strips (#12) — `logic://mixer` now differentiates AX-observed insert snapshots from unknown/empty plugin state, so clients no longer have to infer whether `plugins:[]` means "no plugins" or "no readable source."
+- **Guarded `insert_plugin`** (#13) — supports a stock Logic plugin allowlist through the Accessibility channel with Level-2 confirmation, occupied-slot refusal, and post-insert AX slot readback.
+
+### Changed
+
+- **`set_plugin_param` is now Honest-Contract-shaped** (#12/#13 write-half, P1-3) — Scripter returns HC State B `readback_unavailable` (with `cc`/`applied_midi_value`/`readback_source` extras) instead of a free-form string, and value is fail-closed to `0.0…1.0` (State C `invalid_params`) instead of being silently clamped.
+- **`set_plugin_param` refuses an unverified track selection** (P1-2) — mirrors `track.delete`/`duplicate`: if the pre-write `track.select` returns State B, the write hard-fails (State C with the original `select_response`) rather than writing to whatever track happened to be selected.
+- **`MIDIEngine` is restart-safe** (P1-6) — `stop()` no longer finishes the inbound `AsyncStream`; the continuation is terminal only at `deinit`, so `start → stop → start` restores inbound MIDI delivery.
+- **Version/release surfaces finalized to `3.4.5`** — `ServerConfig`, manifest, installer default, Formula version, startup-banner tests, README, setup docs, and resource `lastModified` timestamp are synchronized for the stable release.
+
+### Fixed
+
+- **Logic 12.2 mixer AX matcher restored** (#10/#11/#12/#13) — the matcher now finds the Logic 12.2 mixer pane by role/description instead of the stale `identifier=="Mixer"` shape, then uses description-based fader/pan/insert-slot discovery.
+- **Echo-independent fader verification** (#10) — when MCU echo times out but AX can read the requested strip, `set_volume` can return `verified:true` with `verify_source:"ax_readback"` and `observed_ax`.
+- **Mixer resource readback after host writes** (#11) — `logic://mixer` can now refresh from AX poll on Logic 12.2 and reflect the post-write fader value instead of remaining stuck on the connect-time MCU value.
+- **AX coordinate-click fallbacks fail closed** (P2-5) — four call sites (`AccessibilityChannel.postMouseClickAt`/`trackViewport`, `AXLogicProElements` track-header click, `LibraryAccessor` header click) now route through shared `AXHelpers.point/size(fromRawAttribute:)` helpers that check `AXValueGetValue`'s Bool result, so a wrong-subtype `AXValue` yields nil instead of a (0,0) misclick / bogus viewport.
+- **Test/evidence honesty** (P1-1/P1-4) — `EndToEndTests` no longer asserts `!isEmpty` on removed read commands (they now assert the tool rejects them as `Unknown` and the misnamed `set_mute`/`set_solo` use the real `mute`/`solo` commands); `Scripts/live-e2e-test.py` reads via `resources/read` instead of stale tool-read commands.
+- Docs (`API.md`, `TROUBLESHOOTING.md`) corrected for the structured `channels_exhausted` envelope, the mixer provenance fields, the `set_plugin_param` HC shape, the empty `plugins[]` gap (#12), and `MCU_TRACE`.
+
+### Known remaining scope
+
+- **Full per-parameter plugin value readback** remains future work. v3.4.5 ships plugin-slot/name/bypass snapshots and Honest-Contract-shaped Scripter writes, but Scripter is still send-only and does not provide a guaranteed AX slider map for every plugin parameter.
+- **`set_plugin_param insert:N`** remains a missing mechanism. v3.4.5 ships `insert_plugin` guardrails and slot readback; targeting arbitrary plugin insert slots for parameter writes requires a separate plugin-window AX path.
+
+### Tests
+
+- `swift test --no-parallel` -> 1192 / 1192 PASS locally.
+- `swift build -c release` -> PASS locally.
+- `python3 -m py_compile Scripts/live-e2e-test.py` -> PASS.
+- `swift test --enable-code-coverage --no-parallel` -> 1192 / 1192 PASS locally; TOTAL coverage 70.40% region / 77.78% line.
+- Targeted live Logic Pro 12.2 issue gate -> #10/#11/#12/#13 checks PASS: AX readback for `set_volume`, `logic://mixer` `data_source:"ax_poll"`, AX plugin snapshots, Level-2 `insert_plugin` confirmation, verified Gain insert, and occupied-slot fail-closed.
+
+### Release packaging (rc8–rc12, 2026-06-05/08 — CI/installer-only, no server-functional change)
+
+- rc8 workflow bash 3.2 fix · rc9 split universal build · rc10 candidate stdout fix · rc11 installer team-id parse validation · rc12 validation floor aligned to macOS 14.
+
 ## [3.4.5-rc7] — 2026-06-05
 
 ### Changed

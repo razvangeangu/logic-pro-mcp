@@ -4,7 +4,7 @@ import MCP
 struct MixerDispatcher {
     static let tool = commandTool(
         name: "logic_mixer",
-        description: "Mixer actions in Logic Pro. Commands: set_volume, set_pan, set_master_volume, set_plugin_param. BREAKING since v3.3.0: every mutating command requires explicit `track` (Int ≥ 0) — pre-v3.3.0 missing `track` defaulted to 0 and silently mutated the first track; this now returns an error. Params: set_volume -> { track: Int (required, ≥ 0), value: Float (0.0..1.0) }; set_pan -> { track: Int (required, ≥ 0), value: Float (-1.0..1.0) }; set_master_volume -> { value: Float (0.0..1.0) }; set_plugin_param -> { track: Int (required, ≥ 0), insert: Int (required, currently only 0), param: Int (required, ≥ 0), value: Float (required) } on the selected track via Scripter.",
+        description: "Mixer actions in Logic Pro. Commands: set_volume, set_pan, set_master_volume, set_plugin_param, insert_plugin. BREAKING since v3.3.0: every mutating command requires explicit `track` (Int ≥ 0) — pre-v3.3.0 missing `track` defaulted to 0 and silently mutated the first track; this now returns an error. Params: set_volume -> { track: Int (required, ≥ 0), value: Float (0.0..1.0) }; set_pan -> { track: Int (required, ≥ 0), value: Float (-1.0..1.0) }; set_master_volume -> { value: Float (0.0..1.0) }; set_plugin_param -> { track: Int (required, ≥ 0), insert: Int (required, currently only 0), param: Int (required, ≥ 0), value: Float (required) } on the selected track via Scripter; insert_plugin -> { track: Int, slot: Int, plugin_name: Gain|Compressor|Channel EQ, confirmed: true } via AX mixer slot with readback.",
         commandDescription: "Mixer command to execute"
     )
 
@@ -88,12 +88,41 @@ struct MixerDispatcher {
         case "reset_strip":
             return toolTextResult("reset_strip is not exposed in the production MCP contract", isError: true)
 
-        case "insert_plugin", "bypass_plugin":
-            // Removed from the public surface: every channel that the router
-            // once considered for plugin.insert / plugin.bypass (accessibility,
-            // MCU) returns an error, so callers always got a failure dressed
-            // up as a feature. Use set_plugin_param on a selected track via
-            // Scripter for deterministic plugin parameter control instead.
+        case "insert_plugin":
+            guard let track = intParamOrNil(params, "track", "track_index", "index"), track >= 0 else {
+                return toolTextResult(
+                    "insert_plugin requires explicit 'track' (Int ≥ 0)",
+                    isError: true
+                )
+            }
+            guard let slot = intParamOrNil(params, "slot", "insert"), slot >= 0 else {
+                return toolTextResult(
+                    "insert_plugin requires explicit 'slot' (Int ≥ 0)",
+                    isError: true
+                )
+            }
+            let pluginName = stringParam(params, "plugin_name", "plugin", "name")
+            guard let spec = AccessibilityChannel.pluginInsertSpec(named: pluginName) else {
+                return toolTextResult(
+                    "insert_plugin unsupported plugin '\(pluginName)'. Supported stock plugins: Gain, Compressor, Channel EQ",
+                    isError: true
+                )
+            }
+            guard boolParam(params, "confirmed", default: false) else {
+                let response = """
+                {"confirmation_required":true,"command":"insert_plugin","level":"L2","message":"insert_plugin changes the channel strip insert chain. Re-call with confirmed:true to insert an allowlisted stock plugin.","confirm_command":"logic_mixer(\\"insert_plugin\\", {\\"track\\": \(track), \\"slot\\": \(slot), \\"plugin_name\\": \\"\(spec.canonicalName)\\", \\"confirmed\\": true})"}
+                """
+                return toolTextResult(response)
+            }
+            return await routedTextResult(router, operation: "plugin.insert", params: [
+                "track": String(track),
+                "slot": String(slot),
+                "plugin_name": spec.canonicalName,
+            ])
+
+        case "bypass_plugin":
+            // Still removed from the public surface: no verified AX/MCU
+            // readback path exists for bypass writes yet.
             return toolTextResult(
                 "\(command) is not exposed in the production MCP contract; use set_plugin_param via Scripter on the selected track instead",
                 isError: true
@@ -129,19 +158,45 @@ struct MixerDispatcher {
                     isError: true
                 )
             }
-            guard params["value"] != nil else {
+            // Phase 6 P1 (RB-1.a): parse `value` STRICTLY and validate range +
+            // param bound BEFORE the track.select side effect. doubleParam()
+            // defaults a non-numeric value to 0.0, which would otherwise let
+            // `value:"abc"` silently select the track and write Scripter 0 —
+            // the exact "malformed caller writes zero" class this op must reject.
+            guard let valueRaw = params["value"], let value = Double(valueRaw) else {
                 return toolTextResult(
-                    "set_plugin_param requires explicit 'value'",
+                    "set_plugin_param requires explicit numeric 'value'",
                     isError: true
                 )
             }
-            let value = doubleParam(params, "value")
+            guard (0.0...1.0).contains(value) else {
+                return toolTextResult(
+                    "set_plugin_param 'value' must be in 0.0...1.0 (got \(value))",
+                    isError: true
+                )
+            }
+            // Scripter addresses params 0–17 (CC 102–119); reject out-of-range
+            // before selecting a track so a bad param index has no side effect.
+            guard paramIndex <= 17 else {
+                return toolTextResult(
+                    "set_plugin_param 'param' must be 0...17 (Scripter CC range); got \(paramIndex)",
+                    isError: true
+                )
+            }
             let selectResult = await router.route(
                 operation: "track.select",
                 params: ["index": String(track)]
             )
             guard selectResult.isSuccess else {
                 return toolTextResult(selectResult.message, isError: true)
+            }
+            guard let data = selectResult.message.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let verified = json["verified"] as? Bool, verified == true else {
+                return toolTextResult(
+                    "set_plugin_param refused: track \(track) selection unverified (State B). Cannot safely write plugin parameter to an unverified selected track. select_response=\(selectResult.message)",
+                    isError: true
+                )
             }
             return await routedTextResult(router, operation: "plugin.set_param", params: [
                 "track": String(track),
@@ -152,7 +207,7 @@ struct MixerDispatcher {
 
         default:
             return toolTextResult(
-                "Unknown mixer command: \(command). Available: set_volume, set_pan, set_master_volume, set_plugin_param",
+                "Unknown mixer command: \(command). Available: set_volume, set_pan, set_master_volume, set_plugin_param, insert_plugin",
                 isError: true
             )
         }

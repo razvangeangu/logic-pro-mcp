@@ -12,6 +12,10 @@ private func scripterApprovalStoreURL() -> URL {
         .appendingPathExtension("json")
 }
 
+private func decodeScripterJSON(_ s: String) -> [String: Any] {
+    (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
+}
+
 @Test func testScripterParamToCC() {
     // param 0 → CC 102
     #expect(ScripterChannel.ccForParam(0) == 102)
@@ -46,6 +50,16 @@ private func scripterApprovalStoreURL() -> URL {
         params: ["param": "0", "value": "0.5"]
     )
     #expect(result.isSuccess)
+    let obj = decodeScripterJSON(result.message)
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["reason"] as? String == "readback_unavailable")
+    #expect(obj["param"] as? Int == 0)
+    #expect(obj["insert"] as? Int == 0)
+    #expect(obj["cc"] as? Int == 102)
+    #expect(obj["applied_midi_value"] as? Int == 64)
+    #expect(obj["midi_channel"] as? Int == 16)
+    #expect(obj["readback_source"] as? String == "scripter_send_only")
 
     let sent = await transport.sentBytes
     #expect(!sent.isEmpty)
@@ -94,7 +108,10 @@ private func scripterApprovalStoreURL() -> URL {
     let result = await channel.execute(operation: "plugin.insert", params: [:])
 
     #expect(!result.isSuccess)
-    #expect(result.message.contains("only handles plugin.set_param"))
+    let obj = decodeScripterJSON(result.message)
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "not_implemented")
+    #expect((obj["hint"] as? String)?.contains("only handles plugin.set_param") == true)
 }
 
 @Test func testScripterExecuteSurfacesTransportSendFailure() async {
@@ -108,7 +125,10 @@ private func scripterApprovalStoreURL() -> URL {
     )
 
     #expect(!result.isSuccess)
-    #expect(result.message.contains("Failed to send Scripter param 1"))
+    let obj = decodeScripterJSON(result.message)
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "port_unavailable")
+    #expect((obj["hint"] as? String)?.contains("Failed to send Scripter param 1") == true)
 }
 
 @Test func testScripterRejectsUnsupportedInsertAndOutOfRangeParam() async {
@@ -120,17 +140,42 @@ private func scripterApprovalStoreURL() -> URL {
         params: ["insert": "1", "param": "0", "value": "0.5"]
     )
     #expect(!badInsert.isSuccess)
-    #expect(badInsert.message.contains("insert 0"))
+    let badInsertObj = decodeScripterJSON(badInsert.message)
+    #expect(badInsertObj["error"] as? String == "not_implemented")
+    #expect((badInsertObj["hint"] as? String)?.contains("insert 0") == true)
 
     let badParam = await channel.execute(
         operation: "plugin.set_param",
         params: ["insert": "0", "param": "18", "value": "0.5"]
     )
     #expect(!badParam.isSuccess)
-    #expect(badParam.message.contains("out of range"))
+    let badParamObj = decodeScripterJSON(badParam.message)
+    #expect(badParamObj["error"] as? String == "invalid_params")
+    #expect((badParamObj["hint"] as? String)?.contains("out of range") == true)
 
     let sent = await transport.sentBytes
     #expect(sent.isEmpty)
+}
+
+@Test func testScripterRejectsOutOfRangeValueWithoutClamping() async {
+    let transport = MockScripterTransport()
+    let channel = ScripterChannel(transport: transport)
+
+    let low = await channel.execute(
+        operation: "plugin.set_param",
+        params: ["insert": "0", "param": "0", "value": "-0.1"]
+    )
+    let high = await channel.execute(
+        operation: "plugin.set_param",
+        params: ["insert": "0", "param": "0", "value": "1.1"]
+    )
+
+    #expect(!low.isSuccess)
+    #expect(!high.isSuccess)
+    #expect(decodeScripterJSON(low.message)["error"] as? String == "invalid_params")
+    #expect(decodeScripterJSON(high.message)["error"] as? String == "invalid_params")
+    let sent = await transport.sentBytes
+    #expect(sent.isEmpty, "out-of-range values must fail closed, not clamp and send")
 }
 
 // MARK: - Mock

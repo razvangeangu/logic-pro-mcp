@@ -353,7 +353,9 @@ private actor FailingExecuteChannel: Channel {
         router: router, cache: StateCache()
     )
     #expect(noValue.isError!)
-    #expect(dispatcherText(noValue).contains("requires explicit 'value'"))
+    // Phase 6 P1: message tightened to require a *numeric* value (strict parse
+    // before the track.select side effect).
+    #expect(dispatcherText(noValue).contains("requires explicit numeric 'value'"))
 
     let ops = await scripter.executedOps
     #expect(ops.isEmpty, "Router must not be invoked for any missing-target case")
@@ -361,7 +363,7 @@ private actor FailingExecuteChannel: Channel {
 
 @Test func testMixerDispatcherSetPluginParam() async {
     let router = ChannelRouter()
-    let mcu = MockChannel(id: .mcu)
+    let mcu = VerifiedSelectMockChannel(id: .mcu)
     let scripter = MockChannel(id: .scripter)
     await router.register(mcu)
     await router.register(scripter)
@@ -477,11 +479,61 @@ private actor FailingExecuteChannel: Channel {
     #expect(axOps.isEmpty)
 }
 
-@Test func testMixerDispatcherPluginCommandsReturnNotExposed() async {
-    // insert_plugin / bypass_plugin were removed from the public contract
-    // because every channel that could handle them (AX, MCU) returned
-    // "not yet implemented" errors. The dispatcher must now short-circuit
-    // with an explicit non-exposure error and MUST NOT touch any channel.
+@Test func testMixerDispatcherInsertPluginRequiresConfirmation() async {
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+    let cache = StateCache()
+
+    let result = await MixerDispatcher.handle(
+        command: "insert_plugin",
+        params: ["track": .int(7), "slot": .int(2), "plugin_name": .string("Gain")],
+        router: router,
+        cache: cache
+    )
+
+    #expect(result.isError != true)
+    if case .text(let text, _, _) = result.content.first {
+        #expect(text.contains("\"confirmation_required\""))
+        #expect(text.contains("\"command\":\"insert_plugin\""))
+        #expect(text.contains("\"level\":\"L2\""))
+    } else {
+        Issue.record("Expected confirmation_required text for insert_plugin")
+    }
+    let axOps = await ax.executedOps
+    #expect(axOps.isEmpty)
+}
+
+@Test func testMixerDispatcherInsertPluginRejectsUnsupportedPluginBeforeRoute() async {
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+    let cache = StateCache()
+
+    let result = await MixerDispatcher.handle(
+        command: "insert_plugin",
+        params: [
+            "track": .int(7),
+            "slot": .int(2),
+            "plugin_name": .string("Some Third Party Plugin"),
+            "confirmed": .bool(true),
+        ],
+        router: router,
+        cache: cache
+    )
+
+    #expect(result.isError == true)
+    if case .text(let text, _, _) = result.content.first {
+        #expect(text.contains("unsupported plugin"))
+        #expect(text.contains("Gain"))
+    } else {
+        Issue.record("Expected unsupported plugin error text")
+    }
+    let axOps = await ax.executedOps
+    #expect(axOps.isEmpty)
+}
+
+@Test func testMixerDispatcherInsertPluginRoutesConfirmedAllowlistedPluginToAX() async {
     let router = ChannelRouter()
     let ax = MockChannel(id: .accessibility)
     let mcu = MockChannel(id: .mcu)
@@ -491,29 +543,41 @@ private actor FailingExecuteChannel: Channel {
 
     let insertResult = await MixerDispatcher.handle(
         command: "insert_plugin",
-        params: ["track_index": .int(7), "slot": .int(2), "plugin_name": .string("Compressor")],
+        params: [
+            "track_index": .int(7),
+            "slot": .int(2),
+            "plugin_name": .string("Gain"),
+            "confirmed": .bool(true),
+        ],
         router: router,
         cache: cache
     )
-    let bypassResult = await MixerDispatcher.handle(
+
+    #expect(insertResult.isError != true)
+    let axOps = await ax.executedOps
+    let mcuOps = await mcu.executedOps
+    expectExecutedOps(axOps, equals: [
+        ("plugin.insert", ["plugin_name": "Gain", "slot": "2", "track": "7"]),
+    ])
+    #expect(mcuOps.isEmpty)
+}
+
+@Test func testMixerDispatcherBypassPluginRemainsNotExposed() async {
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+    let cache = StateCache()
+
+    let result = await MixerDispatcher.handle(
         command: "bypass_plugin",
         params: ["track": .int(7), "slot": .int(2), "bypassed": .bool(false)],
         router: router,
         cache: cache
     )
 
-    #expect(insertResult.isError == true)
-    #expect(bypassResult.isError == true)
-    if case .text(let text, _, _) = insertResult.content.first {
-        #expect(text.contains("insert_plugin"))
-        #expect(text.contains("not exposed"))
-    } else {
-        Issue.record("Expected text content for insert_plugin error")
-    }
+    #expect(result.isError == true)
     let axOps = await ax.executedOps
-    let mcuOps = await mcu.executedOps
     #expect(axOps.isEmpty)
-    #expect(mcuOps.isEmpty)
 }
 
 @Test func testMixerDispatcherUnknown() async {

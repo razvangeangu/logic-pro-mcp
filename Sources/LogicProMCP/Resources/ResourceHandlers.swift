@@ -267,6 +267,21 @@ extension ResourceHandlers {
         throw MCPError.invalidParams("No track at index \(index)")
     }
 
+    /// B1 (#11) — `data_source` for `logic://mixer` strips. Strip volume/pan
+    /// come from two writers: the AX poller (`updateChannelStrips`, which
+    /// advances `mixerFetchedAt`) and MCU echo (`updateFader`/`updatePan`,
+    /// which does NOT). So this labels the *poll* freshness — the canonical
+    /// "is the AX-derived strip array current?" signal — while the separate
+    /// `mcu_*` triplet lets a verification harness reason about the MCU echo
+    /// path independently. `.distantPast` means no successful mixer poll has
+    /// happened (the AX poll requires the Mixer panel to be visible), so the
+    /// honest label is `mixer_not_visible` rather than a false freshness claim.
+    /// Threshold mirrors `readProjectInfo`'s 5s `ax_live` window.
+    static func mixerDataSource(fetchedAt: Date, now: Date = Date(), freshThreshold: Double = 5.0) -> String {
+        guard fetchedAt > .distantPast else { return "mixer_not_visible" }
+        return now.timeIntervalSince(fetchedAt) <= freshThreshold ? "ax_poll" : "cache_stale"
+    }
+
     private static func readMixer(cache: StateCache, uri: String) async throws -> ReadResource.Result {
         let strips = await cache.getChannelStrips()
         let conn = await cache.getMCUConnection()
@@ -276,8 +291,13 @@ extension ResourceHandlers {
         let (age, iso) = cacheEnvelope(fetchedAt: fetchedAt)
         let agePart = (age as? Double).map { "\($0)" } ?? "null"
         let isoPart = (iso as? String).map { "\"\($0)\"" } ?? "null"
+        // B1 (#11): provenance + MCU triplet so a duplicate-and-readback harness
+        // can decide whether to trust the strips. `registered` is kept as a
+        // one-release alias of `mcu_registered` for existing parsers.
+        let dataSource = mixerDataSource(fetchedAt: fetchedAt)
+        let ageMsPart = conn.lastFeedbackAgeMs().map { "\($0)" } ?? "null"
         let json = """
-            {"cache_age_sec":\(agePart),"fetched_at":\(isoPart),"ax_occluded":\(axOccluded),"mcu_connected":\(conn.isConnected),"registered":\(conn.registeredAsDevice),"strips":\(stripsJSON)}
+            {"cache_age_sec":\(agePart),"data_source":"\(dataSource)","fetched_at":\(isoPart),"ax_occluded":\(axOccluded),"mcu_connected":\(conn.isConnected),"mcu_registered":\(conn.registeredAsDevice),"mcu_last_feedback_age_ms":\(ageMsPart),"registered":\(conn.registeredAsDevice),"strips":\(stripsJSON)}
             """
         return ReadResource.Result(
             contents: [.text(json, uri: uri, mimeType: "application/json")]
@@ -430,13 +450,24 @@ extension ResourceHandlers {
     }
 
     private static func readMixerStrip(at index: Int, cache: StateCache, uri: String) async throws -> ReadResource.Result {
-        if let strip = await cache.getChannelStrip(at: index) {
-            let json = encodeJSON(strip)
-            return ReadResource.Result(
-                contents: [.text(json, uri: uri, mimeType: "application/json")]
-            )
+        guard let strip = await cache.getChannelStrip(at: index) else {
+            throw MCPError.invalidParams("No channel strip at index \(index)")
         }
-        throw MCPError.invalidParams("No channel strip at index \(index)")
+        // B2 (#11): give the single-strip read the same envelope + provenance as
+        // logic://mixer, so a harness reading an individual strip gets the same
+        // freshness signal instead of a bare, undated object.
+        let fetchedAt = await cache.getMixerFetchedAt()
+        let (age, iso) = cacheEnvelope(fetchedAt: fetchedAt)
+        let agePart = (age as? Double).map { "\($0)" } ?? "null"
+        let isoPart = (iso as? String).map { "\"\($0)\"" } ?? "null"
+        let dataSource = mixerDataSource(fetchedAt: fetchedAt)
+        let stripJSON = encodeJSON(strip)
+        let json = """
+            {"cache_age_sec":\(agePart),"data_source":"\(dataSource)","fetched_at":\(isoPart),"strip":\(stripJSON)}
+            """
+        return ReadResource.Result(
+            contents: [.text(json, uri: uri, mimeType: "application/json")]
+        )
     }
 
     /// v3.1.8 (Issue #7) — markers wrapped in cache envelope with source attribution.

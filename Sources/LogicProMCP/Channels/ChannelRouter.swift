@@ -92,6 +92,7 @@ actor ChannelRouter {
         "mixer.toggle_eq":            [.mcu, .accessibility],
         "mixer.reset_strip":          [.mcu, .accessibility],
         "mixer.set_plugin_param":     [.scripter],  // public path narrowed to deterministic Scripter flow
+        "plugin.insert":              [.accessibility],
 
         // MIDI — CoreMIDI only
         "midi.send_note":             [.coreMIDI],
@@ -212,10 +213,9 @@ actor ChannelRouter {
         "region.move":                [.accessibility],
         "region.resize":              [.accessibility],
 
-        // Plugins — insert/bypass/remove intentionally omitted from the
-        // routing table: no channel has a deterministic implementation, so
-        // surfacing them would only produce "not implemented" responses.
-        // Use plugin.set_param (Scripter) for parameter control instead.
+        // Plugins — bypass/remove intentionally omitted from the routing
+        // table: no channel has a deterministic implementation. insert is
+        // reintroduced only through an allowlisted AX mixer-slot path.
         "plugin.list":                [.accessibility],
         "plugin.set_param":           [.scripter],  // deterministic plugin parameter path
         "plugin.scan_presets":        [.accessibility],  // F2 — empirical T0 verdict MIXED (CGEvent popup + AXPress menu)

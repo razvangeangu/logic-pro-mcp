@@ -233,4 +233,31 @@ enum AXHelpers {
         guard AXValueGetValue(v, .cgSize, &sz) else { return nil }
         return sz
     }
+
+    /// H2 (P2-5) — decode a CGPoint from an already-fetched raw AX attribute
+    /// value (e.g. from `AXUIElementCopyAttributeValue`). Verifies BOTH that it
+    /// is an AXValue AND that the `.cgPoint` extraction succeeds, returning nil
+    /// (fail-closed) on a non-AXValue or a wrong-subtype AXValue (e.g. a
+    /// `.cgRect` AXValue). Hoists the `AXValueGetValue` Bool check out of four
+    /// coord-click call sites (`AccessibilityChannel.postMouseClickAt` /
+    /// `.trackViewport`, `AXLogicProElements` track-header click,
+    /// `LibraryAccessor` header click) that previously ignored it and would
+    /// fall back to a (0,0) misclick / bogus viewport on drift or a malformed
+    /// test double.
+    static func point(fromRawAttribute raw: AnyObject?) -> CGPoint? {
+        guard let raw, CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+        // swiftlint:disable:next force_cast — guarded by CFGetTypeID above.
+        var pt = CGPoint.zero
+        guard AXValueGetValue((raw as! AXValue), .cgPoint, &pt) else { return nil }
+        return pt
+    }
+
+    /// H2 (P2-5) — CGSize counterpart of `point(fromRawAttribute:)`.
+    static func size(fromRawAttribute raw: AnyObject?) -> CGSize? {
+        guard let raw, CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+        // swiftlint:disable:next force_cast — guarded by CFGetTypeID above.
+        var sz = CGSize.zero
+        guard AXValueGetValue((raw as! AXValue), .cgSize, &sz) else { return nil }
+        return sz
+    }
 }

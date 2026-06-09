@@ -505,35 +505,35 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     section("§3 Transport Live Operations")
 
-    r = call_tool(client, "logic_transport", "get_state")
-    ts_text = tool_text(r)
-    T("transport.get_state returns content", r, lambda _: len(ts_text) > 0)
+    # P1-4 (D2): transport reads moved to the logic://transport/state resource
+    # (the logic_transport get_state tool command was removed). Envelope shape:
+    # { cache_age_sec, fetched_at, ax_occluded, data: { state: {...}, has_document } }.
+    r = read_resource(client, "logic://transport/state")
+    ts_text = resource_text(r)
+    T("logic://transport/state returns content", r, lambda _: len(ts_text) > 0)
 
-    ts = None
-    try:
-        ts = json.loads(ts_text)
-    except (json.JSONDecodeError, ValueError):
-        pass
+    env = safe_json(ts_text)
+    st = env.get("data", {}).get("state") if isinstance(env, dict) else None
 
-    if ts is not None:
-        T("transport.get_state is valid JSON", r, lambda _: ts is not None)
-        T("transport.tempo > 0", r, lambda _: ts.get("tempo", 0) > 0)
-        T("transport.tempo reasonable (20-300)", r, lambda _: 20 <= ts.get("tempo", 0) <= 300)
-        T("transport has isPlaying bool", r, lambda _: isinstance(ts.get("isPlaying"), bool))
-        T("transport has isRecording bool", r, lambda _: isinstance(ts.get("isRecording"), bool))
-        T("transport has isCycleEnabled bool", r, lambda _: isinstance(ts.get("isCycleEnabled"), bool))
-        T("transport has isMetronomeEnabled bool", r, lambda _: isinstance(ts.get("isMetronomeEnabled"), bool))
-        T("transport has position string", r, lambda _: isinstance(ts.get("position"), str))
+    if isinstance(st, dict):
+        T("transport/state is valid JSON envelope", r, lambda _: True)
+        T("transport.tempo > 0", r, lambda _: st.get("tempo", 0) > 0)
+        T("transport.tempo reasonable (20-300)", r, lambda _: 20 <= st.get("tempo", 0) <= 300)
+        T("transport has isPlaying bool", r, lambda _: isinstance(st.get("isPlaying"), bool))
+        T("transport has isRecording bool", r, lambda _: isinstance(st.get("isRecording"), bool))
+        T("transport has isCycleEnabled bool", r, lambda _: isinstance(st.get("isCycleEnabled"), bool))
+        T("transport has isMetronomeEnabled bool", r, lambda _: isinstance(st.get("isMetronomeEnabled"), bool))
+        T("transport has position string", r, lambda _: isinstance(st.get("position"), str))
     else:
-        # Logic Pro may report error if no project open — still a valid MCP response
-        T("transport.get_state error is documented (no project)", r,
-          lambda _: "project" in ts_text.lower() or "transport" in ts_text.lower() or len(ts_text) > 0)
+        # No document open is a valid envelope too — still must be non-empty JSON.
+        T("transport/state envelope present (no-document tolerated)", r,
+          lambda _: len(ts_text) > 0)
 
     # Roundtrip: toggle cycle, read, toggle back, read
     def safe_get_cycle(client):
-        r = call_tool(client, "logic_transport", "get_state")
+        r = read_resource(client, "logic://transport/state")
         try:
-            return json.loads(tool_text(r)).get("isCycleEnabled")
+            return json.loads(resource_text(r)).get("data", {}).get("state", {}).get("isCycleEnabled")
         except: return None
 
     before = safe_get_cycle(client)
@@ -581,27 +581,29 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     section("§4 Track Live Operations")
 
-    r = call_tool(client, "logic_tracks", "get_tracks")
-    tracks_text = tool_text(r)
-    T("track.get_tracks returns content", r, lambda _: len(tracks_text) > 0)
+    # P1-4 (D2): track reads moved to logic://tracks (envelope { ..., data: [...] }).
+    # Selection is carried by each track's isSelected field (no get_selected tool).
+    r = read_resource(client, "logic://tracks")
+    tracks_text = resource_text(r)
+    T("logic://tracks returns content", r, lambda _: len(tracks_text) > 0)
 
-    tracks = safe_json(tracks_text)
+    env = safe_json(tracks_text)
+    tracks = env.get("data") if isinstance(env, dict) else None
     if isinstance(tracks, list):
-        T("tracks is JSON array", r, lambda _: True)
+        T("tracks envelope data is array", r, lambda _: True)
         if tracks:
             T(f"found {len(tracks)} tracks", r, lambda _: len(tracks) > 0)
             T("first track has id", r, lambda _: "id" in tracks[0])
             T("first track has name", r, lambda _: "name" in tracks[0])
             T("first track has type", r, lambda _: "type" in tracks[0])
             T("first track has isMuted bool", r, lambda _: isinstance(tracks[0].get("isMuted"), bool))
-            T("first track has isSolo bool", r, lambda _: isinstance(tracks[0].get("isSolo"), bool))
+            T("first track has isSoloed bool", r, lambda _: isinstance(tracks[0].get("isSoloed"), bool))
             T("first track has isArmed bool", r, lambda _: isinstance(tracks[0].get("isArmed"), bool))
             T("first track id is int", r, lambda _: isinstance(tracks[0].get("id"), int))
+            T("tracks carry isSelected (selection state)", r,
+              lambda _: any("isSelected" in t for t in tracks))
     else:
         tracks = []
-
-    r = call_tool(client, "logic_tracks", "get_selected")
-    T("track.get_selected returns data", r, lambda _: len(tool_text(r)) > 0)
 
     # Select each of first 3 tracks (if available)
     num_to_test = min(3, len(tracks)) if tracks else 1
@@ -715,8 +717,16 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     section("§5 Mixer Live Operations")
 
-    r = call_tool(client, "logic_mixer", "get_state")
-    T("mixer.get_state returns content", r, lambda _: len(tool_text(r)) > 0)
+    # P1-4 (D2): mixer reads moved to logic://mixer (envelope { ..., strips: [...] }).
+    r = read_resource(client, "logic://mixer")
+    mix_text = resource_text(r)
+    T("logic://mixer returns content", r, lambda _: len(mix_text) > 0)
+    T("logic://mixer carries strips + mcu_connected", r,
+      lambda _: ("strips" in mix_text and "mcu_connected" in mix_text)
+                or "No Logic Pro document is open" in response_dump(r))
+    # B1 (#11): provenance — data_source present on the new build's envelope.
+    T("logic://mixer carries data_source provenance (B1/#11)", r,
+      lambda _: "data_source" in mix_text or "No Logic Pro document is open" in response_dump(r))
 
     # Volume range testing
     for vol in [0.0, 0.25, 0.5, 0.75, 1.0]:
@@ -728,10 +738,12 @@ def main():
         r = call_tool(client, "logic_mixer", "set_pan", {"index": 0, "value": pan})
         T(f"mixer.set_pan({pan}) dispatches", r, lambda _: len(tool_text(r)) > 0)
 
-    # Channel strip read for first 3 strips
+    # P1-4 (D2): single-strip reads moved to logic://mixer/{strip} (B2 envelope
+    # { cache_age_sec, data_source, strip: {...} }); absent strip → error is valid.
     for i in range(3):
-        r = call_tool(client, "logic_mixer", "get_channel_strip", {"index": i})
-        T(f"mixer.get_channel_strip({i}) returns data", r, lambda _: len(tool_text(r)) > 0)
+        r = read_resource(client, f"logic://mixer/{i}")
+        T(f"logic://mixer/{i} returns data or errors cleanly", r,
+          lambda _: len(resource_text(r)) > 0 or is_error(r) or "error" in r)
 
     # Out-of-range volume
     r = call_tool(client, "logic_mixer", "set_volume", {"index": 0, "volume": -1})
@@ -871,8 +883,9 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     section("§8 Navigation")
 
-    r = call_tool(client, "logic_navigate", "get_markers")
-    T("nav.get_markers returns data", r, lambda _: len(tool_text(r)) > 0)
+    # P1-4 (D2): markers moved to logic://markers.
+    r = read_resource(client, "logic://markers")
+    T("logic://markers returns data", r, lambda _: len(resource_text(r)) > 0)
 
     r = call_tool(client, "logic_navigate", "goto_bar", {"bar": 1}, timeout=30)
     T("nav.goto_bar(1) dispatches", r, lambda _: len(tool_text(r)) > 0)
@@ -902,8 +915,9 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     section("§9 Project")
 
-    r = call_tool(client, "logic_project", "get_info")
-    T("project.get_info returns data", r, lambda _: len(tool_text(r)) > 0)
+    # P1-4 (D2): project info moved to logic://project/info (envelope { ..., data: {...} }).
+    r = read_resource(client, "logic://project/info")
+    T("logic://project/info returns data", r, lambda _: len(resource_text(r)) > 0)
 
     r = call_tool(client, "logic_project", "is_running")
     T_LIVE("project.is_running returns 'true'", r, lambda _: "true" in tool_text(r), logic_running, "Logic Pro is not running")
@@ -1137,14 +1151,16 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     section("§14 State Consistency")
 
-    # Tool and resource return matching transport state
-    r1 = call_tool(client, "logic_transport", "get_state")
+    # P1-4 (D2): reads are resource-only now (the tool get_state command was
+    # removed), so consistency is verified across two resource reads.
+    r1 = read_resource(client, "logic://transport/state")
     r2 = read_resource(client, "logic://transport/state")
-    tool_data = safe_json(tool_text(r1))
-    resource_data = safe_json(resource_text(r2))
-    if tool_data and resource_data:
-        T("tool & resource both have tempo", "ok", lambda _: "tempo" in tool_data and "tempo" in resource_data)
-        T("tool & resource isPlaying consistent", "ok", lambda _: tool_data.get("isPlaying") == resource_data.get("isPlaying"))
+    s1 = (safe_json(resource_text(r1)) or {}).get("data", {}).get("state")
+    s2 = (safe_json(resource_text(r2)) or {}).get("data", {}).get("state")
+    if isinstance(s1, dict) and isinstance(s2, dict):
+        T("transport resource has tempo", "ok", lambda _: "tempo" in s1)
+        T("transport resource isPlaying consistent across reads", "ok",
+          lambda _: s1.get("isPlaying") == s2.get("isPlaying"))
 
     # Multiple health calls — process.uptime_sec must monotonically increase
     r1 = call_tool(client, "logic_system", "health")
@@ -1160,14 +1176,15 @@ def main():
         T("health logic_pro_running stable", "ok",
           lambda _: h1["logic_pro_running"] == h2["logic_pro_running"])
 
-    # Tracks tool and resource — same count
-    r1 = call_tool(client, "logic_tracks", "get_tracks")
+    # P1-4 (D2): reads are resource-only; verify logic://tracks returns a stable
+    # array across reads (old tool-vs-resource count comparison is obsolete).
+    r1 = read_resource(client, "logic://tracks")
     r2 = read_resource(client, "logic://tracks")
-    tool_tracks = safe_json(tool_text(r1))
-    resource_tracks = safe_json(resource_text(r2))
-    if isinstance(tool_tracks, list) and isinstance(resource_tracks, list):
-        T("tracks count consistent between tool and resource", "ok",
-          lambda _: len(tool_tracks) == len(resource_tracks))
+    t1 = (safe_json(resource_text(r1)) or {}).get("data")
+    t2 = (safe_json(resource_text(r2)) or {}).get("data")
+    if isinstance(t1, list) and isinstance(t2, list):
+        T("tracks count stable across resource reads", "ok",
+          lambda _: len(t1) == len(t2))
 
     # Refresh doesn't crash
     r = call_tool(client, "logic_system", "refresh_cache")
@@ -1258,13 +1275,12 @@ def main():
     T("transport.play routes through chain", r, lambda _: len(tool_text(r)) > 0)
     call_tool(client, "logic_transport", "stop")  # stop playback
 
-    # track.get_tracks: AX only
-    r = call_tool(client, "logic_tracks", "get_tracks")
-    T("track.get_tracks routes (AX)", r, lambda _: len(tool_text(r)) > 0)
+    # P1-4 (D2): reads are served by resources (no channel routing for reads).
+    r = read_resource(client, "logic://tracks")
+    T("logic://tracks resource read returns content", r, lambda _: len(resource_text(r)) > 0)
 
-    # mixer.get_state: MCU, AX
-    r = call_tool(client, "logic_mixer", "get_state")
-    T("mixer.get_state routes (MCU/AX)", r, lambda _: len(tool_text(r)) > 0)
+    r = read_resource(client, "logic://mixer")
+    T("logic://mixer resource read returns content", r, lambda _: len(resource_text(r)) > 0)
 
     # ═══════════════════════════════════════════════════════════════
     # §17 Real MIDI Flow (6 tests)

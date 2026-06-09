@@ -170,7 +170,17 @@ actor LogicProServer {
         // These use MockMCUTransport at init — replaced with real transport in start()
         // For production, we create a real CoreMIDI-backed transport in start()
         let mcuTransport = ProductionMCUTransport(portManager: portManager)
-        self.mcuChannel = MCUChannel(transport: mcuTransport, cache: cache)
+        let mcuAXReadback = MCUChannel.AXReadback(
+            readVolume: { track in
+                guard let fader = AXLogicProElements.findFader(trackIndex: track) else { return nil }
+                return AXValueExtractors.extractLogicMixerFaderValue(fader)
+            },
+            readPan: { track in
+                guard let pan = AXLogicProElements.findPanKnob(trackIndex: track) else { return nil }
+                return AXValueExtractors.extractCenteredSliderValue(pan)
+            }
+        )
+        self.mcuChannel = MCUChannel(transport: mcuTransport, cache: cache, axReadback: mcuAXReadback)
 
         let keyCmdTransport = ProductionKeyCmdTransport(portManager: portManager)
         self.keyCommandsChannel = MIDIKeyCommandsChannel(
@@ -447,6 +457,7 @@ actor ProductionMCUTransport: MCUTransportProtocol {
             return
         }
         packetSink(source, bytes)
+        MCUTrace.emit(.tx, bytes)
     }
 
     func start(onReceive: @escaping @Sendable (MIDIFeedback.Event) -> Void) async throws {
@@ -467,6 +478,7 @@ actor ProductionMCUTransport: MCUTransportProtocol {
                         let bytes: [UInt8] = withUnsafeBytes(of: packetPtr.pointee.words) { raw in
                             Array(raw.prefix(wordCount * 4))
                         }
+                        MCUTrace.emit(.rx, bytes)
                         let events = MIDIFeedback.parseBytes(bytes)
                         for event in events {
                             Task { [weak self] in await self?.onReceive?(event) }
@@ -483,6 +495,11 @@ actor ProductionMCUTransport: MCUTransportProtocol {
 
     func stop() async {
         port = nil
+        // Phase 6 P2: drop the receive sink so a late inbound packet (the
+        // MIDIPortManager destination callback can outlive `port = nil` until
+        // portManager teardown) cannot deliver feedback into the cache after
+        // the channel has stopped.
+        onReceive = nil
     }
 }
 

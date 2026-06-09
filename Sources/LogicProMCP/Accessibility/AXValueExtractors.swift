@@ -73,6 +73,94 @@ enum AXValueExtractors {
         return SliderRange(min: min, max: max)
     }
 
+    /// Normalize a unipolar Logic AX slider to 0.0...1.0 using its live
+    /// AXMin/AXMax range. Logic Pro 12.2 exposes mixer faders as raw values
+    /// like 70 in a 0...233 range, while the public MCP mixer contract uses
+    /// normalized 0...1 values.
+    static func extractNormalizedSliderValue(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime = .production
+    ) -> Double? {
+        guard let value = extractSliderValue(element, runtime: runtime),
+              let range = extractSliderRange(element, runtime: runtime),
+              range.max > range.min else {
+            return extractSliderValue(element, runtime: runtime)
+        }
+        let normalized = (value - range.min) / (range.max - range.min)
+        return min(max(normalized, 0.0), 1.0)
+    }
+
+    /// Convert Logic's AX fader-position value into the public mixer volume
+    /// contract used by `mixer.set_volume`. Logic's AX slider range is not a
+    /// linear mirror of the MCU 14-bit fader position; live Logic 12.2 reads
+    /// show a stable fader taper (e.g. MCP 0.4 reads as AX 70/233). Interpolate
+    /// the observed taper so AX readback and `logic://mixer` speak the same
+    /// units as mixer writes.
+    static func extractLogicMixerFaderValue(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime = .production
+    ) -> Double? {
+        guard let value = extractSliderValue(element, runtime: runtime) else {
+            return nil
+        }
+        guard let range = extractSliderRange(element, runtime: runtime),
+              range.max > range.min else {
+            return value
+        }
+        let position = min(max((value - range.min) / (range.max - range.min), 0.0), 1.0)
+        guard isLogicMixerRawFaderRange(range) else {
+            return position
+        }
+        return logicMixerFaderPositionToContract(position)
+    }
+
+    private static func isLogicMixerRawFaderRange(_ range: SliderRange) -> Bool {
+        range.min == 0.0 && range.max > 2.0
+    }
+
+    static func logicMixerFaderPositionToContract(_ position: Double) -> Double {
+        let clamped = min(max(position, 0.0), 1.0)
+        let points: [(position: Double, contract: Double)] = [
+            (0.0, 0.0),
+            (0.1072961373390558, 0.2),
+            (70.0 / 233.0, 0.4),
+            (0.4206008583690987, 0.5),
+            (0.48497854077253216, 0.6),
+            (0.8111587982832618, 0.8),
+            (1.0, 1.0),
+        ]
+        for index in 1..<points.count {
+            let lower = points[index - 1]
+            let upper = points[index]
+            guard clamped <= upper.position else { continue }
+            let span = upper.position - lower.position
+            guard span > 0 else { return upper.contract }
+            let ratio = (clamped - lower.position) / span
+            return lower.contract + ratio * (upper.contract - lower.contract)
+        }
+        return 1.0
+    }
+
+    /// Normalize a bipolar Logic AX slider to -1.0...1.0. Pan knobs in Logic
+    /// 12.2 expose asymmetric integer ranges (-64...63); treating zero as
+    /// the electrical center avoids surfacing a small false right-pan offset.
+    static func extractCenteredSliderValue(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime = .production
+    ) -> Double? {
+        guard let value = extractSliderValue(element, runtime: runtime),
+              let range = extractSliderRange(element, runtime: runtime),
+              range.min < 0.0,
+              range.max > 0.0 else {
+            return extractNormalizedSliderValue(element, runtime: runtime)
+        }
+        if value == 0.0 { return 0.0 }
+        if value < 0.0 {
+            return max(value / abs(range.min), -1.0)
+        }
+        return min(value / range.max, 1.0)
+    }
+
     /// Read a track header and extract its basic state.
     static func extractTrackState(
         from header: AXUIElement,

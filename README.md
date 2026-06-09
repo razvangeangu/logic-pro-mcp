@@ -12,8 +12,8 @@
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14+-000000.svg?style=flat-square&logo=apple" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
-  <img src="https://img.shields.io/badge/tests-1143_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.4.5--rc5-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-1192_passing-brightgreen.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.4.5-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -81,10 +81,10 @@ The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew 
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc7/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
-LOGIC_PRO_MCP_TEAM_ID=ADHOC \
+LOGIC_PRO_MCP_TEAM_ID=<paste team_id from RELEASE-METADATA.json> \
 bash install.sh
 ```
 
@@ -92,7 +92,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5-rc7/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
@@ -148,14 +148,14 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |
 | [Maintainer Guide](docs/MAINTAINERS.md) | Maintainers | Release, approvals, E2E checklist |
-| [Live Verify v3.4.5-rc5](docs/live-verify-v3.4.5-rc5.md) | Maintainers, QA | Latest full app-level production-readiness and Logic Pro 12.2 E2E evidence (rc6 is a release-workflow hotfix) |
+| [Live Verify v3.4.5](docs/live-verify-v3.4.5.md) | Maintainers, QA | Latest deterministic, coverage, release-build, and targeted Logic Pro 12.2 issue-verification evidence |
 | [Security Policy](SECURITY.md) | Security reviewers | Threat model, reporting, hardening |
 | [Changelog](CHANGELOG.md) | Everyone | Per-release changes |
 | [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, PR workflow |
 
 ## Status
 
-**Current prerelease: v3.4.5-rc7 (2026-06-05 KST).** rc7 is the rerolled release-workflow hotfix: it keeps universal GitHub Actions releases intact while removing the overfit release-path filter, so packaging selects the final fat Mach-O by actual slice inspection instead of path shape. App-level production-readiness evidence remains the rc5 live run: `swift test` at `1143/1143` passing, `swift build -c release` passing, Python syntax validation for the v4 import runner passing, and a live Logic Pro 12.2 MCP session confirming all 7 channels ready, `transport.set_tempo` at `127 BPM`, `project.save_as` with package mtime readback, and an 11-part MIDI-only acid composition saved under `artifacts/acid-track-composition-v4/acid-track-composed-midi-v4.logicx`.
+**Current stable release: v3.4.5 (2026-06-09 KST).** This release closes the Logic Pro 12.2 mixer verification work for Issues #10 and #11, ships the snapshot-level plugin readback surface for #12, and adds the guarded `insert_plugin` path for #13. Local verification: `swift test --no-parallel` at `1192/1192`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, coverage `70.40%` region / `77.78%` line, and targeted live Logic Pro 12.2 checks for #10-#13 all passed.
 
 ### Active contracts (the things callers most care about)
 
@@ -172,6 +172,8 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 | Version | Date | Headline |
 |---------|------|----------|
+| **v3.4.5** | 2026-06-09 | Logic 12.2 mixer AX readback restored, echo-independent fader verification, mixer provenance, `plugins_source:"ax"` snapshots, guarded `insert_plugin`, and deterministic/coverage/live verification evidence |
+| v3.4.5-rc8..rc12 | 2026-06-05/08 | Release-workflow and installer-validation hotfix series: bash 3.2, split universal build, candidate stdout, Team ID parser validation, macOS 14 validation floor |
 | **v3.4.5-rc7** | 2026-06-05 | Release-workflow hotfix reroll, universal binary selection now scans all executable candidates under `.build` and picks the first real fat Mach-O |
 | **v3.4.5-rc5** | 2026-06-05 | Save/readback and MIDI import hardening, live `project/info` tier merge, ProcessUtils Logic detection fallback, Library duplicate-name column targeting, and final v4 MIDI-only composition E2E |
 | **v3.4.5-rc4** | 2026-05-10 | Installer metadata parser fix — same-origin install path now reads `team_id` from one-line `RELEASE-METADATA.json` |
@@ -193,14 +195,14 @@ Per-release detail: [CHANGELOG.md](CHANGELOG.md).
 
 ### Distribution
 
-ADHOC release until Apple Developer Program membership lands. SHA256 pin + `codesign --verify` protect against tampering; Gatekeeper assessment is skipped and the installer strips the quarantine attribute. Stable production tags must use the GitHub Actions workflow with notarization secrets; the local `Scripts/release.sh` refuses stable tags without prerelease suffix. See [SECURITY.md §Release types](SECURITY.md#release-types).
+Stable production tags use the GitHub Actions release workflow; the published `RELEASE-METADATA.json` records the signing mode, Team ID, and architectures for the exact artifact. ADHOC prerelease tags remain allowed only for local RC cuts. SHA256 pinning is mandatory for the fail-closed installer path. See [SECURITY.md §Release types](SECURITY.md#release-types).
 
 ### Testing
 
-- **1143 unit + integration tests** on current main — `swift test` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker/MIDI import), routing-audit invariants, AX hardening, `LogicProjectFileReader` plist parsing + path validation, live `project/info` tier-merge, `project.save_as` package-mtime readback, `LogicProServer.stop()` signal-cleanup contract, deterministic transport packet-sink capture, and installer metadata parsing.
+- **1192 unit + integration tests** on current main — `swift test --no-parallel` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker/MIDI import), routing-audit invariants, AX hardening, `LogicProjectFileReader` plist parsing + path validation, live `project/info` tier-merge, `project.save_as` package-mtime readback, `LogicProServer.stop()` signal-cleanup contract, deterministic transport packet-sink capture, installer metadata parsing, mixer AX readback, plugin-slot snapshots, and guarded insert-plugin flow.
 - **Live E2E** (`Scripts/live-e2e-test.py`) defaults to the release binary. Protocol/security/validation assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a live Logic Pro session is detected. For attestation runs, use `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh`; the shell wrapper launches the MCP server under a trusted tmux parent so macOS TCC evaluates the same stdio parent context instead of Python.
-- **Current live Logic Pro 12.2 validation** — `.build/release/LogicProMCP` launched cleanly, health reported all 7 channels ready, tempo set/readback reached `127`, `project.save_as` returned `verified:true`, and the saved package's `ProjectData` contained all 11 v4 MIDI regions with no packaged audio files.
-- **CI coverage gate** — `region ≥ 65%`, `line ≥ 72%` (current 70.47 / 77.29%, ~5pp slack). Re-armed in v3.4.0 after the v3.1.5 disable.
+- **Current live Logic Pro 12.2 validation** — `.build/release/LogicProMCP` launched cleanly, health reported all 7 channels ready, #10 `set_volume` verified via AX readback despite missing MCU echo, #11 `logic://mixer` refreshed from AX poll, #12 `plugins[]` carried `plugins_source:"ax"`, and #13 guarded `insert_plugin` verified the inserted Gain slot and refused an occupied slot.
+- **CI coverage gate** — `region ≥ 65%`, `line ≥ 72%` (current 70.40 / 77.78%, ~5.4pp / ~5.8pp slack). Re-armed in v3.4.0 after the v3.1.5 disable.
 - **CoreMIDI smoke tests skip on macos-15-arm64 GitHub runners** (`MIDIClientCreate` returns `-50` in the sandboxed image; production code path coverage on real macOS hosts is unchanged).
 
 ### Known limitations

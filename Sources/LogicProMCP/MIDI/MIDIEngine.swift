@@ -166,7 +166,14 @@ actor MIDIEngine: CoreMIDIEngineProtocol {
         virtualDestination = 0
         client = 0
         isRunning = false
-        inboundContinuation.finish()
+        // v3.4.5 (H1 / P1-6): do NOT finish the inbound stream here. The
+        // stream + continuation are created once in init() and cannot be
+        // re-created (`inboundMessages` is a `let` the consumer holds). If
+        // stop() finished the continuation, a later start() would re-capture
+        // an already-finished continuation and silently drop all inbound MIDI
+        // — making the engine restart-unsafe. The continuation is terminal
+        // only at deinit; stop() is a restartable pause that just tears down
+        // the CoreMIDI endpoints.
         Log.info("MIDIEngine stopped", subsystem: "midi")
     }
 

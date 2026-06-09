@@ -37,7 +37,7 @@ All tool invocations use:
 | `logic://system/health` | Health JSON (same schema as `logic_system health`) | Composed on read |
 | `logic://transport/state` | `{ state: TransportState, has_document, transport_age_sec }` JSON (v2.2+ wrapper; see below) | Cache (MCU feedback + AX poll) |
 | `logic://tracks` | `TrackState[]` JSON | Cache (MCU + AX) |
-| `logic://mixer` | `{ mcu_connected, registered, strips }` | Cache |
+| `logic://mixer` | `{ cache_age_sec, fetched_at, data_source, ax_occluded, mcu_connected, mcu_registered, mcu_last_feedback_age_ms, registered (alias), strips }` — `data_source` ∈ `ax_poll`/`cache_stale`/`mixer_not_visible` (#11) | Cache (MCU echo + AX poll) |
 | `logic://markers` | `MarkerState[]` JSON | Cache (AX poll, every 5 cycles) — see [Marker semantics](#marker-semantics) |
 | `logic://project/info` | `ProjectInfo` JSON wrapped in cache envelope (v3.1.8+) — see [Tempo semantics](#tempo-semantics-projectinfo-vs-transportstate) | Tier-merge: live transport/cache → MetaData.plist → defaults (3s AX poll) |
 | `logic://midi/ports` | `{ sources, destinations }` | CoreMIDI live query |
@@ -45,7 +45,7 @@ All tool invocations use:
 | `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`). All candidates must sit under the path allowlist (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` (colon-separated, additive). |
 | `logic://tracks/{index}` | Single `TrackState` JSON | Cache — template |
 | `logic://tracks/{index}/regions` | `RegionState[]` JSON filtered by `trackIndex` | Cache — template |
-| `logic://mixer/{strip}` | Single `ChannelStripState` JSON | Cache — template |
+| `logic://mixer/{strip}` | `{ cache_age_sec, fetched_at, data_source, strip: ChannelStripState }` | Cache — template |
 
 All resources return `contents: [{ uri, text, mimeType: "application/json" }]`.
 
@@ -229,11 +229,11 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 
 | Command | Params | Returns | Channel |
 |---------|--------|---------|---------|
-| `set_volume` | `{ index: int, volume: number }` (0.0–1.0) | text | **MCU only** |
-| `set_pan` | `{ index: int, value: number }` (-1.0–1.0) | text | **MCU only** |
-| `set_master_volume` | `{ volume: number }` (0.0–1.0) | text | **MCU only** |
-| `set_plugin_param` | `{ track: int, insert: int, param: int, value: number }` | text | Scripter |
-| `insert_plugin` | — | error | Removed in v2.2 — no supported channel; use `set_plugin_param` via Scripter |
+| `set_volume` | `{ track: int, value: number }` (0.0–1.0) | HC State A/B (`observed`, `observed_mcu`, `observed_ax`, `verify_source`, `mcu_connected`, `mcu_last_feedback_age_ms`) | MCU write + MCU/AX readback |
+| `set_pan` | `{ track: int, value: number }` (-1.0–1.0) | HC State A/B (+ `pan_write_mode:"relative_vpot"` — relative V-Pot nudge, not idempotent) | **MCU only** |
+| `set_master_volume` | `{ volume: number }` (0.0–1.0) | HC State A/B | **MCU only** |
+| `set_plugin_param` | `{ track: int, insert: 0, param: 0–17, value: 0.0–1.0 }` | Malformed/out-of-range input → `isError` text, rejected **before** any track-select side effect; an unverified selection → `isError` (State B refused); a routed write → HC State B `readback_unavailable` (write-only) | Scripter (selected track) |
+| `insert_plugin` | `{ track: int, slot: int, plugin_name: "Gain" \| "Compressor" \| "Channel EQ", confirmed: true }` | HC State A when AX slot readback confirms the inserted plugin; without `confirmed:true` returns an L2 `confirmation_required` payload; occupied slots fail closed with `slot_occupied` | Accessibility mixer insert menu |
 | `bypass_plugin` | — | error | Removed in v2.2 — no supported channel; use `set_plugin_param` via Scripter |
 | `set_send` | — | error | Not yet deterministic in production contract |
 | `set_output` | — | error | Not exposed in the production MCP contract |
@@ -248,27 +248,38 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 ```ts
 // Mixer resource
 {
+  cache_age_sec: number | null,
+  fetched_at: string | null,
+  data_source: "ax_poll" | "cache_stale" | "mixer_not_visible",  // strip freshness — #11
+  ax_occluded: boolean,
   mcu_connected: boolean,
-  registered: boolean,
+  mcu_registered: boolean,
+  mcu_last_feedback_age_ms: int | null,
+  registered: boolean,   // one-release alias of mcu_registered
   strips: Array<{
     trackIndex: int,
-    volume: number,       // 0.0–1.0
+    volume: number,       // 0.0–1.0 (0 dB ≈ 0.785)
     pan: number,          // -1.0–1.0
     sends: [],
     input?: string,
     output?: string,
     eqEnabled: boolean,
-    plugins: Array<{ index: int, name: string, isBypassed: boolean }>
+    plugins_source?: "ax",
+    plugins_read_error?: string,
+    plugins: Array<{ index: int, name: string, isBypassed: boolean }>  // AX names/bypass snapshot for occupied insert slots
   }>
 }
 ```
 
+> **Trust rule (#11/#12):** when `data_source` is `cache_stale`/`mixer_not_visible` or `mcu_connected` is `false`, treat `strips` as last-known-good, not current. When `plugins_source:"ax"` is present, `plugins[]` is a live AX insert-slot name/bypass snapshot; when `plugins_read_error` is present, distinguish read failure from a genuinely empty insert chain.
+
 ### Examples
 
 ```json
-{"command": "set_volume", "params": {"index": 0, "volume": 0.75}}
-{"command": "set_pan", "params": {"index": 2, "value": -0.3}}
+{"command": "set_volume", "params": {"track": 0, "value": 0.75}}
+{"command": "set_pan", "params": {"track": 2, "value": -0.3}}
 {"command": "set_plugin_param", "params": {"track": 1, "insert": 0, "param": 3, "value": 0.65}}
+{"command": "insert_plugin", "params": {"track": 0, "slot": 2, "plugin_name": "Gain", "confirmed": true}}
 ```
 
 ---

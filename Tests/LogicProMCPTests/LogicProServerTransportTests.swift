@@ -131,6 +131,26 @@ private actor FeedbackEventRecorder {
     }
 }
 
+private func waitForFeedbackEvents(
+    _ recorder: FeedbackEventRecorder,
+    expectedCount: Int,
+    timeoutNanoseconds: UInt64 = 50_000_000
+) async -> [String] {
+    let intervalNanoseconds: UInt64 = 1_000_000
+    var waitedNanoseconds: UInt64 = 0
+
+    while waitedNanoseconds < timeoutNanoseconds {
+        let events = await recorder.snapshot()
+        if events.count >= expectedCount {
+            return events
+        }
+        try? await Task.sleep(nanoseconds: intervalNanoseconds)
+        waitedNanoseconds += intervalNanoseconds
+    }
+
+    return await recorder.snapshot()
+}
+
 @Test func testProductionKeyCmdTransportReadinessStartsUnavailable() async {
     let transport = ProductionKeyCmdTransport(portManager: MockServerPortManager())
 
@@ -271,10 +291,8 @@ private actor FeedbackEventRecorder {
         Task { await recorder.record(event) }
     }
     await manager.emitBidirectionalBytes([0x90, 0x40, 0x7F])
-    await Task.yield()
-    await Task.yield()
 
-    let events = await recorder.snapshot()
+    let events = await waitForFeedbackEvents(recorder, expectedCount: 1)
     #expect(events == ["noteOn:0:64:127"])
 }
 
@@ -383,12 +401,12 @@ private actor FeedbackEventRecorder {
         "logic://tracks/{index}/regions",
         "logic://mixer/{strip}",
     ])
-    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5-rc7 — 8 tools, 9 resources, 4 channels")
+    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5 — 8 tools, 9 resources, 4 channels")
 }
 
 @Test func testServerCatalogStartupBannerUsesProvidedChannelCount() {
     let banner = ServerCatalog.startupBanner(channelCount: 7)
-    #expect(banner == "Starting logic-pro-mcp v3.4.5-rc7 — 8 tools, 9 resources, 7 channels")
+    #expect(banner == "Starting logic-pro-mcp v3.4.5 — 8 tools, 9 resources, 7 channels")
 }
 
 @Test func testLogicProServerCompositionSnapshotMatchesExpectedOrder() async {
@@ -407,5 +425,5 @@ private actor FeedbackEventRecorder {
     ])
     #expect(snapshot.toolNames.count == 8)
     #expect(snapshot.resourceURIs.contains("logic://system/health"))
-    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5-rc7 — 8 tools, 9 resources, 7 channels")
+    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5 — 8 tools, 9 resources, 7 channels")
 }

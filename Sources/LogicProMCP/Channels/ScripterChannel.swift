@@ -44,18 +44,64 @@ actor ScripterChannel: Channel {
 
     func execute(operation: String, params: [String: String]) async -> ChannelResult {
         guard operation == "plugin.set_param" || operation == "mixer.set_plugin_param" else {
-            return .error("Scripter only handles plugin.set_param, got: \(operation)")
+            return .error(HonestContract.encodeStateC(
+                error: .notImplemented,
+                hint: "Scripter only handles plugin.set_param",
+                extras: ["operation": operation]
+            ))
         }
 
         let insert = Int(params["insert"] ?? "0") ?? 0
         guard insert == 0 else {
-            return .error("Scripter only supports insert 0 on the selected track")
+            return .error(HonestContract.encodeStateC(
+                error: .notImplemented,
+                hint: "Scripter only supports insert 0 on the selected track",
+                extras: [
+                    "operation": operation,
+                    "insert": insert,
+                ]
+            ))
         }
-        let paramIndex = Int(params["param"] ?? "0") ?? 0
-        let value = Double(params["value"] ?? "0") ?? 0.0
+        guard let paramRaw = params["param"], let paramIndex = Int(paramRaw) else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "Scripter requires explicit integer 'param'",
+                extras: ["operation": operation]
+            ))
+        }
+        guard let valueRaw = params["value"], let value = Double(valueRaw) else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "Scripter requires explicit numeric 'value'",
+                extras: [
+                    "operation": operation,
+                    "param": paramIndex,
+                ]
+            ))
+        }
+        guard (0.0...1.0).contains(value) else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "Scripter 'value' must be in 0.0..1.0 (got \(value))",
+                extras: [
+                    "operation": operation,
+                    "insert": insert,
+                    "param": paramIndex,
+                    "requested": value,
+                ]
+            ))
+        }
 
         guard let cc = Self.ccForParam(paramIndex) else {
-            return .error("Param index out of range (0-17): \(paramIndex)")
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "Param index out of range (0-17): \(paramIndex)",
+                extras: [
+                    "operation": operation,
+                    "insert": insert,
+                    "param": paramIndex,
+                ]
+            ))
         }
 
         let midiVal = Self.midiValue(for: value)
@@ -63,10 +109,37 @@ actor ScripterChannel: Channel {
         do {
             try await transport.send(bytes)
         } catch {
-            return .error("Failed to send Scripter param \(paramIndex): \(error)")
+            return .error(HonestContract.encodeStateC(
+                error: .portUnavailable,
+                hint: "Failed to send Scripter param \(paramIndex): \(error)",
+                extras: [
+                    "operation": operation,
+                    "insert": insert,
+                    "param": paramIndex,
+                    "requested": value,
+                    "cc": Int(cc),
+                    "applied_midi_value": Int(midiVal),
+                ]
+            ))
         }
 
-        return .success("Scripter param \(paramIndex) set to \(value) on insert \(insert) (CC \(cc) val \(midiVal))")
+        var extras: [String: Any] = [
+            "operation": operation,
+            "insert": insert,
+            "param": paramIndex,
+            "requested": value,
+            "cc": Int(cc),
+            "applied_midi_value": Int(midiVal),
+            "midi_channel": 16,
+            "readback_source": "scripter_send_only",
+        ]
+        if let trackRaw = params["track"], let track = Int(trackRaw) {
+            extras["track"] = track
+        }
+        return .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: extras
+        ))
     }
 
     func healthCheck() async -> ChannelHealth {

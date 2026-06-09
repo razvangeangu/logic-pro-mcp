@@ -156,6 +156,117 @@ import Testing
     #expect(AXLogicProElements.findTransportButton(named: "Stop", runtime: runtime) == nil)
 }
 
+@Test func testAXLogicProElementsFindsLogic12MixerLayoutAreaAndSkipsInspectorMixer() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(160)
+    let window = builder.element(161)
+    let inspector = builder.element(162)
+    let inspectorMixer = builder.element(163)
+    let inspectorStrip = builder.element(164)
+    let mixerGroup = builder.element(165)
+    let mixerToolbar = builder.element(166)
+    let mixerLayout = builder.element(167)
+
+    let strips = (0..<3).map { i in builder.element(170 + i) }
+    let faders = (0..<3).map { i in builder.element(180 + i) }
+    let pans = (0..<3).map { i in builder.element(190 + i) }
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [inspector, mixerGroup])
+
+    builder.setAttribute(inspector, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(inspector, kAXDescriptionAttribute as String, "인스펙터")
+    builder.setChildren(inspector, [inspectorMixer])
+    builder.setAttribute(inspectorMixer, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(inspectorMixer, kAXDescriptionAttribute as String, "믹서")
+    builder.setChildren(inspectorMixer, [inspectorStrip])
+    builder.setAttribute(inspectorStrip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+
+    builder.setAttribute(mixerGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(mixerGroup, kAXDescriptionAttribute as String, "믹서")
+    builder.setChildren(mixerGroup, [mixerToolbar, mixerLayout])
+    builder.setAttribute(mixerToolbar, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(mixerToolbar, kAXDescriptionAttribute as String, "믹서")
+    builder.setAttribute(mixerLayout, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(mixerLayout, kAXDescriptionAttribute as String, "믹서")
+    builder.setChildren(mixerLayout, strips)
+
+    for i in strips.indices {
+        builder.setAttribute(strips[i], kAXRoleAttribute as String, kAXLayoutItemRole as String)
+        builder.setAttribute(strips[i], kAXDescriptionAttribute as String, "Track \(i + 1)")
+        builder.setChildren(strips[i], [faders[i], pans[i]])
+        builder.setAttribute(faders[i], kAXRoleAttribute as String, kAXSliderRole as String)
+        builder.setAttribute(faders[i], kAXDescriptionAttribute as String, "볼륨 페이더")
+        builder.setAttribute(pans[i], kAXRoleAttribute as String, kAXSliderRole as String)
+        builder.setAttribute(pans[i], kAXDescriptionAttribute as String, "패닝")
+    }
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    #expect(AXLogicProElements.getMixerArea(runtime: runtime) == mixerLayout)
+}
+
+@Test func testAXLogicProElementsDoesNotTreatInspectorChannelStripsAsMixerArea() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(210)
+    let window = builder.element(211)
+    let inspector = builder.element(212)
+    let inspectorMixer = builder.element(213)
+    let inspectorStrip = builder.element(214)
+    let fader = builder.element(215)
+    let pan = builder.element(216)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [inspector])
+    builder.setAttribute(inspector, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(inspector, kAXDescriptionAttribute as String, "Inspector")
+    builder.setChildren(inspector, [inspectorMixer])
+    builder.setAttribute(inspectorMixer, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(inspectorMixer, kAXDescriptionAttribute as String, "Mixer")
+    builder.setChildren(inspectorMixer, [inspectorStrip])
+    builder.setAttribute(inspectorStrip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setChildren(inspectorStrip, [fader, pan])
+    builder.setAttribute(fader, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(fader, kAXDescriptionAttribute as String, "Volume Fader")
+    builder.setAttribute(pan, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(pan, kAXDescriptionAttribute as String, "Pan")
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    #expect(AXLogicProElements.getMixerArea(runtime: runtime) == nil)
+}
+
+@Test func testAXLogicProElementsFindsFaderAndPanByLocalizedDescription() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(230)
+    let window = builder.element(231)
+    let mixerLayout = builder.element(232)
+    let strip = builder.element(233)
+    let send = builder.element(234)
+    let pan = builder.element(235)
+    let fader = builder.element(236)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [mixerLayout])
+    builder.setAttribute(mixerLayout, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(mixerLayout, kAXDescriptionAttribute as String, "믹서")
+    builder.setChildren(mixerLayout, [strip])
+    builder.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(strip, kAXDescriptionAttribute as String, "Roland TR-909")
+    builder.setChildren(strip, [send, pan, fader])
+    builder.setAttribute(send, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(send, kAXDescriptionAttribute as String, "센드 노브")
+    builder.setAttribute(pan, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(pan, kAXHelpAttribute as String, "패닝 노브 및 밸런스 노브")
+    builder.setAttribute(fader, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(fader, kAXDescriptionAttribute as String, "볼륨 페이더")
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    #expect(AXLogicProElements.findFader(trackIndex: 0, runtime: runtime) == fader)
+    #expect(AXLogicProElements.findPanKnob(trackIndex: 0, runtime: runtime) == pan)
+}
+
 @Test func testAXLogicProElementsDoesNotTreatPlainWindowAsTransportWithoutTransportSignature() {
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(40)

@@ -448,13 +448,11 @@ enum AXLogicProElements {
         guard
             AXUIElementCopyAttributeValue(header, kAXPositionAttribute as CFString, &posRaw) == .success,
             AXUIElementCopyAttributeValue(header, kAXSizeAttribute as CFString, &sizeRaw) == .success,
-            let pr = posRaw, CFGetTypeID(pr) == AXValueGetTypeID(),
-            let sr = sizeRaw, CFGetTypeID(sr) == AXValueGetTypeID()
+            // H2 (P2-5): fail-closed on non-AXValue / wrong-subtype rather than
+            // a (0,0) misclick.
+            let pt = AXHelpers.point(fromRawAttribute: posRaw),
+            let sz = AXHelpers.size(fromRawAttribute: sizeRaw)
         else { return false }
-        var pt = CGPoint.zero
-        var sz = CGSize.zero
-        AXValueGetValue((pr as! AXValue), .cgPoint, &pt)
-        AXValueGetValue((sr as! AXValue), .cgSize, &sz)
         let clickPoint = CGPoint(x: pt.x + min(60, sz.width / 4), y: pt.y + sz.height / 2)
         return LibraryAccessor.productionMouseClick(at: clickPoint)
     }
@@ -492,35 +490,326 @@ enum AXLogicProElements {
     /// Find the mixer area.
     static func getMixerArea(runtime: Runtime = .production) -> AXUIElement? {
         guard let window = mainWindow(runtime: runtime) else { return nil }
-        // The mixer typically appears as a distinct group/scroll area
+
+        // Legacy/test-path lookup. Older Logic builds and existing fake AX
+        // trees expose the mixer with AXIdentifier="Mixer".
         if let mixer = AXHelpers.findDescendant(
             of: window, role: kAXGroupRole, identifier: "Mixer", runtime: runtime.ax
         ) {
             return mixer
         }
-        return AXHelpers.findDescendant(of: window, role: kAXScrollAreaRole, identifier: "Mixer", runtime: runtime.ax)
+        if let mixer = AXHelpers.findDescendant(
+            of: window, role: kAXScrollAreaRole, identifier: "Mixer", runtime: runtime.ax
+        ) {
+            return mixer
+        }
+
+        // Logic Pro 12.2 exposes the visible bottom Mixer as:
+        //   AXGroup(desc:"믹서") -> AXLayoutArea(desc:"믹서") -> AXLayoutItem strips
+        // with no AXIdentifier. Do not fall back to the Inspector's small
+        // two-strip "믹서" area; that would make a full mixer read silently
+        // return only selected-track + output strips.
+        return mixerAreaCandidates(in: window, runtime: runtime.ax)
+            .sorted { lhs, rhs in
+                if lhs.stripCount != rhs.stripCount { return lhs.stripCount > rhs.stripCount }
+                return lhs.totalChildCount > rhs.totalChildCount
+            }
+            .first?
+            .element
     }
 
     /// Find a volume fader for a specific track index within the mixer.
     static func findFader(trackIndex: Int, runtime: Runtime = .production) -> AXUIElement? {
         guard let mixer = getMixerArea(runtime: runtime) else { return nil }
-        let strips = AXHelpers.getChildren(mixer, runtime: runtime.ax)
+        let strips = mixerChannelStrips(in: mixer, runtime: runtime.ax)
         guard trackIndex >= 0 && trackIndex < strips.count else { return nil }
         let strip = strips[trackIndex]
-        // Fader is an AXSlider within the channel strip
-        return AXHelpers.findDescendant(of: strip, role: kAXSliderRole, maxDepth: 4, runtime: runtime.ax)
+        return findVolumeFader(in: strip, runtime: runtime.ax)
     }
 
     /// Find the pan knob for a track in the mixer.
     static func findPanKnob(trackIndex: Int, runtime: Runtime = .production) -> AXUIElement? {
         guard let mixer = getMixerArea(runtime: runtime) else { return nil }
-        let strips = AXHelpers.getChildren(mixer, runtime: runtime.ax)
+        let strips = mixerChannelStrips(in: mixer, runtime: runtime.ax)
         guard trackIndex >= 0 && trackIndex < strips.count else { return nil }
         let strip = strips[trackIndex]
-        // Pan is typically the second slider or a knob-type element
-        let sliders = AXHelpers.findAllDescendants(of: strip, role: kAXSliderRole, maxDepth: 4, runtime: runtime.ax)
-        // Convention: first slider = volume, second = pan (if present)
+        return findPanControl(in: strip, runtime: runtime.ax)
+    }
+
+    private struct MixerAreaCandidate {
+        let element: AXUIElement
+        let stripCount: Int
+        let totalChildCount: Int
+    }
+
+    private static func mixerAreaCandidates(
+        in root: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> [MixerAreaCandidate] {
+        var candidates: [MixerAreaCandidate] = []
+        collectMixerAreaCandidates(
+            root,
+            runtime: runtime,
+            depth: 0,
+            ancestorIsInspector: false,
+            into: &candidates
+        )
+        return candidates
+    }
+
+    private static func collectMixerAreaCandidates(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime,
+        depth: Int,
+        ancestorIsInspector: Bool,
+        into candidates: inout [MixerAreaCandidate]
+    ) {
+        guard depth <= 12 else { return }
+
+        let text = elementSearchText(element, runtime: runtime)
+        let isInspector = ancestorIsInspector
+            || text.contains("inspector")
+            || text.contains("인스펙터")
+
+        if !isInspector,
+           isMixerNamedElement(element, runtime: runtime),
+           isMixerContainerRole(AXHelpers.getRole(element, runtime: runtime)),
+           hasDirectChannelStripChildren(element, runtime: runtime) {
+            let strips = mixerChannelStrips(in: element, runtime: runtime)
+            candidates.append(MixerAreaCandidate(
+                element: element,
+                stripCount: strips.count,
+                totalChildCount: AXHelpers.getChildren(element, runtime: runtime).count
+            ))
+        }
+
+        for child in AXHelpers.getChildren(element, runtime: runtime) {
+            collectMixerAreaCandidates(
+                child,
+                runtime: runtime,
+                depth: depth + 1,
+                ancestorIsInspector: isInspector,
+                into: &candidates
+            )
+        }
+    }
+
+    private static func isMixerContainerRole(_ role: String?) -> Bool {
+        guard let role else { return false }
+        return role == (kAXGroupRole as String)
+            || role == (kAXScrollAreaRole as String)
+            || role == "AXLayoutArea"
+    }
+
+    private static func isMixerNamedElement(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        let candidates = [
+            AXHelpers.getIdentifier(element, runtime: runtime),
+            AXHelpers.getDescription(element, runtime: runtime),
+            AXHelpers.getTitle(element, runtime: runtime)
+        ]
+        return candidates.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .contains { $0 == "mixer" || $0 == "믹서" }
+    }
+
+    private static func hasDirectChannelStripChildren(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        !mixerChannelStrips(in: element, runtime: runtime).isEmpty
+    }
+
+    static func mixerChannelStrips(
+        in mixer: AXUIElement,
+        runtime: AXHelpers.Runtime = .production
+    ) -> [AXUIElement] {
+        let children = AXHelpers.getChildren(mixer, runtime: runtime)
+        let layoutItems = children.filter {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXLayoutItemRole as String)
+        }
+        return layoutItems.isEmpty ? children : layoutItems
+    }
+
+    static func findVolumeFader(
+        in strip: AXUIElement,
+        runtime: AXHelpers.Runtime = .production
+    ) -> AXUIElement? {
+        let sliders = AXHelpers.findAllDescendants(
+            of: strip, role: kAXSliderRole, maxDepth: 4, runtime: runtime
+        )
+        if let described = sliders.first(where: { sliderText($0, runtime: runtime).isVolumeFader }) {
+            return described
+        }
+        return sliders.first
+    }
+
+    static func findPanControl(
+        in strip: AXUIElement,
+        runtime: AXHelpers.Runtime = .production
+    ) -> AXUIElement? {
+        let sliders = AXHelpers.findAllDescendants(
+            of: strip, role: kAXSliderRole, maxDepth: 4, runtime: runtime
+        )
+        if let described = sliders.first(where: { sliderText($0, runtime: runtime).isPanControl }) {
+            return described
+        }
         return sliders.count > 1 ? sliders[1] : nil
+    }
+
+    static func pluginSlots(
+        in strip: AXUIElement,
+        runtime: AXHelpers.Runtime = .production
+    ) -> [PluginSlotState] {
+        var plugins: [PluginSlotState] = []
+        for child in AXHelpers.getChildren(strip, runtime: runtime) {
+            guard let name = occupiedPluginSlotName(child, runtime: runtime) else {
+                continue
+            }
+            plugins.append(PluginSlotState(
+                index: plugins.count,
+                name: name,
+                isBypassed: pluginSlotBypassState(child, runtime: runtime) ?? false
+            ))
+        }
+        return plugins
+    }
+
+    struct PluginInsertSlot {
+        let index: Int
+        let element: AXUIElement
+        let name: String?
+        let isBypassed: Bool?
+
+        var isEmpty: Bool { name == nil }
+    }
+
+    static func audioPluginInsertSlots(
+        in strip: AXUIElement,
+        runtime: AXHelpers.Runtime = .production
+    ) -> [PluginInsertSlot] {
+        var slots: [PluginInsertSlot] = []
+        for child in AXHelpers.getChildren(strip, runtime: runtime) {
+            if isEmptyAudioPluginSlot(child, runtime: runtime) {
+                slots.append(PluginInsertSlot(
+                    index: slots.count,
+                    element: child,
+                    name: nil,
+                    isBypassed: nil
+                ))
+                continue
+            }
+            guard let name = occupiedPluginSlotName(child, runtime: runtime) else {
+                continue
+            }
+            slots.append(PluginInsertSlot(
+                index: slots.count,
+                element: child,
+                name: name,
+                isBypassed: pluginSlotBypassState(child, runtime: runtime)
+            ))
+        }
+        return slots
+    }
+
+    private static func sliderText(
+        _ slider: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> (text: String, isVolumeFader: Bool, isPanControl: Bool) {
+        let text = elementSearchText(slider, runtime: runtime)
+        let isSend = text.contains("send") || text.contains("센드")
+        let isZoom = text.contains("zoom") || text.contains("확대")
+        let isVolume = !isSend && !isZoom
+            && (text.contains("volume") || text.contains("fader") || text.contains("볼륨"))
+        let isPan = !isSend && !isZoom
+            && (text.contains("pan") || text.contains("panning") || text.contains("패닝") || text.contains("밸런스"))
+        return (text, isVolume, isPan)
+    }
+
+    private static func occupiedPluginSlotName(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> String? {
+        guard (AXHelpers.getRole(element, runtime: runtime) ?? "") == (kAXGroupRole as String) else {
+            return nil
+        }
+        guard let description = AXHelpers.getDescription(element, runtime: runtime)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !description.isEmpty else {
+            return nil
+        }
+        let lower = description.lowercased()
+        guard lower != "읽기, 오토메이션이 활성화됨",
+              lower != "read",
+              !lower.contains("automation"),
+              !lower.contains("오토메이션") else {
+            return nil
+        }
+
+        let children = AXHelpers.getChildren(element, runtime: runtime)
+        let hasBypass = children.contains { child in
+            let text = elementSearchText(child, runtime: runtime)
+            return text.contains("bypass") || text.contains("바이패스")
+        }
+        let hasOpenOrMenu = children.contains { child in
+            let text = elementSearchText(child, runtime: runtime)
+            return text.contains("open")
+                || text.contains("열기")
+                || text.contains("list")
+                || text.contains("목록")
+        }
+        return hasBypass && hasOpenOrMenu ? description : nil
+    }
+
+    private static func isEmptyAudioPluginSlot(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        guard (AXHelpers.getRole(element, runtime: runtime) ?? "") == (kAXButtonRole as String) else {
+            return false
+        }
+        let text = elementSearchText(element, runtime: runtime)
+        let isAudioSlot = text.contains("audio plugin")
+            || text.contains("audio effect")
+            || text.contains("오디오 플러그인")
+            || text.contains("오디오 이펙트")
+        let isSendOrIO = text.contains("send")
+            || text.contains("센드")
+            || text.contains("input")
+            || text.contains("output")
+            || text.contains("입력")
+            || text.contains("출력")
+        return isAudioSlot && !isSendOrIO
+    }
+
+    private static func pluginSlotBypassState(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool? {
+        let children = AXHelpers.getChildren(element, runtime: runtime)
+        guard let bypass = children.first(where: { child in
+            let text = elementSearchText(child, runtime: runtime)
+            return text.contains("bypass") || text.contains("바이패스")
+        }) else {
+            return nil
+        }
+        return AXValueExtractors.extractButtonState(bypass, runtime: runtime)
+    }
+
+    private static func elementSearchText(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> String {
+        [
+            AXHelpers.getIdentifier(element, runtime: runtime),
+            AXHelpers.getDescription(element, runtime: runtime),
+            AXHelpers.getTitle(element, runtime: runtime),
+            AXHelpers.getHelp(element, runtime: runtime)
+        ]
+        .compactMap { $0 }
+        .joined(separator: " ")
+        .lowercased()
     }
 
     // MARK: - Menu Bar

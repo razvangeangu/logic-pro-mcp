@@ -26,6 +26,56 @@ import Testing
     #expect(AXValueExtractors.extractSliderRange(slider, runtime: runtime)?.max == 1.0)
 }
 
+@Test func testAXValueExtractorsNormalizeLogicMixerVolumeAndPanRanges() {
+    let builder = FakeAXRuntimeBuilder()
+    let volume = builder.element(101)
+    let panCenter = builder.element(102)
+    let panLeft = builder.element(103)
+    let panRight = builder.element(104)
+
+    // Logic Pro 12.2 live AX dump shape:
+    // volume fader AXValue=70, AXMin=0, AXMax=233
+    // pan knob AXValue=0, AXMin=-64, AXMax=63
+    builder.setAttribute(volume, kAXValueAttribute as String, 70)
+    builder.setAttribute(volume, kAXMinValueAttribute as String, 0)
+    builder.setAttribute(volume, kAXMaxValueAttribute as String, 233)
+    builder.setAttribute(panCenter, kAXValueAttribute as String, 0)
+    builder.setAttribute(panCenter, kAXMinValueAttribute as String, -64)
+    builder.setAttribute(panCenter, kAXMaxValueAttribute as String, 63)
+    builder.setAttribute(panLeft, kAXValueAttribute as String, -64)
+    builder.setAttribute(panLeft, kAXMinValueAttribute as String, -64)
+    builder.setAttribute(panLeft, kAXMaxValueAttribute as String, 63)
+    builder.setAttribute(panRight, kAXValueAttribute as String, 63)
+    builder.setAttribute(panRight, kAXMinValueAttribute as String, -64)
+    builder.setAttribute(panRight, kAXMaxValueAttribute as String, 63)
+
+    let runtime = builder.makeAXRuntime()
+
+    #expect(AXValueExtractors.extractNormalizedSliderValue(volume, runtime: runtime) == 70.0 / 233.0)
+    #expect(abs((AXValueExtractors.extractLogicMixerFaderValue(volume, runtime: runtime) ?? 0.0) - 0.4) < 0.002)
+    #expect(abs(AXValueExtractors.logicMixerFaderPositionToContract(0.4206008583690987) - 0.5) < 0.002)
+    #expect(abs(AXValueExtractors.logicMixerFaderPositionToContract(0.8111587982832618) - 0.8) < 0.002)
+    #expect(AXValueExtractors.extractCenteredSliderValue(panCenter, runtime: runtime) == 0.0)
+    #expect(AXValueExtractors.extractCenteredSliderValue(panLeft, runtime: runtime) == -1.0)
+    #expect(AXValueExtractors.extractCenteredSliderValue(panRight, runtime: runtime) == 1.0)
+}
+
+@Test func testAXValueExtractorsDoNotApplyLogicFaderTaperWithoutLogicRawRange() {
+    let builder = FakeAXRuntimeBuilder()
+    let normalizedVolume = builder.element(201)
+    let rangedVolume = builder.element(202)
+
+    builder.setAttribute(normalizedVolume, kAXValueAttribute as String, 0.8)
+    builder.setAttribute(rangedVolume, kAXValueAttribute as String, 0.8)
+    builder.setAttribute(rangedVolume, kAXMinValueAttribute as String, 0.0)
+    builder.setAttribute(rangedVolume, kAXMaxValueAttribute as String, 1.0)
+
+    let runtime = builder.makeAXRuntime()
+
+    #expect(AXValueExtractors.extractLogicMixerFaderValue(normalizedVolume, runtime: runtime) == 0.8)
+    #expect(AXValueExtractors.extractLogicMixerFaderValue(rangedVolume, runtime: runtime) == 0.8)
+}
+
 @Test func testAXValueExtractorsBuildTrackStateFromHeader() {
     let builder = FakeAXRuntimeBuilder()
     let header = builder.element(1)

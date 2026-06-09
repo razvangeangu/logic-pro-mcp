@@ -57,6 +57,17 @@ struct ChannelStripState: Sendable, Codable {
     var output: String?
     var eqEnabled: Bool = false
     var plugins: [PluginSlotState] = []
+    /// Provenance for `plugins`. `"ax"` means the insert chain was inspected
+    /// and an empty array is an honest empty chain. `nil` means older payload
+    /// or no plugin-read path was available.
+    var pluginsSource: String?
+    var pluginsReadError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case trackIndex, volume, pan, sends, input, output, eqEnabled, plugins
+        case pluginsSource = "plugins_source"
+        case pluginsReadError = "plugins_read_error"
+    }
 }
 
 /// A send on a channel strip.
@@ -158,6 +169,19 @@ struct MCUConnectionState: Sendable {
     var registeredAsDevice: Bool = false
     var lastFeedbackAt: Date? = nil
     var portName: String = ""
+}
+
+extension MCUConnectionState {
+    /// Age of the last inbound MCU feedback in milliseconds, clamped to ≥0 so a
+    /// backwards system-clock adjustment cannot leak a negative age onto the
+    /// wire. `nil` when no feedback has ever arrived. Shared by the MCU write
+    /// envelope diagnostics (`MCUChannel.mcuConnectionExtras`) and the
+    /// `logic://mixer` provenance (B1 / #11) so both surfaces report identical
+    /// `mcu_last_feedback_age_ms` semantics.
+    func lastFeedbackAgeMs(now: Date = Date()) -> Int? {
+        guard let last = lastFeedbackAt else { return nil }
+        return max(0, Int(now.timeIntervalSince(last) * 1000.0))
+    }
 }
 
 /// MCU LCD display state.

@@ -840,19 +840,14 @@ enum LibraryAccessor {
         let sizeResult = AXUIElementCopyAttributeValue(
             element, kAXSizeAttribute as CFString, &sizeValue
         )
+        // H2 (P2-5): fail-closed on non-AXValue OR wrong-subtype AXValue (the
+        // previous code checked CFGetTypeID but ignored AXValueGetValue's Bool,
+        // so a wrong-subtype value silently produced a (0,0) center).
         guard positionResult == .success, sizeResult == .success,
-              let posRaw = positionValue, let sizeRaw = sizeValue else {
+              let cgPos = AXHelpers.point(fromRawAttribute: positionValue),
+              let cgSize = AXHelpers.size(fromRawAttribute: sizeValue) else {
             return nil
         }
-        // E19: guard against non-AXValue returns instead of force-unwrapping
-        guard CFGetTypeID(posRaw) == AXValueGetTypeID(),
-              CFGetTypeID(sizeRaw) == AXValueGetTypeID() else {
-            return nil
-        }
-        var cgPos = CGPoint.zero
-        var cgSize = CGSize.zero
-        AXValueGetValue((posRaw as! AXValue), .cgPoint, &cgPos)
-        AXValueGetValue((sizeRaw as! AXValue), .cgSize, &cgSize)
         return CGPoint(x: cgPos.x + cgSize.width / 2, y: cgPos.y + cgSize.height / 2)
     }
 
