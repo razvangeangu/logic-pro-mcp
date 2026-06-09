@@ -448,15 +448,15 @@ def main():
 
     r = list_resources(client)
     resources = r.get("result", {}).get("resources", []) if r else []
-    # v3.0.0 exposes 9 static resources. logic://mcu/state is filtered from the
-    # list when the MCU control surface is disconnected, so the expected count
-    # is 8 (disconnected) or 9 (connected).
+    # Issue #14 exposes 12 static resources. logic://mcu/state is filtered from
+    # the list when the MCU control surface is disconnected, so the expected
+    # count is 11 (disconnected) or 12 (connected).
     resource_count = len(resources)
-    T("resources/list returns 8 or 9 resources", r, lambda r: resource_count in (8, 9))
+    T("resources/list returns 11 or 12 resources", r, lambda r: resource_count in (11, 12))
 
     r = list_resource_templates(client)
     templates = r.get("result", {}).get("resourceTemplates", []) if r else []
-    T("resources/templates/list returns 3 templates", r, lambda r: len(templates) == 3)
+    T("resources/templates/list returns 5 templates", r, lambda r: len(templates) == 5)
 
     # ═══════════════════════════════════════════════════════════════
     # §2 System Diagnostics (15 tests)
@@ -993,7 +993,7 @@ def main():
         T(f"SECURITY: blocks {desc}", r, lambda _: is_error(r))
 
     # ═══════════════════════════════════════════════════════════════
-    # §11 Resource Read (18 tests)
+    # §11 Resource Read (28 tests)
     # ═══════════════════════════════════════════════════════════════
     section("§11 Resource Read")
 
@@ -1006,6 +1006,11 @@ def main():
         "logic://project/info",
         "logic://midi/ports",
         "logic://library/inventory",
+        "logic://stock-plugins",
+        "logic://stock-plugins/census",
+        "logic://stock-plugins/capabilities",
+        "logic://stock-plugins/logic.stock.effect.gain",
+        "logic://stock-plugins/search?query=gain",
         # mcu/state is read-testable even when filtered from list (direct reads
         # bypass the connection gate so clients bookmarking the URI still work).
         "logic://mcu/state",
@@ -1031,6 +1036,13 @@ def main():
                 ed and "No Logic Pro document is open" in rd
             ),
         )
+
+    r = read_resource(client, "logic://stock-plugins")
+    stock_catalog = safe_json(resource_text(r))
+    T("stock plugin catalog validates", r,
+      lambda _: bool(stock_catalog and stock_catalog.get("validation", {}).get("is_valid") is True))
+    T("stock plugin catalog exposes truth labels", r,
+      lambda _: any("availability_state" in e for e in stock_catalog.get("entries", [])) if stock_catalog else False)
 
     # Transport resource should have tempo
     r = read_resource(client, "logic://transport/state")

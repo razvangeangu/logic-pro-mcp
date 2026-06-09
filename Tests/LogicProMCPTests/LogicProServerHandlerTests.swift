@@ -36,11 +36,16 @@ private let serverResourceText = sharedResourceText
         "logic://project/info",
         "logic://midi/ports",
         "logic://library/inventory",
+        "logic://stock-plugins",
+        "logic://stock-plugins/census",
+        "logic://stock-plugins/capabilities",
     ])
     #expect(templates.templates.map(\.uriTemplate) == [
         "logic://tracks/{index}",
         "logic://tracks/{index}/regions",
         "logic://mixer/{strip}",
+        "logic://stock-plugins/{id}",
+        "logic://stock-plugins/search?query={query}",
     ])
 }
 
@@ -248,6 +253,9 @@ private let serverResourceText = sharedResourceText
         "logic://project/info",
         "logic://midi/ports",
         "logic://library/inventory",
+        "logic://stock-plugins",
+        "logic://stock-plugins/census",
+        "logic://stock-plugins/capabilities",
     ])
     // server.start() runs serve() to completion then tears poller/channels/ports
     // down in reverse order. With serve recorded as a no-op, the tail section

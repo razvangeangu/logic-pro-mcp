@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **8 tools**, **9 resources**, and **3 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **8 tools**, **12 resources**, and **5 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -30,7 +30,7 @@ All tool invocations use:
 
 ## Resource Catalog (Read-only)
 
-**9 static resources + 3 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
+**12 static resources + 5 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
 
 | URI | Content | Source |
 |-----|---------|--------|
@@ -43,13 +43,35 @@ All tool invocations use:
 | `logic://midi/ports` | `{ sources, destinations }` | CoreMIDI live query |
 | `logic://mcu/state` | `{ connection, display }` — MCU handshake + LCD state | Cache |
 | `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`). All candidates must sit under the path allowlist (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` (colon-separated, additive). |
+| `logic://stock-plugins` | `{ schema_version, generated_at, logic_version, catalog_source, validation, entries[] }` — conservative Logic stock plugin catalog with per-entry truth labels | Static catalog + local Logic app census |
+| `logic://stock-plugins/census` | Catalog census metadata, state counts, validation state | Static catalog + local Logic app census |
+| `logic://stock-plugins/capabilities` | Truth labels, safe write capability labels, and read-only catalog contract | Static |
 | `logic://tracks/{index}` | Single `TrackState` JSON | Cache — template |
 | `logic://tracks/{index}/regions` | `RegionState[]` JSON filtered by `trackIndex` | Cache — template |
 | `logic://mixer/{strip}` | `{ cache_age_sec, fetched_at, data_source, strip: ChannelStripState }` | Cache — template |
+| `logic://stock-plugins/{id}` | Single stock plugin catalog entry by stable ID | Static catalog + local Logic app census — template |
+| `logic://stock-plugins/search?query={query}` | Search stock plugin catalog entries | Static catalog + local Logic app census — template |
 
 All resources return `contents: [{ uri, text, mimeType: "application/json" }]`.
 
 Prefer resources over repeated tool calls — they are cheap and safe to poll at 1 Hz.
+
+### Stock Plugin Intelligence
+
+`logic://stock-plugins` is read-only. It does not insert plugins or broaden existing write gates. Entries include `known_presets`; this is intentionally an empty array unless preset names have provenance.
+
+Each entry has an `availability_state`:
+
+| State | Trust contract |
+|-------|----------------|
+| `verified` | Current-machine evidence exists with source, method, timestamp, and evidence. |
+| `observed` | Seen locally/live, but not fully validated. |
+| `manifested` | Logic app metadata is present, but plugin identity was not live-read back. |
+| `inferred` | Static Logic stock knowledge only; clients must not claim local verification. |
+| `unavailable` | Checked/declared absent from this supported catalog path. |
+| `readback_mismatch` | Expected and observed plugin/parameter identity differed. |
+
+Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced.
 
 ---
 
