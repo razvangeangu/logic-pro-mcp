@@ -15,7 +15,7 @@ This verifies v3.4.5 on the current macOS host and live Logic Pro 12.2 environme
 | Release build | PASS | `swift build -c release` -> build complete. |
 | Python live E2E syntax | PASS | `python3 -m py_compile Scripts/live-e2e-test.py` exit 0. |
 | Coverage test run | PASS | `swift test --enable-code-coverage --no-parallel` -> 1192 tests passed, 0 failed. |
-| Coverage threshold | PASS | TOTAL region 70.40%, line 77.78% against CI gates region >=65%, line >=72%. |
+| Coverage threshold | PASS | TOTAL region 70.40%, line 77.78%. Current CI hard gate is region >=70%, line >=77%; line >=90% remains the tracked target. |
 
 ## Flake Closed During Final Verification
 

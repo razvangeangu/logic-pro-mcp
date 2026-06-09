@@ -12,7 +12,7 @@
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14+-000000.svg?style=flat-square&logo=apple" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
-  <img src="https://img.shields.io/badge/tests-1192_passing-brightgreen.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-1197_passing-brightgreen.svg?style=flat-square" />
   <img src="https://img.shields.io/badge/version-3.4.5-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
@@ -157,7 +157,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 ## Status
 
-**Current source/tag status: v3.4.5 is pushed and verified, but stable artifacts are not published yet (2026-06-09 KST).** This source release closes the Logic Pro 12.2 mixer verification work for Issues #10 and #11, ships the snapshot-level plugin readback surface for #12, and adds the guarded `insert_plugin` path for #13. Local verification: `swift test --no-parallel` at `1192/1192`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, coverage `70.40%` region / `77.78%` line, and targeted live Logic Pro 12.2 checks for #10-#13 all passed. GitHub stable artifact publication is blocked until notarization secrets are configured; the latest published GitHub Release remains `v3.4.5-rc12`.
+**Current source/tag status: v3.4.5 is pushed and verified, but stable artifacts are not published yet (2026-06-09 KST).** This source release closes the Logic Pro 12.2 mixer verification work for Issues #10 and #11, ships the snapshot-level plugin readback surface for #12, and adds the guarded `insert_plugin` path for #13. Local verification: `swift test --no-parallel` at `1192/1192`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, coverage `70.40%` region / `77.78%` line, and targeted live Logic Pro 12.2 checks for #10-#13 all passed. GitHub stable artifact publication is blocked until notarization secrets are configured; the latest published GitHub prerelease is `v3.4.5-rc12`.
 
 ### Active contracts (the things callers most care about)
 
@@ -201,10 +201,10 @@ Stable production tags use the GitHub Actions release workflow; the published `R
 
 ### Testing
 
-- **1192 unit + integration tests** on current main — `swift test --no-parallel` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker/MIDI import), routing-audit invariants, AX hardening, `LogicProjectFileReader` plist parsing + path validation, live `project/info` tier-merge, `project.save_as` package-mtime readback, `LogicProServer.stop()` signal-cleanup contract, deterministic transport packet-sink capture, installer metadata parsing, mixer AX readback, plugin-slot snapshots, and guarded insert-plugin flow.
+- **1197 unit + integration tests** on current main — `swift test --no-parallel` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker/MIDI import), routing-audit invariants, AX hardening, `LogicProjectFileReader` plist parsing + path validation, live `project/info` tier-merge, `project.save_as` package-mtime readback, `LogicProServer.stop()` signal-cleanup contract, deterministic transport packet-sink capture, installer metadata parsing, mixer AX readback, plugin-slot snapshots, guarded insert-plugin flow, and release/CI contract guards.
 - **Live E2E** (`Scripts/live-e2e-test.py`) defaults to the release binary. Protocol/security/validation assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a live Logic Pro session is detected. For attestation runs, use `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh`; the shell wrapper launches the MCP server under a trusted tmux parent so macOS TCC evaluates the same stdio parent context instead of Python.
 - **Current live Logic Pro 12.2 validation** — `.build/release/LogicProMCP` launched cleanly, health reported all 7 channels ready, #10 `set_volume` verified via AX readback despite missing MCU echo, #11 `logic://mixer` refreshed from AX poll, #12 `plugins[]` carried `plugins_source:"ax"`, and #13 guarded `insert_plugin` verified the inserted Gain slot and refused an occupied slot.
-- **CI coverage gate** — `region ≥ 65%`, `line ≥ 72%` (current 70.40 / 77.78%, ~5.4pp / ~5.8pp slack). Re-armed in v3.4.0 after the v3.1.5 disable.
+- **CI coverage gate** — hard gate `region ≥ 70%`, `line ≥ 77%`, with an explicit `line ≥ 90%` target reported as advisory until the dedicated coverage-uplift work lands. The coverage job now fails closed on LLVM profile write errors instead of letting `default.profraw` runtime errors pass as warning noise.
 - **CoreMIDI smoke tests skip on macos-15-arm64 GitHub runners** (`MIDIClientCreate` returns `-50` in the sandboxed image; production code path coverage on real macOS hosts is unchanged).
 
 ### Known limitations

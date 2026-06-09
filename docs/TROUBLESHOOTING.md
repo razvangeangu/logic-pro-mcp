@@ -458,7 +458,7 @@ LOG_LEVEL=DEBUG python3 scripts/live-e2e-test.py 2>/tmp/mcp-session.log
 **Instead:**
 1. Use the MCP server for what it reliably handles: transport, track create/rename, tempo, MCU mixer, MIDI I/O.
 2. For audio file imports, open the stems folder in Finder (`open -R /path/to/folder`) and drag files into Logic Pro manually. Logic handles native drag-drop robustly.
-3. See `scripts/analysis-to-logic.py` for the reference pattern: it does tempo + track setup via MCP and opens Finder for the user to drag.
+3. Use the maintained `Scripts/live-e2e-test.py` harness as the reference MCP stdio pattern.
 
 **If Logic Pro crashed:**
 - Crash dumps are in `~/Library/Logs/DiagnosticReports/Logic Pro-*.ips`

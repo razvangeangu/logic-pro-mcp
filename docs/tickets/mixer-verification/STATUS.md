@@ -3,7 +3,7 @@
 **PRD**: docs/prd/PRD-mixer-verification-honesty.md (v0.2 Approved)
 **Tickets**: docs/tickets/mixer-verification/TICKETS.md
 **Size**: XL · **Current Phase**: 9 (v3.4.5 source/tag pushed; stable artifact publication blocked)
-**Baseline**: 1192 tests green. Stack: Swift 6.2/SPM, `swift test --no-parallel`, coverage region>=65/line>=72.
+**Baseline**: 1197 tests green. Stack: Swift 6.2/SPM, `swift test --no-parallel`, coverage hard gate region>=70/line>=77; line>=90 tracked target.
 **Authority**: Isaac approved push/release/docs/issue replies on 2026-06-09. Full destructive 200+ live E2E remains separate.
 
 ## Tickets
@@ -40,6 +40,7 @@ A1 → H1 → H2 → A4 → B1 → B2 → D1 → D2 → C2 → (E1 스파이크)
 | 6 (최종) | 2 | codex 수렴 — P1/P2 fixed 확인 + doc gap(plaintext vs State C) doc로 정정 | 0 | 0 | 0 | PROCEED. 1177 green. |
 | 7 (후속 구현) | 1 | local TDD + live Logic 12.2 targeted E2E | 0 | 0 | 0 | #10/#11/#12/#13 implemented. 1192 green + release build + targeted live E2E pass. |
 | 8 (hard verification) | 1 | local deterministic + coverage + live Logic 12.2 targeted E2E | 0 | 0 | 0 | `VERIFICATION-2026-06-09.md`. Initial full-suite flake in `testProductionMCUTransportReceiveParsesFeedbackEvents` fixed with bounded receive wait; then 1192 green, release build pass, coverage 70.40% region / 77.78% line, targeted #10-#13 live checks pass. |
+| 9 (CI/release guard) | 1 | local TDD + CI coverage rehearsal | 0 | 0 | 0 | LLVM profile write errors fail closed, profile fallback path uses writable temp, CI gate raised to region>=70/line>=77 with line>=90 target, RC tags publish as prerelease, Scripts one-off harnesses removed. 1197 green, coverage 70.79% region / 78.30% line. |
 
 ## 최종 상태 (2026-06-09, 후속 구현 검증)
 - **#10 fixed**: MCU echo timeout 후 AX fader readback으로 State A 반환. Live: `verify_source:"ax_readback"`, `observed_ax:0.33777777777777773` for requested `0.36` (tolerance 0.04), `observed_mcu:null`.
@@ -48,3 +49,5 @@ A1 → H1 → H2 → A4 → B1 → B2 → D1 → D2 → C2 → (E1 스파이크)
 - **#13 fixed for opt-in insert**: `insert_plugin` is exposed only with L2 `confirmed:true`, stock allowlist, occupied-slot refusal, and AX slot readback. Live: Gain insert returned `verified:true`, `verify_source:"ax_plugin_slot"`; re-run on occupied slot failed closed with `slot_occupied`. Arbitrary `set_plugin_param insert:N` remains future work.
 - **Verification**: focused TDD RED/GREEN for fader taper edge; `swift test --no-parallel` → **1192 tests passed**; `swift build -c release` → passed; `swift test --enable-code-coverage --no-parallel` → **1192 tests passed**; coverage TOTAL **70.40% region / 77.78% line**; targeted live E2E against Logic Pro 12.2 release binary → all issue checks passed. Full evidence: `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`.
 - **Release boundary**: `main` and tag `v3.4.5` are pushed. The stable release workflow run `27178878939` is blocked before artifact publication because `MACOS_CERT_BASE64` is empty and stable ADHOC releases are intentionally forbidden. Published SHA256/Formula lockstep is verified only after the workflow is rerun with notarization secrets and publishes artifacts.
+- **Issue comments posted**: #10 https://github.com/MongLong0214/logic-pro-mcp/issues/10#issuecomment-4655332572 · #11 https://github.com/MongLong0214/logic-pro-mcp/issues/11#issuecomment-4655332671 · #12 https://github.com/MongLong0214/logic-pro-mcp/issues/12#issuecomment-4655332753 · #13 https://github.com/MongLong0214/logic-pro-mcp/issues/13#issuecomment-4655332836.
+- **Post-release CI/release guard**: coverage now fails closed on LLVM profile write errors, routes fallback profile output to writable temp paths, hard-gates region>=70/line>=77 while reporting line>=90 target, and marks hyphenated release tags as GitHub prereleases.

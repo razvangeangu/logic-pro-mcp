@@ -12,6 +12,7 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -21,6 +22,25 @@ STRICT_LIVE = os.environ.get("LOGIC_PRO_MCP_STRICT_LIVE", "0") == "1"
 TRANSPORT = os.environ.get("LOGIC_PRO_MCP_E2E_TRANSPORT", "tmux" if STRICT_LIVE else "popen")
 TIMEOUT = 10
 
+
+def coverage_environment():
+    env = os.environ.copy()
+    if "LLVM_PROFILE_FILE" not in env:
+        profile_dir = env.get(
+            "LOGIC_PRO_MCP_PROFILE_DIR",
+            os.path.join(tempfile.gettempdir(), "logic-pro-mcp-profraw"),
+        )
+        os.makedirs(profile_dir, exist_ok=True)
+        env["LOGIC_PRO_MCP_PROFILE_DIR"] = profile_dir
+        env["LLVM_PROFILE_FILE"] = os.path.join(profile_dir, "%p.profraw")
+    return env
+
+
+def coverage_shell_prefix():
+    profile_file = coverage_environment()["LLVM_PROFILE_FILE"]
+    return f"export LLVM_PROFILE_FILE={shlex.quote(profile_file)}; "
+
+
 class MCPClient:
     def __init__(self):
         self.proc = subprocess.Popen(
@@ -29,6 +49,7 @@ class MCPClient:
             stdout=subprocess.PIPE,
             stderr=open("/tmp/mcp-live-test-stderr.txt", "w"),
             bufsize=0,
+            env=coverage_environment(),
         )
         self.responses = {}
         self.reader_thread = threading.Thread(target=self._read_loop, daemon=True)
@@ -93,6 +114,7 @@ class TmuxMCPClient:
 
         command = (
             "stty -icanon -echo min 1 time 0; "
+            f"{coverage_shell_prefix()}"
             f"exec {shlex.quote(BINARY)} 2>{shlex.quote(self.stderr_path)}"
         )
         subprocess.run(["tmux", "new-session", "-d", "-x", "1000", "-y", "80",

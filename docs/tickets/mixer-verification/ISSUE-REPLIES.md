@@ -7,6 +7,13 @@ Commit: https://github.com/MongLong0214/logic-pro-mcp/commit/06966f2ae341c80a722
 Release workflow blocker: https://github.com/MongLong0214/logic-pro-mcp/actions/runs/27178878939
 Verification: `docs/live-verify-v3.4.5.md` and `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`
 
+Posted current-status comments:
+
+- #10: https://github.com/MongLong0214/logic-pro-mcp/issues/10#issuecomment-4655332572
+- #11: https://github.com/MongLong0214/logic-pro-mcp/issues/11#issuecomment-4655332671
+- #12: https://github.com/MongLong0214/logic-pro-mcp/issues/12#issuecomment-4655332753
+- #13: https://github.com/MongLong0214/logic-pro-mcp/issues/13#issuecomment-4655332836
+
 ---
 
 ## Current Status #10

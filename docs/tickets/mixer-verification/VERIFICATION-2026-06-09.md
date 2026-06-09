@@ -17,7 +17,7 @@ This is a hard verification pass for the current #10-#13 work in the current mac
 | Release build | PASS | `swift build -c release` -> build complete after 1.29s. |
 | Python E2E syntax | PASS | `python3 -m py_compile Scripts/live-e2e-test.py` exit 0. |
 | Coverage test run | PASS | `swift test --enable-code-coverage --no-parallel` -> `1192 tests passed`, 0 fail, after 32.326s. |
-| Coverage threshold | PASS | `TOTAL 5587 1654 70.40% 1642 446 72.84% 15537 3452 77.78%` against CI gate region >=65%, line >=72%. |
+| Coverage threshold | PASS | `TOTAL 5587 1654 70.40% 1642 446 72.84% 15537 3452 77.78%`. Current CI hard gate is region >=70%, line >=77%; line >=90% remains the tracked target. |
 
 ## Flake Closed During This Pass
 

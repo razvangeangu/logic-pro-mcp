@@ -64,6 +64,12 @@ Do not push stable tags manually. `Scripts/release-stable.sh` verifies the requi
 
 `.github/workflows/release.yml` builds a true universal binary, signs/notarizes it, publishes both `LogicProMCP-macOS-universal.tar.gz` and the backward-compatible `LogicProMCP-macOS-arm64.tar.gz` alias, and records the actual architecture list in `RELEASE-METADATA.json`. The downstream install validation job runs on both Apple Silicon and Intel runners so the release asset path is exercised on each architecture. If a stable tag is pushed without the required secrets, the workflow fails closed before artifact publication; rerun it only after the secrets are configured.
 
+Hyphenated tags (`vX.Y.Z-rcN`, beta tags, etc.) must publish as GitHub prereleases. Stable tags are the only releases that should be eligible for latest/stable artifact messaging.
+
+### Coverage gate
+
+CI hard-gates source coverage at region >=70% and line >=77%. The project target is line >=90%, but that is reported as a target until dedicated coverage-uplift work raises the measured baseline. The coverage job is fail-closed: `swift test --enable-code-coverage --no-parallel` must exit successfully and the job fails if LLVM emits a profile runtime error such as `default.profraw` write failure.
+
 ### Post-tag steps (both release modes)
 
 After the GitHub release is published, the Homebrew formula still points at the **old** tarball SHA256. Update it:

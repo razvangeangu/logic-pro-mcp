@@ -80,6 +80,63 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(workflow.contains("LOGIC_PRO_MCP_INSTALL_DIR"))
 }
 
+@Test func testReleaseWorkflowMarksHyphenTagsAsPrereleases() throws {
+    let workflow = try scriptContents(".github/workflows/release.yml")
+
+    #expect(workflow.contains("prerelease: ${{ contains(github.ref_name, '-') }}"))
+}
+
+@Test func testCoverageWorkflowFailsClosedAndUsesWritableProfilePath() throws {
+    let workflow = try scriptContents(".github/workflows/ci.yml")
+
+    #expect(workflow.contains("set -euo pipefail"))
+    #expect(workflow.contains("PROFRAW_DIR=\"$RUNNER_TEMP/logicpromcp-profraw\""))
+    #expect(workflow.contains("export LLVM_PROFILE_FILE=\"$PROFRAW_DIR/%p.profraw\""))
+    #expect(workflow.contains("COVERAGE_LOG=\"$RUNNER_TEMP/logicpromcp-coverage.log\""))
+    #expect(workflow.contains("grep -q \"LLVM Profile Error\" \"$COVERAGE_LOG\""))
+    #expect(workflow.contains("MIN_REGION=70"))
+    #expect(workflow.contains("MIN_LINE=77"))
+    #expect(workflow.contains("COVERAGE_TARGET=90"))
+    #expect(!workflow.contains("set +e"))
+    #expect(!workflow.contains("lets transient instrumentation flakes"))
+}
+
+@Test func testLiveE2EHarnessRoutesCoverageProfilesToWritableTempDir() throws {
+    let python = try scriptContents("Scripts/live-e2e-test.py")
+    let shell = try scriptContents("Scripts/live-e2e-test.sh")
+
+    #expect(python.contains("def coverage_environment():"))
+    #expect(python.contains("LOGIC_PRO_MCP_PROFILE_DIR"))
+    #expect(python.contains("LLVM_PROFILE_FILE"))
+    #expect(python.contains("%p.profraw"))
+    #expect(python.contains("env=coverage_environment()"))
+    #expect(python.contains("export LLVM_PROFILE_FILE="))
+
+    #expect(shell.contains("LOGIC_PRO_MCP_PROFILE_DIR"))
+    #expect(shell.contains("LLVM_PROFILE_FILE"))
+    #expect(shell.contains("%p.profraw"))
+    #expect(shell.contains("export LLVM_PROFILE_FILE"))
+}
+
+@Test func testScriptsFolderNoLongerShipsOneOffSpikeHarnesses() {
+    let root = repositoryRootURL()
+    let legacyPaths = [
+        "Scripts/analysis-to-logic.py",
+        "Scripts/issue7_live_verify.sh",
+        "Scripts/probes/library-ax-probe.swift",
+        "Scripts/probes/plugin-detective.swift",
+        "Scripts/probes/plugin-menu-ax-probe.swift",
+        "Scripts/probes/setting-popup-probe.swift",
+    ]
+
+    for relativePath in legacyPaths {
+        #expect(
+            !FileManager.default.fileExists(atPath: root.appendingPathComponent(relativePath).path),
+            "\(relativePath) was a one-off local/spike harness and must not ship in Scripts/"
+        )
+    }
+}
+
 @Test func testLocalReleaseScriptIsPrereleaseOnlyAndFailClosedOnRemoteCheck() throws {
     let script = try scriptContents("Scripts/release.sh")
 

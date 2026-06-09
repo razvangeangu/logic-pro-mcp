@@ -30,8 +30,13 @@ OUTPUT_FILE="$TMPDIR/output.txt"
 STDERR_FILE="${LOGIC_PRO_MCP_E2E_STDERR:-/tmp/mcp-live-test-stderr.txt}"
 mkfifo "$REQUEST_FIFO"
 : > "$CAPTURE_FILE"
+PROFILE_DIR="${LOGIC_PRO_MCP_PROFILE_DIR:-$TMPDIR/profraw}"
+mkdir -p "$PROFILE_DIR"
+export LOGIC_PRO_MCP_PROFILE_DIR="$PROFILE_DIR"
+export LLVM_PROFILE_FILE="${LLVM_PROFILE_FILE:-$PROFILE_DIR/%p.profraw}"
 BINARY_COMMAND="$(printf '%q' "$LOGIC_PRO_MCP_BINARY")"
 STDERR_COMMAND="$(printf '%q' "$STDERR_FILE")"
+PROFILE_COMMAND="$(printf '%q' "$LLVM_PROFILE_FILE")"
 
 cleanup() {
     set +e
@@ -48,7 +53,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 tmux new-session -d -x 1000 -y 80 -s "$SESSION" -c "$ROOT_DIR" \
-    "stty -icanon -echo min 1 time 0; exec ${BINARY_COMMAND} 2>${STDERR_COMMAND}"
+    "stty -icanon -echo min 1 time 0; export LLVM_PROFILE_FILE=${PROFILE_COMMAND}; exec ${BINARY_COMMAND} 2>${STDERR_COMMAND}"
 tmux set-option -t "$SESSION" history-limit 200000 >/dev/null 2>&1 || true
 
 (

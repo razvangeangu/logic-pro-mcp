@@ -1,6 +1,6 @@
 # 리뷰 가이드 — Issues #10–13 / v3.4.5 작업
 
-> 이 파일이 리뷰 진입점. 작업은 v3.4.5 소스/tag 기준으로 push 완료, 테스트 1192 green. stable artifact publication은 notarization secrets 부재로 blocked. GitHub 이슈 #10~#13의 기존 AX deferral 답글은 2026-06-09 후속 구현으로 superseded되며, release 완료 표현은 artifact publication 후에만 사용한다.
+> 이 파일이 리뷰 진입점. 작업은 v3.4.5 소스/tag 기준으로 push 완료, current main 테스트 1197 green. stable artifact publication은 notarization secrets 부재로 blocked. GitHub 이슈 #10~#13의 기존 AX deferral 답글은 2026-06-09 후속 구현으로 superseded되며, release 완료 표현은 artifact publication 후에만 사용한다.
 
 ---
 
@@ -13,7 +13,7 @@ cd /Users/isaac/projects/logic-pro-mcp
 sed -n '1,80p' docs/tickets/mixer-verification/STATUS.md
 
 # (2) 테스트 green 직접 확인 (~70s)
-swift test --no-parallel 2>&1 | tail -3        # → "Test run with 1192 tests passed"
+swift test --no-parallel 2>&1 | tail -3        # → "Test run with 1197 tests passed"
 
 # (3) 변경 규모 한눈에
 git diff --stat
@@ -95,9 +95,9 @@ insert_plugin confirmed into occupied slot → channels_exhausted / slot_occupie
 ---
 
 ## 4) 무엇을 "통과"로 볼지 (수용 기준)
-- [ ] `swift test --no-parallel` → 1192 passed (0 fail)
+- [ ] `swift test --no-parallel` → 1197 passed (0 fail)
 - [ ] `swift build -c release` → passed
-- [ ] `swift test --enable-code-coverage --no-parallel` → 1192 passed; coverage gate ≥65% region / ≥72% line
+- [ ] `swift test --enable-code-coverage --no-parallel` → 1197 passed; coverage hard gate ≥70% region / ≥77% line, with ≥90% line as the tracked target
 - [ ] targeted live E2E → #10/#11/#12/#13 issue checks passed
 - [ ] git diff가 위 표의 의도와 일치, 범위 외 변경 없음
 - [ ] HonestContract 불변식 유지 (State A: reason/error 없음 / B: reason / C: error)
