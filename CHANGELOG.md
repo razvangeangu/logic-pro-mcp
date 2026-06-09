@@ -10,6 +10,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 No unreleased changes yet.
 
+## [3.4.6] — 2026-06-09
+
+**Release evidence synchronization.** Publishes the current mainline after the v3.4.5 post-release verification pass so the stable tag, server version, installer default, manifest URL, Formula version, and startup banner tests all point at the same build. No new Logic Pro runtime contract is introduced beyond the v3.4.5 Issues #10-#13 fixes; this release carries the final cycle-cache live E2E harness timing fix and documentation consistency cleanup.
+
+### Changed
+
+- **Version/release surfaces finalized to `3.4.6`** — `ServerConfig`, manifest, installer default, Formula version, startup-banner tests, README, setup docs, release evidence docs, and maintainer docs are synchronized for the stable release.
+- **Full live attestation is no longer listed as separate remaining scope** — the strict live E2E pass completed after the harness bounded-wait fix: 285 passed, 0 skipped, 0 failed. Multi-version Logic matrix coverage remains future verification work.
+- **v3.4.5 remains the functional mixer-fix release** — v3.4.6 is the evidence/packaging alignment release for the same #10-#13 behavior.
+
+### Known remaining scope
+
+- **Full per-parameter plugin value readback** remains future work. Current builds ship plugin-slot/name/bypass snapshots and Honest-Contract-shaped Scripter writes, but Scripter is still send-only and does not provide a guaranteed AX slider map for every plugin parameter.
+- **`set_plugin_param insert:N` routing** remains future work. Current builds ship `insert_plugin` guardrails and slot readback; targeting arbitrary plugin insert slots for parameter writes requires a separate plugin-window AX path.
+- **Multi-version Logic matrix** remains future verification work. Current live evidence is Logic Pro 12.2 on this host plus GitHub Actions macOS 14/15 installer validation.
+
+### Tests
+
+- `python3 -m py_compile Scripts/live-e2e-test.py` -> PASS.
+- `ruby -c Formula/logic-pro-mcp.rb` -> PASS.
+- `swift test --filter VersionConsistencyTests --no-parallel` -> 1 / 1 PASS.
+- `swift test --enable-code-coverage --no-parallel` -> 1197 / 1197 PASS locally; TOTAL coverage 70.81% region / 78.32% line.
+
 ## [3.4.5] — 2026-06-09
 
 **Mixer write/read verification honesty — Issues #10–13 (thomas-doesburg).** Publishes the v3.4.5 stable release with the Logic Pro 12.2 mixer AX matcher restored and live-verified. Host-originated fader writes can still receive no MCU echo on Logic 12.2, but `set_volume` now falls back to independent AX fader readback and can return State A when the observed fader matches tolerance. `logic://mixer` carries provenance, AX-sourced `plugins[]` snapshots identify occupied insert slots, and `insert_plugin` is exposed only as a guarded, Level-2-confirmed, stock-plugin allowlisted path. Stable artifacts ship through the ADHOC path when Developer ID credentials are absent, with SHA256 metadata, release metadata, and macOS 14/15 install validation.

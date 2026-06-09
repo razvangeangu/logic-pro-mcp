@@ -401,12 +401,12 @@ private func waitForFeedbackEvents(
         "logic://tracks/{index}/regions",
         "logic://mixer/{strip}",
     ])
-    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5 — 8 tools, 9 resources, 4 channels")
+    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.6 — 8 tools, 9 resources, 4 channels")
 }
 
 @Test func testServerCatalogStartupBannerUsesProvidedChannelCount() {
     let banner = ServerCatalog.startupBanner(channelCount: 7)
-    #expect(banner == "Starting logic-pro-mcp v3.4.5 — 8 tools, 9 resources, 7 channels")
+    #expect(banner == "Starting logic-pro-mcp v3.4.6 — 8 tools, 9 resources, 7 channels")
 }
 
 @Test func testLogicProServerCompositionSnapshotMatchesExpectedOrder() async {
@@ -425,5 +425,5 @@ private func waitForFeedbackEvents(
     ])
     #expect(snapshot.toolNames.count == 8)
     #expect(snapshot.resourceURIs.contains("logic://system/health"))
-    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.5 — 8 tools, 9 resources, 7 channels")
+    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.6 — 8 tools, 9 resources, 7 channels")
 }
