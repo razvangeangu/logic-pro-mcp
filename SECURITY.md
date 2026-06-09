@@ -122,7 +122,7 @@ The one `nonisolated(unsafe)` variable (`pidProcessListCache` in `ProcessUtils`)
 
 ## Deployment security
 
-Release binaries currently ship in **ADHOC mode** (see §Release types below). When Apple Developer Program membership is available, releases will be:
+Release binaries ship in **ADHOC mode** unless Apple Developer Program credentials are explicitly configured for the workflow (see §Release types below). When Developer ID credentials are available, releases are:
 
 1. Built on `macos-15` runners via GitHub Actions
 2. Codesigned with a Developer ID Application certificate
@@ -131,7 +131,7 @@ Release binaries currently ship in **ADHOC mode** (see §Release types below). W
 5. Verified with `spctl` post-signing
 6. Checksummed (SHA256) and published with `RELEASE-METADATA.json`
 
-Until then, ADHOC releases provide SHA256 + codesign verification while skipping Gatekeeper assessment.
+Without those credentials, ADHOC releases provide SHA256 + codesign verification while skipping Gatekeeper assessment.
 
 See `.github/workflows/release.yml` and `docs/MAINTAINERS.md`.
 
@@ -179,11 +179,11 @@ shasum -a 256 /usr/local/bin/LogicProMCP
 
 ### Release types
 
-Two release modes exist depending on whether Apple Developer Program membership is available for the build:
+Two release modes exist depending on whether Apple Developer Program credentials are configured for the build:
 
 | Mode | TeamID | codesign | spctl / Gatekeeper | SHA256 | Quarantine xattr |
 |------|--------|----------|-------------------|--------|------------------|
-| **Notarized** (future) | Developer ID | strict check | assess required | pinned | not applied (stapled) |
+| **Notarized** (optional) | Developer ID | strict check | assess required | pinned | not applied (stapled) |
 | **ADHOC** (current) | `ADHOC` literal | strict check | skipped | pinned | stripped by installer |
 
 ADHOC releases are signed with an ephemeral adhoc identity (`codesign --sign -`). They cannot pass Gatekeeper assessment because they are not notarized by Apple. The installer recognises `LOGIC_PRO_MCP_TEAM_ID=ADHOC` (or `team_id` in `RELEASE-METADATA.json`) and:

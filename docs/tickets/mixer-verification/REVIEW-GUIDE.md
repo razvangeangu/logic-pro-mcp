@@ -1,6 +1,6 @@
 # 리뷰 가이드 — Issues #10–13 / v3.4.5 작업
 
-> 이 파일이 리뷰 진입점. 작업은 v3.4.5 소스/tag 기준으로 push 완료, current main 테스트 1197 green. stable artifact publication은 notarization secrets 부재로 blocked. GitHub 이슈 #10~#13의 기존 AX deferral 답글은 2026-06-09 후속 구현으로 superseded되며, release 완료 표현은 artifact publication 후에만 사용한다.
+> 이 파일이 리뷰 진입점. 작업은 v3.4.5 소스/tag 기준으로 push 완료, current main 테스트 1197 green. current main은 Developer ID 없이 ADHOC stable publication 경로를 다시 허용한다. GitHub 이슈 #10~#13의 기존 AX deferral 답글은 2026-06-09 후속 구현으로 superseded되며, release 완료 표현은 artifact publication 후에만 사용한다.
 
 ---
 
@@ -106,7 +106,7 @@ insert_plugin confirmed into occupied slot → channels_exhausted / slot_occupie
 ---
 
 ## 5) 보류분 + 다음 단계
-1. **Stable artifact publication** — GitHub repo secrets에 notarization credentials를 구성한 뒤 `v3.4.5` release workflow를 rerun한다.
+1. **Stable artifact publication** — Developer ID 없이 ADHOC stable workflow path로 artifact를 publish한다.
 2. **Published SHA256 sync** — GitHub Actions release artifact가 나온 뒤 Formula sha256과 `docs/releases/v3.4.5.md`를 업데이트한다.
 3. **Full destructive 200+ live E2E** — 별도 작업. 이번 targeted release gate에는 포함하지 않는다.
 4. **#12/#13 future work** — full per-parameter plugin value readback, arbitrary `set_plugin_param insert:N`.

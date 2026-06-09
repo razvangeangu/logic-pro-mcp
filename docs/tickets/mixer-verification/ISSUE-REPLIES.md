@@ -1,6 +1,6 @@
 # Issue replies — #10–13 current status (v3.4.5)
 
-> Current state: the `v3.4.5` source/tag is pushed and locally verified, but stable GitHub Release artifacts are not published yet. The release workflow is blocked because stable tags require notarization secrets. Do not post the "release shipped" wording below until artifact publication succeeds; use the current status comments instead.
+> Current state: the `v3.4.5` source/tag is pushed and locally verified, but stable GitHub Release artifacts are not published yet. Current main restores ADHOC stable publication when Developer ID credentials are absent. Do not post the "release shipped" wording below until artifact publication succeeds; use the current status comments instead.
 
 Source tag: https://github.com/MongLong0214/logic-pro-mcp/tree/v3.4.5
 Commit: https://github.com/MongLong0214/logic-pro-mcp/commit/06966f2ae341c80a72271ea0428f2b46572a0e85
@@ -20,7 +20,7 @@ Posted current-status comments:
 
 Hi @thomas-doesburg,
 
-Current source/tag update: your diagnosis was right, and the fix is merged on `main` and tagged as `v3.4.5`. Stable GitHub Release artifacts are not published yet because the release workflow correctly blocks stable tags without notarization secrets.
+Current source/tag update: your diagnosis was right, and the fix is merged on `main` and tagged as `v3.4.5`. Stable GitHub Release artifacts are not published yet; current main restores the ADHOC stable release path when Developer ID credentials are absent.
 
 Logic 12.2 can still omit the MCU echo for host-originated fader writes. The new behavior does not pretend that echo exists: `set_volume` falls back to an independent AX fader readback when the MCU echo times out. If the AX-observed value matches the requested target within tolerance, the write resolves to State A with `verify_source:"ax_readback"` and `observed_ax`.
 
@@ -46,13 +46,13 @@ Verification gates:
 - Coverage TOTAL -> 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 #10/#11/#12/#13 checks -> passed.
 
-Release status: source tag `v3.4.5` is pushed, but artifact publication is blocked pending notarization secrets (`MACOS_CERT_BASE64` and related Apple notarization secrets).
+Release status: source tag `v3.4.5` is pushed, but artifact publication is still pending. Current main uses the ADHOC stable release path when Developer ID credentials are absent.
 
 ## Current Status #11
 
 Hi @thomas-doesburg,
 
-Current source/tag update: `logic://mixer` is no longer forced to stay on stale MCU connect-time state on Logic 12.2. This is merged on `main` and tagged as `v3.4.5`; stable binary artifacts are still blocked pending notarization secrets.
+Current source/tag update: `logic://mixer` is no longer forced to stay on stale MCU connect-time state on Logic 12.2. This is merged on `main` and tagged as `v3.4.5`; stable binary artifact publication is still pending.
 
 The AX matcher is fixed, and `logic://mixer` exposes provenance so a client can distinguish fresh AX-observed data from last-known-good cache:
 
@@ -83,7 +83,7 @@ Verification gates: `swift test --no-parallel` 1192 passed, coverage 70.40% regi
 
 Hi @thomas-doesburg,
 
-Current source/tag update: the empty `plugins[]` ambiguity is fixed at the snapshot level, and `set_plugin_param` is now honest about its write/readback limits. This is merged on `main` and tagged as `v3.4.5`; stable binary artifacts are still blocked pending notarization secrets.
+Current source/tag update: the empty `plugins[]` ambiguity is fixed at the snapshot level, and `set_plugin_param` is now honest about its write/readback limits. This is merged on `main` and tagged as `v3.4.5`; stable binary artifact publication is still pending.
 
 What changed:
 
@@ -109,7 +109,7 @@ Verification gates: `swift test --no-parallel` 1192 passed, coverage 70.40% regi
 
 Hi @thomas-doesburg,
 
-Current source/tag update: the opt-in `insert_plugin` path is merged on `main` and tagged as `v3.4.5` with the guardrails discussed. Stable binary artifacts are still blocked pending notarization secrets.
+Current source/tag update: the opt-in `insert_plugin` path is merged on `main` and tagged as `v3.4.5` with the guardrails discussed. Stable binary artifact publication is still pending.
 
 What changed:
 

@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Changed
 
 - **CI coverage gate tightened** — coverage now runs fail-closed with `set -euo pipefail`, writes fallback profile output under a writable temp path, requires `swift test --enable-code-coverage`, profdata lookup, `llvm-cov report`, and threshold parsing to succeed, and raises the hard gate to region >=70% / line >=77%. Recoverable GitHub macOS runner `LLVM Profile Error` warnings are surfaced in annotations/summary but the gate is the generated profdata/report plus thresholds. Line >=90% is tracked as the explicit target but remains advisory until coverage-uplift work raises the actual baseline.
+- **Stable ADHOC release path restored** — Apple Developer ID is optional for this project. Stable tags now fall back to the historical ADHOC signing path when Developer ID credentials are absent, while keeping SHA256, codesign verification, release metadata, and install validation gates.
 - **Release workflow prerelease honesty** — hyphenated release tags are now published as GitHub prereleases, so RC tags do not masquerade as stable/latest releases.
 - **Live E2E coverage profile hygiene** — Python/tmux live E2E launches now set `LLVM_PROFILE_FILE` to a writable temp profile path when the binary is coverage-instrumented.
 - **Scripts cleanup** — removed one-off local/spike harnesses from `Scripts/` and kept only maintained installer, release, live E2E, plist/template, and shipped support assets.
@@ -23,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [3.4.5] — 2026-06-09
 
-**Mixer write/read verification honesty — Issues #10–13 (thomas-doesburg).** Finalizes the v3.4.5 source/tag changes with the Logic Pro 12.2 mixer AX matcher restored and live-verified. Host-originated fader writes can still receive no MCU echo on Logic 12.2, but `set_volume` now falls back to independent AX fader readback and can return State A when the observed fader matches tolerance. `logic://mixer` carries provenance, AX-sourced `plugins[]` snapshots identify occupied insert slots, and `insert_plugin` is exposed only as a guarded, Level-2-confirmed, stock-plugin allowlisted path. Stable artifact publication is blocked until notarization secrets are configured for the release workflow.
+**Mixer write/read verification honesty — Issues #10–13 (thomas-doesburg).** Finalizes the v3.4.5 source/tag changes with the Logic Pro 12.2 mixer AX matcher restored and live-verified. Host-originated fader writes can still receive no MCU echo on Logic 12.2, but `set_volume` now falls back to independent AX fader readback and can return State A when the observed fader matches tolerance. `logic://mixer` carries provenance, AX-sourced `plugins[]` snapshots identify occupied insert slots, and `insert_plugin` is exposed only as a guarded, Level-2-confirmed, stock-plugin allowlisted path. The first stable artifact attempt was blocked by the previous notarization-only policy; current main restores ADHOC stable publication when Developer ID credentials are absent.
 
 ### Added
 
@@ -61,7 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - `python3 -m py_compile Scripts/live-e2e-test.py` -> PASS.
 - `swift test --enable-code-coverage --no-parallel` -> 1192 / 1192 PASS locally; TOTAL coverage 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 issue gate -> #10/#11/#12/#13 checks PASS: AX readback for `set_volume`, `logic://mixer` `data_source:"ax_poll"`, AX plugin snapshots, Level-2 `insert_plugin` confirmation, verified Gain insert, and occupied-slot fail-closed.
-- GitHub Release workflow for `v3.4.5` -> BLOCKED before artifact publication because stable tags require notarization secrets; `MACOS_CERT_BASE64` was empty and stable ADHOC releases are intentionally not permitted.
+- GitHub Release workflow for `v3.4.5` -> original run BLOCKED before artifact publication under the previous notarization-only policy. Current main restores the ADHOC stable release path when Developer ID credentials are absent.
 
 ### Release packaging (rc8–rc12, 2026-06-05/08 — CI/installer-only, no server-functional change)
 

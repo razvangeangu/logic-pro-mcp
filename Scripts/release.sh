@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Scripts/release.sh — local one-command ADHOC prerelease.
+# Scripts/release.sh — local one-command ADHOC release.
 #
 # Produces a v-tagged GitHub release with an ADHOC-signed binary, aliased
 # `universal` / `arm64` tarballs (bytes identical for tap backward-compat),
@@ -8,10 +8,10 @@
 # *before* pushing the tag so `brew install` against `git checkout <tag>`
 # resolves correctly.
 #
-# RB-4 (2026-05-08 enterprise review): this script is for LOCAL / RC
-# releases ONLY. It refuses stable tags (`vX.Y.Z` with no `-prerelease`
-# suffix) unconditionally. Production stable releases must use the GitHub
-# Actions workflow with Apple Developer ID + notarization secrets.
+# Apple Developer ID is optional for this project. This script publishes the
+# historical ADHOC path for both stable tags and prerelease tags; the installer
+# still enforces SHA256 + codesign verification and records `team_id: ADHOC`
+# in RELEASE-METADATA.json.
 #
 # Architecture honesty: pre-fix this script copied the arm64-only build
 # to `LogicProMCP-macOS-universal.tar.gz`. v3.4.0+ records the actual
@@ -20,6 +20,7 @@
 # filename.
 #
 # Usage:
+#   Scripts/release.sh v3.0.1                            # adhoc stable
 #   Scripts/release.sh v3.0.1-rc1                        # adhoc RC
 #   DRY_RUN=1 Scripts/release.sh v3.0.1-rc1              # print steps only
 #
@@ -40,22 +41,6 @@ if [ -z "$VERSION" ]; then
 fi
 if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
     echo "Error: VERSION '$VERSION' must be strict SemVer, e.g. v3.0.1 or v3.1.0-rc1"
-    exit 1
-fi
-
-# RB-4 (2026-05-08 enterprise review): refuse stable tags. Stable = no
-# `-prerelease` suffix. There is intentionally no override because a stable
-# ADHOC artifact is indistinguishable from a production release to downstream
-# installers once published.
-if [[ "$VERSION" != *-* ]]; then
-    echo "Error: stable tag '$VERSION' refused for ADHOC release."
-    echo ""
-    echo "  Production stable releases must use the GitHub Actions"
-    echo "  workflow (.github/workflows/release.yml) with Apple Developer"
-    echo "  ID + notarization secrets configured."
-    echo ""
-    echo "  Use a prerelease tag for local ADHOC cuts:"
-    echo "    Scripts/release.sh ${VERSION}-rc1"
     exit 1
 fi
 

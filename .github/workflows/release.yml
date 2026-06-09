@@ -42,18 +42,10 @@ jobs:
         id: mode
         env:
           MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
-          # RB-4 (2026-05-08 enterprise review) closed in v3.4.0: production
-          # tags now require notarization. Pre-fix this step silently
-          # selected ADHOC mode whenever `MACOS_CERT_BASE64` was missing,
-          # so a stable tag like `v3.4.0` could publish a non-notarized
-          # binary without anyone noticing.
-          #
-          # Enterprise release rule:
-          #   - Stable tags (no `-prerelease` suffix) require notarization.
-          #     Missing secrets → workflow fails before publishing.
-          #   - Prerelease tags (`v3.4.0-rc1`, `v3.4.0-beta`, etc.) may
-          #     fall back to ADHOC for cheap release candidate cuts.
-          #   - There is intentionally no stable ADHOC override.
+          # Release rule (2026-06-09 owner decision): Apple Developer ID is
+          # not required for this project. If Developer ID credentials are
+          # present, publish a notarized release. Otherwise publish the same
+          # SHA256-pinned ADHOC release path used by historical stable tags.
         run: |
           tag="${GITHUB_REF_NAME}"
           if [[ "$tag" =~ - ]]; then
@@ -66,15 +58,12 @@ jobs:
           if [ -n "$MACOS_CERT_BASE64" ]; then
             echo "mode=notarized" >> "$GITHUB_OUTPUT"
             echo "Release mode: NOTARIZED (Developer ID + notarization)"
-          elif [ "$tag_kind" = "stable" ]; then
-            echo "::error::Stable tag '$tag' requires notarization secrets."
-            echo "::error::Configure MACOS_CERT_BASE64 and the related notarization secrets."
-            echo "::error::Do not push stable tags manually; use Scripts/release-stable.sh $tag after the required secrets exist."
-            echo "::error::Stable ADHOC releases are not permitted."
-            exit 1
           else
             echo "mode=adhoc" >> "$GITHUB_OUTPUT"
             echo "Release mode: ADHOC (codesign --sign -; no notarization)"
+            if [ "$tag_kind" = "stable" ]; then
+              echo "::warning::Publishing ADHOC stable release ($tag)."
+            fi
           fi
 
       - name: Validate notarization secrets

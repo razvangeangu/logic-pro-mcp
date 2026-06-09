@@ -34,17 +34,20 @@ Revoke whenever the preset is removed, the Scripter instance is removed, or the 
 
 ## Release Process
 
-### ADHOC prerelease (no Apple Developer Program)
+### ADHOC release (no Apple Developer Program)
 
 ```bash
+Scripts/release-stable.sh v3.4.6
 Scripts/release.sh v3.4.6-rc1
 ```
 
-`Scripts/release.sh` is prerelease-only. It refuses stable tags (`vX.Y.Z`) because a stable ADHOC artifact is indistinguishable from a production release to downstream installers. The installer recognises `team_id: ADHOC` and skips Gatekeeper assessment while keeping SHA256 + codesign verification.
+Apple Developer ID is optional for this project. `Scripts/release-stable.sh` publishes a stable tag after clean-main, duplicate tag/release, test, and build preflight. `.github/workflows/release.yml` then builds a universal binary, ADHOC-signs it when Developer ID credentials are absent, publishes both tarball aliases, writes `RELEASE-METADATA.json` with `team_id:"ADHOC"` / `signing:"adhoc"`, and runs installer validation on macOS 14 and macOS 15.
 
-### Notarized release (requires Apple Developer Program, $99/year)
+`Scripts/release.sh` remains available for local artifact-attached ADHOC cuts, including RC tags. The installer recognises `team_id: ADHOC` and skips Gatekeeper assessment while keeping SHA256 + codesign verification.
 
-Preconditions — GitHub Actions secrets configured:
+### Optional notarized release (requires Apple Developer Program)
+
+If Developer ID credentials are ever configured, the same workflow automatically switches to notarized mode. Required GitHub Actions secrets:
 
 - `MACOS_CERT_BASE64` — Developer ID Application certificate, .p12 → base64
 - `MACOS_CERT_PASSWORD` — .p12 unlock password
@@ -60,9 +63,9 @@ Release:
 Scripts/release-stable.sh v3.4.6
 ```
 
-Do not push stable tags manually. `Scripts/release-stable.sh` verifies the required GitHub Actions secret names, a clean `main` branch matching `origin/main`, absent local/remote tags, absent GitHub Release, and local deterministic gates before it creates and pushes the stable tag. This prevents the stable workflow from being triggered before notarization credentials exist.
+Do not push stable tags manually. `Scripts/release-stable.sh` verifies a clean `main` branch matching `origin/main`, absent local/remote tags, absent GitHub Release, and local deterministic gates before it creates and pushes the stable tag.
 
-`.github/workflows/release.yml` builds a true universal binary, signs/notarizes it, publishes both `LogicProMCP-macOS-universal.tar.gz` and the backward-compatible `LogicProMCP-macOS-arm64.tar.gz` alias, and records the actual architecture list in `RELEASE-METADATA.json`. The downstream install validation job runs on both Apple Silicon and Intel runners so the release asset path is exercised on each architecture. If a stable tag is pushed without the required secrets, the workflow fails closed before artifact publication; rerun it only after the secrets are configured.
+`.github/workflows/release.yml` builds a true universal binary, signs/notarizes it when Developer ID credentials are present, otherwise ADHOC-signs it, publishes both `LogicProMCP-macOS-universal.tar.gz` and the backward-compatible `LogicProMCP-macOS-arm64.tar.gz` alias, and records the actual architecture list in `RELEASE-METADATA.json`. The downstream install validation job runs on macOS 14 and macOS 15 so the release asset path is exercised against the supported runner floor and latest runner.
 
 Hyphenated tags (`vX.Y.Z-rcN`, beta tags, etc.) must publish as GitHub prereleases. Stable tags are the only releases that should be eligible for latest/stable artifact messaging.
 
