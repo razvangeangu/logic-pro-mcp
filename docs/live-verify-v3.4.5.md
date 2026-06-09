@@ -5,7 +5,7 @@ Scope: stable v3.4.5 source tree before tag, local release binary `.build/releas
 
 ## Claim Boundary
 
-This verifies v3.4.5 on the current macOS host and live Logic Pro 12.2 environment. It does not claim coverage for every Logic Pro version, locale, project shape, parent-app TCC context, clean host, or future macOS update. Published-release metadata and installer validation are recorded in `docs/releases/v3.4.5.md`.
+This verifies v3.4.5 on the current macOS host and live Logic Pro 12.2 environment. It does not claim coverage for every Logic Pro version, locale, project shape, parent-app TCC context, clean host, or future macOS update. Release metadata and the current publication blocker are recorded in `docs/releases/v3.4.5.md`.
 
 ## Deterministic Gates
 

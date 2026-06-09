@@ -12,7 +12,7 @@ No unreleased changes yet.
 
 ## [3.4.5] — 2026-06-09
 
-**Mixer write/read verification honesty — Issues #10–13 (thomas-doesburg).** Finalizes the v3.4.5 release with the Logic Pro 12.2 mixer AX matcher restored and live-verified. Host-originated fader writes can still receive no MCU echo on Logic 12.2, but `set_volume` now falls back to independent AX fader readback and can return State A when the observed fader matches tolerance. `logic://mixer` carries provenance, AX-sourced `plugins[]` snapshots identify occupied insert slots, and `insert_plugin` is exposed only as a guarded, Level-2-confirmed, stock-plugin allowlisted path.
+**Mixer write/read verification honesty — Issues #10–13 (thomas-doesburg).** Finalizes the v3.4.5 source/tag changes with the Logic Pro 12.2 mixer AX matcher restored and live-verified. Host-originated fader writes can still receive no MCU echo on Logic 12.2, but `set_volume` now falls back to independent AX fader readback and can return State A when the observed fader matches tolerance. `logic://mixer` carries provenance, AX-sourced `plugins[]` snapshots identify occupied insert slots, and `insert_plugin` is exposed only as a guarded, Level-2-confirmed, stock-plugin allowlisted path. Stable artifact publication is blocked until notarization secrets are configured for the release workflow.
 
 ### Added
 
@@ -27,7 +27,7 @@ No unreleased changes yet.
 - **`set_plugin_param` is now Honest-Contract-shaped** (#12/#13 write-half, P1-3) — Scripter returns HC State B `readback_unavailable` (with `cc`/`applied_midi_value`/`readback_source` extras) instead of a free-form string, and value is fail-closed to `0.0…1.0` (State C `invalid_params`) instead of being silently clamped.
 - **`set_plugin_param` refuses an unverified track selection** (P1-2) — mirrors `track.delete`/`duplicate`: if the pre-write `track.select` returns State B, the write hard-fails (State C with the original `select_response`) rather than writing to whatever track happened to be selected.
 - **`MIDIEngine` is restart-safe** (P1-6) — `stop()` no longer finishes the inbound `AsyncStream`; the continuation is terminal only at `deinit`, so `start → stop → start` restores inbound MIDI delivery.
-- **Version/release surfaces finalized to `3.4.5`** — `ServerConfig`, manifest, installer default, Formula version, startup-banner tests, README, setup docs, and resource `lastModified` timestamp are synchronized for the stable release.
+- **Version/release surfaces finalized to `3.4.5`** — `ServerConfig`, manifest, installer default, Formula version, startup-banner tests, README, setup docs, and resource `lastModified` timestamp are synchronized for the stable release attempt.
 
 ### Fixed
 
@@ -50,6 +50,7 @@ No unreleased changes yet.
 - `python3 -m py_compile Scripts/live-e2e-test.py` -> PASS.
 - `swift test --enable-code-coverage --no-parallel` -> 1192 / 1192 PASS locally; TOTAL coverage 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 issue gate -> #10/#11/#12/#13 checks PASS: AX readback for `set_volume`, `logic://mixer` `data_source:"ax_poll"`, AX plugin snapshots, Level-2 `insert_plugin` confirmation, verified Gain insert, and occupied-slot fail-closed.
+- GitHub Release workflow for `v3.4.5` -> BLOCKED before artifact publication because stable tags require notarization secrets; `MACOS_CERT_BASE64` was empty and stable ADHOC releases are intentionally not permitted.
 
 ### Release packaging (rc8–rc12, 2026-06-05/08 — CI/installer-only, no server-functional change)
 

@@ -9,6 +9,8 @@ Complete installation, Logic Pro integration, and verification. Should take ~10 
 - GitHub Actions/Homebrew release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts may still be arm64-only, so audit a specific tag via `RELEASE-METADATA.json` when needed
 - Claude Code or Claude Desktop
 
+2026-06-09 release note: `v3.4.5` source and tag are pushed, but stable binary artifacts are not published yet because the GitHub Actions release workflow correctly blocks stable tags without notarization secrets. Until that workflow is rerun with `MACOS_CERT_BASE64` and related Apple notarization secrets configured, use Option C to build the current `v3.4.5` source locally.
+
 ---
 
 ## 1. Install the Binary

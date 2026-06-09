@@ -1,6 +1,6 @@
 # 리뷰 가이드 — Issues #10–13 / v3.4.5 작업
 
-> 이 파일이 리뷰 진입점. 작업은 v3.4.5 정식 릴리스 후보. 테스트 1192 green. GitHub 이슈 #10~#13의 기존 AX deferral 답글은 2026-06-09 후속 구현으로 superseded되며, 최종 답글은 `ISSUE-REPLIES.md`의 Final section 기준.
+> 이 파일이 리뷰 진입점. 작업은 v3.4.5 소스/tag 기준으로 push 완료, 테스트 1192 green. stable artifact publication은 notarization secrets 부재로 blocked. GitHub 이슈 #10~#13의 기존 AX deferral 답글은 2026-06-09 후속 구현으로 superseded되며, release 완료 표현은 artifact publication 후에만 사용한다.
 
 ---
 
@@ -33,7 +33,7 @@ gh issue view 10 --repo MongLong0214/logic-pro-mcp --comments | tail -40
 | 3 | `docs/tickets/mixer-verification/SPIKE-REPORT.md` | 라이브 Logic 12.2 스파이크 실측 결과 + 2026-06-09 follow-up implementation evidence |
 | 4 | `docs/prd/PRD-mixer-verification-honesty.md` | PRD v0.2 (US/AC, §13 Phase2 리뷰 해소, Track 분해) |
 | 5 | `docs/tickets/mixer-verification/TICKETS.md` | 티켓별 TDD spec |
-| 6 | `docs/tickets/mixer-verification/ISSUE-REPLIES.md` | 최종 게시 답글 4개 |
+| 6 | `docs/tickets/mixer-verification/ISSUE-REPLIES.md` | 이슈 답글 초안/현재 상태 답글 |
 | 7 | `CHANGELOG.md` `[3.4.5]` | 릴리스 노트 |
 | 8 | `docs/live-verify-v3.4.5.md` | 공개용 live verification 요약 |
 | 9 | `docs/releases/v3.4.5.md` | published artifact / SHA / workflow evidence |
@@ -101,14 +101,15 @@ insert_plugin confirmed into occupied slot → channels_exhausted / slot_occupie
 - [ ] targeted live E2E → #10/#11/#12/#13 issue checks passed
 - [ ] git diff가 위 표의 의도와 일치, 범위 외 변경 없음
 - [ ] HonestContract 불변식 유지 (State A: reason/error 없음 / B: reason / C: error)
-- [ ] GitHub issue #10~#13 final reply posted; #12/#13 remaining scope is not over-claimed
+- [ ] GitHub issue #10~#13 status reply posted; release-complete wording is not used before artifact publication; #12/#13 remaining scope is not over-claimed
 
 ---
 
 ## 5) 보류분 + 다음 단계
-1. **Published SHA256 sync** — GitHub Actions release artifact가 나온 뒤 Formula sha256과 `docs/releases/v3.4.5.md`를 업데이트한다.
-2. **Full destructive 200+ live E2E** — 별도 작업. 이번 targeted release gate에는 포함하지 않는다.
-3. **#12/#13 future work** — full per-parameter plugin value readback, arbitrary `set_plugin_param insert:N`.
+1. **Stable artifact publication** — GitHub repo secrets에 notarization credentials를 구성한 뒤 `v3.4.5` release workflow를 rerun한다.
+2. **Published SHA256 sync** — GitHub Actions release artifact가 나온 뒤 Formula sha256과 `docs/releases/v3.4.5.md`를 업데이트한다.
+3. **Full destructive 200+ live E2E** — 별도 작업. 이번 targeted release gate에는 포함하지 않는다.
+4. **#12/#13 future work** — full per-parameter plugin value readback, arbitrary `set_plugin_param insert:N`.
 
 ## 되돌리기 (전부 무르고 싶으면)
 ```bash

@@ -1,13 +1,139 @@
-# Issue replies — #10–13 final (v3.4.5)
+# Issue replies — #10–13 current status (v3.4.5)
 
-> Final current replies to post after the `v3.4.5` GitHub release is published. They supersede the 2026-06-08 AX-deferral replies preserved below for history.
+> Current state: the `v3.4.5` source/tag is pushed and locally verified, but stable GitHub Release artifacts are not published yet. The release workflow is blocked because stable tags require notarization secrets. Do not post the "release shipped" wording below until artifact publication succeeds; use the current status comments instead.
 
-Release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.5
+Source tag: https://github.com/MongLong0214/logic-pro-mcp/tree/v3.4.5
+Commit: https://github.com/MongLong0214/logic-pro-mcp/commit/06966f2ae341c80a72271ea0428f2b46572a0e85
+Release workflow blocker: https://github.com/MongLong0214/logic-pro-mcp/actions/runs/27178878939
 Verification: `docs/live-verify-v3.4.5.md` and `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`
 
 ---
 
-## Final #10 — Mixer parameter writes: adapter returns success but MCU echo times out
+## Current Status #10
+
+Hi @thomas-doesburg,
+
+Current source/tag update: your diagnosis was right, and the fix is merged on `main` and tagged as `v3.4.5`. Stable GitHub Release artifacts are not published yet because the release workflow correctly blocks stable tags without notarization secrets.
+
+Logic 12.2 can still omit the MCU echo for host-originated fader writes. The new behavior does not pretend that echo exists: `set_volume` falls back to an independent AX fader readback when the MCU echo times out. If the AX-observed value matches the requested target within tolerance, the write resolves to State A with `verify_source:"ax_readback"` and `observed_ax`.
+
+Live verification on Logic Pro 12.2:
+
+```text
+logic_mixer set_volume {track:0,value:0.36}
+-> success:true
+-> verified:true
+-> verify_source:"ax_readback"
+-> observed_ax:0.33777777777777773
+-> observed_mcu:null
+```
+
+`MCU_TRACE=1` is also included and writes raw MCU TX/RX frames to stderr only, so stdout remains clean JSON-RPC.
+
+Verification gates:
+
+- `swift test --no-parallel` -> 1192 tests passed.
+- `swift build -c release` -> passed.
+- `python3 -m py_compile Scripts/live-e2e-test.py` -> passed.
+- `swift test --enable-code-coverage --no-parallel` -> 1192 tests passed.
+- Coverage TOTAL -> 70.40% region / 77.78% line.
+- Targeted live Logic Pro 12.2 #10/#11/#12/#13 checks -> passed.
+
+Release status: source tag `v3.4.5` is pushed, but artifact publication is blocked pending notarization secrets (`MACOS_CERT_BASE64` and related Apple notarization secrets).
+
+## Current Status #11
+
+Hi @thomas-doesburg,
+
+Current source/tag update: `logic://mixer` is no longer forced to stay on stale MCU connect-time state on Logic 12.2. This is merged on `main` and tagged as `v3.4.5`; stable binary artifacts are still blocked pending notarization secrets.
+
+The AX matcher is fixed, and `logic://mixer` exposes provenance so a client can distinguish fresh AX-observed data from last-known-good cache:
+
+```jsonc
+{
+  "cache_age_sec": ...,
+  "fetched_at": "...",
+  "data_source": "ax_poll" | "cache_stale" | "mixer_not_visible",
+  "mcu_connected": true,
+  "mcu_registered": true,
+  "mcu_last_feedback_age_ms": ...,
+  "registered": true,
+  "strips": [...]
+}
+```
+
+Live verification after the #10 write:
+
+```text
+logic://mixer
+-> data_source:"ax_poll"
+-> strips[0].volume:0.33777777777777773
+```
+
+Verification gates: `swift test --no-parallel` 1192 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #11 passed.
+
+## Current Status #12
+
+Hi @thomas-doesburg,
+
+Current source/tag update: the empty `plugins[]` ambiguity is fixed at the snapshot level, and `set_plugin_param` is now honest about its write/readback limits. This is merged on `main` and tagged as `v3.4.5`; stable binary artifacts are still blocked pending notarization secrets.
+
+What changed:
+
+- `logic://mixer` can populate insert snapshots from AX.
+- Each strip can carry `plugins_source:"ax"` so a client can distinguish a real AX-observed plugin snapshot from unknown/unread plugin state.
+- `set_plugin_param` returns State B `readback_unavailable` with `cc`, `applied_midi_value`, and `readback_source:"scripter_send_only"` instead of free-form text.
+- Invalid value / non-numeric value / `param > 17` are rejected before track selection.
+- The write is refused if the pre-write track selection is not verified.
+
+Live verification:
+
+```text
+logic://mixer strip 0
+-> plugins_source:"ax"
+-> plugins:["Gain","Gain","Drum Machine Designer"]
+```
+
+Boundary: this is not full per-parameter plugin value readback. Scripter remains send-only; full parameter value readback is future work.
+
+Verification gates: `swift test --no-parallel` 1192 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #12 passed.
+
+## Current Status #13
+
+Hi @thomas-doesburg,
+
+Current source/tag update: the opt-in `insert_plugin` path is merged on `main` and tagged as `v3.4.5` with the guardrails discussed. Stable binary artifacts are still blocked pending notarization secrets.
+
+What changed:
+
+- `insert_plugin` is not a default blind descriptor; it requires explicit Level-2 confirmation.
+- Stock allowlist is enforced for the supported path.
+- Occupied slots fail closed; no silent replacement.
+- After insertion, Logic's AX slot is read back and the operation only returns verified when the observed plugin matches.
+
+Live verification:
+
+```text
+insert_plugin without confirmed:true
+-> confirmation_required:true
+
+insert_plugin {track:0,slot:3,plugin_name:"Gain",confirmed:true}
+-> success:true
+-> verified:true
+-> verify_source:"ax_plugin_slot"
+-> observed_plugin_name:"Gain"
+
+repeat same insert into occupied slot 3
+-> channels_exhausted / slot_occupied
+```
+
+Boundary: arbitrary `set_plugin_param insert:N` remains future work. v3.4.5 source ships the safe insert primitive and slot readback, not a universal per-insert parameter writer.
+
+Verification gates: `swift test --no-parallel` 1192 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #13 confirmation/insert/occupied-slot checks passed.
+
+---
+
+## Draft Final #10 — Mixer parameter writes: adapter returns success but MCU echo times out
 
 Hi @thomas-doesburg,
 

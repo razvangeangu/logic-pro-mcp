@@ -67,6 +67,8 @@ This server takes a different approach: **combine seven complementary channels**
 
 **Prerequisites**: macOS 14+, Logic Pro 12.0.1+. GitHub Actions/Homebrew release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts may still be arm64-only, so audit a specific tag via `RELEASE-METADATA.json` when needed.
 
+**Release note, 2026-06-09:** the `v3.4.5` source tag is pushed and verified, but stable GitHub Release artifacts are not published yet. The release workflow is correctly blocked until notarization secrets are configured (`MACOS_CERT_BASE64` and related Apple notarization secrets). Use the source build path below for current `v3.4.5` code until the release workflow is rerun successfully.
+
 ### Option A — Homebrew (recommended)
 
 ```bash
@@ -155,7 +157,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 ## Status
 
-**Current stable release: v3.4.5 (2026-06-09 KST).** This release closes the Logic Pro 12.2 mixer verification work for Issues #10 and #11, ships the snapshot-level plugin readback surface for #12, and adds the guarded `insert_plugin` path for #13. Local verification: `swift test --no-parallel` at `1192/1192`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, coverage `70.40%` region / `77.78%` line, and targeted live Logic Pro 12.2 checks for #10-#13 all passed.
+**Current source/tag status: v3.4.5 is pushed and verified, but stable artifacts are not published yet (2026-06-09 KST).** This source release closes the Logic Pro 12.2 mixer verification work for Issues #10 and #11, ships the snapshot-level plugin readback surface for #12, and adds the guarded `insert_plugin` path for #13. Local verification: `swift test --no-parallel` at `1192/1192`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, coverage `70.40%` region / `77.78%` line, and targeted live Logic Pro 12.2 checks for #10-#13 all passed. GitHub stable artifact publication is blocked until notarization secrets are configured; the latest published GitHub Release remains `v3.4.5-rc12`.
 
 ### Active contracts (the things callers most care about)
 
@@ -172,7 +174,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 | Version | Date | Headline |
 |---------|------|----------|
-| **v3.4.5** | 2026-06-09 | Logic 12.2 mixer AX readback restored, echo-independent fader verification, mixer provenance, `plugins_source:"ax"` snapshots, guarded `insert_plugin`, and deterministic/coverage/live verification evidence |
+| **v3.4.5** | 2026-06-09 | Source tag pushed: Logic 12.2 mixer AX readback restored, echo-independent fader verification, mixer provenance, `plugins_source:"ax"` snapshots, guarded `insert_plugin`, and deterministic/coverage/live verification evidence. Stable artifacts blocked pending notarization secrets |
 | v3.4.5-rc8..rc12 | 2026-06-05/08 | Release-workflow and installer-validation hotfix series: bash 3.2, split universal build, candidate stdout, Team ID parser validation, macOS 14 validation floor |
 | **v3.4.5-rc7** | 2026-06-05 | Release-workflow hotfix reroll, universal binary selection now scans all executable candidates under `.build` and picks the first real fat Mach-O |
 | **v3.4.5-rc5** | 2026-06-05 | Save/readback and MIDI import hardening, live `project/info` tier merge, ProcessUtils Logic detection fallback, Library duplicate-name column targeting, and final v4 MIDI-only composition E2E |
@@ -195,7 +197,7 @@ Per-release detail: [CHANGELOG.md](CHANGELOG.md).
 
 ### Distribution
 
-Stable production tags use the GitHub Actions release workflow; the published `RELEASE-METADATA.json` records the signing mode, Team ID, and architectures for the exact artifact. ADHOC prerelease tags remain allowed only for local RC cuts. SHA256 pinning is mandatory for the fail-closed installer path. See [SECURITY.md §Release types](SECURITY.md#release-types).
+Stable production tags use the GitHub Actions release workflow; the published `RELEASE-METADATA.json` records the signing mode, Team ID, and architectures for the exact artifact. ADHOC prerelease tags remain allowed only for local RC cuts. SHA256 pinning is mandatory for the fail-closed installer path. The `v3.4.5` stable workflow run is blocked until notarization secrets are configured, so no stable `v3.4.5` binary artifact is published yet. See [SECURITY.md §Release types](SECURITY.md#release-types).
 
 ### Testing
 
