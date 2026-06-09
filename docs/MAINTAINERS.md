@@ -71,7 +71,9 @@ Hyphenated tags (`vX.Y.Z-rcN`, beta tags, etc.) must publish as GitHub prereleas
 
 ### Coverage gate
 
-CI hard-gates source coverage at region >=70% and line >=77%. The project target is line >=90%, but that is reported as a target until dedicated coverage-uplift work raises the measured baseline. The coverage job is fail-closed on the actual artifacts: `swift test --enable-code-coverage --no-parallel` must exit successfully, `default.profdata` must exist, `llvm-cov report` must parse a `TOTAL` line, and the thresholds must pass. GitHub macOS runner `LLVM Profile Error` warnings are reported, but do not fail the job by themselves when a valid profdata/report is produced.
+CI hard-gates source coverage at region >=70% and line >=78%. The project target is line >=90%, but that is reported as a target until dedicated coverage-uplift work raises the measured baseline. The coverage job is fail-closed on the actual artifacts: `swift test --enable-code-coverage --no-parallel` must exit successfully, `default.profdata` must exist, `llvm-cov report` must parse a `TOTAL` line, and the thresholds must pass. GitHub macOS runner `LLVM Profile Error` warnings are reported, but do not fail the job by themselves when a valid profdata/report is produced.
+
+For new or changed production code, treat the global gate as a regression floor, not the quality target. New behavior should carry focused tests in the same change; high-risk Logic-facing writes, parsers, routing gates, installer/release paths, and Honest Contract transitions should target roughly 90% line coverage for the touched surface, or document why that cannot be measured directly and which live/manual evidence closes the gap.
 
 ### Post-tag steps (both release modes)
 

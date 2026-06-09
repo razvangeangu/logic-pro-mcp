@@ -136,6 +136,35 @@ private func makeBundleURL(version: String) throws -> URL {
     #expect(ProcessUtils.parseLogicProPID(fromProcessList: output) == nil)
 }
 
+@Test func testProcessUtilsParsesLogicProPIDFromCommandNameAndSuffixVariants() {
+    #expect(ProcessUtils.parseLogicProPID(fromProcessList: "7174 Logic Pro") == 7174)
+    #expect(ProcessUtils.parseLogicProPID(fromProcessList: "7175 /private/tmp/Logic Pro") == 7175)
+    #expect(ProcessUtils.parseLogicProPID(fromProcessList: "-1 /Applications/Logic Pro.app/Contents/MacOS/Logic Pro") == nil)
+    #expect(ProcessUtils.parseLogicProPID(fromProcessList: "abc /Applications/Logic Pro.app/Contents/MacOS/Logic Pro") == nil)
+}
+
+@Test func testProcessUtilsWindowListHandlesMissingBoundsAndRejectsZeroSizedWindows() {
+    let zeroSized: [[String: Any]] = [
+        [
+            kCGWindowOwnerName as String: "Logic Pro",
+            kCGWindowOwnerPID as String: NSNumber(value: 4000),
+            kCGWindowBounds as String: [
+                "Width": NSNumber(value: 0),
+                "Height": NSNumber(value: 900),
+            ],
+        ],
+    ]
+    let missingBounds: [[String: Any]] = [
+        [
+            kCGWindowOwnerName as String: "Logic Pro",
+            kCGWindowOwnerPID as String: 4001,
+        ],
+    ]
+
+    #expect(ProcessUtils.logicProPID(fromWindowList: zeroSized) == nil)
+    #expect(ProcessUtils.logicProPID(fromWindowList: missingBounds) == 4001)
+}
+
 @Test func testProcessUtilsActivateLogicProUsesInjectedRuntime() {
     let harness = ProcessRuntimeHarness()
     harness.activateResult = false

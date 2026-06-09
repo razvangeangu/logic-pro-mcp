@@ -98,7 +98,7 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(workflow.contains("continuing to profdata/report validation"))
     #expect(workflow.contains("LLVM profile warnings: ${PROFILE_WARNING_COUNT:-0}."))
     #expect(workflow.contains("MIN_REGION=70"))
-    #expect(workflow.contains("MIN_LINE=77"))
+    #expect(workflow.contains("MIN_LINE=78"))
     #expect(workflow.contains("COVERAGE_TARGET=90"))
     #expect(!workflow.contains("set +e"))
     #expect(!workflow.contains("lets transient instrumentation flakes"))

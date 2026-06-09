@@ -633,12 +633,14 @@ enum LibraryAccessor {
         if let parent = AXHelpers.getAttribute(
             targetEl, kAXParentAttribute, runtime: runtime.ax
         ) as AXUIElement? {
-            let r = AXUIElementSetAttributeValue(
-                parent, "AXSelectedChildren" as CFString, [targetEl] as CFArray
+            selectedChildrenOK = AXHelpers.setAttribute(
+                parent,
+                kAXSelectedChildrenAttribute,
+                [targetEl] as CFArray,
+                runtime: runtime.ax
             )
-            selectedChildrenOK = (r == .success)
         }
-        let pressOK = AXUIElementPerformAction(targetEl, kAXPressAction as CFString) == .success
+        let pressOK = AXHelpers.performAction(targetEl, kAXPressAction, runtime: runtime.ax)
         Thread.sleep(forTimeInterval: 0.25)
         return selectedChildrenOK || pressOK
     }
@@ -686,11 +688,11 @@ enum LibraryAccessor {
             return true
         }
         let arr = [targetEl] as CFArray
-        _ = AXUIElementSetAttributeValue(parent, "AXSelectedChildren" as CFString, arr)
+        _ = AXHelpers.setAttribute(parent, kAXSelectedChildrenAttribute, arr, runtime: runtime.ax)
         Thread.sleep(forTimeInterval: 0.20)   // let the scroll settle
-        let pressResult = AXUIElementPerformAction(targetEl, kAXPressAction as CFString)
+        let pressResult = AXHelpers.performAction(targetEl, kAXPressAction, runtime: runtime.ax)
         Thread.sleep(forTimeInterval: 0.30)   // let Logic swap the plugin chain
-        return pressResult == .success
+        return pressResult
     }
 
     private enum ColumnPreference {
@@ -832,20 +834,11 @@ enum LibraryAccessor {
         of element: AXUIElement,
         runtime: AXHelpers.Runtime
     ) -> CGPoint? {
-        var positionValue: AnyObject?
-        let positionResult = AXUIElementCopyAttributeValue(
-            element, kAXPositionAttribute as CFString, &positionValue
-        )
-        var sizeValue: AnyObject?
-        let sizeResult = AXUIElementCopyAttributeValue(
-            element, kAXSizeAttribute as CFString, &sizeValue
-        )
         // H2 (P2-5): fail-closed on non-AXValue OR wrong-subtype AXValue (the
         // previous code checked CFGetTypeID but ignored AXValueGetValue's Bool,
         // so a wrong-subtype value silently produced a (0,0) center).
-        guard positionResult == .success, sizeResult == .success,
-              let cgPos = AXHelpers.point(fromRawAttribute: positionValue),
-              let cgSize = AXHelpers.size(fromRawAttribute: sizeValue) else {
+        guard let cgPos = AXHelpers.getPosition(element, runtime: runtime),
+              let cgSize = AXHelpers.getSize(element, runtime: runtime) else {
             return nil
         }
         return CGPoint(x: cgPos.x + cgSize.width / 2, y: cgPos.y + cgSize.height / 2)
@@ -901,11 +894,11 @@ enum LibraryAccessor {
             of: browser, role: kAXListRole, maxDepth: 6, runtime: runtime
         )
         for list in lists {
-            var selectedRaw: AnyObject?
-            let r = AXUIElementCopyAttributeValue(
-                list, kAXSelectedChildrenAttribute as CFString, &selectedRaw
-            )
-            guard r == .success, let arr = selectedRaw as? [AXUIElement], !arr.isEmpty else {
+            guard let arr: [AXUIElement] = AXHelpers.getAttribute(
+                list,
+                kAXSelectedChildrenAttribute,
+                runtime: runtime
+            ), !arr.isEmpty else {
                 continue
             }
             for child in arr {
@@ -941,11 +934,11 @@ enum LibraryAccessor {
         var lastText: String? = nil
         var lastX: CGFloat = -CGFloat.greatestFiniteMagnitude
         for list in lists {
-            var selectedRaw: AnyObject?
-            let r = AXUIElementCopyAttributeValue(
-                list, kAXSelectedChildrenAttribute as CFString, &selectedRaw
-            )
-            guard r == .success, let arr = selectedRaw as? [AXUIElement], !arr.isEmpty else {
+            guard let arr: [AXUIElement] = AXHelpers.getAttribute(
+                list,
+                kAXSelectedChildrenAttribute,
+                runtime: runtime
+            ), !arr.isEmpty else {
                 continue
             }
             for child in arr {

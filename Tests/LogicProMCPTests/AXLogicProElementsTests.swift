@@ -156,6 +156,78 @@ import Testing
     #expect(AXLogicProElements.findTransportButton(named: "Stop", runtime: runtime) == nil)
 }
 
+@Test func testAXLogicProElementsFallsBackToLegacyMainWindowWhenOnlyDialogsAreEnumerable() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(310)
+    let legacyMain = builder.element(311)
+    let dialog = builder.element(312)
+    let systemDialog = builder.element(313)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, legacyMain)
+    builder.setAttribute(app, kAXWindowsAttribute as String, [dialog, systemDialog])
+    builder.setAttribute(dialog, kAXSubroleAttribute as String, kAXDialogSubrole as String)
+    builder.setAttribute(systemDialog, kAXSubroleAttribute as String, kAXSystemDialogSubrole as String)
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    #expect(AXLogicProElements.mainWindow(runtime: runtime) == legacyMain)
+    #expect(AXLogicProElements.dialogPresent(runtime: runtime) == true)
+}
+
+@Test func testAXLogicProElementsControlBarCheckboxesAndLocatorSliders() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(320)
+    let window = builder.element(321)
+    let controlBar = builder.element(322)
+    let recordTitle = builder.element(323)
+    let cycleDescription = builder.element(324)
+    let barSlider = builder.element(325)
+    let beatSlider = builder.element(326)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [controlBar])
+    builder.setAttribute(controlBar, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(controlBar, kAXDescriptionAttribute as String, "Control Bar")
+    builder.setChildren(controlBar, [recordTitle, cycleDescription, barSlider, beatSlider])
+
+    builder.setAttribute(recordTitle, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(recordTitle, kAXTitleAttribute as String, "Record")
+    builder.setAttribute(recordTitle, kAXValueAttribute as String, NSNumber(value: true))
+    builder.setAttribute(cycleDescription, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(cycleDescription, kAXDescriptionAttribute as String, "사이클")
+    builder.setAttribute(cycleDescription, kAXValueAttribute as String, false)
+    builder.setAttribute(barSlider, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(barSlider, kAXDescriptionAttribute as String, "Bar")
+    builder.setAttribute(beatSlider, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(beatSlider, kAXDescriptionAttribute as String, "비트")
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    #expect(AXLogicProElements.getControlBar(runtime: runtime) == controlBar)
+    #expect(AXLogicProElements.findControlBarCheckbox(
+        named: "녹음",
+        englishName: "Record",
+        runtime: runtime
+    ) == recordTitle)
+    #expect(AXLogicProElements.findControlBarCheckbox(
+        named: "사이클",
+        englishName: "Cycle",
+        runtime: runtime
+    ) == cycleDescription)
+    #expect(AXLogicProElements.readControlBarCheckboxValue(
+        named: "녹음",
+        englishName: "Record",
+        runtime: runtime
+    ) == true)
+    #expect(AXLogicProElements.readControlBarCheckboxValue(
+        named: "사이클",
+        englishName: "Cycle",
+        runtime: runtime
+    ) == false)
+    #expect(AXLogicProElements.findControlBarBarSlider(runtime: runtime) == barSlider)
+    #expect(AXLogicProElements.findControlBarBeatSlider(runtime: runtime) == beatSlider)
+}
+
 @Test func testAXLogicProElementsFindsLogic12MixerLayoutAreaAndSkipsInspectorMixer() {
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(160)

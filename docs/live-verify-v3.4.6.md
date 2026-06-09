@@ -17,7 +17,7 @@ Published release metadata, SHA256 values, and workflow evidence are recorded in
 | Formula syntax | PASS | `ruby -c Formula/logic-pro-mcp.rb` -> `Syntax OK`. |
 | Version lockstep | PASS | `swift test --filter VersionConsistencyTests --no-parallel` -> 1 test passed. |
 | Coverage test run | PASS | `swift test --enable-code-coverage --no-parallel` -> 1197 tests passed, 0 failed. |
-| Coverage threshold | PASS | TOTAL region 70.81%, line 78.32%. Current CI hard gate is region >=70%, line >=77%; line >=90% remains the tracked target. |
+| Coverage threshold | PASS | TOTAL region 70.81%, line 78.32%. Current CI hard gate is region >=70%, line >=78%; line >=90% remains the tracked target. |
 | Release build | PASS | `swift build -c release` -> build complete. |
 | Stable release preflight | PASS | `Scripts/release-stable.sh v3.4.6` -> py_compile, `swift test --no-parallel` 1197 passed, release build passed, tag pushed. |
 | GitHub Release workflow | PASS | Run `27186085967`: `build`, `validate-install (macos-15)`, and `validate-install (macos-14)` all passed. |

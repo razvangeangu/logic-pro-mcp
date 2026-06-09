@@ -39,7 +39,7 @@ jobs:
         #      producing a valid default.profdata.
         #   2. Enforce thresholds (this is the actual gate).
         #
-        # Hard thresholds: 70% region, 77% line. 90% line coverage is the
+        # Hard thresholds: 70% region, 78% line. 90% line coverage is the
         # project target, but not the hard gate until a dedicated coverage
         # uplift lands; setting 90% today would only make every release red.
         if: always()
@@ -113,13 +113,13 @@ jobs:
             echo "$TOTAL_LINE"
             echo '```'
             echo ""
-            echo "Hard thresholds: region ≥ 70%, line ≥ 77%."
+            echo "Hard thresholds: region ≥ 70%, line ≥ 78%."
             echo "Coverage target: line ≥ 90%."
             echo "LLVM profile warnings: ${PROFILE_WARNING_COUNT:-0}."
           } >> "$GITHUB_STEP_SUMMARY"
 
           MIN_REGION=70
-          MIN_LINE=77
+          MIN_LINE=78
           COVERAGE_TARGET=90
           FAIL=0
           if [ -z "$REGION_PCT" ] || [ -z "$LINE_PCT" ]; then

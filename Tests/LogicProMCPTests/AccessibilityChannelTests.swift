@@ -16,6 +16,7 @@ private final class AccessibilityRuntimeRecorder: @unchecked Sendable {
     var renameParams: [[String: String]] = []
     var channelStripParams: [[String: String]] = []
     var mixerValueCalls: [([String: String], AccessibilityChannel.MixerTarget)] = []
+    var importedMIDIPaths: [String] = []
 }
 
 private func makeAccessibilityRuntime(
@@ -64,7 +65,12 @@ private func makeAccessibilityRuntime(
             recorder.mixerValueCalls.append((params, target))
             return .success("{\"mixerValue\":true}")
         },
-        projectInfo: { .success("{\"project\":true}") }
+        projectInfo: { .success("{\"project\":true}") },
+        markers: { .success("[{\"name\":\"Intro\"}]") },
+        importMIDIFile: { path in
+            recorder.importedMIDIPaths.append(path)
+            return .success("{\"imported\":\"\(path)\"}")
+        }
     )
 }
 
@@ -132,6 +138,10 @@ private func makeAXBackedAccessibilityChannel(
         ("transport.get_state", [:]),
         ("transport.toggle_cycle", [:]),
         ("transport.toggle_metronome", [:]),
+        ("transport.toggle_count_in", [:]),
+        ("transport.play", [:]),
+        ("transport.stop", [:]),
+        ("transport.record", [:]),
         ("transport.set_tempo", ["tempo": "128"]),
         ("transport.set_cycle_range", ["start": "1.1.1.1", "end": "9.1.1.1"]),
         ("track.get_tracks", [:]),
@@ -145,6 +155,7 @@ private func makeAXBackedAccessibilityChannel(
         ("mixer.get_channel_strip", ["index": "2"]),
         ("mixer.set_volume", ["index": "2", "value": "0.75"]),
         ("mixer.set_pan", ["index": "2", "value": "-0.2"]),
+        ("nav.get_markers", [:]),
         ("project.get_info", [:]),
     ]
 
@@ -153,7 +164,7 @@ private func makeAXBackedAccessibilityChannel(
         #expect(result.isSuccess, "Expected \(operation) to route through runtime")
     }
 
-    #expect(recorder.transportButtons == ["Cycle", "Metronome"])
+    #expect(recorder.transportButtons == ["Cycle", "Metronome", "CountIn", "Play", "Stop", "Record"])
     #expect(recorder.tempoParams == [["tempo": "128"]])
     #expect(recorder.cycleRangeParams == [["start": "1.1.1.1", "end": "9.1.1.1"]])
     #expect(recorder.selectParams == [["index": "4"]])
@@ -168,6 +179,48 @@ private func makeAXBackedAccessibilityChannel(
     #expect(recorder.mixerValueCalls.count == 2)
     #expect(recorder.mixerValueCalls[0].1 == .volume)
     #expect(recorder.mixerValueCalls[1].1 == .pan)
+}
+
+@Test func testAccessibilityChannelMIDIImportValidatesManagedTempPathBeforeRuntimeImport() async throws {
+    let recorder = AccessibilityRuntimeRecorder()
+    let channel = AccessibilityChannel(runtime: makeAccessibilityRuntime(recorder: recorder))
+    let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
+    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+    let midiURL = managedDirectory.appendingPathComponent("coverage-uplift-\(UUID().uuidString).mid")
+    try Data([0x4d, 0x54, 0x68, 0x64]).write(to: midiURL)
+    defer { try? FileManager.default.removeItem(at: midiURL) }
+
+    let missing = await channel.execute(operation: "midi.import_file", params: [:])
+    let invalid = await channel.execute(operation: "midi.import_file", params: ["path": "/tmp/not-managed.mid"])
+    let valid = await channel.execute(operation: "midi.import_file", params: ["path": midiURL.path])
+
+    #expect(!missing.isSuccess)
+    #expect(missing.message.contains("requires 'path'"))
+    #expect(!invalid.isSuccess)
+    #expect(invalid.message.contains("/tmp/LogicProMCP/*.mid"))
+    #expect(valid.isSuccess)
+    #expect(recorder.importedMIDIPaths == [midiURL.path])
+}
+
+@Test func testAccessibilityChannelFastValidationErrorsCoverDeepOperationsWithoutTouchingUI() async {
+    let channel = AccessibilityChannel(runtime: makeAccessibilityRuntime())
+    let cases: [(operation: String, params: [String: String], expected: String)] = [
+        ("transport.goto_position", [:], "goto_position requires"),
+        ("transport.goto_position", ["position": "01:02:03:04"], "cannot handle timecode"),
+        ("project.save_as", [:], "Missing 'path'"),
+        ("project.save_as", ["path": "relative.logicx"], "absolute .logicx"),
+        ("track.set_instrument", [:], "Missing path"),
+        ("track.set_instrument", ["path": "Bass"], "at least 2 segments"),
+        ("plugin.insert", [:], "explicit 'track'"),
+        ("plugin.insert", ["track": "0"], "explicit 'slot'"),
+        ("plugin.insert", ["track": "0", "slot": "1"], "unsupported plugin"),
+    ]
+
+    for testCase in cases {
+        let result = await channel.execute(operation: testCase.operation, params: testCase.params)
+        #expect(!result.isSuccess, "Expected \(testCase.operation) to fail validation")
+        #expect(result.message.contains(testCase.expected), "Expected \(result.message) to contain \(testCase.expected)")
+    }
 }
 
 @Test func testAccessibilityChannelReturnsExpectedUnimplementedAndUnsupportedErrors() async {

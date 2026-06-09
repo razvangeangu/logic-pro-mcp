@@ -1,6 +1,6 @@
 # 리뷰 가이드 — Issues #10–13 / v3.4.6 작업
 
-> 이 파일이 리뷰 진입점. 작업은 v3.4.6 stable GitHub Release 기준으로 published 완료, current main 테스트 1197 green. Developer ID 없이 ADHOC stable artifacts가 발행됐고, GitHub 이슈 #10~#13은 최종 targeted/live E2E 통과 후 CLOSED로 검증됐다.
+> 이 파일이 리뷰 진입점. 작업은 v3.4.6 stable GitHub Release 기준으로 published 완료, current main 테스트 1208 green. Developer ID 없이 ADHOC stable artifacts가 발행됐고, GitHub 이슈 #10~#13은 최종 targeted/live E2E 통과 후 CLOSED로 검증됐다.
 
 ---
 
@@ -13,7 +13,7 @@ cd /Users/isaac/projects/logic-pro-mcp
 sed -n '1,80p' docs/tickets/mixer-verification/STATUS.md
 
 # (2) 테스트 green 직접 확인 (~70s)
-swift test --no-parallel 2>&1 | tail -3        # → "Test run with 1197 tests passed"
+swift test --no-parallel 2>&1 | tail -3        # → "Test run with 1208 tests passed"
 
 # (3) 변경 규모 한눈에
 git diff --stat
@@ -96,9 +96,9 @@ insert_plugin confirmed into occupied slot → channels_exhausted / slot_occupie
 ---
 
 ## 4) 무엇을 "통과"로 볼지 (수용 기준)
-- [ ] `swift test --no-parallel` → 1197 passed (0 fail)
+- [ ] `swift test --no-parallel` → 1208 passed (0 fail)
 - [ ] `swift build -c release` → passed
-- [ ] `swift test --enable-code-coverage --no-parallel` → 1197 passed; coverage hard gate ≥70% region / ≥77% line, with ≥90% line as the tracked target
+- [ ] `swift test --enable-code-coverage --no-parallel` → 1208 passed; coverage hard gate ≥70% region / ≥78% line, with ≥90% line as the tracked target
 - [ ] targeted live E2E → #10/#11/#12/#13 issue checks passed
 - [ ] git diff가 위 표의 의도와 일치, 범위 외 변경 없음
 - [ ] HonestContract 불변식 유지 (State A: reason/error 없음 / B: reason / C: error)

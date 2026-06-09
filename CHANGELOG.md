@@ -8,7 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Changed
+
+- **CI coverage gate raised to current-baseline floor** — global source coverage now hard-gates at region >=70% / line >=78%, while keeping line >=90% as the explicit uplift target. Maintainer and contribution docs now clarify that new high-risk production code should target about 90% line coverage on the touched surface or carry live/manual evidence when direct measurement is not practical.
+
+### Tests
+
+- Added focused coverage for AX mouse/key injection, AX-backed Library selection, control-bar lookup fallbacks, accessibility routing validation, and Logic process/window detection. Local gate: `swift test --no-parallel` -> 1208 tests passed; coverage TOTAL 73.62% region / 81.06% line.
 
 ## [3.4.6] — 2026-06-09
 

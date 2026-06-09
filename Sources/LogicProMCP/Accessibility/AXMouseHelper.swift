@@ -13,50 +13,85 @@ import Foundation
 /// the double-click + keystroke sequence inside the server process
 /// eliminates the FD exhaustion path entirely.
 enum AXMouseHelper {
+    struct Runtime: @unchecked Sendable {
+        let postMouseEvent: @Sendable (CGEventType, CGPoint, Int64) -> Bool
+        let postKeyEvent: @Sendable (CGKeyCode) -> Bool
+        let postUnicodeScalar: @Sendable (UniChar) -> Bool
+        let sleepMicros: @Sendable (useconds_t) -> Void
+
+        static let production = Runtime(
+            postMouseEvent: { type, point, clickCount in
+                let source = CGEventSource(stateID: .combinedSessionState)
+                guard let event = CGEvent(
+                    mouseEventSource: source,
+                    mouseType: type,
+                    mouseCursorPosition: point,
+                    mouseButton: .left
+                ) else { return false }
+                event.setIntegerValueField(.mouseEventClickState, value: clickCount)
+                event.post(tap: .cghidEventTap)
+                return true
+            },
+            postKeyEvent: { keyCode in
+                let source = CGEventSource(stateID: .combinedSessionState)
+                guard
+                    let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+                    let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+                else { return false }
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+                return true
+            },
+            postUnicodeScalar: { scalar in
+                let source = CGEventSource(stateID: .combinedSessionState)
+                guard
+                    let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                    let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+                else { return false }
+                var u16 = [scalar]
+                down.keyboardSetUnicodeString(stringLength: u16.count, unicodeString: &u16)
+                up.keyboardSetUnicodeString(stringLength: u16.count, unicodeString: &u16)
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+                return true
+            },
+            sleepMicros: { usleep($0) }
+        )
+    }
 
     /// Post a native double-click at the screen point. The two down/up
     /// pairs carry `clickCount = 2` on the second pair so macOS recognises
     /// the sequence as a double-click (single-clicks repeated quickly are
     /// NOT the same thing).
-    static func doubleClick(at point: CGPoint) {
-        let source = CGEventSource(stateID: .combinedSessionState)
-
-        post(.leftMouseDown, at: point, clickCount: 1, source: source)
-        post(.leftMouseUp, at: point, clickCount: 1, source: source)
+    static func doubleClick(at point: CGPoint, runtime: Runtime = .production) {
+        post(.leftMouseDown, at: point, clickCount: 1, runtime: runtime)
+        post(.leftMouseUp, at: point, clickCount: 1, runtime: runtime)
 
         // Inter-click pause must stay well under macOS's system-wide
         // double-click interval (default ~500 ms) — 40 ms is reliable.
-        usleep(40_000)
+        runtime.sleepMicros(40_000)
 
-        post(.leftMouseDown, at: point, clickCount: 2, source: source)
-        post(.leftMouseUp, at: point, clickCount: 2, source: source)
+        post(.leftMouseDown, at: point, clickCount: 2, runtime: runtime)
+        post(.leftMouseUp, at: point, clickCount: 2, runtime: runtime)
     }
 
     private static func post(
         _ type: CGEventType,
         at point: CGPoint,
         clickCount: Int64,
-        source: CGEventSource?
+        runtime: Runtime
     ) {
-        guard let event = CGEvent(
-            mouseEventSource: source,
-            mouseType: type,
-            mouseCursorPosition: point,
-            mouseButton: .left
-        ) else { return }
-        event.setIntegerValueField(.mouseEventClickState, value: clickCount)
-        event.post(tap: .cghidEventTap)
+        _ = runtime.postMouseEvent(type, point, clickCount)
     }
 
     /// Post a sequence of keystrokes representing the given string. Only
     /// ASCII digits, `.`, `-` and `Return` are supported — sufficient for
     /// tempo / locator numeric entry.
-    static func typeNumericString(_ s: String) {
-        let source = CGEventSource(stateID: .combinedSessionState)
+    static func typeNumericString(_ s: String, runtime: Runtime = .production) {
         for ch in s {
             guard let keyCode = numericKeyCode(for: ch) else { continue }
-            postKey(keyCode, source: source)
-            usleep(15_000)
+            postKey(keyCode, runtime: runtime)
+            runtime.sleepMicros(15_000)
         }
     }
 
@@ -65,41 +100,25 @@ enum AXMouseHelper {
     /// table — relies on the active input source to resolve characters. Used
     /// by the Library type-to-jump path when we need to seek to a preset that
     /// is scrolled out of the AX-visible but screen-invisible viewport.
-    static func typeText(_ s: String) {
-        let source = CGEventSource(stateID: .combinedSessionState)
+    static func typeText(_ s: String, runtime: Runtime = .production) {
         for ch in s.unicodeScalars {
-            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
-                continue
-            }
-            var u16 = [UniChar(ch.value & 0xFFFF)]
-            down.keyboardSetUnicodeString(stringLength: u16.count, unicodeString: &u16)
-            up.keyboardSetUnicodeString(stringLength: u16.count, unicodeString: &u16)
-            down.post(tap: .cghidEventTap)
-            up.post(tap: .cghidEventTap)
-            usleep(12_000)
+            _ = runtime.postUnicodeScalar(UniChar(ch.value & 0xFFFF))
+            runtime.sleepMicros(12_000)
         }
     }
 
     /// Post a Return key tap.
-    static func pressReturn() {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        postKey(0x24, source: source)   // kVK_Return = 0x24
+    static func pressReturn(runtime: Runtime = .production) {
+        postKey(0x24, runtime: runtime)   // kVK_Return = 0x24
     }
 
     /// Post an Escape key tap (used to dismiss unwanted popups on error).
-    static func pressEscape() {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        postKey(0x35, source: source)   // kVK_Escape = 0x35
+    static func pressEscape(runtime: Runtime = .production) {
+        postKey(0x35, runtime: runtime)   // kVK_Escape = 0x35
     }
 
-    private static func postKey(_ keyCode: CGKeyCode, source: CGEventSource?) {
-        guard
-            let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-            let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
-        else { return }
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+    private static func postKey(_ keyCode: CGKeyCode, runtime: Runtime) {
+        _ = runtime.postKeyEvent(keyCode)
     }
 
     /// Virtual key codes for numeric input (kVK_ANSI_0 .. kVK_ANSI_9 + decimal/minus).
