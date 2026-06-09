@@ -9,7 +9,7 @@ Complete installation, Logic Pro integration, and verification. Should take ~10 
 - GitHub Actions/Homebrew release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts may still be arm64-only, so audit a specific tag via `RELEASE-METADATA.json` when needed
 - Claude Code or Claude Desktop
 
-2026-06-09 release note: `v3.4.5` is the current stable GitHub Release. It publishes ADHOC-signed universal artifacts when Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for pinned installer verification.
+2026-06-09 release note: `v3.4.6` is the current stable GitHub Release. It publishes ADHOC-signed universal artifacts when Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for pinned installer verification.
 
 ---
 
@@ -29,7 +29,7 @@ Homebrew pins both the release tarball URL and its SHA256 in the formula, and Ho
 The installer is **fail-closed by default**: it refuses to run without explicit SHA256 + Team ID pins. Inspect the script first, verify the hash from the release's `SHA256SUMS.txt`, then execute:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.6/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<hex from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=<team_id from RELEASE-METADATA.json> \
@@ -40,7 +40,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.6/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](../SECURITY.md#installer-trust-model) for the threat model.
@@ -78,7 +78,7 @@ LogicProMCP --check-permissions
 
 The MCP server controls Logic Pro's mixer via the Mackie Control Universal (MCU) protocol over a virtual MIDI port.
 
-> ⚠️ **MCU registration is the single most failure-prone setup step** — if you skip it, mixer writes fail before sending with structured State C `{ "success": false, "error": "channels_exhausted", "operation": "mixer.set_volume", … }`. If MCU is connected but Logic does not echo a host write, the wire shape is State B `{ "success": true, "verified": false, "reason": "echo_timeout_500ms", "mcu_connected": true, … }`; v3.4.5 can still verify `set_volume` via AX readback when the mixer is readable.
+> ⚠️ **MCU registration is the single most failure-prone setup step** — if you skip it, mixer writes fail before sending with structured State C `{ "success": false, "error": "channels_exhausted", "operation": "mixer.set_volume", … }`. If MCU is connected but Logic does not echo a host write, the wire shape is State B `{ "success": true, "verified": false, "reason": "echo_timeout_500ms", "mcu_connected": true, … }`; v3.4.6 can still verify `set_volume` via AX readback when the mixer is readable.
 
 1. Launch **Logic Pro**. The MCP server auto-starts when Claude Code connects.
 2. Menu: **Logic Pro → Control Surfaces → Setup…** (KR: `컨트롤 서피스 → 설정…`)

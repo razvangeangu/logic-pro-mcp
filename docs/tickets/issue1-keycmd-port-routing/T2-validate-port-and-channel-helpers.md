@@ -1,6 +1,6 @@
 # T2: MIDIDispatcher `validatePort` + `validateMidiChannel` helpers
 
-> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.6.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue1-keycmd-port-routing > §3 AC-1.3, AC-2.1-2.5, §4.3 helper sketches
 **Priority**: P1 (High — foundational, blocks T5)

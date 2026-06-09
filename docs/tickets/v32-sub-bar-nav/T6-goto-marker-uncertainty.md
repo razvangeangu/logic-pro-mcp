@@ -1,6 +1,6 @@
 # T6 — `goto_marker` Dispatcher: HC Top-Level Extras Merge
 
-> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.6.md`; this file remains preserved implementation context.
 
 **Status**: Todo
 **Depends on**: T2, T4

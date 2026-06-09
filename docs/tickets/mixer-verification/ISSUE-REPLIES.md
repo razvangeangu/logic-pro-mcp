@@ -1,12 +1,16 @@
-# Issue replies — #10–13 final status (v3.4.5)
+# Issue replies — #10–13 final status (v3.4.5, superseded by v3.4.6 evidence sync)
 
-> Current state: `v3.4.5` is published as the stable GitHub Release, and issues #10-#13 are closed as completed after final verification. Artifacts are ADHOC-signed when Developer ID credentials are absent and are accompanied by `SHA256SUMS.txt` plus `RELEASE-METADATA.json`.
+> Current state: `v3.4.6` is the stable GitHub Release and evidence/packaging alignment release after `v3.4.5`; issues #10-#13 remain closed as completed after final verification. Artifacts are ADHOC-signed when Developer ID credentials are absent and are accompanied by `SHA256SUMS.txt` plus `RELEASE-METADATA.json`.
 
 Source tag: https://github.com/MongLong0214/logic-pro-mcp/tree/v3.4.5
 Commit: https://github.com/MongLong0214/logic-pro-mcp/commit/22c7d39fb4f5eadd5c9b6dc6518831f45bbdebd7
 Release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.5
 Release workflow: https://github.com/MongLong0214/logic-pro-mcp/actions/runs/27183025739
 Verification: `docs/live-verify-v3.4.5.md` and `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`
+
+Current stable release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.6
+Current stable workflow: https://github.com/MongLong0214/logic-pro-mcp/actions/runs/27186085967
+Current stable evidence: `docs/live-verify-v3.4.6.md` and `docs/releases/v3.4.6.md`
 
 Final close comments:
 

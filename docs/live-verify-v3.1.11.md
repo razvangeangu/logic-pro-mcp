@@ -1,6 +1,6 @@
 # Live Verification Runbook — v3.1.11 (Issue #9)
 
-> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.6.md`; this file remains preserved implementation context.
 
 **Verification timing**: Immediately before v3.1.11 release + for reproducing on user reports.
 **Target fix**: `parseMarkerListPosition` strict 4 + trailing punctuation strip + 1-based + ASCII narrow + mixed separator reject.

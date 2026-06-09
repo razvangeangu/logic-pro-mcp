@@ -32,6 +32,8 @@ No unreleased changes yet.
 - `ruby -c Formula/logic-pro-mcp.rb` -> PASS.
 - `swift test --filter VersionConsistencyTests --no-parallel` -> 1 / 1 PASS.
 - `swift test --enable-code-coverage --no-parallel` -> 1197 / 1197 PASS locally; TOTAL coverage 70.81% region / 78.32% line.
+- `Scripts/release-stable.sh v3.4.6` -> preflight PASS and tag pushed.
+- GitHub Release workflow for `v3.4.6` -> run `27186085967` PASS: build plus macOS 15 and macOS 14 install validation. Published assets include `LogicProMCP`, both tarball aliases, `SHA256SUMS.txt`, and `RELEASE-METADATA.json`.
 
 ## [3.4.5] — 2026-06-09
 

@@ -81,3 +81,15 @@ Targeted issue checks:
 - C1 version finalize is part of the v3.4.5 release pass. Published SHA256 lockstep and GitHub Actions macOS 14/15 install validation are verified for the stable release artifacts.
 - Multi-version Logic matrix is release-follow-up work, not closed by this pass.
 - The current verified claim is: #10-#13 are fixed and verified for the current working tree against Logic Pro 12.2 on this machine, with deterministic tests, release build, coverage gate, full strict live E2E, and targeted live E2E all green.
+
+## v3.4.6 Release Sync Addendum
+
+After the v3.4.5 release, the current mainline was published as `v3.4.6` to align the stable tag, server version, installer default, manifest URL, Formula version/SHA, and release evidence docs with the final current-main verification state.
+
+- Source commit: `4592248b9fe70a8d07be0eea800e457c77577d50`.
+- GitHub Release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.6
+- Release workflow: `27186085967` -> PASS (`build`, `validate-install (macos-15)`, `validate-install (macos-14)`).
+- Published metadata: `version:"v3.4.6"`, `team_id:"ADHOC"`, `signing:"adhoc"`, `architectures:["x86_64","arm64"]`.
+- Published universal tarball SHA256: `6420274b4fbbb863226a2a163b971a36161c10880e8f3a06d979100a35bc01d3`.
+- Local v3.4.6 gates: `python3 -m py_compile Scripts/live-e2e-test.py` PASS, `ruby -c Formula/logic-pro-mcp.rb` PASS, `swift test --filter VersionConsistencyTests --no-parallel` PASS, `swift test --enable-code-coverage --no-parallel` 1197 PASS, coverage TOTAL 70.81% region / 78.32% line, `swift build -c release` PASS.
+- Runtime boundary: v3.4.6 is a version/packaging/docs sync release; it does not change the Logic runtime mixer implementation verified above.

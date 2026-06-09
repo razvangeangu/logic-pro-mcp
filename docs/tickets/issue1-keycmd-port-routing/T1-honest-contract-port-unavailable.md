@@ -1,6 +1,6 @@
 # T1: HonestContract `.portUnavailable` FailureError + terminalErrorCodes
 
-> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.6.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue1-keycmd-port-routing > §4.1 step 7, §10.1 R7, OQ-7
 **Priority**: P1 (High — foundational, blocks T4/T6)

@@ -13,7 +13,7 @@
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
   <img src="https://img.shields.io/badge/tests-1197_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/version-3.4.5-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-3.4.6-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -67,7 +67,7 @@ This server takes a different approach: **combine seven complementary channels**
 
 **Prerequisites**: macOS 14+, Logic Pro 12.0.1+. GitHub Actions/Homebrew release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts may still be arm64-only, so audit a specific tag via `RELEASE-METADATA.json` when needed.
 
-**Release note, 2026-06-09:** `v3.4.5` is the current stable GitHub Release. It ships ADHOC-signed universal artifacts when Apple Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for the fail-closed installer path.
+**Release note, 2026-06-09:** `v3.4.6` is the current stable GitHub Release. It ships ADHOC-signed universal artifacts when Apple Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for the fail-closed installer path.
 
 ### Option A — Homebrew (recommended)
 
@@ -83,7 +83,7 @@ The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew 
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.6/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=<paste team_id from RELEASE-METADATA.json> \
@@ -94,7 +94,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.5/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.6/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
@@ -150,14 +150,14 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |
 | [Maintainer Guide](docs/MAINTAINERS.md) | Maintainers | Release, approvals, E2E checklist |
-| [Live Verify v3.4.5](docs/live-verify-v3.4.5.md) | Maintainers, QA | Latest deterministic, coverage, release-build, and targeted Logic Pro 12.2 issue-verification evidence |
+| [Live Verify v3.4.6](docs/live-verify-v3.4.6.md) | Maintainers, QA | Latest deterministic, coverage, release-build, packaging, and carried Logic Pro 12.2 issue-verification evidence |
 | [Security Policy](SECURITY.md) | Security reviewers | Threat model, reporting, hardening |
 | [Changelog](CHANGELOG.md) | Everyone | Per-release changes |
 | [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, PR workflow |
 
 ## Status
 
-**Current stable release: v3.4.5 is published (2026-06-09 KST).** This release closes the Logic Pro 12.2 mixer verification work for Issues #10 and #11, ships the snapshot-level plugin readback surface for #12, and adds the guarded `insert_plugin` path for #13. Verification: `swift test --no-parallel` at `1197/1197`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, coverage `70.40%` region / `77.78%` line, strict live E2E `285/285`, targeted live Logic Pro 12.2 checks for #10-#13, and GitHub Release workflow `27183025739` with build plus macOS 14/15 install validation all passed. Published release metadata is `team_id:"ADHOC"` / `signing:"adhoc"` / `architectures:["x86_64","arm64"]`.
+**Current stable release: v3.4.6 is published (2026-06-09 KST).** This is the evidence/packaging alignment release after the v3.4.5 Logic Pro 12.2 mixer verification work for Issues #10-#13. Verification: `swift test --no-parallel` at `1197/1197`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, `ruby -c Formula/logic-pro-mcp.rb`, coverage `70.81%` region / `78.32%` line, strict live E2E `285/285` from the final current-main Logic 12.2 attestation, targeted live Logic Pro 12.2 checks for #10-#13, and GitHub Release workflow `27186085967` with build plus macOS 14/15 install validation all passed. Published release metadata is `team_id:"ADHOC"` / `signing:"adhoc"` / `architectures:["x86_64","arm64"]`.
 
 ### Active contracts (the things callers most care about)
 
@@ -174,6 +174,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 | Version | Date | Headline |
 |---------|------|----------|
+| **v3.4.6** | 2026-06-09 | Stable GitHub Release: evidence/packaging alignment after v3.4.5, version surfaces synced, final strict live E2E documented as complete, ADHOC universal artifacts, SHA256 metadata, and macOS 14/15 install validation |
 | **v3.4.5** | 2026-06-09 | Stable GitHub Release: Logic 12.2 mixer AX readback restored, echo-independent fader verification, mixer provenance, `plugins_source:"ax"` snapshots, guarded `insert_plugin`, ADHOC universal artifacts, SHA256 metadata, and deterministic/coverage/live/release-workflow evidence |
 | v3.4.5-rc8..rc12 | 2026-06-05/08 | Release-workflow and installer-validation hotfix series: bash 3.2, split universal build, candidate stdout, Team ID parser validation, macOS 14 validation floor |
 | **v3.4.5-rc7** | 2026-06-05 | Release-workflow hotfix reroll, universal binary selection now scans all executable candidates under `.build` and picks the first real fat Mach-O |
@@ -197,7 +198,7 @@ Per-release detail: [CHANGELOG.md](CHANGELOG.md).
 
 ### Distribution
 
-Stable production tags use the GitHub Actions release workflow; the published `RELEASE-METADATA.json` records the signing mode, Team ID, and architectures for the exact artifact. When Developer ID credentials are absent, stable and prerelease tags publish ADHOC artifacts with `team_id:"ADHOC"`. SHA256 pinning is mandatory for the fail-closed installer path. `v3.4.5` is published as a stable ADHOC release with build and macOS 14/15 install validation in workflow `27183025739`. See [SECURITY.md §Release types](SECURITY.md#release-types).
+Stable production tags use the GitHub Actions release workflow; the published `RELEASE-METADATA.json` records the signing mode, Team ID, and architectures for the exact artifact. When Developer ID credentials are absent, stable and prerelease tags publish ADHOC artifacts with `team_id:"ADHOC"`. SHA256 pinning is mandatory for the fail-closed installer path. `v3.4.6` is published as a stable ADHOC release with build and macOS 14/15 install validation in workflow `27186085967`. See [SECURITY.md §Release types](SECURITY.md#release-types).
 
 ### Testing
 

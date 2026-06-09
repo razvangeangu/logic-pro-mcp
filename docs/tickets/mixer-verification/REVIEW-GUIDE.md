@@ -1,6 +1,6 @@
-# 리뷰 가이드 — Issues #10–13 / v3.4.5 작업
+# 리뷰 가이드 — Issues #10–13 / v3.4.6 작업
 
-> 이 파일이 리뷰 진입점. 작업은 v3.4.5 stable GitHub Release 기준으로 published 완료, current main 테스트 1197 green. Developer ID 없이 ADHOC stable artifacts가 발행됐고, GitHub 이슈 #10~#13은 최종 targeted live E2E 통과 후 CLOSED로 검증됐다.
+> 이 파일이 리뷰 진입점. 작업은 v3.4.6 stable GitHub Release 기준으로 published 완료, current main 테스트 1197 green. Developer ID 없이 ADHOC stable artifacts가 발행됐고, GitHub 이슈 #10~#13은 최종 targeted/live E2E 통과 후 CLOSED로 검증됐다.
 
 ---
 
@@ -34,9 +34,10 @@ gh issue view 10 --repo MongLong0214/logic-pro-mcp --comments | tail -40
 | 4 | `docs/prd/PRD-mixer-verification-honesty.md` | PRD v0.2 (US/AC, §13 Phase2 리뷰 해소, Track 분해) |
 | 5 | `docs/tickets/mixer-verification/TICKETS.md` | 티켓별 TDD spec |
 | 6 | `docs/tickets/mixer-verification/ISSUE-REPLIES.md` | 이슈 답글 초안/현재 상태 답글 |
-| 7 | `CHANGELOG.md` `[3.4.5]` | 릴리스 노트 |
-| 8 | `docs/live-verify-v3.4.5.md` | 공개용 live verification 요약 |
-| 9 | `docs/releases/v3.4.5.md` | published artifact / SHA / workflow evidence |
+| 7 | `CHANGELOG.md` `[3.4.6]` | 최신 릴리스 노트 |
+| 8 | `docs/live-verify-v3.4.6.md` | 공개용 live/package verification 요약 |
+| 9 | `docs/releases/v3.4.6.md` | published artifact / SHA / workflow evidence |
+| 참고 | `docs/releases/v3.4.5.md`, `docs/live-verify-v3.4.5.md` | 기능 수정이 처음 stable로 나간 historical evidence |
 | 참고 | `~/.openclaw/workspace/reports/logic-pro-mcp-issues-10-13-prd-2026-06-08.md` | 트랙 A~G 상세 + 8-에이전트 정찰 결론 |
 
 ---
@@ -106,8 +107,8 @@ insert_plugin confirmed into occupied slot → channels_exhausted / slot_occupie
 ---
 
 ## 5) 보류분 + 다음 단계
-1. **Full destructive 200+ live E2E** — 별도 작업. 이번 targeted release gate에는 포함하지 않는다.
-2. **#12/#13 future work** — full per-parameter plugin value readback, arbitrary `set_plugin_param insert:N`.
+1. **#12/#13 future work** — full per-parameter plugin value readback, arbitrary `set_plugin_param insert:N`.
+2. **Multi-version Logic matrix** — 현재 live evidence는 Logic Pro 12.2 기준. 다른 Logic 버전 matrix는 별도 검증 범위.
 
 ## 되돌리기 (전부 무르고 싶으면)
 ```bash

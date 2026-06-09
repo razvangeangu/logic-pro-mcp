@@ -1,6 +1,6 @@
 # T2b — IME Mitigation Tier 3: `CGEventKeyboardSetUnicodeString` (Conditional)
 
-> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.6.md`; this file remains preserved implementation context.
 
 **Status**: Conditional — only if T0 S1 (English build + English IME) FAIL
 **Size**: M
