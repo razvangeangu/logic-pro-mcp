@@ -151,6 +151,42 @@ struct StockPluginValidatorTests {
         #expect(issues.contains { $0.code == "presets_missing_provenance" })
     }
 
+    @Test("manifested entries require a probed source path")
+    func manifestedRequiresSourcePath() {
+        let bad = StockPluginProvenance(
+            source: "local_logic_app",
+            method: "factory_plugin_settings_probe",
+            observedAt: "2026-06-10T00:00:00Z",
+            logicVersion: "12.2",
+            locale: "en_US",
+            sourcePath: nil,
+            inferenceReason: nil,
+            evidence: ["factory_plugin_settings_folder"]
+        )
+        let entries = [makeStockPluginEntry(id: "logic.stock.effect.gain", state: .manifested, provenance: bad)]
+
+        let issues = StockPluginCatalogValidator.validate(entries).issues
+        #expect(issues.contains { $0.code == "manifested_missing_source_path" })
+    }
+
+    @Test("unavailable entries require absence evidence")
+    func unavailableRequiresEvidence() {
+        let bad = StockPluginProvenance(
+            source: "live_logic",
+            method: "live_census_absence",
+            observedAt: "2026-06-10T00:00:00Z",
+            logicVersion: "12.2",
+            locale: "en_US",
+            sourcePath: nil,
+            inferenceReason: nil,
+            evidence: []
+        )
+        let entries = [makeStockPluginEntry(id: "logic.stock.effect.gain", state: .unavailable, provenance: bad)]
+
+        let issues = StockPluginCatalogValidator.validate(entries).issues
+        #expect(issues.contains { $0.code == "unavailable_missing_evidence" })
+    }
+
     @Test("verified parameters require explicit readback evidence")
     func verifiedParametersRequireReadback() {
         let provenance = StockPluginProvenance.verified(
@@ -292,6 +328,43 @@ struct StockPluginCatalogTests {
         #expect(manifested.provenance.sourcePath?.hasSuffix("Plug-In Settings/Limiter") == true)
         #expect(manifested.provenance.evidence.contains("factory_plugin_settings_folder"))
         #expect(manifested.provenance.evidence.contains("factory_preset_filenames"))
+    }
+
+    @Test("verified overlay keeps factory presets with merged provenance")
+    func verifiedOverlayKeepsFactoryPresets() throws {
+        let census = censusFixture(
+            verified: ["logic.stock.effect.gain"],
+            manifests: [
+                "logic.stock.effect.gain": StockPluginLocalManifest(
+                    sourcePath: "/Applications/Logic Pro.app/Contents/Resources/Plug-In Settings/Gain",
+                    presetNames: ["#default", "Convert To Mono"]
+                ),
+            ]
+        )
+        let snapshot = StockPluginCatalog.defaultSnapshot(census: census)
+
+        let gain = try #require(snapshot.entries.first { $0.id == "logic.stock.effect.gain" })
+        #expect(gain.availabilityState == .verified)
+        #expect(gain.knownPresets == ["#default", "Convert To Mono"])
+        #expect(gain.provenance.evidence.contains("plugin_identity_readback"))
+        #expect(gain.provenance.evidence.contains("factory_preset_filenames"))
+        #expect(snapshot.validation.isValid,
+                "verified entries carrying factory presets must validate: \(snapshot.validation.issues)")
+    }
+
+    @Test("contradictory census evidence fails loudly and never yields verified")
+    func censusConflictSurfaced() throws {
+        let census = censusFixture(
+            verified: ["logic.stock.effect.gain"],
+            mismatched: ["logic.stock.effect.gain"]
+        )
+        let snapshot = StockPluginCatalog.defaultSnapshot(census: census)
+
+        let gain = try #require(snapshot.entries.first { $0.id == "logic.stock.effect.gain" })
+        #expect(gain.availabilityState == .readbackMismatch,
+                "contradiction must resolve to the non-claiming state")
+        #expect(!snapshot.validation.isValid)
+        #expect(snapshot.validation.issues.contains { $0.code == "census_conflict" })
     }
 
     @Test("production snapshot never claims more than manifested")

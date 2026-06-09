@@ -57,9 +57,18 @@ Additional hardening: catalog expanded to 103 documented stock entries; validato
 
 97/103 entries are `manifested` from real per-plugin folder probes on this machine; the 6 remaining stay honestly `inferred` (their factory content lives outside the probed roots). `verified`, `observed`, `unavailable`, and `readback_mismatch` are absent from production output by design — they require injected live-census evidence.
 
-## Convergence Round 2→3
+## Convergence Rounds 2→4
 
-A cross-branch round-2 re-review (Codex gpt-5.5 xhigh on the sibling #15 branch) surfaced one routing edge shared by both branches: doubled/trailing-slash paths (`logic://stock-plugins//census`, `.../census/`) were silently normalized by segment splitting. Fixed with a canonical-path guard in `readStockPluginResource` plus fail-closed regression tests. `swift test --no-parallel` → 1225 tests passed after the fix.
+Round-2 re-review (Codex gpt-5.5 xhigh): all 7 round-1 findings **CLOSED**; verdict PASS-WITH-CONDITIONS with 4 new edges, all fixed in follow-up commits:
+
+| New finding | Fix |
+|---|---|
+| `verified`/`observed` overlays copied factory presets without preset evidence, so a real live census would fail validation (P2) | Preset evidence merged into overlay provenance (`factory_preset_filenames`); regression test `verifiedOverlayKeepsFactoryPresets` |
+| Contradictory census sets resolved silently by precedence — verified beat mismatch (P2) | `census_conflict` validation issues surface contradictions (verified∩mismatch, live∩unavailable); precedence reordered so contradiction never yields `verified`; regression test |
+| Validator accepted under-evidenced labels (P3) | `manifested` now requires probed `source_path`; `unavailable` requires absence evidence; new issue codes + tests |
+| Probe path concatenation not component-safe for names like "I/O" (P3) | Probe skips names containing `/` (no POSIX folder can match); shared routing edge (doubled/trailing slashes) fixed with canonical-path guard + tests |
+
+Round-4 gates: `swift test --no-parallel` → **1229 tests passed**; `swift build -c release` PASS; `git diff --check` PASS.
 
 ## Claim Boundary (unchanged)
 

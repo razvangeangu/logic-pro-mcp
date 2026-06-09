@@ -502,6 +502,20 @@ enum StockPluginCatalogValidator {
                     "\(state.rawValue) state requires source, method, and observed_at"
                 ))
             }
+            if state == .manifested, provenance.sourcePath?.isEmpty ?? true {
+                issues.append(issue(
+                    "manifested_missing_source_path",
+                    path,
+                    "manifested state requires the probed source_path"
+                ))
+            }
+            if state == .unavailable, provenance.evidence.isEmpty {
+                issues.append(issue(
+                    "unavailable_missing_evidence",
+                    path,
+                    "unavailable state requires absence evidence"
+                ))
+            }
         case .inferred:
             if provenance.inferenceReason?.isEmpty ?? true {
                 issues.append(issue(
@@ -533,7 +547,12 @@ enum StockPluginCatalog {
         let entries = seeds
             .map { buildEntry(seed: $0, census: census) }
             .sorted { $0.id < $1.id }
-        let validation = StockPluginCatalogValidator.validate(entries)
+        let conflicts = censusConflicts(census)
+        let entryValidation = StockPluginCatalogValidator.validate(entries)
+        let validation = StockPluginValidationResult(
+            isValid: entryValidation.isValid && conflicts.isEmpty,
+            issues: conflicts + entryValidation.issues
+        )
         return StockPluginCatalogSnapshot(
             schemaVersion: 1,
             generatedAt: census.observedAt,
@@ -544,6 +563,29 @@ enum StockPluginCatalog {
             validation: validation,
             entries: entries
         )
+    }
+
+    /// Contradictory live evidence for the same plugin must fail loudly, not
+    /// be resolved by precedence alone: a plugin cannot be both verified and
+    /// readback-mismatched, nor absent yet seen live.
+    static func censusConflicts(_ census: StockPluginCensus) -> [StockPluginValidationIssue] {
+        let contradictions: [(String, Set<String>, String, Set<String>)] = [
+            ("verified", census.verifiedPluginIDs, "readback_mismatch", census.readbackMismatchPluginIDs),
+            ("verified", census.verifiedPluginIDs, "unavailable", census.unavailablePluginIDs),
+            ("observed", census.observedPluginIDs, "unavailable", census.unavailablePluginIDs),
+            ("readback_mismatch", census.readbackMismatchPluginIDs, "unavailable", census.unavailablePluginIDs),
+        ]
+        var issues: [StockPluginValidationIssue] = []
+        for (leftName, left, rightName, right) in contradictions {
+            for id in left.intersection(right).sorted() {
+                issues.append(StockPluginValidationIssue(
+                    code: "census_conflict",
+                    path: "census.\(id)",
+                    message: "census claims both \(leftName) and \(rightName) for \(id)"
+                ))
+            }
+        }
+        return issues
     }
 
     static func entry(id: String, snapshot: StockPluginCatalogSnapshot = productionSnapshot) -> StockPluginCatalogEntry? {
@@ -645,6 +687,10 @@ enum StockPluginCatalog {
         let roots = factorySettingsRoots(appPath: appPath)
         var result: [String: StockPluginLocalManifest] = [:]
         for seed in seeds {
+            // POSIX paths cannot contain "/" in a single component, so names
+            // like "I/O" have no probeable folder; skip rather than letting
+            // the separator silently change the probed directory.
+            guard !seed.name.contains("/") else { continue }
             for root in roots {
                 let folder = root + "/" + seed.name
                 var isDirectory: ObjCBool = false
@@ -925,25 +971,14 @@ enum StockPluginCatalog {
         let presetNames: [String]
     }
 
-    /// Truth-state precedence: live evidence beats local metadata beats static
-    /// knowledge. Only census-injected sets can produce `verified`,
-    /// `observed`, `readback_mismatch`, or `unavailable`; the production probe
-    /// alone never claims more than `manifested`.
+    /// Truth-state precedence: contradiction beats confirmation, live evidence
+    /// beats local metadata, local metadata beats static knowledge. A
+    /// `readback_mismatch` therefore wins over `verified` — contradictory live
+    /// evidence must never be silently upgraded (the conflict is also surfaced
+    /// via `censusConflicts`). Only census-injected sets can produce
+    /// `verified`, `observed`, `readback_mismatch`, or `unavailable`; the
+    /// production probe alone never claims more than `manifested`.
     private static func resolve(seedID: String, census: StockPluginCensus) -> StateResolution {
-        if census.verifiedPluginIDs.contains(seedID) {
-            return StateResolution(
-                state: .verified,
-                provenance: .verified(
-                    source: "live_logic",
-                    method: "ax_insert_readback",
-                    observedAt: census.observedAt,
-                    logicVersion: census.logicVersion,
-                    locale: census.locale,
-                    evidence: ["plugin_identity_readback"]
-                ),
-                presetNames: census.localManifests[seedID]?.presetNames ?? []
-            )
-        }
         if census.readbackMismatchPluginIDs.contains(seedID) {
             return StateResolution(
                 state: .readbackMismatch,
@@ -956,7 +991,27 @@ enum StockPluginCatalog {
                 presetNames: []
             )
         }
+        if census.verifiedPluginIDs.contains(seedID) {
+            let presets = census.localManifests[seedID]?.presetNames ?? []
+            var evidence = ["plugin_identity_readback"]
+            if !presets.isEmpty { evidence.append("factory_preset_filenames") }
+            return StateResolution(
+                state: .verified,
+                provenance: .verified(
+                    source: "live_logic",
+                    method: "ax_insert_readback",
+                    observedAt: census.observedAt,
+                    logicVersion: census.logicVersion,
+                    locale: census.locale,
+                    evidence: evidence
+                ),
+                presetNames: presets
+            )
+        }
         if census.observedPluginIDs.contains(seedID) {
+            let presets = census.localManifests[seedID]?.presetNames ?? []
+            var evidence = ["menu_item_observed"]
+            if !presets.isEmpty { evidence.append("factory_preset_filenames") }
             return StateResolution(
                 state: .observed,
                 provenance: .observed(
@@ -964,9 +1019,9 @@ enum StockPluginCatalog {
                     observedAt: census.observedAt,
                     logicVersion: census.logicVersion,
                     locale: census.locale,
-                    evidence: ["menu_item_observed"]
+                    evidence: evidence
                 ),
-                presetNames: census.localManifests[seedID]?.presetNames ?? []
+                presetNames: presets
             )
         }
         if census.unavailablePluginIDs.contains(seedID) {
