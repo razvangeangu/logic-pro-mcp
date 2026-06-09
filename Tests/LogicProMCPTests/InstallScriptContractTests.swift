@@ -91,9 +91,11 @@ private func scriptContents(_ relativePath: String) throws -> String {
 
     #expect(workflow.contains("set -euo pipefail"))
     #expect(workflow.contains("PROFRAW_DIR=\"$RUNNER_TEMP/logicpromcp-profraw\""))
-    #expect(workflow.contains("export LLVM_PROFILE_FILE=\"$PROFRAW_DIR/%p.profraw\""))
+    #expect(workflow.contains("export LLVM_PROFILE_FILE=\"$PROFRAW_DIR/%m-%p.profraw\""))
     #expect(workflow.contains("COVERAGE_LOG=\"$RUNNER_TEMP/logicpromcp-coverage.log\""))
-    #expect(workflow.contains("grep -q \"LLVM Profile Error\" \"$COVERAGE_LOG\""))
+    #expect(workflow.contains("PROFILE_WARNING_COUNT=$(grep -c \"LLVM Profile Error\" \"$COVERAGE_LOG\" || true)"))
+    #expect(workflow.contains("continuing to profdata/report validation"))
+    #expect(workflow.contains("LLVM profile warnings: ${PROFILE_WARNING_COUNT:-0}."))
     #expect(workflow.contains("MIN_REGION=70"))
     #expect(workflow.contains("MIN_LINE=77"))
     #expect(workflow.contains("COVERAGE_TARGET=90"))
@@ -108,13 +110,13 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(python.contains("def coverage_environment():"))
     #expect(python.contains("LOGIC_PRO_MCP_PROFILE_DIR"))
     #expect(python.contains("LLVM_PROFILE_FILE"))
-    #expect(python.contains("%p.profraw"))
+    #expect(python.contains("%m-%p.profraw"))
     #expect(python.contains("env=coverage_environment()"))
     #expect(python.contains("export LLVM_PROFILE_FILE="))
 
     #expect(shell.contains("LOGIC_PRO_MCP_PROFILE_DIR"))
     #expect(shell.contains("LLVM_PROFILE_FILE"))
-    #expect(shell.contains("%p.profraw"))
+    #expect(shell.contains("%m-%p.profraw"))
     #expect(shell.contains("export LLVM_PROFILE_FILE"))
 }
 

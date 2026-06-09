@@ -68,7 +68,7 @@ Hyphenated tags (`vX.Y.Z-rcN`, beta tags, etc.) must publish as GitHub prereleas
 
 ### Coverage gate
 
-CI hard-gates source coverage at region >=70% and line >=77%. The project target is line >=90%, but that is reported as a target until dedicated coverage-uplift work raises the measured baseline. The coverage job is fail-closed: `swift test --enable-code-coverage --no-parallel` must exit successfully and the job fails if LLVM emits a profile runtime error such as `default.profraw` write failure.
+CI hard-gates source coverage at region >=70% and line >=77%. The project target is line >=90%, but that is reported as a target until dedicated coverage-uplift work raises the measured baseline. The coverage job is fail-closed on the actual artifacts: `swift test --enable-code-coverage --no-parallel` must exit successfully, `default.profdata` must exist, `llvm-cov report` must parse a `TOTAL` line, and the thresholds must pass. GitHub macOS runner `LLVM Profile Error` warnings are reported, but do not fail the job by themselves when a valid profdata/report is produced.
 
 ### Post-tag steps (both release modes)
 

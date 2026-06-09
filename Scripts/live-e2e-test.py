@@ -32,7 +32,7 @@ def coverage_environment():
         )
         os.makedirs(profile_dir, exist_ok=True)
         env["LOGIC_PRO_MCP_PROFILE_DIR"] = profile_dir
-        env["LLVM_PROFILE_FILE"] = os.path.join(profile_dir, "%p.profraw")
+        env["LLVM_PROFILE_FILE"] = os.path.join(profile_dir, "%m-%p.profraw")
     return env
 
 

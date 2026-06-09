@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
-- **CI coverage gate tightened** — coverage now runs fail-closed with `set -euo pipefail`, fails if LLVM emits `LLVM Profile Error`, writes fallback profile output under a writable temp path, and raises the hard gate to region >=70% / line >=77%. Line >=90% is tracked as the explicit target but remains advisory until coverage-uplift work raises the actual baseline.
+- **CI coverage gate tightened** — coverage now runs fail-closed with `set -euo pipefail`, writes fallback profile output under a writable temp path, requires `swift test --enable-code-coverage`, profdata lookup, `llvm-cov report`, and threshold parsing to succeed, and raises the hard gate to region >=70% / line >=77%. Recoverable GitHub macOS runner `LLVM Profile Error` warnings are surfaced in annotations/summary but the gate is the generated profdata/report plus thresholds. Line >=90% is tracked as the explicit target but remains advisory until coverage-uplift work raises the actual baseline.
 - **Release workflow prerelease honesty** — hyphenated release tags are now published as GitHub prereleases, so RC tags do not masquerade as stable/latest releases.
 - **Live E2E coverage profile hygiene** — Python/tmux live E2E launches now set `LLVM_PROFILE_FILE` to a writable temp profile path when the binary is coverage-instrumented.
 - **Scripts cleanup** — removed one-off local/spike harnesses from `Scripts/` and kept only maintained installer, release, live E2E, plist/template, and shipped support assets.
@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 - `swift test --no-parallel` -> 1197 / 1197 PASS locally.
 - `swift build -c release` -> PASS locally.
-- `swift test --enable-code-coverage --no-parallel` -> 1197 / 1197 PASS locally; TOTAL coverage 70.79% region / 78.30% line against the tightened region>=70 / line>=77 gate.
+- `swift test --enable-code-coverage --no-parallel` -> 1197 / 1197 PASS locally; TOTAL coverage 70.40% region / 77.78% line against the tightened region>=70 / line>=77 gate.
 
 ## [3.4.5] — 2026-06-09
 
