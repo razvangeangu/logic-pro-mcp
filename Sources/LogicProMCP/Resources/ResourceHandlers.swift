@@ -197,6 +197,12 @@ extension ResourceHandlers {
             throw MCPError.invalidParams("Malformed stock plugin resource URI: \(uri)")
         }
         let segments = components.path.split(separator: "/").map(String.init)
+        // Reject doubled or trailing slashes ("//census", "census/") — the
+        // canonical reconstruction must reproduce the raw path exactly.
+        let canonicalPath = segments.isEmpty ? "" : "/" + segments.joined(separator: "/")
+        guard components.path == canonicalPath else {
+            throw MCPError.invalidParams("Malformed stock plugin resource path: \(components.path)")
+        }
         let queryItems = components.queryItems ?? []
         let unknownParams = queryItems.map(\.name).filter { $0 != "query" }
 

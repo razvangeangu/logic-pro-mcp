@@ -57,6 +57,10 @@ Additional hardening: catalog expanded to 103 documented stock entries; validato
 
 97/103 entries are `manifested` from real per-plugin folder probes on this machine; the 6 remaining stay honestly `inferred` (their factory content lives outside the probed roots). `verified`, `observed`, `unavailable`, and `readback_mismatch` are absent from production output by design — they require injected live-census evidence.
 
+## Convergence Round 2→3
+
+A cross-branch round-2 re-review (Codex gpt-5.5 xhigh on the sibling #15 branch) surfaced one routing edge shared by both branches: doubled/trailing-slash paths (`logic://stock-plugins//census`, `.../census/`) were silently normalized by segment splitting. Fixed with a canonical-path guard in `readStockPluginResource` plus fail-closed regression tests. `swift test --no-parallel` → 1225 tests passed after the fix.
+
 ## Claim Boundary (unchanged)
 
 Read-only discovery only. No write-side broadening. `verified` labels remain provenance-gated; parameter verification still requires explicit readback evidence. Live insert/readback evidence for the guarded Gain path remains `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`.
