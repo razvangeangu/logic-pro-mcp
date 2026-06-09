@@ -66,6 +66,7 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(workflow.contains("mode=notarized"))
     #expect(workflow.contains("mode=adhoc"))
     #expect(workflow.contains("Stable ADHOC releases are not permitted"))
+    #expect(workflow.contains("Do not push stable tags manually"))
     #expect(!workflow.contains("ALLOW_ADHOC_STABLE"))
     #expect(workflow.contains("Validate notarization secrets"))
     #expect(workflow.contains("is required for a notarized release build"))
@@ -88,6 +89,27 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(script.contains("RELEASE_FLAGS=\"--prerelease\""))
     #expect(script.contains("could not verify remote tag availability"))
     #expect(script.contains("Refusing to continue because publishing could race"))
+}
+
+@Test func testStableReleaseScriptPreflightsNotarizationBeforeTagPush() throws {
+    let script = try scriptContents("Scripts/release-stable.sh")
+
+    #expect(script.contains("stable release preflight"))
+    #expect(script.contains("MACOS_CERT_BASE64"))
+    #expect(script.contains("MACOS_CERT_PASSWORD"))
+    #expect(script.contains("MACOS_SIGNING_IDENTITY"))
+    #expect(script.contains("MACOS_KEYCHAIN_PASSWORD"))
+    #expect(script.contains("APPLE_NOTARY_APPLE_ID"))
+    #expect(script.contains("APPLE_NOTARY_TEAM_ID"))
+    #expect(script.contains("APPLE_NOTARY_APP_PASSWORD"))
+    #expect(script.contains("gh secret list --repo \"$REPO\" --app actions"))
+    #expect(script.contains("Stable tag '$VERSION' was NOT created."))
+    #expect(script.contains("refs/tags/$VERSION"))
+    #expect(script.contains("gh release view \"$VERSION\""))
+    #expect(script.contains("python3 -m py_compile Scripts/live-e2e-test.py"))
+    #expect(script.contains("swift test --no-parallel"))
+    #expect(script.contains("swift build -c release"))
+    #expect(script.contains("git push origin \"$VERSION\""))
 }
 
 @Test func testUninstallScriptRemovesClaudeRegistrationAndKeepsManualScripterReminder() throws {

@@ -34,22 +34,13 @@ Revoke whenever the preset is removed, the Scripter instance is removed, or the 
 
 ## Release Process
 
-### Adhoc release (no Apple Developer Program)
+### ADHOC prerelease (no Apple Developer Program)
 
 ```bash
-swift build -c release
-codesign --force --sign - .build/release/LogicProMCP
-VERSION=v3.0.2-rc1
-shasum -a 256 .build/release/LogicProMCP | awk '{print $1"  LogicProMCP"}' > SHA256SUMS.txt
-echo '{"version":"'$VERSION'","team_id":"ADHOC","signing":"adhoc","architectures":["arm64"]}' > RELEASE-METADATA.json
-
-gh release create $VERSION \
-  .build/release/LogicProMCP \
-  SHA256SUMS.txt \
-  RELEASE-METADATA.json
+Scripts/release.sh v3.4.6-rc1
 ```
 
-The installer recognises `team_id: ADHOC` and skips Gatekeeper assessment while keeping SHA256 + codesign verification.
+`Scripts/release.sh` is prerelease-only. It refuses stable tags (`vX.Y.Z`) because a stable ADHOC artifact is indistinguishable from a production release to downstream installers. The installer recognises `team_id: ADHOC` and skips Gatekeeper assessment while keeping SHA256 + codesign verification.
 
 ### Notarized release (requires Apple Developer Program, $99/year)
 
@@ -66,11 +57,12 @@ Preconditions — GitHub Actions secrets configured:
 Release:
 
 ```bash
-git tag v3.0.2
-git push origin v3.0.2
+Scripts/release-stable.sh v3.4.6
 ```
 
-`.github/workflows/release.yml` builds a true universal binary, signs/notarizes it, publishes both `LogicProMCP-macOS-universal.tar.gz` and the backward-compatible `LogicProMCP-macOS-arm64.tar.gz` alias, and records the actual architecture list in `RELEASE-METADATA.json`. The downstream install validation job runs on both Apple Silicon and Intel runners so the release asset path is exercised on each architecture.
+Do not push stable tags manually. `Scripts/release-stable.sh` verifies the required GitHub Actions secret names, a clean `main` branch matching `origin/main`, absent local/remote tags, absent GitHub Release, and local deterministic gates before it creates and pushes the stable tag. This prevents the stable workflow from being triggered before notarization credentials exist.
+
+`.github/workflows/release.yml` builds a true universal binary, signs/notarizes it, publishes both `LogicProMCP-macOS-universal.tar.gz` and the backward-compatible `LogicProMCP-macOS-arm64.tar.gz` alias, and records the actual architecture list in `RELEASE-METADATA.json`. The downstream install validation job runs on both Apple Silicon and Intel runners so the release asset path is exercised on each architecture. If a stable tag is pushed without the required secrets, the workflow fails closed before artifact publication; rerun it only after the secrets are configured.
 
 ### Post-tag steps (both release modes)
 

@@ -69,6 +69,7 @@ jobs:
           elif [ "$tag_kind" = "stable" ]; then
             echo "::error::Stable tag '$tag' requires notarization secrets."
             echo "::error::Configure MACOS_CERT_BASE64 and the related notarization secrets."
+            echo "::error::Do not push stable tags manually; use Scripts/release-stable.sh $tag after the required secrets exist."
             echo "::error::Stable ADHOC releases are not permitted."
             exit 1
           else
