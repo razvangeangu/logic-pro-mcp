@@ -19,7 +19,7 @@ The implemented #14 surface is read-only catalog intelligence. It does not broad
 | Full test suite | PASS | `swift test --no-parallel` -> 1214 tests passed. |
 | Release build | PASS | `swift build -c release` -> build complete. |
 | Python E2E syntax | PASS | `PYTHONPYCACHEPREFIX=/private/tmp/logic-pro-mcp-pycache python3 -m py_compile Scripts/live-e2e-test.py` exit 0. |
-| Coverage gate | PASS | `swift test --enable-code-coverage --no-parallel` -> 1220 tests passed; TOTAL region 73.52%, line 81.45% against CI hard gate region >=70%, line >=78%. |
+| Coverage gate | Not run on split branch | CI coverage runs on PR; local focused/full tests and release build passed before PR. |
 
 ## Release-Binary Read-Only Smoke
 
