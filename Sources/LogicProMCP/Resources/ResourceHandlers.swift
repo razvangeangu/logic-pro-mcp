@@ -103,20 +103,8 @@ extension ResourceHandlers {
 
         await cache.recordToolAccess()
 
-        if uri == "logic://stock-plugins" {
-            return readStockPlugins(uri: uri)
-        }
-        if uri == "logic://stock-plugins/census" {
-            return readStockPluginCensus(uri: uri)
-        }
-        if uri == "logic://stock-plugins/capabilities" {
-            return readStockPluginCapabilities(uri: uri)
-        }
-        if uri.hasPrefix("logic://stock-plugins/search") {
-            return readStockPluginSearch(uri: uri)
-        }
-        if uri.hasPrefix("logic://stock-plugins/") {
-            return try readStockPluginDetail(uri: uri)
+        if uri == "logic://stock-plugins" || uri.hasPrefix("logic://stock-plugins/") || uri.hasPrefix("logic://stock-plugins?") {
+            return try readStockPluginResource(uri: uri)
         }
 
         // hasDocument gate removed (post-hardening): the StatePoller's view
@@ -198,14 +186,52 @@ extension ResourceHandlers {
         )
     }
 
+    /// Stock plugin discovery routing. Parsed with `URLComponents` so path and
+    /// query are matched exactly: unknown subpaths, nested segments, and stray
+    /// query parameters fail closed instead of silently degrading to a search
+    /// or a detail lookup.
+    private static func readStockPluginResource(uri: String) throws -> ReadResource.Result {
+        guard let components = URLComponents(string: uri),
+              components.scheme == "logic",
+              components.host == "stock-plugins" else {
+            throw MCPError.invalidParams("Malformed stock plugin resource URI: \(uri)")
+        }
+        let segments = components.path.split(separator: "/").map(String.init)
+        let queryItems = components.queryItems ?? []
+        let unknownParams = queryItems.map(\.name).filter { $0 != "query" }
+
+        if segments.isEmpty {
+            guard queryItems.isEmpty else {
+                throw MCPError.invalidParams("logic://stock-plugins does not accept query parameters")
+            }
+            return readStockPlugins(uri: uri)
+        }
+        guard segments.count == 1 else {
+            throw MCPError.invalidParams("Unknown stock plugin resource path: \(components.path)")
+        }
+        let segment = segments[0]
+
+        if segment == "search" {
+            guard unknownParams.isEmpty else {
+                throw MCPError.invalidParams("Unsupported search parameters: \(unknownParams.joined(separator: ", "))")
+            }
+            return readStockPluginSearch(uri: uri, query: queryItemValue(from: uri, name: "query") ?? "")
+        }
+        guard queryItems.isEmpty else {
+            throw MCPError.invalidParams("logic://stock-plugins/\(segment) does not accept query parameters")
+        }
+        if segment == "census" { return readStockPluginCensus(uri: uri) }
+        if segment == "capabilities" { return readStockPluginCapabilities(uri: uri) }
+        return try readStockPluginDetail(uri: uri, id: segment)
+    }
+
     private static func readStockPlugins(uri: String) -> ReadResource.Result {
-        let json = encodeJSON(StockPluginCatalog.defaultSnapshot(), compact: true)
+        let json = encodeJSON(StockPluginCatalog.productionSnapshot, compact: true)
         return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
     }
 
-    private static func readStockPluginDetail(uri: String) throws -> ReadResource.Result {
-        let id = String(uri.dropFirst("logic://stock-plugins/".count)).removingPercentEncoding ?? ""
-        let snapshot = StockPluginCatalog.defaultSnapshot()
+    private static func readStockPluginDetail(uri: String, id: String) throws -> ReadResource.Result {
+        let snapshot = StockPluginCatalog.productionSnapshot
         guard let entry = StockPluginCatalog.entry(id: id, snapshot: snapshot) else {
             throw MCPError.invalidParams("Unknown stock plugin id: \(id)")
         }
@@ -220,9 +246,8 @@ extension ResourceHandlers {
         return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
     }
 
-    private static func readStockPluginSearch(uri: String) -> ReadResource.Result {
-        let snapshot = StockPluginCatalog.defaultSnapshot()
-        let query = queryValue(from: uri) ?? ""
+    private static func readStockPluginSearch(uri: String, query: String) -> ReadResource.Result {
+        let snapshot = StockPluginCatalog.productionSnapshot
         let entries = StockPluginCatalog.search(query: query, snapshot: snapshot).map(jsonObject)
         let json = encodeJSONObject([
             "schema_version": snapshot.schemaVersion,
@@ -238,7 +263,7 @@ extension ResourceHandlers {
     }
 
     private static func readStockPluginCensus(uri: String) -> ReadResource.Result {
-        let snapshot = StockPluginCatalog.defaultSnapshot()
+        let snapshot = StockPluginCatalog.productionSnapshot
         let counts = Dictionary(grouping: snapshot.entries, by: { $0.availabilityState.rawValue })
             .mapValues(\.count)
         let json = encodeJSONObject([
@@ -257,28 +282,6 @@ extension ResourceHandlers {
     private static func readStockPluginCapabilities(uri: String) -> ReadResource.Result {
         let json = encodeJSONObject(StockPluginCatalog.capabilities())
         return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
-    }
-
-    private static func queryValue(from uri: String) -> String? {
-        URLComponents(string: uri)?
-            .queryItems?
-            .first { $0.name == "query" }?
-            .value?
-            .removingPercentEncoding
-    }
-
-    private static func jsonObject<T: Encodable>(_ value: T) -> Any {
-        let text = encodeJSON(value, compact: true)
-        return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) ?? [:]
-    }
-
-    private static func encodeJSONObject(_ object: Any) -> String {
-        guard JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else {
-            return #"{"error":"resource JSON encoding failed"}"#
-        }
-        return text
     }
 
     /// v3.1.8 (Issue #7) — tier-merged track list read.

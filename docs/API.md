@@ -58,20 +58,24 @@ Prefer resources over repeated tool calls — they are cheap and safe to poll at
 
 ### Stock Plugin Intelligence
 
-`logic://stock-plugins` is read-only. It does not insert plugins or broaden existing write gates. Entries include `known_presets`; this is intentionally an empty array unless preset names have provenance.
+`logic://stock-plugins` is read-only. It does not insert plugins or broaden existing write gates. The catalog covers the documented Logic stock set (effects, instruments, MIDI FX) under stable ID namespaces `logic.stock.effect.*`, `logic.stock.instrument.*`, and `logic.stock.midi_fx.*`.
 
 Each entry has an `availability_state`:
 
 | State | Trust contract |
 |-------|----------------|
-| `verified` | Current-machine evidence exists with source, method, timestamp, and evidence. |
-| `observed` | Seen locally/live, but not fully validated. |
-| `manifested` | Logic app metadata is present, but plugin identity was not live-read back. |
-| `inferred` | Static Logic stock knowledge only; clients must not claim local verification. |
-| `unavailable` | Checked/declared absent from this supported catalog path. |
-| `readback_mismatch` | Expected and observed plugin/parameter identity differed. |
+| `verified` | Live insert/readback evidence on this machine, with source, method, timestamp, and evidence. |
+| `observed` | Seen in a live Logic session (e.g. menu observation) without full readback. |
+| `manifested` | Per-plugin factory metadata was found in the local Logic installation (a `Plug-In Settings/<Display Name>` folder), with the probed `source_path` recorded in provenance. |
+| `inferred` | Documented stock identity only; clients must verify against the live menu before relying on it. |
+| `unavailable` | A live census recorded this plugin as absent. Never produced by static knowledge alone. |
+| `readback_mismatch` | Live readback returned a different identity than expected. |
 
-Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced.
+The production census can only produce `inferred` and `manifested` (see `production_reachable_states` in `logic://stock-plugins/capabilities`); `verified`, `observed`, `unavailable`, and `readback_mismatch` require injected live-census evidence and are never fabricated. Absence of a factory settings folder is deliberately **not** treated as evidence of absence.
+
+`known_presets` stays empty unless preset names have provenance. For `manifested` entries it lists factory preset filenames harvested from the probed settings folder (capped at `preset_name_cap`, currently 12; the full set remains on disk at the provenance `source_path`).
+
+Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Insert paths are menu hints unless their own state says otherwise. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced. Entries with `safe_write_capabilities: "insert_only"` (Gain, Compressor, Channel EQ) match the `logic_mixer insert_plugin` allowlist; everything else is discovery-only.
 
 ---
 
