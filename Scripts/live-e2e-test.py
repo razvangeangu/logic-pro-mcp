@@ -558,10 +558,19 @@ def main():
             return json.loads(resource_text(r)).get("data", {}).get("state", {}).get("isCycleEnabled")
         except: return None
 
+    def wait_for_cycle_change(client, before, timeout=5.0):
+        deadline = time.time() + timeout
+        last = None
+        while time.time() < deadline:
+            last = safe_get_cycle(client)
+            if before is not None and last is not None and before != last:
+                return last
+            time.sleep(0.2)
+        return last
+
     before = safe_get_cycle(client)
     call_tool(client, "logic_transport", "toggle_cycle")
-    time.sleep(0.3)
-    after = safe_get_cycle(client)
+    after = wait_for_cycle_change(client, before)
     if before is not None and after is not None:
         T("cycle roundtrip: state changed after toggle", "ok", lambda _: before != after)
     else:

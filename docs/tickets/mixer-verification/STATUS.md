@@ -2,9 +2,9 @@
 
 **PRD**: docs/prd/PRD-mixer-verification-honesty.md (v0.2 Approved)
 **Tickets**: docs/tickets/mixer-verification/TICKETS.md
-**Size**: XL · **Current Phase**: 9 (v3.4.5 source/tag pushed; ADHOC stable publication path restored)
+**Size**: XL · **Current Phase**: 11 (v3.4.5 stable release published; issues #10-#13 closed and verified)
 **Baseline**: 1197 tests green. Stack: Swift 6.2/SPM, `swift test --no-parallel`, coverage hard gate region>=70/line>=77; line>=90 tracked target.
-**Authority**: Isaac approved push/release/docs/issue replies on 2026-06-09. Full destructive 200+ live E2E remains separate.
+**Authority**: Isaac approved push/release/docs/issue replies and conditional issue close on 2026-06-09. Full destructive 200+ live E2E remains separate.
 
 ## Tickets
 
@@ -21,13 +21,13 @@
 | D1 | EndToEndTests stale 제거 | T1 | **Done** | green(1174) | P1-1. 10 stale cmd → isError/structured assertion |
 | D2 | live-e2e-test.py stale 제거 | T1 | **Done** | py_compile OK | P1-4. tool-read→resource read 전량. live-run=operator |
 | C2 | docs accuracy | T1 | **Done** | - | G6. TROUBLESHOOTING channels_exhausted/#10/#11/#12/MCU_TRACE + API.md mixer/strip/set_plugin_param/data_source |
-| C1 | version finalize 3.4.5 (7면) | T1 | **Source/tag done; artifact pending** | green | ServerConfig/manifest/Formula version/install.sh/README/CHANGELOG/ResourceProvider/test banners synced to 3.4.5. Current main restores ADHOC stable publication when Developer ID credentials are absent; Formula sha256 is filled after published artifact. |
+| C1 | version finalize 3.4.5 (7면) | T1 | **Released** | green | ServerConfig/manifest/Formula version+sha256/install.sh/README/CHANGELOG/ResourceProvider/test banners synced to 3.4.5. Stable GitHub Release `v3.4.5` published as ADHOC with SHA256 metadata and macOS 14/15 install validation. |
 | E1 | T0 라이브 스파이크 | gate | **Done** | SPIKE-REPORT.md | 초기 스파이크에서 #10 echo_timeout/#11 stale/getMixerArea broken 확인 → 2026-06-09 후속 AX dump로 matcher 확정 |
 | F1/F2/F3 | AX 독립 되읽기 | T2 | **Done** | green(1192)+live | Logic 12.2 mixer AX matcher 복구, AX fader taper 보정, echo timeout 후 `verify_source:"ax_readback"`, `plugins_source:"ax"` |
 | G1/G2/G3 | opt-in insert_plugin | T3 | **Done** | green(1192)+live | L2 `confirmed:true`, Gain/Compressor/Channel EQ allowlist, occupied-slot fail-closed, AX slot readback 검증 |
 
 ## 구현 순서 (T1)
-A1 → H1 → H2 → A4 → B1 → B2 → D1 → D2 → C2 → (E1 스파이크) → F* → G* → C1(버전) → 최종리뷰 → E2E → 이슈답글.
+A1 → H1 → H2 → A4 → B1 → B2 → D1 → D2 → C2 → (E1 스파이크) → F* → G* → C1(버전) → 최종리뷰 → E2E → 이슈답글/닫기.
 > 각 티켓 Red→Green→Refactor + Incremental Review(슬라이딩 윈도우) + 전체 테스트.
 
 ## Review History
@@ -41,13 +41,16 @@ A1 → H1 → H2 → A4 → B1 → B2 → D1 → D2 → C2 → (E1 스파이크)
 | 7 (후속 구현) | 1 | local TDD + live Logic 12.2 targeted E2E | 0 | 0 | 0 | #10/#11/#12/#13 implemented. 1192 green + release build + targeted live E2E pass. |
 | 8 (hard verification) | 1 | local deterministic + coverage + live Logic 12.2 targeted E2E | 0 | 0 | 0 | `VERIFICATION-2026-06-09.md`. Initial full-suite flake in `testProductionMCUTransportReceiveParsesFeedbackEvents` fixed with bounded receive wait; then 1192 green, release build pass, coverage 70.40% region / 77.78% line, targeted #10-#13 live checks pass. |
 | 9 (CI/release guard) | 1 | local TDD + CI coverage rehearsal | 0 | 0 | 0 | Coverage gate uses writable temp profile fallback, reports LLVM profile runtime warnings, fail-closes on profdata/report parsing plus region>=70/line>=77 with line>=90 target, RC tags publish as prerelease, Scripts one-off harnesses removed. 1197 green, coverage 70.40% region / 77.78% line. |
+| 10 (release publication) | 1 | GitHub Release workflow + metadata/SHA verification | 0 | 0 | 0 | `v3.4.5` published. Release run `27183025739` success; jobs `build`, `validate-install (macos-15)`, `validate-install (macos-14)` passed; assets 5 uploaded; `RELEASE-METADATA.json` = ADHOC; Formula sha256 synced to published universal tarball. |
+| 11 (issue closure) | 1 | final targeted live E2E + GitHub state verification | 0 | 0 | 0 | #10-#13 closed as completed after final verification; `gh issue list --state open` returned `[]`; each issue view returned `closed:true`, `state:"CLOSED"`. |
+| 12 (full live attestation) | 1 | strict live E2E + fresh targeted #10-#13 | 0 | 0 | 0 | Fixed live harness cycle-cache timing with bounded wait. `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh` -> 285 passed, 0 skipped. Fresh targeted #10/#11/#12/#13 re-run passed with slot 6 insert/occupied guard. |
 
-## 최종 상태 (2026-06-09, 후속 구현 검증)
+## 최종 상태 (2026-06-09, release/issue close verified)
 - **#10 fixed**: MCU echo timeout 후 AX fader readback으로 State A 반환. Live: `verify_source:"ax_readback"`, `observed_ax:0.33777777777777773` for requested `0.36` (tolerance 0.04), `observed_mcu:null`.
 - **#11 fixed**: `logic://mixer`가 Logic 12.2 mixer AX poll로 갱신됨. Live post-write readback: `data_source:"ax_poll"`, track 0 `volume:0.33777777777777773`.
-- **#12 fixed at snapshot level**: channel strip `plugins[]` is populated from AX with `plugins_source:"ax"` and bypass/name fields. Live snapshot: `Gain`, `Gain`, `Drum Machine Designer`. Full per-parameter value readback remains future work.
-- **#13 fixed for opt-in insert**: `insert_plugin` is exposed only with L2 `confirmed:true`, stock allowlist, occupied-slot refusal, and AX slot readback. Live: Gain insert returned `verified:true`, `verify_source:"ax_plugin_slot"`; re-run on occupied slot failed closed with `slot_occupied`. Arbitrary `set_plugin_param insert:N` remains future work.
-- **Verification**: focused TDD RED/GREEN for fader taper edge; `swift test --no-parallel` → **1192 tests passed**; `swift build -c release` → passed; `swift test --enable-code-coverage --no-parallel` → **1192 tests passed**; coverage TOTAL **70.40% region / 77.78% line**; targeted live E2E against Logic Pro 12.2 release binary → all issue checks passed. Full evidence: `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`.
-- **Release boundary**: `main` and tag `v3.4.5` are pushed. The stable release workflow run `27178878939` was blocked before artifact publication by the previous notarization-only policy. Current main restores ADHOC stable publication when Developer ID credentials are absent. Published SHA256/Formula lockstep is verified only after a new successful artifact publication.
-- **Issue comments posted**: #10 https://github.com/MongLong0214/logic-pro-mcp/issues/10#issuecomment-4655332572 · #11 https://github.com/MongLong0214/logic-pro-mcp/issues/11#issuecomment-4655332671 · #12 https://github.com/MongLong0214/logic-pro-mcp/issues/12#issuecomment-4655332753 · #13 https://github.com/MongLong0214/logic-pro-mcp/issues/13#issuecomment-4655332836.
+- **#12 fixed at snapshot level**: channel strip `plugins[]` is populated from AX with `plugins_source:"ax"` and bypass/name fields. Fresh live snapshot: `Gain`, `Gain`, `Gain`, `Gain`, `Gain`, `Drum Machine Designer`. Full per-parameter value readback remains future work.
+- **#13 fixed for opt-in insert**: `insert_plugin` is exposed only with L2 `confirmed:true`, stock allowlist, occupied-slot refusal, and AX slot readback. Fresh live: slot 6 Gain insert returned `verified:true`, `verify_source:"ax_plugin_slot"`; re-run on occupied slot failed closed with `slot_occupied`. Arbitrary `set_plugin_param insert:N` remains future work.
+- **Verification**: focused TDD RED/GREEN for fader taper edge; `swift test --no-parallel` -> **1197 tests passed**; `swift build -c release` -> passed; `swift test --enable-code-coverage --no-parallel` -> **1197 tests passed**; coverage TOTAL **70.40% region / 77.78% line**; strict live E2E -> **285 passed, 0 skipped, 0 failed**; targeted live E2E against Logic Pro 12.2 release binary -> all issue checks passed. Full evidence: `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`.
+- **Release boundary**: `main` and tag `v3.4.5` are pushed at `22c7d39`. GitHub Release `v3.4.5` is published as stable (`draft=false`, `prerelease=false`, latest) with 5 assets. Release workflow run `27183025739` passed build plus macOS 14/15 install validation. Historical failed run `27178878939` is superseded.
+- **Issue close verified**: #10 https://github.com/MongLong0214/logic-pro-mcp/issues/10#issuecomment-4656122876 · #11 https://github.com/MongLong0214/logic-pro-mcp/issues/11#issuecomment-4656124282 · #12 https://github.com/MongLong0214/logic-pro-mcp/issues/12#issuecomment-4656125708 · #13 https://github.com/MongLong0214/logic-pro-mcp/issues/13#issuecomment-4656126616. `gh issue list --state open` returned `[]`.
 - **Post-release CI/release guard**: coverage now routes fallback profile output to writable temp paths, reports LLVM profile runtime warnings, hard-gates on profdata/report parsing plus region>=70/line>=77 while reporting line>=90 target, and marks hyphenated release tags as GitHub prereleases.

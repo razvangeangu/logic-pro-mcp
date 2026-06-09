@@ -1,6 +1,6 @@
 # T8: Docs + Homebrew formula `xcode` removal + release.sh Issue #1 automation + version bump
 
-> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue1-keycmd-port-routing > §3 AC-3.1-3.6, AC-4.1-4.5, §9.1, §10.2 R8
 **Priority**: P1 (High — final integration step + user communication)

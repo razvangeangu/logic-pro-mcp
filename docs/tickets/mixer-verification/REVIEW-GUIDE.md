@@ -1,6 +1,6 @@
 # 리뷰 가이드 — Issues #10–13 / v3.4.5 작업
 
-> 이 파일이 리뷰 진입점. 작업은 v3.4.5 소스/tag 기준으로 push 완료, current main 테스트 1197 green. current main은 Developer ID 없이 ADHOC stable publication 경로를 다시 허용한다. GitHub 이슈 #10~#13의 기존 AX deferral 답글은 2026-06-09 후속 구현으로 superseded되며, release 완료 표현은 artifact publication 후에만 사용한다.
+> 이 파일이 리뷰 진입점. 작업은 v3.4.5 stable GitHub Release 기준으로 published 완료, current main 테스트 1197 green. Developer ID 없이 ADHOC stable artifacts가 발행됐고, GitHub 이슈 #10~#13은 최종 targeted live E2E 통과 후 CLOSED로 검증됐다.
 
 ---
 
@@ -18,7 +18,7 @@ swift test --no-parallel 2>&1 | tail -3        # → "Test run with 1197 tests p
 # (3) 변경 규모 한눈에
 git diff --stat
 
-# (4) 게시된 답글 확인
+# (4) 닫힌 이슈/게시된 close comment 확인
 gh issue view 10 --repo MongLong0214/logic-pro-mcp --comments | tail -40
 ```
 
@@ -83,7 +83,7 @@ logic://mixer
 
 # #12 — occupied insert slots are named
 logic://mixer
-→ strips[0].plugins_source:"ax", plugins:[Gain, Gain, Drum Machine Designer]
+→ strips[0].plugins_source:"ax", plugins:[Gain, Gain, Gain, Drum Machine Designer] before the slot-4 insert
 
 # #13 — opt-in insert and guardrails
 insert_plugin without confirmed:true → confirmation_required
@@ -101,15 +101,13 @@ insert_plugin confirmed into occupied slot → channels_exhausted / slot_occupie
 - [ ] targeted live E2E → #10/#11/#12/#13 issue checks passed
 - [ ] git diff가 위 표의 의도와 일치, 범위 외 변경 없음
 - [ ] HonestContract 불변식 유지 (State A: reason/error 없음 / B: reason / C: error)
-- [ ] GitHub issue #10~#13 status reply posted; release-complete wording is not used before artifact publication; #12/#13 remaining scope is not over-claimed
+- [ ] GitHub issue #10~#13 final close comment posted after targeted live E2E; #12/#13 remaining scope is not over-claimed
 
 ---
 
 ## 5) 보류분 + 다음 단계
-1. **Stable artifact publication** — Developer ID 없이 ADHOC stable workflow path로 artifact를 publish한다.
-2. **Published SHA256 sync** — GitHub Actions release artifact가 나온 뒤 Formula sha256과 `docs/releases/v3.4.5.md`를 업데이트한다.
-3. **Full destructive 200+ live E2E** — 별도 작업. 이번 targeted release gate에는 포함하지 않는다.
-4. **#12/#13 future work** — full per-parameter plugin value readback, arbitrary `set_plugin_param insert:N`.
+1. **Full destructive 200+ live E2E** — 별도 작업. 이번 targeted release gate에는 포함하지 않는다.
+2. **#12/#13 future work** — full per-parameter plugin value readback, arbitrary `set_plugin_param insert:N`.
 
 ## 되돌리기 (전부 무르고 싶으면)
 ```bash

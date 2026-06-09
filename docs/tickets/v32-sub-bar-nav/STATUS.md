@@ -1,6 +1,6 @@
 # Pipeline Status: v3.2 Sub-Bar Nav (NG10) + Marker Provenance
 
-> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
 
 **PRD**: docs/prd/PRD-v32-sub-bar-nav.md (v0.4 — Boomer ALL PASS round 4)
 **Size**: L

@@ -8,23 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-### Changed
-
-- **CI coverage gate tightened** — coverage now runs fail-closed with `set -euo pipefail`, writes fallback profile output under a writable temp path, requires `swift test --enable-code-coverage`, profdata lookup, `llvm-cov report`, and threshold parsing to succeed, and raises the hard gate to region >=70% / line >=77%. Recoverable GitHub macOS runner `LLVM Profile Error` warnings are surfaced in annotations/summary but the gate is the generated profdata/report plus thresholds. Line >=90% is tracked as the explicit target but remains advisory until coverage-uplift work raises the actual baseline.
-- **Stable ADHOC release path restored** — Apple Developer ID is optional for this project. Stable tags now fall back to the historical ADHOC signing path when Developer ID credentials are absent, while keeping SHA256, codesign verification, release metadata, and install validation gates.
-- **Release workflow prerelease honesty** — hyphenated release tags are now published as GitHub prereleases, so RC tags do not masquerade as stable/latest releases.
-- **Live E2E coverage profile hygiene** — Python/tmux live E2E launches now set `LLVM_PROFILE_FILE` to a writable temp profile path when the binary is coverage-instrumented.
-- **Scripts cleanup** — removed one-off local/spike harnesses from `Scripts/` and kept only maintained installer, release, live E2E, plist/template, and shipped support assets.
-
-### Tests
-
-- `swift test --no-parallel` -> 1197 / 1197 PASS locally.
-- `swift build -c release` -> PASS locally.
-- `swift test --enable-code-coverage --no-parallel` -> 1197 / 1197 PASS locally; TOTAL coverage 70.40% region / 77.78% line against the tightened region>=70 / line>=77 gate.
+No unreleased changes yet.
 
 ## [3.4.5] — 2026-06-09
 
-**Mixer write/read verification honesty — Issues #10–13 (thomas-doesburg).** Finalizes the v3.4.5 source/tag changes with the Logic Pro 12.2 mixer AX matcher restored and live-verified. Host-originated fader writes can still receive no MCU echo on Logic 12.2, but `set_volume` now falls back to independent AX fader readback and can return State A when the observed fader matches tolerance. `logic://mixer` carries provenance, AX-sourced `plugins[]` snapshots identify occupied insert slots, and `insert_plugin` is exposed only as a guarded, Level-2-confirmed, stock-plugin allowlisted path. The first stable artifact attempt was blocked by the previous notarization-only policy; current main restores ADHOC stable publication when Developer ID credentials are absent.
+**Mixer write/read verification honesty — Issues #10–13 (thomas-doesburg).** Publishes the v3.4.5 stable release with the Logic Pro 12.2 mixer AX matcher restored and live-verified. Host-originated fader writes can still receive no MCU echo on Logic 12.2, but `set_volume` now falls back to independent AX fader readback and can return State A when the observed fader matches tolerance. `logic://mixer` carries provenance, AX-sourced `plugins[]` snapshots identify occupied insert slots, and `insert_plugin` is exposed only as a guarded, Level-2-confirmed, stock-plugin allowlisted path. Stable artifacts ship through the ADHOC path when Developer ID credentials are absent, with SHA256 metadata, release metadata, and macOS 14/15 install validation.
 
 ### Added
 
@@ -39,7 +27,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **`set_plugin_param` is now Honest-Contract-shaped** (#12/#13 write-half, P1-3) — Scripter returns HC State B `readback_unavailable` (with `cc`/`applied_midi_value`/`readback_source` extras) instead of a free-form string, and value is fail-closed to `0.0…1.0` (State C `invalid_params`) instead of being silently clamped.
 - **`set_plugin_param` refuses an unverified track selection** (P1-2) — mirrors `track.delete`/`duplicate`: if the pre-write `track.select` returns State B, the write hard-fails (State C with the original `select_response`) rather than writing to whatever track happened to be selected.
 - **`MIDIEngine` is restart-safe** (P1-6) — `stop()` no longer finishes the inbound `AsyncStream`; the continuation is terminal only at `deinit`, so `start → stop → start` restores inbound MIDI delivery.
-- **Version/release surfaces finalized to `3.4.5`** — `ServerConfig`, manifest, installer default, Formula version, startup-banner tests, README, setup docs, and resource `lastModified` timestamp are synchronized for the stable release attempt.
+- **Version/release surfaces finalized to `3.4.5`** — `ServerConfig`, manifest, installer default, Formula version/SHA, startup-banner tests, README, setup docs, and resource `lastModified` timestamp are synchronized for the stable release.
+- **CI coverage gate tightened** — coverage now runs fail-closed with `set -euo pipefail`, writes fallback profile output under a writable temp path, requires `swift test --enable-code-coverage`, profdata lookup, `llvm-cov report`, and threshold parsing to succeed, and raises the hard gate to region >=70% / line >=77%. Recoverable GitHub macOS runner `LLVM Profile Error` warnings are surfaced in annotations/summary, but the gate is the generated profdata/report plus thresholds.
+- **Stable ADHOC release path restored** — Apple Developer ID is optional for this project. Stable tags fall back to the historical ADHOC signing path when Developer ID credentials are absent, while keeping SHA256, codesign verification, release metadata, and install validation gates.
+- **Release workflow prerelease honesty** — hyphenated release tags are published as GitHub prereleases, so RC tags do not masquerade as stable/latest releases.
+- **Live E2E coverage profile hygiene** — Python/tmux live E2E launches set `LLVM_PROFILE_FILE` to a writable temp profile path when the binary is coverage-instrumented.
+- **Scripts cleanup** — removed one-off local/spike harnesses from `Scripts/` and kept only maintained installer, release, live E2E, plist/template, and shipped support assets.
 
 ### Fixed
 
@@ -57,12 +50,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Tests
 
-- `swift test --no-parallel` -> 1192 / 1192 PASS locally.
+- `swift test --no-parallel` -> 1197 / 1197 PASS locally.
 - `swift build -c release` -> PASS locally.
 - `python3 -m py_compile Scripts/live-e2e-test.py` -> PASS.
-- `swift test --enable-code-coverage --no-parallel` -> 1192 / 1192 PASS locally; TOTAL coverage 70.40% region / 77.78% line.
+- `swift test --enable-code-coverage --no-parallel` -> 1197 / 1197 PASS locally; TOTAL coverage 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 issue gate -> #10/#11/#12/#13 checks PASS: AX readback for `set_volume`, `logic://mixer` `data_source:"ax_poll"`, AX plugin snapshots, Level-2 `insert_plugin` confirmation, verified Gain insert, and occupied-slot fail-closed.
-- GitHub Release workflow for `v3.4.5` -> original run BLOCKED before artifact publication under the previous notarization-only policy. Current main restores the ADHOC stable release path when Developer ID credentials are absent.
+- GitHub Release workflow for `v3.4.5` -> run `27183025739` PASS: build plus macOS 15 and macOS 14 install validation. Published assets include `LogicProMCP`, both tarball aliases, `SHA256SUMS.txt`, and `RELEASE-METADATA.json`.
 
 ### Release packaging (rc8–rc12, 2026-06-05/08 — CI/installer-only, no server-functional change)
 
@@ -93,7 +86,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - `AppleScriptChannel.wrapSaveAsResult` — wraps successful `project.save_as` responses in Honest Contract State A only after observing the requested `.logicx` package. Existing package saves must show an advanced modification time; missing/stale packages return State C `readback_mismatch`.
 - `AccessibilityChannel.validatedMIDIImportPath` — resolves symlinks, standardizes the URL, rejects control characters, enforces `.mid`, and only accepts regular files under `/tmp/LogicProMCP/`.
 - `HonestContract.FailureError.readbackUnavailable` — terminal State C code for write paths that executed a fallback but could not obtain the readback required to claim success.
-- `docs/live-verify-v3.4.5-rc5.md` — current production-readiness evidence covering local tests, release build, live Logic Pro 12.2 health, tempo readback, save-as package readback, and the v4 MIDI-only composition artifact.
+- `docs/live-verify-v3.4.5-rc5.md` — rc5-era production-readiness evidence covering local tests, release build, live Logic Pro 12.2 health, tempo readback, save-as package readback, and the v4 MIDI-only composition artifact.
 
 ### 2026-06-05 Changed
 

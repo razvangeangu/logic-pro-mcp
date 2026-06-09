@@ -1,6 +1,6 @@
 # PRD — v3.2 Sub-Bar Navigation (NG10) + Marker Provenance (Boomer P2-3)
 
-> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
 
 **Status**: Draft (v0.4 — boomer round 3 P1+P2 integrated)
 **Size**: L

@@ -1,6 +1,6 @@
 # T6: MIDIKeyCommandsChannel `midi.send_*.keycmd` direct send path
 
-> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue1-keycmd-port-routing > §4.3 MIDIKeyCommandsChannel change spec, §3 AC-1.1
 **Priority**: P1 (High)

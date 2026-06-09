@@ -1,6 +1,6 @@
 # T4: ResourceHandlers tier-merge for project_info
 
-> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue7-logic12-read-paths > US-1 (AC-1.1..1.6, AC-4.1, AC-4.2)
 **Priority**: P0 (Blocker — main user-facing fix)

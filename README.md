@@ -67,7 +67,7 @@ This server takes a different approach: **combine seven complementary channels**
 
 **Prerequisites**: macOS 14+, Logic Pro 12.0.1+. GitHub Actions/Homebrew release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts may still be arm64-only, so audit a specific tag via `RELEASE-METADATA.json` when needed.
 
-**Release note, 2026-06-09:** the `v3.4.5` source tag is pushed and verified, but stable GitHub Release artifacts are not published yet. The previous notarization-only stable policy has been removed; stable releases now use the historical ADHOC path when Apple Developer ID credentials are absent. Use the source build path below until the next stable artifact is published.
+**Release note, 2026-06-09:** `v3.4.5` is the current stable GitHub Release. It ships ADHOC-signed universal artifacts when Apple Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for the fail-closed installer path.
 
 ### Option A — Homebrew (recommended)
 
@@ -157,7 +157,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 ## Status
 
-**Current source/tag status: v3.4.5 is pushed and verified, but stable artifacts are not published yet (2026-06-09 KST).** This source release closes the Logic Pro 12.2 mixer verification work for Issues #10 and #11, ships the snapshot-level plugin readback surface for #12, and adds the guarded `insert_plugin` path for #13. Local verification: `swift test --no-parallel` at `1192/1192`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, coverage `70.40%` region / `77.78%` line, and targeted live Logic Pro 12.2 checks for #10-#13 all passed. Stable artifact publication now uses the ADHOC release path when Developer ID credentials are absent; the latest published GitHub prerelease is `v3.4.5-rc12`.
+**Current stable release: v3.4.5 is published (2026-06-09 KST).** This release closes the Logic Pro 12.2 mixer verification work for Issues #10 and #11, ships the snapshot-level plugin readback surface for #12, and adds the guarded `insert_plugin` path for #13. Verification: `swift test --no-parallel` at `1197/1197`, `swift build -c release`, `python3 -m py_compile Scripts/live-e2e-test.py`, coverage `70.40%` region / `77.78%` line, strict live E2E `285/285`, targeted live Logic Pro 12.2 checks for #10-#13, and GitHub Release workflow `27183025739` with build plus macOS 14/15 install validation all passed. Published release metadata is `team_id:"ADHOC"` / `signing:"adhoc"` / `architectures:["x86_64","arm64"]`.
 
 ### Active contracts (the things callers most care about)
 
@@ -174,7 +174,7 @@ See [Architecture](docs/ARCHITECTURE.md) for deeper details on channel prioritie
 
 | Version | Date | Headline |
 |---------|------|----------|
-| **v3.4.5** | 2026-06-09 | Source tag pushed: Logic 12.2 mixer AX readback restored, echo-independent fader verification, mixer provenance, `plugins_source:"ax"` snapshots, guarded `insert_plugin`, and deterministic/coverage/live verification evidence. Stable ADHOC publication path restored |
+| **v3.4.5** | 2026-06-09 | Stable GitHub Release: Logic 12.2 mixer AX readback restored, echo-independent fader verification, mixer provenance, `plugins_source:"ax"` snapshots, guarded `insert_plugin`, ADHOC universal artifacts, SHA256 metadata, and deterministic/coverage/live/release-workflow evidence |
 | v3.4.5-rc8..rc12 | 2026-06-05/08 | Release-workflow and installer-validation hotfix series: bash 3.2, split universal build, candidate stdout, Team ID parser validation, macOS 14 validation floor |
 | **v3.4.5-rc7** | 2026-06-05 | Release-workflow hotfix reroll, universal binary selection now scans all executable candidates under `.build` and picks the first real fat Mach-O |
 | **v3.4.5-rc5** | 2026-06-05 | Save/readback and MIDI import hardening, live `project/info` tier merge, ProcessUtils Logic detection fallback, Library duplicate-name column targeting, and final v4 MIDI-only composition E2E |
@@ -197,13 +197,13 @@ Per-release detail: [CHANGELOG.md](CHANGELOG.md).
 
 ### Distribution
 
-Stable production tags use the GitHub Actions release workflow; the published `RELEASE-METADATA.json` records the signing mode, Team ID, and architectures for the exact artifact. When Developer ID credentials are absent, stable and prerelease tags publish ADHOC artifacts with `team_id:"ADHOC"`. SHA256 pinning is mandatory for the fail-closed installer path. The original `v3.4.5` stable workflow run did not publish artifacts under the previous notarization-only policy; current main restores ADHOC stable publication. See [SECURITY.md §Release types](SECURITY.md#release-types).
+Stable production tags use the GitHub Actions release workflow; the published `RELEASE-METADATA.json` records the signing mode, Team ID, and architectures for the exact artifact. When Developer ID credentials are absent, stable and prerelease tags publish ADHOC artifacts with `team_id:"ADHOC"`. SHA256 pinning is mandatory for the fail-closed installer path. `v3.4.5` is published as a stable ADHOC release with build and macOS 14/15 install validation in workflow `27183025739`. See [SECURITY.md §Release types](SECURITY.md#release-types).
 
 ### Testing
 
 - **1197 unit + integration tests** on current main — `swift test --no-parallel` PASS. Coverage spans Honest Contract envelopes, fail-closed mutation gates (mixer/marker/MIDI import), routing-audit invariants, AX hardening, `LogicProjectFileReader` plist parsing + path validation, live `project/info` tier-merge, `project.save_as` package-mtime readback, `LogicProServer.stop()` signal-cleanup contract, deterministic transport packet-sink capture, installer metadata parsing, mixer AX readback, plugin-slot snapshots, guarded insert-plugin flow, and release/CI contract guards.
-- **Live E2E** (`Scripts/live-e2e-test.py`) defaults to the release binary. Protocol/security/validation assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a live Logic Pro session is detected. For attestation runs, use `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh`; the shell wrapper launches the MCP server under a trusted tmux parent so macOS TCC evaluates the same stdio parent context instead of Python.
-- **Current live Logic Pro 12.2 validation** — `.build/release/LogicProMCP` launched cleanly, health reported all 7 channels ready, #10 `set_volume` verified via AX readback despite missing MCU echo, #11 `logic://mixer` refreshed from AX poll, #12 `plugins[]` carried `plugins_source:"ax"`, and #13 guarded `insert_plugin` verified the inserted Gain slot and refused an occupied slot.
+- **Live E2E** (`Scripts/live-e2e-test.py`) defaults to the release binary. Protocol/security/validation assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a live Logic Pro session is detected. For attestation runs, use `LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh`; the shell wrapper launches the MCP server under a trusted tmux parent so macOS TCC evaluates the same stdio parent context instead of Python. Current strict attestation: 285 passed, 0 skipped, 0 failed.
+- **Current live Logic Pro 12.2 validation** — `.build/release/LogicProMCP` launched cleanly, health reported all 7 channels ready, #10 `set_volume` verified via AX readback despite missing MCU echo, #11 `logic://mixer` refreshed from AX poll, #12 `plugins[]` carried `plugins_source:"ax"`, and #13 guarded `insert_plugin` verified the inserted Gain slot and refused an occupied slot. Fresh strict coverage: full live E2E plus targeted #10-#13 checks all passed.
 - **CI coverage gate** — hard gate `region ≥ 70%`, `line ≥ 77%`, with an explicit `line ≥ 90%` target reported as advisory until the dedicated coverage-uplift work lands. The coverage job now fails closed on LLVM profile write errors instead of letting `default.profraw` runtime errors pass as warning noise.
 - **CoreMIDI smoke tests skip on macos-15-arm64 GitHub runners** (`MIDIClientCreate` returns `-50` in the sandboxed image; production code path coverage on real macOS hosts is unchanged).
 

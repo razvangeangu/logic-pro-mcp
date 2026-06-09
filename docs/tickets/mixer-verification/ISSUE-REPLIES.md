@@ -1,18 +1,19 @@
-# Issue replies — #10–13 current status (v3.4.5)
+# Issue replies — #10–13 final status (v3.4.5)
 
-> Current state: the `v3.4.5` source/tag is pushed and locally verified, but stable GitHub Release artifacts are not published yet. Current main restores ADHOC stable publication when Developer ID credentials are absent. Do not post the "release shipped" wording below until artifact publication succeeds; use the current status comments instead.
+> Current state: `v3.4.5` is published as the stable GitHub Release, and issues #10-#13 are closed as completed after final verification. Artifacts are ADHOC-signed when Developer ID credentials are absent and are accompanied by `SHA256SUMS.txt` plus `RELEASE-METADATA.json`.
 
 Source tag: https://github.com/MongLong0214/logic-pro-mcp/tree/v3.4.5
-Commit: https://github.com/MongLong0214/logic-pro-mcp/commit/06966f2ae341c80a72271ea0428f2b46572a0e85
-Release workflow blocker: https://github.com/MongLong0214/logic-pro-mcp/actions/runs/27178878939
+Commit: https://github.com/MongLong0214/logic-pro-mcp/commit/22c7d39fb4f5eadd5c9b6dc6518831f45bbdebd7
+Release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.5
+Release workflow: https://github.com/MongLong0214/logic-pro-mcp/actions/runs/27183025739
 Verification: `docs/live-verify-v3.4.5.md` and `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`
 
-Posted current-status comments:
+Final close comments:
 
-- #10: https://github.com/MongLong0214/logic-pro-mcp/issues/10#issuecomment-4655332572
-- #11: https://github.com/MongLong0214/logic-pro-mcp/issues/11#issuecomment-4655332671
-- #12: https://github.com/MongLong0214/logic-pro-mcp/issues/12#issuecomment-4655332753
-- #13: https://github.com/MongLong0214/logic-pro-mcp/issues/13#issuecomment-4655332836
+- #10: https://github.com/MongLong0214/logic-pro-mcp/issues/10#issuecomment-4656122876
+- #11: https://github.com/MongLong0214/logic-pro-mcp/issues/11#issuecomment-4656124282
+- #12: https://github.com/MongLong0214/logic-pro-mcp/issues/12#issuecomment-4656125708
+- #13: https://github.com/MongLong0214/logic-pro-mcp/issues/13#issuecomment-4656126616
 
 ---
 
@@ -20,7 +21,7 @@ Posted current-status comments:
 
 Hi @thomas-doesburg,
 
-Current source/tag update: your diagnosis was right, and the fix is merged on `main` and tagged as `v3.4.5`. Stable GitHub Release artifacts are not published yet; current main restores the ADHOC stable release path when Developer ID credentials are absent.
+Final v3.4.5 update: your diagnosis was right, and the fix is merged on `main`, tagged as `v3.4.5`, and published as a stable GitHub Release.
 
 Logic 12.2 can still omit the MCU echo for host-originated fader writes. The new behavior does not pretend that echo exists: `set_volume` falls back to an independent AX fader readback when the MCU echo times out. If the AX-observed value matches the requested target within tolerance, the write resolves to State A with `verify_source:"ax_readback"` and `observed_ax`.
 
@@ -39,20 +40,20 @@ logic_mixer set_volume {track:0,value:0.36}
 
 Verification gates:
 
-- `swift test --no-parallel` -> 1192 tests passed.
+- `swift test --no-parallel` -> 1197 tests passed.
 - `swift build -c release` -> passed.
 - `python3 -m py_compile Scripts/live-e2e-test.py` -> passed.
-- `swift test --enable-code-coverage --no-parallel` -> 1192 tests passed.
+- `swift test --enable-code-coverage --no-parallel` -> 1197 tests passed.
 - Coverage TOTAL -> 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 #10/#11/#12/#13 checks -> passed.
 
-Release status: source tag `v3.4.5` is pushed, but artifact publication is still pending. Current main uses the ADHOC stable release path when Developer ID credentials are absent.
+Release status: `v3.4.5` is published with ADHOC release metadata, SHA256 sums, and macOS 14/15 install validation.
 
 ## Current Status #11
 
 Hi @thomas-doesburg,
 
-Current source/tag update: `logic://mixer` is no longer forced to stay on stale MCU connect-time state on Logic 12.2. This is merged on `main` and tagged as `v3.4.5`; stable binary artifact publication is still pending.
+Final v3.4.5 update: `logic://mixer` is no longer forced to stay on stale MCU connect-time state on Logic 12.2. This is merged on `main`, tagged as `v3.4.5`, and published as a stable GitHub Release.
 
 The AX matcher is fixed, and `logic://mixer` exposes provenance so a client can distinguish fresh AX-observed data from last-known-good cache:
 
@@ -77,13 +78,13 @@ logic://mixer
 -> strips[0].volume:0.33777777777777773
 ```
 
-Verification gates: `swift test --no-parallel` 1192 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #11 passed.
+Verification gates: `swift test --no-parallel` 1197 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #11 passed.
 
 ## Current Status #12
 
 Hi @thomas-doesburg,
 
-Current source/tag update: the empty `plugins[]` ambiguity is fixed at the snapshot level, and `set_plugin_param` is now honest about its write/readback limits. This is merged on `main` and tagged as `v3.4.5`; stable binary artifact publication is still pending.
+Final v3.4.5 update: the empty `plugins[]` ambiguity is fixed at the snapshot level, and `set_plugin_param` is now honest about its write/readback limits. This is merged on `main`, tagged as `v3.4.5`, and published as a stable GitHub Release.
 
 What changed:
 
@@ -98,18 +99,18 @@ Live verification:
 ```text
 logic://mixer strip 0
 -> plugins_source:"ax"
--> plugins:["Gain","Gain","Drum Machine Designer"]
+-> plugins:["Gain","Gain","Gain","Drum Machine Designer"] before the slot-4 insert
 ```
 
 Boundary: this is not full per-parameter plugin value readback. Scripter remains send-only; full parameter value readback is future work.
 
-Verification gates: `swift test --no-parallel` 1192 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #12 passed.
+Verification gates: `swift test --no-parallel` 1197 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #12 passed.
 
 ## Current Status #13
 
 Hi @thomas-doesburg,
 
-Current source/tag update: the opt-in `insert_plugin` path is merged on `main` and tagged as `v3.4.5` with the guardrails discussed. Stable binary artifact publication is still pending.
+Final v3.4.5 update: the opt-in `insert_plugin` path is merged on `main`, tagged as `v3.4.5`, and published as a stable GitHub Release with the guardrails discussed.
 
 What changed:
 
@@ -124,19 +125,19 @@ Live verification:
 insert_plugin without confirmed:true
 -> confirmation_required:true
 
-insert_plugin {track:0,slot:3,plugin_name:"Gain",confirmed:true}
+insert_plugin {track:0,slot:4,plugin_name:"Gain",confirmed:true}
 -> success:true
 -> verified:true
 -> verify_source:"ax_plugin_slot"
 -> observed_plugin_name:"Gain"
 
-repeat same insert into occupied slot 3
+repeat same insert into occupied slot 4
 -> channels_exhausted / slot_occupied
 ```
 
 Boundary: arbitrary `set_plugin_param insert:N` remains future work. v3.4.5 source ships the safe insert primitive and slot readback, not a universal per-insert parameter writer.
 
-Verification gates: `swift test --no-parallel` 1192 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #13 confirmation/insert/occupied-slot checks passed.
+Verification gates: `swift test --no-parallel` 1197 passed, coverage 70.40% region / 77.78% line, and targeted live Logic Pro 12.2 #13 confirmation/insert/occupied-slot checks passed.
 
 ---
 
@@ -165,10 +166,10 @@ Release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.5
 
 Final verification gates:
 
-- `swift test --no-parallel` -> 1192 tests passed.
+- `swift test --no-parallel` -> 1197 tests passed.
 - `swift build -c release` -> passed.
 - `python3 -m py_compile Scripts/live-e2e-test.py` -> passed.
-- `swift test --enable-code-coverage --no-parallel` -> 1192 tests passed.
+- `swift test --enable-code-coverage --no-parallel` -> 1197 tests passed.
 - Coverage TOTAL -> 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 #10/#11/#12/#13 checks -> passed.
 
@@ -212,7 +213,7 @@ So the harness rule is now:
 Release and verification:
 
 - https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.5
-- `swift test --no-parallel` -> 1192 passed.
+- `swift test --no-parallel` -> 1197 passed.
 - Coverage -> 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 #11 check -> passed.
 
@@ -237,7 +238,7 @@ Live verification:
 ```text
 logic://mixer strip 0
 -> plugins_source:"ax"
--> plugins:["Gain","Gain","Drum Machine Designer"]
+-> plugins:["Gain","Gain","Gain","Drum Machine Designer"] before the slot-4 insert
 ```
 
 Important boundary: this is not full per-parameter plugin value readback. Scripter remains send-only, and v3.4.5 does not claim a guaranteed mapping from CC 102-119 to arbitrary plugin-window AX sliders. The shipped contract gives your harness a truthful insert-slot/name/bypass snapshot and an honest write envelope; full parameter value readback is future work.
@@ -245,7 +246,7 @@ Important boundary: this is not full per-parameter plugin value readback. Script
 Release and verification:
 
 - https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.5
-- `swift test --no-parallel` -> 1192 passed.
+- `swift test --no-parallel` -> 1197 passed.
 - Coverage -> 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 #12 check -> passed.
 
@@ -268,13 +269,13 @@ Live verification:
 insert_plugin without confirmed:true
 -> confirmation_required:true
 
-insert_plugin {track:0,slot:3,plugin_name:"Gain",confirmed:true}
+insert_plugin {track:0,slot:4,plugin_name:"Gain",confirmed:true}
 -> success:true
 -> verified:true
 -> verify_source:"ax_plugin_slot"
 -> observed_plugin_name:"Gain"
 
-repeat same insert into occupied slot 3
+repeat same insert into occupied slot 4
 -> channels_exhausted / slot_occupied
 ```
 
@@ -283,7 +284,7 @@ Boundary: arbitrary `set_plugin_param insert:N` is still future work. The Script
 Release and verification:
 
 - https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.5
-- `swift test --no-parallel` -> 1192 passed.
+- `swift test --no-parallel` -> 1197 passed.
 - Coverage -> 70.40% region / 77.78% line.
 - Targeted live Logic Pro 12.2 #13 confirmation/insert/occupied-slot checks -> passed.
 

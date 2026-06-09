@@ -1,6 +1,6 @@
 # T1: LogicProjectFileReader (plist parser + path hardening)
 
-> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue7-logic12-read-paths > US-1, US-2 (foundation)
 **Priority**: P1 (High)

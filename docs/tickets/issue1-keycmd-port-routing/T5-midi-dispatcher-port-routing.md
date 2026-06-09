@@ -1,6 +1,6 @@
 # T5: MIDIDispatcher port routing integration + 7 ops × 2 ports + record_sequence/mmc_* reject
 
-> Historical record (2026-06-05 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5-rc5.md`; this file remains preserved implementation context.
+> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.5.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue1-keycmd-port-routing > §3 AC-1.1, AC-1.2, AC-1.4, AC-1.6, AC-2.x, §4.3
 **Priority**: P1 (High)

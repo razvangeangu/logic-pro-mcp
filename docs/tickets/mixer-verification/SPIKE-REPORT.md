@@ -44,12 +44,12 @@ Targeted live E2E against the release binary on Logic Pro 12.2:
 
 - #10: `set_volume {track:0,value:0.36}` returned `success:true`, `verified:true`, `verify_source:"ax_readback"`, `observed_ax:0.33777777777777773`, `observed_mcu:null`.
 - #11: post-write `logic://mixer` returned `data_source:"ax_poll"` and track 0 `volume:0.33777777777777773`.
-- #12: `plugins[]` populated from AX with `plugins_source:"ax"` and observed names `Gain`, `Gain`, `Drum Machine Designer`.
+- #12: `plugins[]` populated from AX with `plugins_source:"ax"` and observed names `Gain`, `Gain`, `Gain`, `Drum Machine Designer` before the slot-4 insert.
 - #13: `insert_plugin` requires L2 confirmation, inserted Gain verified by AX slot readback, and a repeat against the occupied slot failed closed with `slot_occupied`.
 
 Regression gates:
 
-- `swift test --no-parallel` → 1192 tests passed.
+- `swift test --no-parallel` → 1197 tests passed.
 - `swift build -c release` → passed.
 
 ## Historical required follow-up spike (now complete)

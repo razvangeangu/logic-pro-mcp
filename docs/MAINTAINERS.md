@@ -75,16 +75,16 @@ CI hard-gates source coverage at region >=70% and line >=77%. The project target
 
 ### Post-tag steps (both release modes)
 
-After the GitHub release is published, the Homebrew formula still points at the **old** tarball SHA256. Update it:
+After the GitHub release is published, verify that the Homebrew formula points at the published universal tarball SHA256. If it still points at the old hash, update it:
 
 ```bash
-VERSION=v3.0.2
+VERSION=v3.4.5
 curl -fsSL "https://github.com/MongLong0214/logic-pro-mcp/releases/download/$VERSION/SHA256SUMS.txt" \
     | awk '$2 == "LogicProMCP-macOS-universal.tar.gz" {print $1}'
 # copy the hex into Formula/logic-pro-mcp.rb `sha256 "…"`
 ```
 
-Commit the formula update as a separate follow-up (it is not on the tag). Users installing via `brew install` against the tap will then resolve to the newly-published artifact.
+Commit the formula update as a separate follow-up when needed. Users installing via `brew install` against the tap will then resolve to the newly-published artifact.
 
 If you also maintain a private Homebrew tap, publish the formula update there.
 

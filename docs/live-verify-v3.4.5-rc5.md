@@ -1,5 +1,7 @@
 # Live Verification Runbook — v3.4.5-rc5
 
+Historical prerelease record. Latest stable release and issue #10-#13 evidence: `docs/live-verify-v3.4.5.md`, `docs/releases/v3.4.5.md`, and `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`.
+
 Date: 2026-06-05 KST
 Scope: current main hardening, release binary, live Logic Pro 12.2 session, and final MIDI-only v4 composition artifact.
 
@@ -58,4 +60,4 @@ Artifact constraints:
 
 - AX viewport reads can report fewer visible tracks than the saved package contains. For artifact completion, package-level `ProjectData` verification is authoritative.
 - `project/info.trackCount` is metadata, not a visible-row counter. Use `logic://tracks` for live visible rows and `logic://project/info` for provenance-tagged project metadata.
-- Public install docs point at `v3.4.5-rc5`.
+- Public install docs now point at stable `v3.4.5`; this rc5 runbook remains historical prerelease evidence.
