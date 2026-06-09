@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **8 tools**, **9 resources**, and **3 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **8 tools**, **11 resources**, and **5 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -30,7 +30,7 @@ All tool invocations use:
 
 ## Resource Catalog (Read-only)
 
-**9 static resources + 3 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
+**11 static resources + 5 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
 
 | URI | Content | Source |
 |-----|---------|--------|
@@ -43,13 +43,23 @@ All tool invocations use:
 | `logic://midi/ports` | `{ sources, destinations }` | CoreMIDI live query |
 | `logic://mcu/state` | `{ connection, display }` — MCU handshake + LCD state | Cache |
 | `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`). All candidates must sit under the path allowlist (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` (colon-separated, additive). |
+| `logic://workflow-skills` | `{ schema_version, workflow_count, validation, workflows[] }` — validated workflow skill pack | Static validated pack |
+| `logic://workflow-skills/schema` | Workflow schema fields, evidence levels, mutation kinds, and resource names | Static |
 | `logic://tracks/{index}` | Single `TrackState` JSON | Cache — template |
 | `logic://tracks/{index}/regions` | `RegionState[]` JSON filtered by `trackIndex` | Cache — template |
 | `logic://mixer/{strip}` | `{ cache_age_sec, fetched_at, data_source, strip: ChannelStripState }` | Cache — template |
+| `logic://workflow-skills/{id}` | Single workflow skill by stable ID | Static validated pack — template |
+| `logic://workflow-skills/search?query={query}` | Search workflow skills | Static validated pack — template |
 
 All resources return `contents: [{ uri, text, mimeType: "application/json" }]`.
 
 Prefer resources over repeated tool calls — they are cheap and safe to poll at 1 Hz.
+
+### Workflow Skills
+
+`logic://workflow-skills` is also read-only. It returns workflow recipes that tell clients which resources/tools to call, which state checks must pass, when confirmation is required, and which response fields prove success. Reading a workflow never executes it.
+
+Mutating workflows are not marked `production_ready` unless they have matching `live_verified` evidence. `logic.workflow.plugins.stock_chain_plan` is planning-only and declares its #14 stock-catalog dependency; `logic.workflow.plugins.stock_insert_gain_live_verified` is the guarded L2 Gain insert recipe backed by the existing Logic Pro 12.2 live evidence file and still requires current-session confirmation/readback.
 
 ---
 

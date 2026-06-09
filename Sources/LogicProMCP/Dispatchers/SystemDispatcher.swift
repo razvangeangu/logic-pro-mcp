@@ -386,7 +386,7 @@ struct SystemDispatcher {
 
         default:
             return """
-                Logic Pro MCP — 8 dispatcher tools + 9 resources + 3 templates
+                Logic Pro MCP — 8 dispatcher tools + 11 resources + 5 templates
 
                 Tools (actions):
                   logic_transport  — Transport control (play, stop, record, tempo...)
@@ -408,11 +408,15 @@ struct SystemDispatcher {
                   logic://midi/ports            — MIDI ports
                   logic://mcu/state             — MCU control-surface state (hidden in list when disconnected)
                   logic://library/inventory     — Cached Library tree JSON
+                  logic://workflow-skills       — Validated workflow skills pack
+                  logic://workflow-skills/schema — Workflow skill schema
 
                 Resource templates:
                   logic://tracks/{index}          — Single track detail
                   logic://tracks/{index}/regions  — Regions on a single track
                   logic://mixer/{strip}           — Single channel strip
+                  logic://workflow-skills/{id}    — Workflow skill detail
+                  logic://workflow-skills/search?query={query} — Workflow skill search
 
                 Use: logic_system(command: "help", params: {category: "transport"})
                 for detailed command docs per category.

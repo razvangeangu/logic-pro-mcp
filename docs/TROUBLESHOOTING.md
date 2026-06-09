@@ -35,9 +35,15 @@ head -40 /tmp/mcp-stderr.txt
 Look for lines like:
 - `MIDIPortManager started` — CoreMIDI initialized
 - `Accessibility channel started` — AX ready
-- `Starting logic-pro-mcp v3.0.0 — 8 tools, 9 resources, 7 channels` — composition complete
+- `Starting logic-pro-mcp v3.4.6 — 8 tools, 11 resources, 7 channels` — composition complete
 
 If you see `AccessibilityError.notTrusted`, grant Accessibility permission.
+
+### Workflow skill refuses to call a tool automatically
+
+**Cause:** `logic://workflow-skills` is a read-only recipe surface. It describes safe steps and verification fields; it never executes the recipe.
+
+**Fix:** have the MCP client read the workflow, perform listed `state_checks`, request explicit user confirmation for mutating steps, then call the named tools itself.
 
 ---
 

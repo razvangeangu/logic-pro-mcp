@@ -110,6 +110,20 @@ struct ResourceProvider {
             mimeType: "application/json",
             annotations: annotations(priority: 0.4)
         ),
+        Resource(
+            name: "Workflow Skills",
+            uri: "logic://workflow-skills",
+            description: "Validated read-only Logic Pro MCP workflow skill pack",
+            mimeType: "application/json",
+            annotations: annotations(priority: 0.43)
+        ),
+        Resource(
+            name: "Workflow Skills Schema",
+            uri: "logic://workflow-skills/schema",
+            description: "Workflow skill schema, evidence levels, and validation rules",
+            mimeType: "application/json",
+            annotations: annotations(priority: 0.34)
+        ),
     ]
 
     private static let baseTemplates: [Resource.Template] = [
@@ -129,6 +143,18 @@ struct ResourceProvider {
             uriTemplate: "logic://mixer/{strip}",
             name: "Channel Strip Detail",
             description: "Single channel strip by index (volume, pan, plugin chain)",
+            mimeType: "application/json"
+        ),
+        Resource.Template(
+            uriTemplate: "logic://workflow-skills/{id}",
+            name: "Workflow Skill Detail",
+            description: "Single workflow skill by stable ID",
+            mimeType: "application/json"
+        ),
+        Resource.Template(
+            uriTemplate: "logic://workflow-skills/search?query={query}",
+            name: "Workflow Skill Search",
+            description: "Search workflow skills by query",
             mimeType: "application/json"
         ),
     ]
