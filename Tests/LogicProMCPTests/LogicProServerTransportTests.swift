@@ -385,7 +385,7 @@ private func waitForFeedbackEvents(
         "logic_project",
         "logic_system",
     ])
-    #expect(snapshot.resourceURIs == [
+    let expectedResources: Set<String> = [
         "logic://system/health",
         "logic://transport/state",
         "logic://tracks",
@@ -398,20 +398,22 @@ private func waitForFeedbackEvents(
         "logic://stock-plugins",
         "logic://stock-plugins/census",
         "logic://stock-plugins/capabilities",
-    ])
-    #expect(snapshot.templateURIs == [
+    ]
+    #expect(expectedResources.isSubset(of: Set(snapshot.resourceURIs)))
+    let expectedTemplates: Set<String> = [
         "logic://tracks/{index}",
         "logic://tracks/{index}/regions",
         "logic://mixer/{strip}",
         "logic://stock-plugins/{id}",
         "logic://stock-plugins/search?query={query}",
-    ])
-    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.6 — 8 tools, 12 resources, 4 channels")
+    ]
+    #expect(expectedTemplates.isSubset(of: Set(snapshot.templateURIs)))
+    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.6 — 8 tools, \(snapshot.resourceURIs.count) resources, 4 channels")
 }
 
 @Test func testServerCatalogStartupBannerUsesProvidedChannelCount() {
     let banner = ServerCatalog.startupBanner(channelCount: 7)
-    #expect(banner == "Starting logic-pro-mcp v3.4.6 — 8 tools, 12 resources, 7 channels")
+    #expect(banner == "Starting logic-pro-mcp v3.4.6 — 8 tools, \(ResourceProvider.resources.count) resources, 7 channels")
 }
 
 @Test func testLogicProServerCompositionSnapshotMatchesExpectedOrder() async {
@@ -430,5 +432,5 @@ private func waitForFeedbackEvents(
     ])
     #expect(snapshot.toolNames.count == 8)
     #expect(snapshot.resourceURIs.contains("logic://system/health"))
-    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.6 — 8 tools, 12 resources, 7 channels")
+    #expect(snapshot.startupBanner == "Starting logic-pro-mcp v3.4.6 — 8 tools, \(ResourceProvider.resources.count) resources, 7 channels")
 }

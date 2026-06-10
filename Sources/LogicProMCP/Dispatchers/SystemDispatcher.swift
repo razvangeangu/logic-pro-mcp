@@ -386,7 +386,7 @@ struct SystemDispatcher {
 
         default:
             return """
-                Logic Pro MCP — 8 dispatcher tools + 12 resources + 5 templates
+                Logic Pro MCP — 8 dispatcher tools + \(ResourceProvider.resources.count) resources + \(ResourceProvider.templates.count) templates
 
                 Tools (actions):
                   logic_transport  — Transport control (play, stop, record, tempo...)

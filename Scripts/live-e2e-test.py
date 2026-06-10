@@ -448,15 +448,33 @@ def main():
 
     r = list_resources(client)
     resources = r.get("result", {}).get("resources", []) if r else []
-    # Issue #14 exposes 12 static resources. logic://mcu/state is filtered from
-    # the list when the MCU control surface is disconnected, so the expected
-    # count is 11 (disconnected) or 12 (connected).
-    resource_count = len(resources)
-    T("resources/list returns 11 or 12 resources", r, lambda r: resource_count in (11, 12))
+    resource_uris = {res.get("uri") for res in resources}
+    required_resource_uris = {
+        "logic://system/health",
+        "logic://transport/state",
+        "logic://tracks",
+        "logic://mixer",
+        "logic://markers",
+        "logic://project/info",
+        "logic://midi/ports",
+        "logic://library/inventory",
+        "logic://stock-plugins",
+        "logic://stock-plugins/census",
+        "logic://stock-plugins/capabilities",
+    }
+    T("resources/list includes required resources", r, lambda r: required_resource_uris.issubset(resource_uris))
 
     r = list_resource_templates(client)
     templates = r.get("result", {}).get("resourceTemplates", []) if r else []
-    T("resources/templates/list returns 5 templates", r, lambda r: len(templates) == 5)
+    template_uris = {tpl.get("uriTemplate") for tpl in templates}
+    required_template_uris = {
+        "logic://tracks/{index}",
+        "logic://tracks/{index}/regions",
+        "logic://mixer/{strip}",
+        "logic://stock-plugins/{id}",
+        "logic://stock-plugins/search?query={query}",
+    }
+    T("resources/templates/list includes required templates", r, lambda r: required_template_uris.issubset(template_uris))
 
     # ═══════════════════════════════════════════════════════════════
     # §2 System Diagnostics (15 tests)

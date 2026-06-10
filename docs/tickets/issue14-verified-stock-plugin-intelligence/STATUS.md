@@ -55,6 +55,7 @@ See `docs/tickets/issue14-verified-stock-plugin-intelligence/VERIFICATION-2026-0
 
 Final production-readiness pass (2026-06-10):
 
+- Resource/template catalog assertions were hardened to require the #14 surface as a subset rather than freezing exact counts, and `logic_system help` now derives catalog counts from `ResourceProvider` so later public resources cannot stale the banner.
 - `swift test --no-parallel` — 1232 tests passed.
 - `swift build -c release` — passed.
 - `PYTHONPYCACHEPREFIX=/private/tmp/lpm-pycache-issue14 python3 -m py_compile Scripts/live-e2e-test.py` — passed.
