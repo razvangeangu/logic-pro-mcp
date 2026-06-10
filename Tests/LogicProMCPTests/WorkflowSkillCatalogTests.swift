@@ -299,18 +299,23 @@ struct WorkflowSkillCatalogTests {
         #expect(snapshot.workflowCount >= 6)
         #expect(snapshot.validation.isValid, "workflow pack should validate: \(snapshot.validation.issues)")
 
+        let stockSurfacePresent = WorkflowSkillCatalog.currentStaticResourceURIs().contains("logic://stock-plugins")
         let stock = snapshot.workflows.first { $0.id == "logic.workflow.plugins.stock_chain_plan" }
         #expect(stock?.dependsOn.contains("logic://stock-plugins") == true)
         #expect(stock?.mutationKind == .readOnly)
-        #expect(stock?.dependenciesResolved == false,
-                "stock catalog resources are not served by this branch; the snapshot must say so")
-        #expect(stock?.unresolvedResources?.allSatisfy { $0.hasPrefix("logic://stock-plugins") } == true)
+        #expect(stock?.dependenciesResolved == stockSurfacePresent,
+                "stock dependency honesty must follow the actual served resource surface")
+        if stockSurfacePresent {
+            #expect(stock?.unresolvedResources == nil)
+        } else {
+            #expect(stock?.unresolvedResources?.allSatisfy { $0.hasPrefix("logic://stock-plugins") } == true)
+        }
 
         let liveInsert = snapshot.workflows.first { $0.id == "logic.workflow.plugins.stock_insert_gain_live_verified" }
         #expect(liveInsert?.mutationKind == .guardedMutation)
         #expect(liveInsert?.evidenceLevel == .liveVerified)
         #expect(liveInsert?.productionReady == true)
-        #expect(liveInsert?.dependenciesResolved == false)
+        #expect(liveInsert?.dependenciesResolved == stockSurfacePresent)
         #expect(liveInsert?.verification.liveEvidenceFile == "docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md")
         #expect(liveInsert?.requiredConfirmations.contains { $0.level == "L2" } == true)
 
@@ -440,9 +445,14 @@ struct WorkflowSkillResourceTests {
         #expect((detail["workflow"] as? [String: Any])?["dependencies_resolved"] as? Bool == true)
 
         let stockDetail = try await workflowResourceObject("logic://workflow-skills/logic.workflow.plugins.stock_insert_gain_live_verified")
-        #expect((stockDetail["workflow"] as? [String: Any])?["dependencies_resolved"] as? Bool == false,
-                "stock-dependent workflow must disclose unresolved dependencies on this branch")
-        #expect(((stockDetail["workflow"] as? [String: Any])?["unresolved_resources"] as? [String])?.isEmpty == false)
+        let stockSurfacePresent = WorkflowSkillCatalog.currentStaticResourceURIs().contains("logic://stock-plugins")
+        #expect((stockDetail["workflow"] as? [String: Any])?["dependencies_resolved"] as? Bool == stockSurfacePresent,
+                "stock-dependent workflow must disclose dependency state from the actual served surface")
+        if stockSurfacePresent {
+            #expect((stockDetail["workflow"] as? [String: Any])?["unresolved_resources"] == nil)
+        } else {
+            #expect(((stockDetail["workflow"] as? [String: Any])?["unresolved_resources"] as? [String])?.isEmpty == false)
+        }
 
         let search = try await workflowResourceObject("logic://workflow-skills/search?query=plugin")
         #expect((search["workflows"] as? [[String: Any]])?.contains {
@@ -463,6 +473,7 @@ struct WorkflowSkillResourceTests {
             "logic://workflow-skills?query=x",
             "logic://workflow-skills/search/extra",
             "logic://workflow-skills/search?other=x",
+            "logic://workflow-skills/search?query=plugin&query=marker",
             "logic://workflow-skills/logic.workflow.readiness.project?x=1",
             "logic://workflow-skills/logic.workflow.readiness.project/extra",
             "logic://workflow-skills/unknown.workflow.id",

@@ -448,15 +448,32 @@ def main():
 
     r = list_resources(client)
     resources = r.get("result", {}).get("resources", []) if r else []
-    # Issue #15 exposes 11 static resources. logic://mcu/state is filtered from
-    # the list when the MCU control surface is disconnected, so the expected
-    # count is 10 (disconnected) or 11 (connected).
-    resource_count = len(resources)
-    T("resources/list returns 10 or 11 resources", r, lambda r: resource_count in (10, 11))
+    resource_uris = {res.get("uri") for res in resources}
+    required_resource_uris = {
+        "logic://system/health",
+        "logic://transport/state",
+        "logic://tracks",
+        "logic://mixer",
+        "logic://markers",
+        "logic://project/info",
+        "logic://midi/ports",
+        "logic://library/inventory",
+        "logic://workflow-skills",
+        "logic://workflow-skills/schema",
+    }
+    T("resources/list includes required resources", r, lambda r: required_resource_uris.issubset(resource_uris))
 
     r = list_resource_templates(client)
     templates = r.get("result", {}).get("resourceTemplates", []) if r else []
-    T("resources/templates/list returns 5 templates", r, lambda r: len(templates) == 5)
+    template_uris = {tpl.get("uriTemplate") for tpl in templates}
+    required_template_uris = {
+        "logic://tracks/{index}",
+        "logic://tracks/{index}/regions",
+        "logic://mixer/{strip}",
+        "logic://workflow-skills/{id}",
+        "logic://workflow-skills/search?query={query}",
+    }
+    T("resources/templates/list includes required templates", r, lambda r: required_template_uris.issubset(template_uris))
 
     # ═══════════════════════════════════════════════════════════════
     # §2 System Diagnostics (15 tests)
@@ -555,7 +572,13 @@ def main():
     def safe_get_cycle(client):
         r = read_resource(client, "logic://transport/state")
         try:
-            return json.loads(resource_text(r)).get("data", {}).get("state", {}).get("isCycleEnabled")
+            envelope = json.loads(resource_text(r))
+            if envelope.get("fetched_at") is None:
+                return None
+            data = envelope.get("data", {})
+            if data.get("has_document") is False:
+                return None
+            return data.get("state", {}).get("isCycleEnabled")
         except: return None
 
     def wait_for_cycle_change(client, before, timeout=5.0):
