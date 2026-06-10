@@ -64,6 +64,7 @@ See `docs/tickets/issue15-workflow-skills-pack/VERIFICATION-2026-06-09.md` and `
 
 Final production-readiness pass (2026-06-10):
 
+- `logic_system help` now derives resource/template counts from `ResourceProvider`, preventing stale help/banner counts when #14/#15 public resources are merged in either order.
 - `swift test --no-parallel` — 1235 tests passed.
 - `swift build -c release` — passed.
 - `PYTHONPYCACHEPREFIX=/private/tmp/lpm-pycache-issue15 python3 -m py_compile Scripts/live-e2e-test.py` — passed.
