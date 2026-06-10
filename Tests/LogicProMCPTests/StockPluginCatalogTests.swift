@@ -449,6 +449,7 @@ struct StockPluginResourceTests {
             "logic://stock-plugins?query=gain",
             "logic://stock-plugins/search/extra",
             "logic://stock-plugins/search?other=x",
+            "logic://stock-plugins/search?query=gain&query=compressor",
             "logic://stock-plugins/logic.stock.effect.gain?x=1",
             "logic://stock-plugins/logic.stock.effect.gain/extra",
             "logic://stock-plugins/unknown.plugin.id",

@@ -221,7 +221,11 @@ extension ResourceHandlers {
             guard unknownParams.isEmpty else {
                 throw MCPError.invalidParams("Unsupported search parameters: \(unknownParams.joined(separator: ", "))")
             }
-            return readStockPluginSearch(uri: uri, query: queryItemValue(from: uri, name: "query") ?? "")
+            let queries = queryItems.filter { $0.name == "query" }
+            guard queries.count <= 1 else {
+                throw MCPError.invalidParams("logic://stock-plugins/search accepts at most one query parameter")
+            }
+            return readStockPluginSearch(uri: uri, query: queries.first?.value ?? "")
         }
         guard queryItems.isEmpty else {
             throw MCPError.invalidParams("logic://stock-plugins/\(segment) does not accept query parameters")

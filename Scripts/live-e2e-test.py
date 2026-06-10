@@ -555,7 +555,13 @@ def main():
     def safe_get_cycle(client):
         r = read_resource(client, "logic://transport/state")
         try:
-            return json.loads(resource_text(r)).get("data", {}).get("state", {}).get("isCycleEnabled")
+            envelope = json.loads(resource_text(r))
+            if envelope.get("fetched_at") is None:
+                return None
+            data = envelope.get("data", {})
+            if data.get("has_document") is False:
+                return None
+            return data.get("state", {}).get("isCycleEnabled")
         except: return None
 
     def wait_for_cycle_change(client, before, timeout=5.0):
