@@ -186,16 +186,9 @@ actor CoreMIDIChannel: Channel {
         // MARK: - Pitch Bend
 
         case "midi.pitch_bend", "midi.send_pitch_bend":
-            let value: UInt16?
-            if let signed = params["value"].flatMap(Int.init) {
-                let normalized = min(max(signed, -8192), 8191) + 8192
-                value = UInt16(normalized)
-            } else if let raw = params["value"].flatMap(UInt16.init) {
-                value = min(raw, 16383)
-            } else {
-                value = nil
-            }
-            guard let value else {
+            guard let rawValue = params["value"].flatMap(Int.init),
+                  (0...16_383).contains(rawValue),
+                  let value = UInt16(exactly: rawValue) else {
                 return .error("pitch_bend requires 'value' (0-16383, center=8192)")
             }
             let channel = params["channel"].flatMap(UInt8.init) ?? 0

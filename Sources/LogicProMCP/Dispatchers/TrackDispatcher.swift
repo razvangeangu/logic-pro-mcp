@@ -150,7 +150,17 @@ struct TrackDispatcher {
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
                 return toolTextResult("mute requires explicit 'index' (Int ≥ 0)", isError: true)
             }
-            let enabled = boolParam(params, "enabled", default: true)
+            let enabled: Bool
+            if params["enabled"] != nil {
+                guard let parsed = boolParamOrNil(params, "enabled") else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "mute 'enabled' must be boolean true/false"
+                    )
+                }
+                enabled = parsed
+            } else {
+                enabled = true
+            }
             let result = await router.route(
                 operation: "track.set_mute",
                 params: ["index": String(index), "enabled": String(enabled)]
@@ -161,7 +171,17 @@ struct TrackDispatcher {
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
                 return toolTextResult("solo requires explicit 'index' (Int ≥ 0)", isError: true)
             }
-            let enabled = boolParam(params, "enabled", default: true)
+            let enabled: Bool
+            if params["enabled"] != nil {
+                guard let parsed = boolParamOrNil(params, "enabled") else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "solo 'enabled' must be boolean true/false"
+                    )
+                }
+                enabled = parsed
+            } else {
+                enabled = true
+            }
             let result = await router.route(
                 operation: "track.set_solo",
                 params: ["index": String(index), "enabled": String(enabled)]
@@ -172,7 +192,17 @@ struct TrackDispatcher {
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
                 return toolTextResult("arm requires explicit 'index' (Int ≥ 0)", isError: true)
             }
-            let enabled = boolParam(params, "enabled", default: true)
+            let enabled: Bool
+            if params["enabled"] != nil {
+                guard let parsed = boolParamOrNil(params, "enabled") else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "arm 'enabled' must be boolean true/false"
+                    )
+                }
+                enabled = parsed
+            } else {
+                enabled = true
+            }
             let result = await router.route(
                 operation: "track.set_arm",
                 params: ["index": String(index), "enabled": String(enabled)]
@@ -287,6 +317,11 @@ struct TrackDispatcher {
             var scanParams: [String: String] = [:]
             let mode = stringParam(params, "mode")
             if !mode.isEmpty {
+                guard ["ax", "disk", "both"].contains(mode) else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "scan_library 'mode' must be one of: ax, disk, both"
+                    )
+                }
                 scanParams["mode"] = mode
             }
             let result = await router.route(
@@ -297,7 +332,18 @@ struct TrackDispatcher {
 
         case "scan_plugin_presets":
             // F2 minimal — scans the currently-focused plugin window's Setting menu.
-            let settleMs = intParam(params, "submenuOpenDelayMs", default: 250)
+            let settleMs: Int
+            if params["submenuOpenDelayMs"] != nil {
+                guard let parsed = intParamOrNil(params, "submenuOpenDelayMs"),
+                      (0...5000).contains(parsed) else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "scan_plugin_presets 'submenuOpenDelayMs' must be an integer in 0..5000"
+                    )
+                }
+                settleMs = parsed
+            } else {
+                settleMs = 250
+            }
             let result = await router.route(
                 operation: "plugin.scan_presets",
                 params: ["submenuOpenDelayMs": String(settleMs)]
@@ -332,21 +378,49 @@ struct TrackDispatcher {
                 hint: "port parameter not supported for record_sequence"
             )
         }
+        let bar: Int
+        if params["bar"] != nil {
+            guard let parsed = intParamOrNil(params, "bar"),
+                  (1...9999).contains(parsed) else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "record_sequence 'bar' must be an integer in 1..9999"
+                )
+            }
+            bar = parsed
+        } else {
+            bar = 1
+        }
+        let notes: String
+        if let rawNotes = params["notes"] {
+            guard let parsed = rawNotes.stringValue, !parsed.isEmpty else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "record_sequence requires 'notes' as a non-empty string"
+                )
+            }
+            notes = parsed
+        } else {
+            return MIDIDispatcher.invalidParamsResult(
+                hint: "record_sequence requires 'notes' (semicolon-separated 'pitch,offsetMs,durMs[,vel[,ch]]')"
+            )
+        }
+        let requestedTempo: Double?
+        if params["tempo"] != nil {
+            guard let parsed = doubleParamOrNil(params, "tempo"), (5.0...999.0).contains(parsed) else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "record_sequence 'tempo' must be numeric in 5..999"
+                )
+            }
+            requestedTempo = parsed
+        } else {
+            requestedTempo = nil
+        }
         guard await cache.getHasDocument() else {
             return toolTextResult("record_sequence: No project open", isError: true)
-        }
-        let bar = intParam(params, "bar", default: 1)
-        let notes = stringParam(params, "notes")
-        guard !notes.isEmpty else {
-            return toolTextResult(
-                "record_sequence requires 'notes' (semicolon-separated 'pitch,offsetMs,durMs[,vel[,ch]]')",
-                isError: true
-            )
         }
 
         let project = await cache.getProject()
         let cacheTempo = project.tempo > 0 ? project.tempo : 120.0
-        let tempo = doubleParam(params, "tempo", default: cacheTempo)
+        let tempo = requestedTempo ?? cacheTempo
         // T3 — strict whole-parse-fail. The previous silent-skip parser left
         // callers unable to distinguish "user typed garbage" from "all
         // segments happened to be invalid", so the error wording was vague

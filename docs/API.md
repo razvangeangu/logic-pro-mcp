@@ -338,7 +338,7 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 | `send_chord` | `{ notes: "60,64,67" \| int[], velocity?: 0–127, channel?: 1–16, duration_ms?: 1–30000 }` | `"Chord sent: N notes"` | CoreMIDI |
 | `send_cc` | `{ controller: 0–127, value: 0–127, channel?: 1–16 }` | `"CC X=Y on ch Z"` | CoreMIDI |
 | `send_program_change` | `{ program: 0–127, channel?: 1–16 }` | text | CoreMIDI |
-| `send_pitch_bend` | `{ value: 0–16383 \| -8192..8191, channel?: 1–16 }` | text | CoreMIDI |
+| `send_pitch_bend` | `{ value: 0–16383, channel?: 1–16 }` where 8192 is center | text | CoreMIDI |
 | `send_aftertouch` | `{ value: 0–127, channel?: 1–16 }` | text | CoreMIDI |
 | `send_sysex` | `{ bytes: "F0 ... F7" \| int[] }` | text | CoreMIDI |
 | `import_file` | `{ path: "/tmp/LogicProMCP/name.mid" }` | HC JSON text; State A only after a new AX track appears | Accessibility |

@@ -303,7 +303,7 @@ struct SystemDispatcher {
                   send_chord        -> { notes: [Int], velocity: Int, channel: Int, duration_ms: Int }
                   send_cc           -> { controller: Int, value: Int, channel: Int }
                   send_program_change -> { program: Int, channel: Int }
-                  send_pitch_bend   -> { value: Int, channel: Int } (-8192 to 8191)
+                  send_pitch_bend   -> { value: Int, channel: Int } (0 to 16383, center=8192)
                   send_aftertouch   -> { value: Int, channel: Int }
                   send_sysex        -> { bytes: [Int] } or { data: String }
                   play_sequence     -> { notes: "pitch,offsetMs,durMs[,vel[,ch]];..." } — tight rhythm (≤256 events)

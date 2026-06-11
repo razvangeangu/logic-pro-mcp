@@ -399,14 +399,14 @@ private let toolText = sharedToolText
     #expect(result.message.contains("Aftertouch 91"))
 }
 
-@Test func testCoreMIDIChannelPitchBendNormalizesSignedValue() async {
+@Test func testCoreMIDIChannelPitchBendAcceptsAbsoluteCenterValue() async {
     let channel = CoreMIDIChannel(engine: MockCoreMIDIEngine(active: true))
     let result = await channel.execute(
         operation: "midi.send_pitch_bend",
-        params: ["value": "-8192", "channel": "1"]
+        params: ["value": "8192", "channel": "1"]
     )
     #expect(result.isSuccess)
-    #expect(result.message.contains("Pitch bend 0"))
+    #expect(result.message.contains("Pitch bend 8192"))
 }
 
 @Test func testCoreMIDIChannelGotoPositionRequiresFallback() async {

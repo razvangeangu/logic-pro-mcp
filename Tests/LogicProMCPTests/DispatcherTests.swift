@@ -1920,7 +1920,7 @@ private actor SelectiveFailChannel: Channel {
     )
     let bendResult = await MIDIDispatcher.handle(
         command: "send_pitch_bend",
-        params: ["value": .int(-512), "channel": .int(5)],
+        params: ["value": .int(7_680), "channel": .int(5)],
         router: router,
         cache: cache
     )
@@ -1946,7 +1946,7 @@ private actor SelectiveFailChannel: Channel {
         ("midi.send_note", ["note": "64", "velocity": "90", "channel": "1", "duration_ms": "750"]),
         ("midi.send_cc", ["controller": "74", "value": "127", "channel": "2"]),
         ("midi.send_program_change", ["program": "8", "channel": "3"]),
-        ("midi.send_pitch_bend", ["value": "-512", "channel": "4"]),
+        ("midi.send_pitch_bend", ["value": "7680", "channel": "4"]),
         ("midi.send_aftertouch", ["value": "55", "channel": "5"]),
     ])
 }

@@ -26,11 +26,14 @@ struct MixerDispatcher {
                     isError: true
                 )
             }
-            let volume = doubleParam(params, "value", "volume")
+            guard let volume = doubleParamOrNil(params, "value", "volume") else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_volume requires explicit numeric 'value' or 'volume'"
+                )
+            }
             guard (0.0...1.0).contains(volume) else {
-                return toolTextResult(
-                    "set_volume 'volume' must be in 0.0..1.0 (got \(volume))",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_volume 'volume' must be in 0.0..1.0 (got \(volume))"
                 )
             }
             return await routedTextResult(router, operation: "mixer.set_volume", params: [
@@ -46,11 +49,14 @@ struct MixerDispatcher {
                     isError: true
                 )
             }
-            let pan = doubleParam(params, "value", "pan")
+            guard let pan = doubleParamOrNil(params, "value", "pan") else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_pan requires explicit numeric 'value' or 'pan'"
+                )
+            }
             guard (-1.0...1.0).contains(pan) else {
-                return toolTextResult(
-                    "set_pan 'value' must be in -1.0..1.0 (got \(pan))",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_pan 'value' must be in -1.0..1.0 (got \(pan))"
                 )
             }
             return await routedTextResult(router, operation: "mixer.set_pan", params: [
@@ -71,11 +77,14 @@ struct MixerDispatcher {
             return toolTextResult("set_input is not exposed in the production MCP contract", isError: true)
 
         case "set_master_volume":
-            let volume = doubleParam(params, "value", "volume")
+            guard let volume = doubleParamOrNil(params, "value", "volume") else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_master_volume requires explicit numeric 'value' or 'volume'"
+                )
+            }
             guard (0.0...1.0).contains(volume) else {
-                return toolTextResult(
-                    "set_master_volume 'value' must be in 0.0..1.0 (got \(volume))",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_master_volume 'value' must be in 0.0..1.0 (got \(volume))"
                 )
             }
             return await routedTextResult(router, operation: "mixer.set_master_volume", params: [

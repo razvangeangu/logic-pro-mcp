@@ -46,6 +46,21 @@ func doubleParam(_ params: [String: Value], _ keys: String..., default defaultVa
     return defaultValue
 }
 
+func doubleParamOrNil(_ params: [String: Value], _ keys: String...) -> Double? {
+    for key in keys {
+        guard let raw = params[key] else { continue }
+        let parsed: Double? = {
+            if let value = raw.doubleValue { return value }
+            if let value = raw.intValue { return Double(value) }
+            if let s = raw.stringValue { return Double(s) }
+            return nil
+        }()
+        guard let parsed, parsed.isFinite else { return nil }
+        return parsed
+    }
+    return nil
+}
+
 func stringParam(_ params: [String: Value], _ keys: String..., default defaultValue: String = "") -> String {
     for key in keys {
         if let value = params[key]?.stringValue {
@@ -83,6 +98,26 @@ func boolParam(_ params: [String: Value], _ keys: String..., default defaultValu
         }
     }
     return defaultValue
+}
+
+func boolParamOrNil(_ params: [String: Value], _ keys: String...) -> Bool? {
+    for key in keys {
+        guard let raw = params[key] else { continue }
+        if let value = raw.boolValue {
+            return value
+        }
+        if let s = raw.stringValue?.lowercased() {
+            if s == "true" || s == "1" || s == "yes" { return true }
+            if s == "false" || s == "0" || s == "no" { return false }
+            return nil
+        }
+        if let value = raw.intValue {
+            guard value == 0 || value == 1 else { return nil }
+            return value == 1
+        }
+        return nil
+    }
+    return nil
 }
 
 func csvIntListOrStringParam(_ params: [String: Value], key: String) -> String {

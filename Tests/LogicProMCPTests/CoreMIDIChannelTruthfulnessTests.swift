@@ -233,8 +233,8 @@ actor MockVirtualPortManager: VirtualPortManaging {
         ("midi.send_cc", ["controller": "74", "value": "80", "channel": "3"]),
         ("midi.program_change", ["program": "10", "channel": "4"]),
         ("midi.send_program_change", ["program": "11", "channel": "5"]),
-        ("midi.send_pitch_bend", ["value": "-8192", "channel": "6"]),
-        ("midi.pitch_bend", ["value": "20000", "channel": "7"]),
+        ("midi.send_pitch_bend", ["value": "0", "channel": "6"]),
+        ("midi.pitch_bend", ["value": "16383", "channel": "7"]),
         ("midi.aftertouch", ["pressure": "70", "channel": "8"]),
         ("midi.send_aftertouch", ["value": "71", "channel": "9"]),
     ]
@@ -257,6 +257,37 @@ actor MockVirtualPortManager: VirtualPortManaging {
         .pitchBend(channel: 7, value: 16_383),
         .aftertouch(channel: 8, pressure: 70),
         .aftertouch(channel: 9, pressure: 71),
+    ])
+}
+
+@Test func testCoreMIDIChannelPitchBendUsesAbsolute14BitValues() async {
+    let engine = MockCoreMIDIEngine()
+    let channel = CoreMIDIChannel(engine: engine)
+
+    let center = await channel.execute(
+        operation: "midi.send_pitch_bend",
+        params: ["value": "8192", "channel": "2"]
+    )
+    let expressive = await channel.execute(
+        operation: "midi.pitch_bend",
+        params: ["value": "12345", "channel": "3"]
+    )
+    let negative = await channel.execute(
+        operation: "midi.send_pitch_bend",
+        params: ["value": "-1", "channel": "4"]
+    )
+    let overflow = await channel.execute(
+        operation: "midi.pitch_bend",
+        params: ["value": "16384", "channel": "5"]
+    )
+
+    #expect(center.isSuccess)
+    #expect(expressive.isSuccess)
+    #expect(!negative.isSuccess)
+    #expect(!overflow.isSuccess)
+    #expect(await engine.shortMessages == [
+        .pitchBend(channel: 2, value: 8192),
+        .pitchBend(channel: 3, value: 12345),
     ])
 }
 
@@ -361,7 +392,7 @@ actor MockVirtualPortManager: VirtualPortManaging {
     #expect(invalidMMCTime.message.contains("HH:MM:SS:FF"))
 
     #expect(await engine.shortMessages == [
-        .pitchBend(channel: 2, value: 16_383),
+        .pitchBend(channel: 2, value: 12_345),
     ])
 }
 

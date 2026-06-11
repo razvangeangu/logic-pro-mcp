@@ -16,9 +16,20 @@ struct NavigateDispatcher {
     ) async -> CallTool.Result {
         switch command {
         case "goto_bar":
-            let bar = intParam(params, "bar", default: 1)
+            guard params["bar"] != nil else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "goto_bar requires explicit 'bar'"
+                )
+            }
+            guard let bar = intParamOrNil(params, "bar") else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "goto_bar 'bar' must be an integer in 1..9999"
+                )
+            }
             guard (1...9999).contains(bar) else {
-                return toolTextResult("goto_bar 'bar' must be in 1..9999 (got \(bar))", isError: true)
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "goto_bar 'bar' must be in 1..9999 (got \(bar))"
+                )
             }
             let result = await router.route(
                 operation: "transport.goto_position",
@@ -189,10 +200,15 @@ struct NavigateDispatcher {
                 let result = await router.route(operation: "nav.zoom_to_fit")
                 return toolTextResult(result)
             default:
-                // Treat as numeric zoom level
+                guard let numericLevel = Int(level),
+                      (1...10).contains(numericLevel) else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "set_zoom 'level' must be one of: in, out, fit, or integer 1..10"
+                    )
+                }
                 let result = await router.route(
                     operation: "nav.set_zoom_level",
-                    params: ["level": level]
+                    params: ["level": String(numericLevel)]
                 )
                 return toolTextResult(result)
             }
