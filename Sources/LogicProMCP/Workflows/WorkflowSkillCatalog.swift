@@ -333,7 +333,8 @@ enum WorkflowSkillLinter {
                         issues.append(issue("mutating_step_missing_confirmation", stepPath, "mutating steps need confirmation level"))
                     }
                 }
-                if step.expectedResponseFields.isEmpty {
+                if step.expectedResponseFields.isEmpty,
+                   !WorkflowSkillCatalog.resourceAllowsEmptyExpectedFields(step.resource) {
                     issues.append(issue("step_missing_success_fields", stepPath, "steps must name response fields to inspect"))
                 }
             }
@@ -410,6 +411,10 @@ enum WorkflowSkillCatalog {
         refs.formUnion(workflow.stateChecks.map(\.resource))
         refs.formUnion(workflow.steps.compactMap(\.resource))
         return Array(refs)
+    }
+
+    static func resourceAllowsEmptyExpectedFields(_ resource: String?) -> Bool {
+        resource == "logic://tracks/{index}/regions"
     }
 
     static func defaultWorkflows() -> [WorkflowSkill] {
@@ -655,12 +660,12 @@ enum WorkflowSkillCatalog {
             ],
             stateChecks: [
                 stateCheck("tracks", "logic://tracks", ["data"], true),
-                stateCheck("regions_before", "logic://tracks/{index}/regions", ["regions"], false),
+                stateCheck("regions_before", "logic://tracks/{index}/regions", [], false),
             ],
             steps: [
                 readStep("read_tracks", "Read tracks before target selection", "logic://tracks", ["data"]),
                 toolStep("write_midi", "Import MIDI file for the explicit target", "logic_midi", command: "import_file", true, "L1", ["success", "verified"], ["unverified target", "invalid channel"]),
-                readStep("regions_after", "Read regions after write", "logic://tracks/{index}/regions", ["regions"]),
+                readStep("regions_after", "Read regions after write", "logic://tracks/{index}/regions", []),
             ],
             verification: WorkflowVerification(evidence: ["before_regions", "after_regions", "tool_envelope"], successFields: ["region_count_delta", "verified"], liveEvidenceFile: nil),
             failureModes: ["target track missing", "selection unverified", "MIDI import rejected", "post-write region readback unavailable"],
@@ -690,7 +695,7 @@ enum WorkflowSkillCatalog {
             ],
             stateChecks: [stateCheck("markers", "logic://markers", ["data"], false)],
             steps: [
-                readStep("read_markers", "Read current markers", "logic://markers", ["data", "position_source"]),
+                readStep("read_markers", "Read current markers", "logic://markers", ["data"]),
                 toolStep("optional_write", "Optionally create a marker at the playhead", "logic_navigate", command: "create_marker", true, "L1", ["success", "verified"], ["unsupported marker mutation", "position parse failure"]),
             ],
             verification: WorkflowVerification(evidence: ["marker_resource_before_after"], successFields: ["canonical_position", "verified"], liveEvidenceFile: nil),
@@ -756,7 +761,7 @@ enum WorkflowSkillCatalog {
                 stateCheck("mixer", "logic://mixer", ["strips"], false),
             ],
             steps: [
-                readStep("read_catalog", "Read stock plugin catalog", "logic://stock-plugins", ["entries", "availability_state"]),
+                readStep("read_catalog", "Read stock plugin catalog", "logic://stock-plugins", ["entries", "validation"]),
                 readStep("search_catalog", "Search catalog for user intent", "logic://stock-plugins/search?query={query}", ["entries"]),
                 readStep("read_mixer_slots", "Read mixer slot state before planning insert order", "logic://mixer", ["strips"]),
             ],
@@ -802,8 +807,8 @@ enum WorkflowSkillCatalog {
                 stateCheck("target_strip", "logic://mixer/{strip}", ["strip"], false),
             ],
             steps: [
-                readStep("read_gain_catalog", "Read stock Gain catalog entry", "logic://stock-plugins/logic.stock.effect.gain", ["entry", "availability_state"]),
-                readStep("read_mixer_slots", "Read mixer slot state", "logic://mixer", ["strips", "plugins"]),
+                readStep("read_gain_catalog", "Read stock Gain catalog entry", "logic://stock-plugins/logic.stock.effect.gain", ["entry", "validation"]),
+                readStep("read_mixer_slots", "Read mixer slot state", "logic://mixer", ["strips", "data_source"]),
                 toolStep(
                     "confirmed_insert_gain",
                     "Insert stock Gain into an explicit empty slot",
@@ -814,7 +819,7 @@ enum WorkflowSkillCatalog {
                     ["success", "verified", "observed_plugin_name", "verify_source"],
                     ["confirmation missing", "slot_occupied", "readback unavailable", "readback mismatch"]
                 ),
-                readStep("read_strip_after_insert", "Read target strip after insert", "logic://mixer/{strip}", ["strip", "plugins"]),
+                readStep("read_strip_after_insert", "Read target strip after insert", "logic://mixer/{strip}", ["strip"]),
             ],
             verification: WorkflowVerification(
                 evidence: ["catalog_entry", "confirmation_required_gate", "ax_plugin_slot_readback"],

@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+
+- Hardened stock-plugin and workflow resource routing so percent-encoded paths, percent-encoded query parameter names, and malformed query escapes fail closed instead of aliasing canonical catalog URIs.
+- Corrected workflow required-field declarations for array/enveloped resource shapes, including track regions, markers, stock plugin detail/list reads, and mixer strip reads.
+- Updated the next public-surface identity to `3.5.0`, refreshed resource `lastModified` annotations, and synchronized manifest/README/API routing docs for the 14-resource / 7-template surface.
+
 ### Changed
 
 - **CI coverage gate raised to current-baseline floor** — global source coverage now hard-gates at region >=70% / line >=78%, while keeping line >=90% as the explicit uplift target. Maintainer and contribution docs now clarify that new high-risk production code should target about 90% line coverage on the touched surface or carry live/manual evidence when direct measurement is not practical.

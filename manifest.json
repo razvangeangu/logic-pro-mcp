@@ -1,8 +1,8 @@
 {
   "name": "logic-pro-mcp",
   "display_name": "Logic Pro MCP Server",
-  "description": "Bidirectional, stateful control of Logic Pro from AI assistants. 8 tools + 9 resources + 3 templates across 7 native macOS channels (MCU, MIDI Key Commands, CoreMIDI, Scripter, Accessibility, CGEvent, AppleScript). GitHub Actions release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts should be audited via RELEASE-METADATA.json.",
-  "version": "3.4.6",
+  "description": "Bidirectional, stateful control of Logic Pro from AI assistants. 8 tools + 14 resources + 7 templates across 7 native macOS channels (MCU, MIDI Key Commands, CoreMIDI, Scripter, Accessibility, CGEvent, AppleScript). GitHub Actions release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts should be audited via RELEASE-METADATA.json.",
+  "version": "3.5.0",
   "author": "Isaac (MongLong0214)",
   "license": "MIT",
   "homepage": "https://github.com/MongLong0214/logic-pro-mcp",
@@ -15,7 +15,7 @@
     "macos": {
       "command": "LogicProMCP",
       "args": [],
-      "download_url": "https://github.com/MongLong0214/logic-pro-mcp/releases/download/v3.4.6/LogicProMCP",
+      "download_url": "https://github.com/MongLong0214/logic-pro-mcp/releases/download/v3.5.0/LogicProMCP",
       "install_path": "/usr/local/bin/LogicProMCP"
     }
   },
@@ -42,11 +42,20 @@
     "logic://project/info",
     "logic://midi/ports",
     "logic://mcu/state",
-    "logic://library/inventory"
+    "logic://library/inventory",
+    "logic://stock-plugins",
+    "logic://stock-plugins/census",
+    "logic://stock-plugins/capabilities",
+    "logic://workflow-skills",
+    "logic://workflow-skills/schema"
   ],
   "resource_templates": [
     "logic://tracks/{index}",
     "logic://tracks/{index}/regions",
-    "logic://mixer/{strip}"
+    "logic://mixer/{strip}",
+    "logic://stock-plugins/{id}",
+    "logic://stock-plugins/search?query={query}",
+    "logic://workflow-skills/{id}",
+    "logic://workflow-skills/search?query={query}"
   ]
 }

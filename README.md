@@ -54,8 +54,8 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 | Surface | Current source tree |
 |---------|---------------------|
 | MCP tools | 8 tools covering transport, tracks, mixer, MIDI, edit, navigation, project lifecycle, and system health |
-| Read resources | 9 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, and library inventory |
-| Resource templates | 3 templates for track, region, and mixer-strip lookup |
+| Read resources | 14 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, library inventory, stock plugin intelligence, and workflow skills |
+| Resource templates | 7 templates for track, region, mixer-strip, stock plugin detail/search, and workflow detail/search lookup |
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
 | Verification line | Current main: `1208` Swift tests + strict Logic Pro 12.2 live E2E `285 passed / 0 skipped / 0 failed`, backed by [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
 | Published release | `v3.4.6`, ADHOC universal artifacts, SHA256 metadata, macOS 14/15 install validation |
@@ -205,7 +205,7 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [Setup Guide](docs/SETUP.md) | End users | One-page install + Logic Pro integration, ~10 min |
-| [API Reference](docs/API.md) | End users, MCP clients | All 8 tools, 9 resources, 3 templates, 130+ operations |
+| [API Reference](docs/API.md) | End users, MCP clients | All 8 tools, 14 resources, 7 templates, 130+ operations |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |
 | [Maintainer Guide](docs/MAINTAINERS.md) | Maintainers | Release, approvals, E2E checklist |

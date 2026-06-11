@@ -109,10 +109,10 @@ Mutating workflows are not marked `production_ready` unless they have matching `
 | `pause` | — | text | CoreMIDI → CGEvent |
 | `rewind` | — | text | MCU → CoreMIDI → CGEvent |
 | `fast_forward` | — | text | MCU → CoreMIDI → CGEvent |
-| `toggle_cycle` | — | text | Accessibility → MCU → MIDIKeyCommands → CGEvent |
+| `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |
 | `toggle_metronome` | — | text | Accessibility → MIDIKeyCommands → CGEvent |
 | `toggle_count_in` | — | text | Accessibility → MIDIKeyCommands → CGEvent |
-| `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility → MIDIKeyCommands |
+| `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility |
 | `goto_position` | `{ bar: int }` (1..9999) or `{ position: string }` — `"B.B.S.S"` or `"HH:MM:SS:FF"` SMPTE | text | Accessibility (dialog, auto-extends project, ~800ms) → MCU → CoreMIDI → CGEvent |
 | `set_cycle_range` | `{ start: int, end: int }` | text | Accessibility |
 | `capture_recording` | — | text | MIDIKeyCommands → CGEvent |

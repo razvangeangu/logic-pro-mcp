@@ -324,6 +324,36 @@ struct WorkflowSkillCatalogTests {
         #expect(readiness?.unresolvedResources == nil)
     }
 
+    @Test("default workflows declare required fields that match served top-level resource shapes")
+    func defaultWorkflowRequiredFieldsMatchResourceShapes() {
+        let workflows = WorkflowSkillCatalog.defaultWorkflows()
+
+        func workflow(_ id: String) throws -> WorkflowSkill {
+            try #require(workflows.first { $0.id == id }, "missing workflow \(id)")
+        }
+        func stepFields(_ workflow: WorkflowSkill, _ stepID: String) throws -> [String] {
+            try #require(workflow.steps.first { $0.id == stepID }, "missing step \(stepID)").expectedResponseFields
+        }
+        func checkFields(_ workflow: WorkflowSkill, _ checkID: String) throws -> [String] {
+            try #require(workflow.stateChecks.first { $0.id == checkID }, "missing state check \(checkID)").requiredFields
+        }
+
+        let midi = try! workflow("logic.workflow.midi.idea_sketch")
+        #expect(try! checkFields(midi, "regions_before").isEmpty)
+        #expect(try! stepFields(midi, "regions_after").isEmpty)
+
+        let markers = try! workflow("logic.workflow.arrangement.marker_plan")
+        #expect(try! stepFields(markers, "read_markers") == ["data"])
+
+        let stockPlan = try! workflow("logic.workflow.plugins.stock_chain_plan")
+        #expect(try! stepFields(stockPlan, "read_catalog") == ["entries", "validation"])
+
+        let guardedInsert = try! workflow("logic.workflow.plugins.stock_insert_gain_live_verified")
+        #expect(try! stepFields(guardedInsert, "read_gain_catalog") == ["entry", "validation"])
+        #expect(try! stepFields(guardedInsert, "read_mixer_slots") == ["strips", "data_source"])
+        #expect(try! stepFields(guardedInsert, "read_strip_after_insert") == ["strip"])
+    }
+
     @Test("dependencies resolve once the stock plugin surface exists")
     func dependenciesResolveWithStockSurface() {
         let augmentedStatics = WorkflowSkillCatalog.currentStaticResourceURIs().union(["logic://stock-plugins"])
@@ -471,6 +501,9 @@ struct WorkflowSkillResourceTests {
     func workflowRoutingFailsClosed() async {
         let malformed = [
             "logic://workflow-skills?query=x",
+            "logic://workflow-skills/%73chema",
+            "logic://workflow-skills/search?qu%65ry=plugin",
+            "logic://workflow-skills/search?query=%ZZ",
             "logic://workflow-skills/search/extra",
             "logic://workflow-skills/search?other=x",
             "logic://workflow-skills/search?query=plugin&query=marker",

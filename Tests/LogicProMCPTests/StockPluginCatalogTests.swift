@@ -447,6 +447,9 @@ struct StockPluginResourceTests {
     func stockPluginRoutingFailsClosed() async {
         let malformed = [
             "logic://stock-plugins?query=gain",
+            "logic://stock-plugins/%63ensus",
+            "logic://stock-plugins/search?qu%65ry=gain",
+            "logic://stock-plugins/search?query=%ZZ",
             "logic://stock-plugins/search/extra",
             "logic://stock-plugins/search?other=x",
             "logic://stock-plugins/search?query=gain&query=compressor",

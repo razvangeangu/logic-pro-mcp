@@ -195,6 +195,7 @@ extension ResourceHandlers {
     /// query parameters fail closed instead of silently degrading to a search
     /// or a detail lookup.
     private static func readStockPluginResource(uri: String) throws -> ReadResource.Result {
+        try validateRawCatalogURIEncoding(uri, host: "stock-plugins")
         guard let components = URLComponents(string: uri),
               components.scheme == "logic",
               components.host == "stock-plugins" else {
@@ -203,6 +204,8 @@ extension ResourceHandlers {
         guard components.fragment == nil else {
             throw MCPError.invalidParams("logic://stock-plugins resources do not accept URI fragments")
         }
+        try validateCanonicalCatalogPath(components, host: "stock-plugins")
+        try validateCatalogSearchQuery(components, baseURI: "logic://stock-plugins")
         let segments = components.path.split(separator: "/").map(String.init)
         // Reject doubled or trailing slashes ("//census", "census/") — the
         // canonical reconstruction must reproduce the raw path exactly.
@@ -247,6 +250,7 @@ extension ResourceHandlers {
     /// parameters fail closed instead of silently degrading to a search or a
     /// detail lookup.
     private static func readWorkflowSkillResource(uri: String) throws -> ReadResource.Result {
+        try validateRawCatalogURIEncoding(uri, host: "workflow-skills")
         guard let components = URLComponents(string: uri),
               components.scheme == "logic",
               components.host == "workflow-skills" else {
@@ -255,6 +259,8 @@ extension ResourceHandlers {
         guard components.fragment == nil else {
             throw MCPError.invalidParams("logic://workflow-skills resources do not accept URI fragments")
         }
+        try validateCanonicalCatalogPath(components, host: "workflow-skills")
+        try validateCatalogSearchQuery(components, baseURI: "logic://workflow-skills")
         let segments = components.path.split(separator: "/").map(String.init)
         // Reject doubled or trailing slashes ("//schema", "schema/") — the
         // canonical reconstruction must reproduce the raw path exactly.
@@ -291,6 +297,66 @@ extension ResourceHandlers {
         }
         if segment == "schema" { return readWorkflowSkillSchema(uri: uri) }
         return try readWorkflowSkillDetail(uri: uri, id: segment)
+    }
+
+    private static func validateRawCatalogURIEncoding(_ uri: String, host: String) throws {
+        let prefix = "logic://\(host)"
+        guard uri.hasPrefix(prefix) else { return }
+        let rest = String(uri.dropFirst(prefix.count))
+        let withoutFragment = rest.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+        let pathAndQuery = withoutFragment.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        let rawPath = pathAndQuery.first ?? ""
+        guard !rawPath.contains("%") else {
+            throw MCPError.invalidParams("Malformed \(host) resource path: \(rawPath)")
+        }
+        if pathAndQuery.count > 1 {
+            let rawQuery = pathAndQuery[1]
+            guard percentEscapesAreWellFormed(rawQuery) else {
+                throw MCPError.invalidParams("Malformed search query encoding: \(rawQuery)")
+            }
+        }
+    }
+
+    private static func validateCanonicalCatalogPath(_ components: URLComponents, host: String) throws {
+        // URLComponents exposes `path` decoded. Compare against the raw
+        // percent-encoded path so `%63ensus` cannot alias the canonical
+        // `/census` route.
+        guard components.percentEncodedPath == components.path else {
+            throw MCPError.invalidParams("Malformed \(host) resource path: \(components.percentEncodedPath)")
+        }
+    }
+
+    private static func validateCatalogSearchQuery(_ components: URLComponents, baseURI: String) throws {
+        guard let rawQuery = components.percentEncodedQuery else { return }
+        guard percentEscapesAreWellFormed(rawQuery) else {
+            throw MCPError.invalidParams("Malformed search query encoding: \(rawQuery)")
+        }
+        // Search resources accept percent-encoded query *values*, but the
+        // parameter name itself is part of the routing surface and must remain
+        // canonical (`query`), not an encoded alias such as `qu%65ry`.
+        for rawPair in rawQuery.split(separator: "&", omittingEmptySubsequences: false) {
+            let parts = rawPair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.first.map(String.init) == "query" else {
+                throw MCPError.invalidParams("Unsupported search parameters in \(baseURI): \(rawPair)")
+            }
+        }
+    }
+
+    private static func percentEscapesAreWellFormed(_ raw: String) -> Bool {
+        var index = raw.startIndex
+        while index < raw.endIndex {
+            guard raw[index] == "%" else {
+                index = raw.index(after: index)
+                continue
+            }
+            let first = raw.index(after: index)
+            guard first < raw.endIndex else { return false }
+            let second = raw.index(after: first)
+            guard second < raw.endIndex else { return false }
+            guard raw[first].isHexDigit, raw[second].isHexDigit else { return false }
+            index = raw.index(after: second)
+        }
+        return true
     }
 
     private static func readStockPlugins(uri: String) -> ReadResource.Result {
