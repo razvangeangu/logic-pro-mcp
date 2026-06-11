@@ -456,6 +456,10 @@ struct StockPluginResourceTests {
             "logic://stock-plugins/census?x=1",
             "logic://stock-plugins//census",
             "logic://stock-plugins/census/",
+            "logic://stock-plugins/census#fragment",
+            "logic://stock-plugins/capabilities#fragment",
+            "logic://stock-plugins/search?query=gain#fragment",
+            "logic://stock-plugins/logic.stock.effect.gain#fragment",
         ]
         for uri in malformed {
             #expect(await stockPluginResourceThrows(uri), "expected fail-closed read for \(uri)")

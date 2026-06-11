@@ -480,6 +480,9 @@ struct WorkflowSkillResourceTests {
             "logic://workflow-skills/schema?x=1",
             "logic://workflow-skills//schema",
             "logic://workflow-skills/schema/",
+            "logic://workflow-skills/schema#fragment",
+            "logic://workflow-skills/search?query=plugin#fragment",
+            "logic://workflow-skills/logic.workflow.readiness.project#fragment",
         ]
         for uri in malformed {
             #expect(await workflowResourceThrows(uri), "expected fail-closed read for \(uri)")

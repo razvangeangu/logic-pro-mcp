@@ -200,6 +200,9 @@ extension ResourceHandlers {
               components.host == "stock-plugins" else {
             throw MCPError.invalidParams("Malformed stock plugin resource URI: \(uri)")
         }
+        guard components.fragment == nil else {
+            throw MCPError.invalidParams("logic://stock-plugins resources do not accept URI fragments")
+        }
         let segments = components.path.split(separator: "/").map(String.init)
         // Reject doubled or trailing slashes ("//census", "census/") — the
         // canonical reconstruction must reproduce the raw path exactly.
@@ -248,6 +251,9 @@ extension ResourceHandlers {
               components.scheme == "logic",
               components.host == "workflow-skills" else {
             throw MCPError.invalidParams("Malformed workflow skill resource URI: \(uri)")
+        }
+        guard components.fragment == nil else {
+            throw MCPError.invalidParams("logic://workflow-skills resources do not accept URI fragments")
         }
         let segments = components.path.split(separator: "/").map(String.init)
         // Reject doubled or trailing slashes ("//schema", "schema/") — the

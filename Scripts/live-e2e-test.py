@@ -1115,6 +1115,18 @@ def main():
     r = read_resource(client, "not-a-logic-uri")
     T("malformed URI throws", r, lambda _: "error" in r)
 
+    malformed_catalog_uris = [
+        "logic://stock-plugins/census#fragment",
+        "logic://stock-plugins/search?query=gain#fragment",
+        "logic://stock-plugins/logic.stock.effect.gain#fragment",
+        "logic://workflow-skills/schema#fragment",
+        "logic://workflow-skills/search?query=plugin#fragment",
+        "logic://workflow-skills/logic.workflow.readiness.project#fragment",
+    ]
+    for uri in malformed_catalog_uris:
+        r = read_resource(client, uri)
+        T(f"malformed catalog URI throws: {uri}", r, lambda _: "error" in r)
+
     # ═══════════════════════════════════════════════════════════════
     # §12 Error Handling (16 tests)
     # ═══════════════════════════════════════════════════════════════
