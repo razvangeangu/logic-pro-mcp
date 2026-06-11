@@ -103,7 +103,7 @@ struct ResourceProviderTests {
         #expect(health?.annotations?.priority == 1.0)
     }
 
-    @Test("resource annotations use the 3.5.0 public-surface timestamp")
+    @Test("resource annotations use the current public-surface timestamp")
     func resourceAnnotationsUseCurrentSurfaceTimestamp() {
         let timestamps = Set(ResourceProvider.resources.compactMap { $0.annotations?.lastModified })
         #expect(timestamps == ["2026-06-11T00:00:00Z"])

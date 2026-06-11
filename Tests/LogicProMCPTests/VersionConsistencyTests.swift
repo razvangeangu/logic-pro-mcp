@@ -23,8 +23,8 @@ private func readRepoFile(_ relativePath: String) throws -> String {
 @Test func testServerVersionMatchesPackagingArtefacts() throws {
     let sourceVersion = ServerConfig.serverVersion
     #expect(
-        sourceVersion == "3.5.0",
-        "stock plugin and workflow resources expand the public surface, so this branch must not identify as v3.4.6"
+        sourceVersion == "3.4.6",
+        "PR branches must stay pinned to the latest published stable until the v3.5.0 tag and release assets exist"
     )
 
     let manifest = try readRepoFile("manifest.json")
@@ -50,17 +50,31 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     )
 }
 
-@Test func testManifestResourceSurfaceMatchesRegisteredProvider() throws {
+@Test func testManifestResourceSurfaceMatchesPublishedStableRelease() throws {
     let manifest = try sharedParseJSON(readRepoFile("manifest.json")) as! [String: Any]
 
     let resources = Set(try #require(manifest["resources"] as? [String]))
-    #expect(resources == Set(ResourceProvider.resources.map(\.uri)))
+    #expect(resources == [
+        "logic://system/health",
+        "logic://transport/state",
+        "logic://tracks",
+        "logic://mixer",
+        "logic://markers",
+        "logic://project/info",
+        "logic://midi/ports",
+        "logic://mcu/state",
+        "logic://library/inventory",
+    ])
 
     let templates = Set(try #require(manifest["resource_templates"] as? [String]))
-    #expect(templates == Set(ResourceProvider.templates.map(\.uriTemplate)))
+    #expect(templates == [
+        "logic://tracks/{index}",
+        "logic://tracks/{index}/regions",
+        "logic://mixer/{strip}",
+    ])
 
     let description = try #require(manifest["description"] as? String)
-    #expect(description.contains("\(ResourceProvider.resources.count) resources + \(ResourceProvider.templates.count) templates"))
+    #expect(description.contains("9 resources + 3 templates"))
 }
 
 @Test func testReadmeAndAPIDocsMatchPublicSurfaceAndRouting() throws {
