@@ -18,9 +18,13 @@ import Foundation
 /// Callers layer their own upper bounds on top of the result (256 for
 /// real-time `play_sequence`, 1024 for SMF import in `record_sequence`).
 enum NoteSequenceParser {
+    static let maxRealtimeOffsetMs = 30_000
+    static let maxRealtimeSequenceEndMs = 60_000
+    static let maxSMFSequenceEndMs = 3_600_000
+
     struct ParsedNote: Equatable {
         let pitch: UInt8       // 0...127
-        let offsetMs: Int      // >= 0
+        let offsetMs: Int      // >= 0; call sites apply transport-specific caps
         let durationMs: Int    // 1...30000
         let velocity: UInt8    // 0...127
         let channel: UInt8     // 0...15 (wire byte; user-facing was 1..16)
@@ -49,7 +53,7 @@ enum NoteSequenceParser {
             case .invalidPitch(let segment):
                 return "invalid pitch (must be 0..127) in segment '\(segment)'"
             case .invalidTiming(let segment):
-                return "invalid timing (offset>=0, duration 1..30000) in segment '\(segment)'"
+                return "invalid timing (offset >= 0, duration 1..30000) in segment '\(segment)'"
             case .malformed(let segment):
                 return "malformed segment '\(segment)' (expected 'pitch,offsetMs,durMs[,vel[,ch]]')"
             }
@@ -79,10 +83,12 @@ enum NoteSequenceParser {
     }
 
     private static func parseSegment(_ segment: String) -> Result<ParsedNote, NoteSequenceParseError> {
-        let parts = segment.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        let parts = segment
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-        // Need at least pitch, offset, duration.
-        guard parts.count >= 3 else {
+        // Need pitch, offset, duration, plus optional velocity and channel.
+        guard (3...5).contains(parts.count), parts.allSatisfy({ !$0.isEmpty }) else {
             return .failure(.malformed(segment: segment))
         }
 
@@ -144,5 +150,27 @@ enum NoteSequenceParser {
             velocity: UInt8(velocity),
             channel: channelWire
         ))
+    }
+
+    static func realtimeTimingViolation(in notes: [ParsedNote]) -> String? {
+        for note in notes {
+            if note.offsetMs > maxRealtimeOffsetMs {
+                return "offset \(note.offsetMs)ms exceeds realtime play_sequence 30s per-event cap; use record_sequence for longer SMF import"
+            }
+            let endMs = note.offsetMs + note.durationMs
+            if endMs > maxRealtimeSequenceEndMs {
+                return "sequence end \(endMs)ms exceeds realtime play_sequence 60s cap; use record_sequence for longer SMF import"
+            }
+        }
+        return nil
+    }
+
+    static func smfTimingViolation(in notes: [ParsedNote]) -> String? {
+        for note in notes {
+            if note.offsetMs > maxSMFSequenceEndMs - note.durationMs {
+                return "sequence end exceeds record_sequence SMF safety cap \(maxSMFSequenceEndMs)ms"
+            }
+        }
+        return nil
     }
 }

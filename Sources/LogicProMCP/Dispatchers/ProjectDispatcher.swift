@@ -31,7 +31,20 @@ struct ProjectDispatcher {
         },
         sleep: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }
     ) async -> CallTool.Result {
-        let confirmed = boolParam(params, "confirmed", default: false)
+        func destructiveConfirmation(for command: String) -> (confirmed: Bool, error: CallTool.Result?) {
+            switch strictBoolParam(params, "confirmed") {
+            case .missing:
+                return (false, nil)
+            case .value(let confirmed):
+                return (confirmed, nil)
+            case .invalid(let hint):
+                audit(command, phase: .rejected, reason: "invalid confirmed")
+                return (
+                    false,
+                    MIDIDispatcher.invalidParamsResult(hint: "\(command) \(hint)")
+                )
+            }
+        }
 
         // H-1 (2026-05-08 enterprise review): pre-fix this dispatcher logged
         // `[AUDIT] project.<command> executed` BEFORE param validation,
@@ -82,7 +95,9 @@ struct ProjectDispatcher {
                 audit(command, phase: .rejected, reason: "invalid path")
                 return toolTextResult("open requires an existing absolute .logicx project path", isError: true)
             }
-            if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+            let confirmation = destructiveConfirmation(for: command)
+            if let error = confirmation.error { return error }
+            if !confirmation.confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
@@ -110,7 +125,9 @@ struct ProjectDispatcher {
                 audit(command, phase: .rejected, reason: "invalid path")
                 return toolTextResult("save_as requires an absolute .logicx project path", isError: true)
             }
-            if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+            let confirmation = destructiveConfirmation(for: command)
+            if let error = confirmation.error { return error }
+            if !confirmation.confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
@@ -131,7 +148,9 @@ struct ProjectDispatcher {
                     isError: true
                 )
             }
-            if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+            let confirmation = destructiveConfirmation(for: command)
+            if let error = confirmation.error { return error }
+            if !confirmation.confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
@@ -147,7 +166,9 @@ struct ProjectDispatcher {
             return toolTextResult(result)
 
         case "bounce":
-            if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+            let confirmation = destructiveConfirmation(for: command)
+            if let error = confirmation.error { return error }
+            if !confirmation.confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
@@ -182,7 +203,9 @@ struct ProjectDispatcher {
             )
 
         case "quit":
-            if !confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
+            let confirmation = destructiveConfirmation(for: command)
+            if let error = confirmation.error { return error }
+            if !confirmation.confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }

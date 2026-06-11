@@ -174,7 +174,7 @@ Clients can detect stale snapshots without cross-referencing `logic://system/hea
 | `solo` | `{ index: int, enabled?: bool }` | text | MCU → AX → CGEvent |
 | `arm` | `{ index: int, enabled?: bool }` | text | MCU → AX → CGEvent |
 | `arm_only` | `{ index: int }` | text on full success; **error** when target arm fails or any disarm fails | composite (disarm-all + arm target) |
-| `record_sequence` | `{ bar?: int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: float }` | JSON on success; **error** when goto fails OR no new track is observed via live AX within 500 ms | **v2.3 rewrite**: SMF generation + AX `File → Import → MIDI File…` — byte-exact timing |
+| `record_sequence` | `{ bar?: int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: float }` (`ch` 1..16, SMF end ≤ 3,600,000 ms) | JSON on success; **error** when goto fails OR no new track is observed via live AX within 500 ms | **v2.3 rewrite**: SMF generation + AX `File → Import → MIDI File…` — byte-exact timing |
 | `set_automation` | `{ index: int, mode: "off"\|"read"\|"touch"\|"latch"\|"trim"\|"write" }` | text | MCU |
 | `set_instrument` | `{ index: int, path: string }` OR `{ index: int, category: string, preset: string }` — at least one path OR (category + preset) is required | text | Accessibility |
 | `list_library` | — | text | Accessibility |
@@ -235,6 +235,7 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 
 - `hasDocument` is false (no project open)
 - `notes` is empty, or no valid events parsed
+- `notes` exceeds the SMF safety cap (encoded sequence end > 3,600,000 ms)
 - Playhead reset (`transport.goto_position` with `bar=1`) fails — treated as a hard precondition because Logic's MIDI File Import anchors the region at playhead; without the reset, notes would land at the wrong bar
 - `midi.import_file` fails, rejects the path, or completes without a new live AX track
 - No new track is observed via live AX within 500 ms of import (v3.1.2+ switched from 2s cache polling to live `AXLogicProElements.allTrackHeaders` after the cache-poll race documented in CHANGELOG §3.1.2)

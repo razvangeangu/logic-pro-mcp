@@ -294,6 +294,9 @@ actor CoreMIDIChannel: Channel {
             guard events.count <= 256 else {
                 return .error("play_sequence 'notes' count must be ≤ 256 (got \(events.count))")
             }
+            if let violation = NoteSequenceParser.realtimeTimingViolation(in: events) {
+                return .error("play_sequence: \(violation)")
+            }
             let startNs = DispatchTime.now().uptimeNanoseconds
             for event in events {
                 let targetNs = startNs + UInt64(event.offsetMs) * 1_000_000

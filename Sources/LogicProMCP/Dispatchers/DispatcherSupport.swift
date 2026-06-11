@@ -18,15 +18,27 @@ func intParam(_ params: [String: Value], _ keys: String..., default defaultValue
 /// `index` on mutating track commands where falling through to track 0
 /// would edit the wrong track on a malformed caller request.
 func intParamOrNil(_ params: [String: Value], _ keys: String...) -> Int? {
+    var selected: Int?
     for key in keys {
-        if let value = params[key]?.intValue {
-            return value
+        guard let raw = params[key] else { continue }
+        let parsed: Int? = {
+            if let value = raw.intValue { return value }
+            if let value = raw.doubleValue, value.isFinite { return Int(exactly: value) }
+            if let s = raw.stringValue {
+                return Int(s.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            return nil
+        }()
+        guard let parsed else {
+            return nil
         }
-        if let s = params[key]?.stringValue, let value = Int(s) {
-            return value
+        if let selected {
+            guard selected == parsed else { return nil }
+        } else {
+            selected = parsed
         }
     }
-    return nil
+    return selected
 }
 
 func doubleParam(_ params: [String: Value], _ keys: String..., default defaultValue: Double = 0) -> Double {
@@ -47,6 +59,7 @@ func doubleParam(_ params: [String: Value], _ keys: String..., default defaultVa
 }
 
 func doubleParamOrNil(_ params: [String: Value], _ keys: String...) -> Double? {
+    var selected: Double?
     for key in keys {
         guard let raw = params[key] else { continue }
         let parsed: Double? = {
@@ -56,9 +69,13 @@ func doubleParamOrNil(_ params: [String: Value], _ keys: String...) -> Double? {
             return nil
         }()
         guard let parsed, parsed.isFinite else { return nil }
-        return parsed
+        if let selected {
+            guard selected == parsed else { return nil }
+        } else {
+            selected = parsed
+        }
     }
-    return nil
+    return selected
 }
 
 func stringParam(_ params: [String: Value], _ keys: String..., default defaultValue: String = "") -> String {
@@ -118,6 +135,20 @@ func boolParamOrNil(_ params: [String: Value], _ keys: String...) -> Bool? {
         return nil
     }
     return nil
+}
+
+enum StrictBoolParam {
+    case missing
+    case value(Bool)
+    case invalid(String)
+}
+
+func strictBoolParam(_ params: [String: Value], _ key: String) -> StrictBoolParam {
+    guard let raw = params[key] else { return .missing }
+    guard let value = raw.boolValue else {
+        return .invalid("'\(key)' must be a literal boolean true or false")
+    }
+    return .value(value)
 }
 
 func csvIntListOrStringParam(_ params: [String: Value], key: String) -> String {

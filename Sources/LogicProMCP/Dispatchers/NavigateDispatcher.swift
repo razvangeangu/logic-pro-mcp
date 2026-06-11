@@ -46,24 +46,8 @@ struct NavigateDispatcher {
             // marker pointer by one — making both index- and name-based
             // goto silent no-ops relative to their parameter.
             //
-            // Cache miss strategy: if the marker isn't in cache (e.g. the
-            // poller hasn't run yet, or the marker list window is closed
-            // on Logic 12.2), fall back to the legacy `nav.goto_marker` CC
-            // keycmd path so existing call sites get *some* navigation
-            // signal. Documented in API.md as "best-effort when cache is
-            // cold".
             let markers = await cache.getMarkers()
-            let target: MarkerState? = {
-                if let indexStr = params["index"]?.intValue.map(String.init)
-                    ?? params["index"]?.stringValue,
-                   let index = Int(indexStr) {
-                    return markers.first { $0.id == index }
-                }
-                let name = stringParam(params, "name")
-                guard !name.isEmpty else { return nil }
-                return markers.first { $0.name.localizedCaseInsensitiveContains(name) }
-            }()
-            if let target {
+            func routeMarkerTarget(_ target: MarkerState) async -> CallTool.Result {
                 let result = await router.route(
                     operation: "transport.goto_position",
                     params: ["position": target.position]
@@ -91,8 +75,16 @@ struct NavigateDispatcher {
             // caller at the cache freshness state. The caller can then
             // decide whether to refresh the cache and retry, or accept the
             // failure. No silent wrong-target navigation.
-            if let indexStr = params["index"]?.intValue.map(String.init)
-                ?? params["index"]?.stringValue {
+            if params["index"] != nil {
+                guard let index = intParamOrNil(params, "index"), index >= 0 else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "goto_marker 'index' must be an integer >= 0"
+                    )
+                }
+                if let target = markers.first(where: { $0.id == index }) {
+                    return await routeMarkerTarget(target)
+                }
+                let indexStr = String(index)
                 return toolTextResult(
                     HonestContract.encodeStateC(
                         error: .elementNotFound,
@@ -108,6 +100,9 @@ struct NavigateDispatcher {
             let name = stringParam(params, "name")
             if name.isEmpty {
                 return toolTextResult("goto_marker requires 'index' or 'name' param", isError: true)
+            }
+            if let target = markers.first(where: { $0.name.localizedCaseInsensitiveContains(name) }) {
+                return await routeMarkerTarget(target)
             }
             return toolTextResult(
                 HonestContract.encodeStateC(

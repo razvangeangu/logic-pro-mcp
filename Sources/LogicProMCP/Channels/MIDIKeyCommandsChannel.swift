@@ -460,6 +460,13 @@ actor MIDIKeyCommandsChannel: Channel {
                 extras: ["operation": "midi.play_sequence.keycmd"]
             ))
         }
+        if let violation = NoteSequenceParser.realtimeTimingViolation(in: events) {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "play_sequence.keycmd: \(violation)",
+                extras: ["operation": "midi.play_sequence.keycmd"]
+            ))
+        }
 
         // Tight-rhythm scheduler — same shape as CoreMIDIChannel.play_sequence.
         // Note Off is fired in a detached task after each note's duration.

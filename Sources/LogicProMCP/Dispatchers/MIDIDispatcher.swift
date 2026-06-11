@@ -75,6 +75,11 @@ struct MIDIDispatcher {
             // Per-event channel lives inside the notes string and is parsed
             // by `NoteSequenceParser` (T3) — there is no top-level channel,
             // so we skip `validateMidiChannel` and only validate `port`.
+            guard params["channel"] == nil else {
+                return invalidParamsResult(
+                    hint: "play_sequence does not support top-level 'channel'; use the optional per-event channel field in notes"
+                )
+            }
             guard let notes = params["notes"]?.stringValue, !notes.isEmpty else {
                 return invalidParamsResult(hint: "play_sequence requires 'notes' as a non-empty string")
             }
@@ -82,6 +87,9 @@ struct MIDIDispatcher {
             case .success(let events):
                 guard !events.isEmpty, events.count <= 256 else {
                     return invalidParamsResult(hint: "play_sequence 'notes' count must be 1..256")
+                }
+                if let violation = NoteSequenceParser.realtimeTimingViolation(in: events) {
+                    return invalidParamsResult(hint: "play_sequence: \(violation)")
                 }
             case .failure(let error):
                 return invalidParamsResult(hint: "play_sequence: \(error.hint)")
@@ -181,11 +189,13 @@ struct MIDIDispatcher {
             if let reject = rejectIfPortPresent(params, command: command) {
                 return reject
             }
-            guard params["path"] != nil else {
-                return invalidParamsResult(hint: "import_file requires explicit 'path'")
+            let path: String
+            switch importFilePathParam(params) {
+            case .success(let parsed): path = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await routedTextResult(router, operation: "midi.import_file", params: [
-                "path": stringParam(params, "path"),
+                "path": path,
             ])
 
         case "create_virtual_port":
@@ -545,13 +555,38 @@ struct MIDIDispatcher {
 
     internal static func validatePort(_ params: [String: Value]) -> Result<String, ValidationFailure> {
         // Empty string `""` is explicitly rejected (does not fall through to default).
-        guard let raw = params["port"]?.stringValue else {
+        guard let rawValue = params["port"] else {
             return .success("midi") // missing = default
+        }
+        guard let raw = rawValue.stringValue else {
+            return .failure(ValidationFailure("port must be a string and one of: midi, keycmd"))
         }
         guard Self.validPorts.contains(raw) else {
             return .failure(ValidationFailure("port must be one of: midi, keycmd"))
         }
         return .success(raw)
+    }
+
+    private static func importFilePathParam(
+        _ params: [String: Value]
+    ) -> Result<String, ValidationFailure> {
+        guard let raw = params["path"] else {
+            return .failure(ValidationFailure("import_file requires explicit 'path'"))
+        }
+        guard let path = raw.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty else {
+            return .failure(ValidationFailure("import_file 'path' must be a non-empty string"))
+        }
+        guard !path.contains("\0"), !path.contains("\n"), !path.contains("\r") else {
+            return .failure(ValidationFailure("import_file 'path' must not contain control characters"))
+        }
+
+        let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard normalized.hasPrefix("/tmp/LogicProMCP/"),
+              normalized.lowercased().hasSuffix(".mid") else {
+            return .failure(ValidationFailure("import_file 'path' must be /tmp/LogicProMCP/*.mid"))
+        }
+        return .success(normalized)
     }
 
     /// Validates 1-based MIDI channel input and converts to wire byte (0..15).
