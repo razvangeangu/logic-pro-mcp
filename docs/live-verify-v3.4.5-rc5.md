@@ -1,6 +1,6 @@
 # Live Verification Runbook — v3.4.5-rc5
 
-Historical prerelease record. Latest stable release and issue #10-#13 evidence: `docs/live-verify-v3.4.6.md`, `docs/releases/v3.4.6.md`, and `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`.
+Historical prerelease record. Latest stable release evidence: `docs/live-verify-v3.5.0.md` and `docs/releases/v3.5.0.md`; issue #10-#13 evidence remains in `docs/live-verify-v3.4.6.md`, `docs/releases/v3.4.6.md`, and `docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md`.
 
 Date: 2026-06-05 KST
 Scope: current main hardening, release binary, live Logic Pro 12.2 session, and final MIDI-only v4 composition artifact.

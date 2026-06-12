@@ -1,5 +1,7 @@
 # Live Verification — v3.4.6
 
+> Historical record (2026-06-12 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.5.0.md`; this file remains preserved release evidence for v3.4.6.
+
 Date: 2026-06-09 KST
 Scope: stable `v3.4.6` release tag, current mainline source, local deterministic gates, published GitHub Release artifacts, and carried Logic Pro 12.2 live evidence from the final current-main mixer attestation.
 

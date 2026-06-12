@@ -13,7 +13,7 @@
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
   <img src="https://img.shields.io/badge/tests-1276_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/stable-v3.4.6-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/stable-v3.5.0-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -57,8 +57,8 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 | Read resources | 14 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, library inventory, stock plugin intelligence, and workflow skills |
 | Resource templates | 7 templates for track, region, mixer-strip, stock plugin detail/search, and workflow detail/search lookup |
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
-| Verification line | Current main: `1276` Swift tests + strict Logic Pro 12.2 live E2E `313 passed / 0 skipped / 0 failed`; published release backed by [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
-| Published release | `v3.4.6`, ADHOC universal artifacts, SHA256 metadata, macOS 14/15 install validation |
+| Verification line | Current main: `1276` Swift tests + strict Logic Pro 12.2 live E2E `313 passed / 0 skipped / 0 failed`; published release backed by [v3.5.0 evidence](docs/live-verify-v3.5.0.md) |
+| Published release | `v3.5.0`, ADHOC universal artifacts, SHA256 metadata, macOS 14/15 install validation |
 
 If this project helps you make music with Claude, Cursor, or any MCP client, star the repo. It helps the project reach more Logic Pro users and maintainers.
 
@@ -99,7 +99,7 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 - **Confirmation levels**: destructive/project and plugin insertion flows require explicit confirmation metadata before execution.
 - **Provenance labels**: read surfaces expose source, freshness, and evidence labels instead of forcing clients to guess.
 - **Installer hardening**: Homebrew pins SHA256; the shell installer refuses to run without explicit hash/team pins unless same-origin provenance is explicitly allowed.
-- **Release honesty**: published `v3.4.6` is the stable install line; README claims stay tied to shipped artifacts, current-main tests, or explicitly linked live evidence.
+- **Release honesty**: published `v3.5.0` is the stable install line; README claims stay tied to shipped artifacts, current-main tests, or explicitly linked live evidence.
 
 ## Quick Start
 
@@ -107,7 +107,7 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 
 The package manifest uses Swift tools 6.0 for compatibility. Current source verification uses Xcode 16.4 / Swift 6.2 in CI.
 
-The current published stable release is `v3.4.6` (2026-06-09 KST). It ships ADHOC-signed universal artifacts when Apple Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for pinned installs.
+The current published stable release is `v3.5.0` (2026-06-12 KST). It ships ADHOC-signed universal artifacts when Apple Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for pinned installs.
 
 ### 1. Install
 
@@ -176,7 +176,7 @@ Expected: all 7 channels `ready` after full setup, or 5 if you intentionally ski
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.6/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.5.0/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=<paste team_id from RELEASE-METADATA.json> \
@@ -187,7 +187,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.4.6/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.5.0/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
@@ -209,14 +209,14 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |
 | [Maintainer Guide](docs/MAINTAINERS.md) | Maintainers | Release, approvals, E2E checklist |
-| [Live Verify v3.4.6](docs/live-verify-v3.4.6.md) | Maintainers, QA | Latest deterministic, coverage, release-build, packaging, and carried Logic Pro 12.2 issue-verification evidence |
+| [Live Verify v3.5.0](docs/live-verify-v3.5.0.md) | Maintainers, QA | Latest deterministic, coverage, release-build, packaging, and fresh Logic Pro 12.2 strict live E2E evidence |
 | [Security Policy](SECURITY.md) | Security reviewers | Threat model, reporting, hardening |
 | [Changelog](CHANGELOG.md) | Everyone | Per-release changes |
 | [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, PR workflow |
 
 ## Status
 
-**Published stable**: `v3.4.6` is available as a GitHub Release and Homebrew install. It is the evidence/packaging alignment release after the Logic Pro 12.2 mixer verification work for Issues #10-#13. Release workflow `27186085967` passed build plus macOS 14/15 install validation; published metadata is `team_id:"ADHOC"`, `signing:"adhoc"`, `architectures:["x86_64","arm64"]`.
+**Published stable**: `v3.5.0` is available as a GitHub Release and Homebrew install. It ships the Issue #14 verified stock plugin intelligence catalog, the Issue #15 workflow skills pack, and the fail-closed dispatcher validation sweep from PR #21 (BREAKING — see [CHANGELOG](CHANGELOG.md)). Release workflow `27421259014` passed build plus macOS 14/15 install validation; published metadata is `team_id:"ADHOC"`, `signing:"adhoc"`, `architectures:["x86_64","arm64"]`.
 
 ## Verification
 
@@ -226,9 +226,9 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 | Release build | Current main: `swift build -c release` passed |
 | Python E2E syntax | Current main: `python3 -m py_compile Scripts/live-e2e-test.py` passed |
 | Coverage gate | Current main: `swift test --enable-code-coverage --no-parallel` -> `1276` passed, coverage `74.49%` region / `81.76%` line |
-| Strict live Logic Pro 12.2 | Current main attestation -> `313` passed, `0` skipped, `0` failed (2026-06-12, [PR #21](https://github.com/MongLong0214/logic-pro-mcp/pull/21)); published release: [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
+| Strict live Logic Pro 12.2 | v3.5.0 release-tree attestation -> `313` passed, `0` skipped, `0` failed (2026-06-12); see [v3.5.0 evidence](docs/live-verify-v3.5.0.md) |
 | README media evidence | Actual Logic Pro 12.2 capture derivatives regenerate from `docs/media/logic-pro-mcp-demo.mp4`; `docs/media/render-demo.py` contains no synthetic DAW renderer |
-| v3.4.6 release evidence | [docs/live-verify-v3.4.6.md](docs/live-verify-v3.4.6.md) |
+| v3.5.0 release evidence | [docs/live-verify-v3.5.0.md](docs/live-verify-v3.5.0.md) |
 
 Live E2E defaults to the release binary. Protocol/security assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a real Logic Pro session is visible. Strict mode converts live-gated skips to failures, treats missing project state as a failed cycle roundtrip precondition, and launches the MCP server under a trusted shell/tmux parent so macOS TCC evaluates the same parent context used by live client flows.
 

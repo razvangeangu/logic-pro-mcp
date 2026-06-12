@@ -56,7 +56,9 @@ Dispatcher input validation is now uniformly fail-closed: values that were previ
 - Added adversarial dispatcher validation, stock plugin catalog, workflow skill catalog, fail-closed resource routing, and commercial readiness suites on top of the focused AX coverage below.
 - Added focused coverage for AX mouse/key injection, AX-backed Library selection, control-bar lookup fallbacks, accessibility routing validation, and Logic process/window detection.
 - Local gate: `swift test` (parallel) and `swift test --no-parallel` -> 1276 tests passed; CI coverage TOTAL 74.49% region / 81.76% line; Logic Pro 12.2 live E2E 313 passed / 0 skipped / 0 failed.
-- Release gates on the v3.5.0 tree: `python3 -m py_compile Scripts/live-e2e-test.py` -> PASS; `ruby -c Formula/logic-pro-mcp.rb` -> PASS; `swift test` -> 1276 passed; `swift build -c release` -> PASS; fresh strict live E2E (Logic Pro 12.2, `LOGIC_PRO_MCP_STRICT_LIVE=1`) -> 313 passed / 0 skipped / 0 failed (2026-06-12).
+- Release gates on the v3.5.0 tree: `python3 -m py_compile Scripts/live-e2e-test.py` -> PASS; `ruby -c Formula/logic-pro-mcp.rb` -> PASS; `swift test` -> 1276 passed; `swift test --enable-code-coverage --no-parallel` -> 1276 passed with local coverage TOTAL 75.51% region / 83.04% line; `swift build -c release` -> PASS; fresh strict live E2E (Logic Pro 12.2, `LOGIC_PRO_MCP_STRICT_LIVE=1`) -> 313 passed / 0 skipped / 0 failed (2026-06-12).
+- `Scripts/release-stable.sh v3.5.0` -> preflight PASS (py_compile, `swift test --no-parallel` 1276 passed, release build) and tag pushed.
+- GitHub Release workflow for `v3.5.0` -> run `27421259014` PASS: build plus macOS 15 and macOS 14 install validation. Published assets include `LogicProMCP`, both tarball aliases, `SHA256SUMS.txt`, and `RELEASE-METADATA.json`; the Formula `sha256` now pins the published universal tarball.
 
 ## [3.4.6] — 2026-06-09
 
