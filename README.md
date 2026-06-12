@@ -12,7 +12,7 @@
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14+-000000.svg?style=flat-square&logo=apple" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
-  <img src="https://img.shields.io/badge/tests-1208_passing-brightgreen.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-1276_passing-brightgreen.svg?style=flat-square" />
   <img src="https://img.shields.io/badge/stable-v3.4.6-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
@@ -54,10 +54,10 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 | Surface | Current source tree |
 |---------|---------------------|
 | MCP tools | 8 tools covering transport, tracks, mixer, MIDI, edit, navigation, project lifecycle, and system health |
-| Read resources | 9 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, and library inventory |
-| Resource templates | 3 templates for track, region, and mixer-strip lookup |
+| Read resources | 14 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, library inventory, stock plugin intelligence, and workflow skills |
+| Resource templates | 7 templates for track, region, mixer-strip, stock plugin detail/search, and workflow detail/search lookup |
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
-| Verification line | Current main: `1208` Swift tests + strict Logic Pro 12.2 live E2E `285 passed / 0 skipped / 0 failed`, backed by [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
+| Verification line | Current main: `1276` Swift tests + strict Logic Pro 12.2 live E2E `313 passed / 0 skipped / 0 failed`; published release backed by [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
 | Published release | `v3.4.6`, ADHOC universal artifacts, SHA256 metadata, macOS 14/15 install validation |
 
 If this project helps you make music with Claude, Cursor, or any MCP client, star the repo. It helps the project reach more Logic Pro users and maintainers.
@@ -205,7 +205,7 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [Setup Guide](docs/SETUP.md) | End users | One-page install + Logic Pro integration, ~10 min |
-| [API Reference](docs/API.md) | End users, MCP clients | All 8 tools, 9 resources, 3 templates, 130+ operations |
+| [API Reference](docs/API.md) | End users, MCP clients | All 8 tools, 14 resources, 7 templates, 130+ operations |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |
 | [Maintainer Guide](docs/MAINTAINERS.md) | Maintainers | Release, approvals, E2E checklist |
@@ -222,11 +222,11 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 
 | Gate | Current evidence |
 |------|------------------|
-| Full deterministic suite | Current main: `swift test --no-parallel` -> `1208` passed, `0` failed |
+| Full deterministic suite | Current main: `swift test --no-parallel` -> `1276` passed, `0` failed |
 | Release build | Current main: `swift build -c release` passed |
 | Python E2E syntax | Current main: `python3 -m py_compile Scripts/live-e2e-test.py` passed |
-| Coverage gate | Current main: `swift test --enable-code-coverage --no-parallel` -> `1208` passed, coverage `73.62%` region / `81.06%` line |
-| Strict live Logic Pro 12.2 | Current main attestation -> `285` passed, `0` skipped, `0` failed; see [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
+| Coverage gate | Current main: `swift test --enable-code-coverage --no-parallel` -> `1276` passed, coverage `74.49%` region / `81.76%` line |
+| Strict live Logic Pro 12.2 | Current main attestation -> `313` passed, `0` skipped, `0` failed (2026-06-12, [PR #21](https://github.com/MongLong0214/logic-pro-mcp/pull/21)); published release: [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
 | README media evidence | Actual Logic Pro 12.2 capture derivatives regenerate from `docs/media/logic-pro-mcp-demo.mp4`; `docs/media/render-demo.py` contains no synthetic DAW renderer |
 | v3.4.6 release evidence | [docs/live-verify-v3.4.6.md](docs/live-verify-v3.4.6.md) |
 

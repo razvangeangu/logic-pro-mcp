@@ -1,6 +1,8 @@
 # 리뷰 가이드 — Issues #10–13 / v3.4.6 작업
 
-> 이 파일이 리뷰 진입점. 작업은 v3.4.6 stable GitHub Release 기준으로 published 완료, current main 테스트 1208 green. Developer ID 없이 ADHOC stable artifacts가 발행됐고, GitHub 이슈 #10~#13은 최종 targeted/live E2E 통과 후 CLOSED로 검증됐다.
+> **역사적 기록 (v3.4.6 사이클, 2026-06-09 종결).** 아래 수치는 당시 기준 증거다 — 현재 main 검증 수치는 `README.md` § Verification 참조.
+>
+> 이 파일이 리뷰 진입점. 작업은 v3.4.6 stable GitHub Release 기준으로 published 완료, 당시 main 테스트 1208 green. Developer ID 없이 ADHOC stable artifacts가 발행됐고, GitHub 이슈 #10~#13은 최종 targeted/live E2E 통과 후 CLOSED로 검증됐다.
 
 ---
 

@@ -20,19 +20,28 @@ struct ResourceProviderTests {
         #expect(uris.count == Set(uris).count, "Duplicate template URI: \(uris)")
     }
 
-    @Test("new resources are registered: markers, mcu/state, library/inventory")
+    @Test("new resources are registered: markers, mcu/state, library/inventory, stock plugins, workflow skills")
     func newResourcesRegistered() {
         let uris = Set(ResourceProvider.resources.map(\.uri))
         #expect(uris.contains("logic://markers"))
         #expect(uris.contains("logic://mcu/state"))
         #expect(uris.contains("logic://library/inventory"))
+        #expect(uris.contains("logic://stock-plugins"))
+        #expect(uris.contains("logic://stock-plugins/census"))
+        #expect(uris.contains("logic://stock-plugins/capabilities"))
+        #expect(uris.contains("logic://workflow-skills"))
+        #expect(uris.contains("logic://workflow-skills/schema"))
     }
 
-    @Test("new templates are registered: regions per track, mixer per strip")
+    @Test("new templates are registered: regions per track, mixer per strip, catalog/search detail")
     func newTemplatesRegistered() {
         let uris = Set(ResourceProvider.templates.map(\.uriTemplate))
         #expect(uris.contains("logic://tracks/{index}/regions"))
         #expect(uris.contains("logic://mixer/{strip}"))
+        #expect(uris.contains("logic://stock-plugins/{id}"))
+        #expect(uris.contains("logic://stock-plugins/search?query={query}"))
+        #expect(uris.contains("logic://workflow-skills/{id}"))
+        #expect(uris.contains("logic://workflow-skills/search?query={query}"))
     }
 
     @Test("every static resource URI maps to a handler")
@@ -92,6 +101,12 @@ struct ResourceProviderTests {
     func healthPriority() {
         let health = ResourceProvider.resources.first { $0.uri == "logic://system/health" }
         #expect(health?.annotations?.priority == 1.0)
+    }
+
+    @Test("resource annotations use the current public-surface timestamp")
+    func resourceAnnotationsUseCurrentSurfaceTimestamp() {
+        let timestamps = Set(ResourceProvider.resources.compactMap { $0.annotations?.lastModified })
+        #expect(timestamps == ["2026-06-11T00:00:00Z"])
     }
 
     // MARK: - Dynamic MCU filtering

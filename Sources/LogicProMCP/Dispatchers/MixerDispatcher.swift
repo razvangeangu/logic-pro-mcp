@@ -21,16 +21,18 @@ struct MixerDispatcher {
             // the first track's fader. Mixer writes are not undoable from
             // the operator's seat — missing/invalid target now fails closed.
             guard let index = intParamOrNil(params, "track", "index"), index >= 0 else {
-                return toolTextResult(
-                    "set_volume requires explicit 'track' (Int ≥ 0)",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_volume requires explicit 'track' or non-conflicting 'index' (Int >= 0)"
                 )
             }
-            let volume = doubleParam(params, "value", "volume")
+            guard let volume = doubleParamOrNil(params, "value", "volume") else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_volume requires explicit numeric 'value' or 'volume'"
+                )
+            }
             guard (0.0...1.0).contains(volume) else {
-                return toolTextResult(
-                    "set_volume 'volume' must be in 0.0..1.0 (got \(volume))",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_volume 'volume' must be in 0.0..1.0 (got \(volume))"
                 )
             }
             return await routedTextResult(router, operation: "mixer.set_volume", params: [
@@ -41,16 +43,18 @@ struct MixerDispatcher {
         case "set_pan":
             // RB-1.a — same fail-closed treatment as set_volume.
             guard let index = intParamOrNil(params, "track", "index"), index >= 0 else {
-                return toolTextResult(
-                    "set_pan requires explicit 'track' (Int ≥ 0)",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_pan requires explicit 'track' or non-conflicting 'index' (Int >= 0)"
                 )
             }
-            let pan = doubleParam(params, "value", "pan")
+            guard let pan = doubleParamOrNil(params, "value", "pan") else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_pan requires explicit numeric 'value' or 'pan'"
+                )
+            }
             guard (-1.0...1.0).contains(pan) else {
-                return toolTextResult(
-                    "set_pan 'value' must be in -1.0..1.0 (got \(pan))",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_pan 'value' must be in -1.0..1.0 (got \(pan))"
                 )
             }
             return await routedTextResult(router, operation: "mixer.set_pan", params: [
@@ -71,11 +75,14 @@ struct MixerDispatcher {
             return toolTextResult("set_input is not exposed in the production MCP contract", isError: true)
 
         case "set_master_volume":
-            let volume = doubleParam(params, "value", "volume")
+            guard let volume = doubleParamOrNil(params, "value", "volume") else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_master_volume requires explicit numeric 'value' or 'volume'"
+                )
+            }
             guard (0.0...1.0).contains(volume) else {
-                return toolTextResult(
-                    "set_master_volume 'value' must be in 0.0..1.0 (got \(volume))",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_master_volume 'value' must be in 0.0..1.0 (got \(volume))"
                 )
             }
             return await routedTextResult(router, operation: "mixer.set_master_volume", params: [
@@ -90,15 +97,13 @@ struct MixerDispatcher {
 
         case "insert_plugin":
             guard let track = intParamOrNil(params, "track", "track_index", "index"), track >= 0 else {
-                return toolTextResult(
-                    "insert_plugin requires explicit 'track' (Int ≥ 0)",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "insert_plugin requires explicit non-conflicting 'track', 'track_index', or 'index' (Int >= 0)"
                 )
             }
             guard let slot = intParamOrNil(params, "slot", "insert"), slot >= 0 else {
-                return toolTextResult(
-                    "insert_plugin requires explicit 'slot' (Int ≥ 0)",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "insert_plugin requires explicit non-conflicting 'slot' or 'insert' (Int >= 0)"
                 )
             }
             let pluginName = stringParam(params, "plugin_name", "plugin", "name")
@@ -108,11 +113,16 @@ struct MixerDispatcher {
                     isError: true
                 )
             }
-            guard boolParam(params, "confirmed", default: false) else {
+            switch strictBoolParam(params, "confirmed") {
+            case .missing, .value(false):
                 let response = """
                 {"confirmation_required":true,"command":"insert_plugin","level":"L2","message":"insert_plugin changes the channel strip insert chain. Re-call with confirmed:true to insert an allowlisted stock plugin.","confirm_command":"logic_mixer(\\"insert_plugin\\", {\\"track\\": \(track), \\"slot\\": \(slot), \\"plugin_name\\": \\"\(spec.canonicalName)\\", \\"confirmed\\": true})"}
                 """
                 return toolTextResult(response)
+            case .value(true):
+                break
+            case .invalid(let hint):
+                return MIDIDispatcher.invalidParamsResult(hint: "insert_plugin \(hint)")
             }
             return await routedTextResult(router, operation: "plugin.insert", params: [
                 "track": String(track),
@@ -135,52 +145,44 @@ struct MixerDispatcher {
             // of track 0 (often the master/first track) without ever knowing.
             // All four are now explicit-required.
             guard let track = intParamOrNil(params, "track"), track >= 0 else {
-                return toolTextResult(
-                    "set_plugin_param requires explicit 'track' (Int ≥ 0)",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_plugin_param requires explicit 'track' (Int >= 0)"
                 )
             }
             guard let insert = intParamOrNil(params, "insert"), insert >= 0 else {
-                return toolTextResult(
-                    "set_plugin_param requires explicit 'insert' (Int ≥ 0; currently only 0 supported)",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_plugin_param requires explicit 'insert' (Int >= 0; currently only 0 supported)"
                 )
             }
             guard insert == 0 else {
-                return toolTextResult(
-                    "set_plugin_param currently supports only insert: 0 on the selected track via Scripter",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_plugin_param currently supports only insert: 0 on the selected track via Scripter"
                 )
             }
             guard let paramIndex = intParamOrNil(params, "param"), paramIndex >= 0 else {
-                return toolTextResult(
-                    "set_plugin_param requires explicit 'param' (Int ≥ 0)",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_plugin_param requires explicit 'param' (Int >= 0)"
                 )
             }
             // Phase 6 P1 (RB-1.a): parse `value` STRICTLY and validate range +
-            // param bound BEFORE the track.select side effect. doubleParam()
-            // defaults a non-numeric value to 0.0, which would otherwise let
-            // `value:"abc"` silently select the track and write Scripter 0 —
-            // the exact "malformed caller writes zero" class this op must reject.
-            guard let valueRaw = params["value"], let value = Double(valueRaw) else {
-                return toolTextResult(
-                    "set_plugin_param requires explicit numeric 'value'",
-                    isError: true
+            // param bound BEFORE the track.select side effect. Numeric strings
+            // remain accepted for client compatibility, but malformed values
+            // must never fall through to a track.select side effect.
+            guard let value = doubleParamOrNil(params, "value") else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_plugin_param requires explicit numeric 'value'"
                 )
             }
             guard (0.0...1.0).contains(value) else {
-                return toolTextResult(
-                    "set_plugin_param 'value' must be in 0.0...1.0 (got \(value))",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_plugin_param 'value' must be in 0.0...1.0 (got \(value))"
                 )
             }
             // Scripter addresses params 0–17 (CC 102–119); reject out-of-range
             // before selecting a track so a bad param index has no side effect.
             guard paramIndex <= 17 else {
-                return toolTextResult(
-                    "set_plugin_param 'param' must be 0...17 (Scripter CC range); got \(paramIndex)",
-                    isError: true
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "set_plugin_param 'param' must be 0...17 (Scripter CC range); got \(paramIndex)"
                 )
             }
             let selectResult = await router.route(

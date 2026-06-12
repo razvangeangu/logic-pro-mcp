@@ -79,7 +79,7 @@ Register the operation in `ChannelRouter.v2RoutingTable` as an ordered list; the
 ## Pull Request Checklist
 
 - [ ] `swift build` clean
-- [ ] `swift test` green (all 1208 tests on current main)
+- [ ] `swift test` green (all 1276 tests on current main)
 - [ ] New behavior covered by at least one unit test
 - [ ] Changed production code keeps the global coverage floor green (`region >=70%`, `line >=78%`); high-risk Logic-facing changes target about 90% line coverage on the touched surface or document the live/manual evidence that substitutes for direct measurement
 - [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`

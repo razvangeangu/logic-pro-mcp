@@ -303,7 +303,7 @@ struct SystemDispatcher {
                   send_chord        -> { notes: [Int], velocity: Int, channel: Int, duration_ms: Int }
                   send_cc           -> { controller: Int, value: Int, channel: Int }
                   send_program_change -> { program: Int, channel: Int }
-                  send_pitch_bend   -> { value: Int, channel: Int } (-8192 to 8191)
+                  send_pitch_bend   -> { value: Int, channel: Int } (0 to 16383, center=8192)
                   send_aftertouch   -> { value: Int, channel: Int }
                   send_sysex        -> { bytes: [Int] } or { data: String }
                   play_sequence     -> { notes: "pitch,offsetMs,durMs[,vel[,ch]];..." } — tight rhythm (≤256 events)
@@ -386,7 +386,7 @@ struct SystemDispatcher {
 
         default:
             return """
-                Logic Pro MCP — 8 dispatcher tools + 9 resources + 3 templates
+                Logic Pro MCP — 8 dispatcher tools + \(ResourceProvider.resources.count) resources + \(ResourceProvider.templates.count) templates
 
                 Tools (actions):
                   logic_transport  — Transport control (play, stop, record, tempo...)
@@ -408,11 +408,20 @@ struct SystemDispatcher {
                   logic://midi/ports            — MIDI ports
                   logic://mcu/state             — MCU control-surface state (hidden in list when disconnected)
                   logic://library/inventory     — Cached Library tree JSON
+                  logic://stock-plugins         — Stock plugin intelligence catalog
+                  logic://stock-plugins/census  — Stock plugin census metadata
+                  logic://stock-plugins/capabilities — Stock plugin catalog capabilities
+                  logic://workflow-skills       — Validated workflow skills pack
+                  logic://workflow-skills/schema — Workflow skill schema
 
                 Resource templates:
                   logic://tracks/{index}          — Single track detail
                   logic://tracks/{index}/regions  — Regions on a single track
                   logic://mixer/{strip}           — Single channel strip
+                  logic://stock-plugins/{id}      — Stock plugin detail
+                  logic://stock-plugins/search?query={query} — Stock plugin search
+                  logic://workflow-skills/{id}    — Workflow skill detail
+                  logic://workflow-skills/search?query={query} — Workflow skill search
 
                 Use: logic_system(command: "help", params: {category: "transport"})
                 for detailed command docs per category.

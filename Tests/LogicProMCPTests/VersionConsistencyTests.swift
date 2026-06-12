@@ -22,6 +22,10 @@ private func readRepoFile(_ relativePath: String) throws -> String {
 /// artefacts or this test fails.
 @Test func testServerVersionMatchesPackagingArtefacts() throws {
     let sourceVersion = ServerConfig.serverVersion
+    #expect(
+        sourceVersion == "3.4.6",
+        "PR branches must stay pinned to the latest published stable until the v3.5.0 tag and release assets exist"
+    )
 
     let manifest = try readRepoFile("manifest.json")
     #expect(
@@ -44,4 +48,42 @@ private func readRepoFile(_ relativePath: String) throws -> String {
         installScript.contains("LOGIC_PRO_MCP_VERSION:-v\(sourceVersion)"),
         "Scripts/install.sh default VERSION must match v\(sourceVersion)"
     )
+}
+
+@Test func testManifestResourceSurfaceMatchesPublishedStableRelease() throws {
+    let manifest = try sharedParseJSON(readRepoFile("manifest.json")) as! [String: Any]
+
+    let resources = Set(try #require(manifest["resources"] as? [String]))
+    #expect(resources == [
+        "logic://system/health",
+        "logic://transport/state",
+        "logic://tracks",
+        "logic://mixer",
+        "logic://markers",
+        "logic://project/info",
+        "logic://midi/ports",
+        "logic://mcu/state",
+        "logic://library/inventory",
+    ])
+
+    let templates = Set(try #require(manifest["resource_templates"] as? [String]))
+    #expect(templates == [
+        "logic://tracks/{index}",
+        "logic://tracks/{index}/regions",
+        "logic://mixer/{strip}",
+    ])
+
+    let description = try #require(manifest["description"] as? String)
+    #expect(description.contains("9 resources + 3 templates"))
+}
+
+@Test func testReadmeAndAPIDocsMatchPublicSurfaceAndRouting() throws {
+    let readme = try readRepoFile("README.md")
+    #expect(readme.contains("| Read resources | 14 static resources"))
+    #expect(readme.contains("| Resource templates | 7 templates"))
+    #expect(readme.contains("All 8 tools, 14 resources, 7 templates"))
+
+    let api = try readRepoFile("docs/API.md")
+    #expect(api.contains("| `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |"))
+    #expect(api.contains("| `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility |"))
 }

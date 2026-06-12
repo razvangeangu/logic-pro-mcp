@@ -4,7 +4,7 @@ import MCP
 struct TrackDispatcher {
     static let tool = Tool(
         name: "logic_tracks",
-        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment), tempo?: Float } v3.0.8 SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`. The new track keeps Logic's default Software Instrument (Studio Grand piano on a fresh project); callers that want a specific patch must follow up with an explicit `set_instrument` AFTER ensuring the intended track is selected. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
+        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment; SMF end <= 3,600,000 ms), tempo?: Float } v3.0.8 SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`. The new track keeps Logic's default Software Instrument (Studio Grand piano on a fresh project); callers that want a specific patch must follow up with an explicit `set_instrument` AFTER ensuring the intended track is selected. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
         inputSchema: commandParamsToolSchema(commandDescription: "Track command to execute")
     )
 
@@ -150,7 +150,17 @@ struct TrackDispatcher {
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
                 return toolTextResult("mute requires explicit 'index' (Int ≥ 0)", isError: true)
             }
-            let enabled = boolParam(params, "enabled", default: true)
+            let enabled: Bool
+            if params["enabled"] != nil {
+                guard let parsed = boolParamOrNil(params, "enabled") else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "mute 'enabled' must be boolean true/false"
+                    )
+                }
+                enabled = parsed
+            } else {
+                enabled = true
+            }
             let result = await router.route(
                 operation: "track.set_mute",
                 params: ["index": String(index), "enabled": String(enabled)]
@@ -161,7 +171,17 @@ struct TrackDispatcher {
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
                 return toolTextResult("solo requires explicit 'index' (Int ≥ 0)", isError: true)
             }
-            let enabled = boolParam(params, "enabled", default: true)
+            let enabled: Bool
+            if params["enabled"] != nil {
+                guard let parsed = boolParamOrNil(params, "enabled") else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "solo 'enabled' must be boolean true/false"
+                    )
+                }
+                enabled = parsed
+            } else {
+                enabled = true
+            }
             let result = await router.route(
                 operation: "track.set_solo",
                 params: ["index": String(index), "enabled": String(enabled)]
@@ -172,7 +192,17 @@ struct TrackDispatcher {
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
                 return toolTextResult("arm requires explicit 'index' (Int ≥ 0)", isError: true)
             }
-            let enabled = boolParam(params, "enabled", default: true)
+            let enabled: Bool
+            if params["enabled"] != nil {
+                guard let parsed = boolParamOrNil(params, "enabled") else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "arm 'enabled' must be boolean true/false"
+                    )
+                }
+                enabled = parsed
+            } else {
+                enabled = true
+            }
             let result = await router.route(
                 operation: "track.set_arm",
                 params: ["index": String(index), "enabled": String(enabled)]
@@ -287,6 +317,11 @@ struct TrackDispatcher {
             var scanParams: [String: String] = [:]
             let mode = stringParam(params, "mode")
             if !mode.isEmpty {
+                guard ["ax", "disk", "both"].contains(mode) else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "scan_library 'mode' must be one of: ax, disk, both"
+                    )
+                }
                 scanParams["mode"] = mode
             }
             let result = await router.route(
@@ -297,7 +332,18 @@ struct TrackDispatcher {
 
         case "scan_plugin_presets":
             // F2 minimal — scans the currently-focused plugin window's Setting menu.
-            let settleMs = intParam(params, "submenuOpenDelayMs", default: 250)
+            let settleMs: Int
+            if params["submenuOpenDelayMs"] != nil {
+                guard let parsed = intParamOrNil(params, "submenuOpenDelayMs"),
+                      (0...5000).contains(parsed) else {
+                    return MIDIDispatcher.invalidParamsResult(
+                        hint: "scan_plugin_presets 'submenuOpenDelayMs' must be an integer in 0..5000"
+                    )
+                }
+                settleMs = parsed
+            } else {
+                settleMs = 250
+            }
             let result = await router.route(
                 operation: "plugin.scan_presets",
                 params: ["submenuOpenDelayMs": String(settleMs)]
@@ -332,21 +378,49 @@ struct TrackDispatcher {
                 hint: "port parameter not supported for record_sequence"
             )
         }
+        let bar: Int
+        if params["bar"] != nil {
+            guard let parsed = intParamOrNil(params, "bar"),
+                  (1...9999).contains(parsed) else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "record_sequence 'bar' must be an integer in 1..9999"
+                )
+            }
+            bar = parsed
+        } else {
+            bar = 1
+        }
+        let notes: String
+        if let rawNotes = params["notes"] {
+            guard let parsed = rawNotes.stringValue, !parsed.isEmpty else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "record_sequence requires 'notes' as a non-empty string"
+                )
+            }
+            notes = parsed
+        } else {
+            return MIDIDispatcher.invalidParamsResult(
+                hint: "record_sequence requires 'notes' (semicolon-separated 'pitch,offsetMs,durMs[,vel[,ch]]')"
+            )
+        }
+        let requestedTempo: Double?
+        if params["tempo"] != nil {
+            guard let parsed = doubleParamOrNil(params, "tempo"), (5.0...999.0).contains(parsed) else {
+                return MIDIDispatcher.invalidParamsResult(
+                    hint: "record_sequence 'tempo' must be numeric in 5..999"
+                )
+            }
+            requestedTempo = parsed
+        } else {
+            requestedTempo = nil
+        }
         guard await cache.getHasDocument() else {
             return toolTextResult("record_sequence: No project open", isError: true)
-        }
-        let bar = intParam(params, "bar", default: 1)
-        let notes = stringParam(params, "notes")
-        guard !notes.isEmpty else {
-            return toolTextResult(
-                "record_sequence requires 'notes' (semicolon-separated 'pitch,offsetMs,durMs[,vel[,ch]]')",
-                isError: true
-            )
         }
 
         let project = await cache.getProject()
         let cacheTempo = project.tempo > 0 ? project.tempo : 120.0
-        let tempo = doubleParam(params, "tempo", default: cacheTempo)
+        let tempo = requestedTempo ?? cacheTempo
         // T3 — strict whole-parse-fail. The previous silent-skip parser left
         // callers unable to distinguish "user typed garbage" from "all
         // segments happened to be invalid", so the error wording was vague
@@ -359,7 +433,7 @@ struct TrackDispatcher {
             events = parsed
         case .failure(let error):
             return toolTextResult(
-                "record_sequence: invalid 'notes' — \(error.hint)",
+                "record_sequence: invalid 'notes' — \(error.message)",
                 isError: true
             )
         }
@@ -556,9 +630,15 @@ struct TrackDispatcher {
     private static func parseNotesToSMFEvents(
         notes: String,
         tempo: Double
-    ) -> Result<[SMFWriter.NoteEvent], NoteSequenceParser.NoteSequenceParseError> {
-        NoteSequenceParser.parse(notes).map { parsed in
-            parsed.map { note in
+    ) -> Result<[SMFWriter.NoteEvent], RecordSequenceNoteValidationError> {
+        switch NoteSequenceParser.parse(notes) {
+        case .failure(let error):
+            return .failure(RecordSequenceNoteValidationError(message: error.hint))
+        case .success(let parsed):
+            if let violation = NoteSequenceParser.smfTimingViolation(in: parsed) {
+                return .failure(RecordSequenceNoteValidationError(message: violation))
+            }
+            return .success(parsed.map { note in
                 let ticks = SMFWriter.msToTicks(
                     offsetMs: note.offsetMs,
                     durationMs: note.durationMs,
@@ -571,8 +651,12 @@ struct TrackDispatcher {
                     velocity: note.velocity,
                     channel: note.channel
                 )
-            }
+            })
         }
+    }
+
+    private struct RecordSequenceNoteValidationError: Error {
+        let message: String
     }
 
 }

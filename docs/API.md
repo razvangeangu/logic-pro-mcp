@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **8 tools**, **9 resources**, and **3 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **8 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -30,7 +30,7 @@ All tool invocations use:
 
 ## Resource Catalog (Read-only)
 
-**9 static resources + 3 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
+**14 static resources + 7 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
 
 | URI | Content | Source |
 |-----|---------|--------|
@@ -43,13 +43,57 @@ All tool invocations use:
 | `logic://midi/ports` | `{ sources, destinations }` | CoreMIDI live query |
 | `logic://mcu/state` | `{ connection, display }` — MCU handshake + LCD state | Cache |
 | `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`). All candidates must sit under the path allowlist (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` (colon-separated, additive). |
+| `logic://stock-plugins` | `{ schema_version, generated_at, logic_version, catalog_source, validation, entries[] }` — conservative Logic stock plugin catalog with per-entry truth labels | Static catalog + local Logic app census |
+| `logic://stock-plugins/census` | Catalog census metadata, state counts, validation state | Static catalog + local Logic app census |
+| `logic://stock-plugins/capabilities` | Truth labels, safe write capability labels, and read-only catalog contract | Static |
+| `logic://workflow-skills` | `{ schema_version, workflow_count, validation, workflows[] }` — validated workflow skill pack | Static validated pack |
+| `logic://workflow-skills/schema` | Workflow schema fields, evidence levels, mutation kinds, and resource names | Static |
 | `logic://tracks/{index}` | Single `TrackState` JSON | Cache — template |
 | `logic://tracks/{index}/regions` | `RegionState[]` JSON filtered by `trackIndex` | Cache — template |
 | `logic://mixer/{strip}` | `{ cache_age_sec, fetched_at, data_source, strip: ChannelStripState }` | Cache — template |
+| `logic://stock-plugins/{id}` | Single stock plugin catalog entry by stable ID | Static catalog + local Logic app census — template |
+| `logic://stock-plugins/search?query={query}` | Search stock plugin catalog entries | Static catalog + local Logic app census — template |
+| `logic://workflow-skills/{id}` | Single workflow skill by stable ID | Static validated pack — template |
+| `logic://workflow-skills/search?query={query}` | Search workflow skills | Static validated pack — template |
 
 All resources return `contents: [{ uri, text, mimeType: "application/json" }]`.
 
 Prefer resources over repeated tool calls — they are cheap and safe to poll at 1 Hz.
+
+### Stock Plugin Intelligence
+
+`logic://stock-plugins` is read-only. It does not insert plugins or broaden existing write gates. The catalog covers the documented Logic stock set (effects, instruments, MIDI FX) under stable ID namespaces `logic.stock.effect.*`, `logic.stock.instrument.*`, and `logic.stock.midi_fx.*`.
+
+Each entry has an `availability_state`:
+
+| State | Trust contract |
+|-------|----------------|
+| `verified` | Live insert/readback evidence on this machine, with source, method, timestamp, and evidence. |
+| `observed` | Seen in a live Logic session (e.g. menu observation) without full readback. |
+| `manifested` | Per-plugin factory metadata was found in the local Logic installation (a `Plug-In Settings/<Display Name>` folder), with the probed `source_path` recorded in provenance. |
+| `inferred` | Documented stock identity only; clients must verify against the live menu before relying on it. |
+| `unavailable` | A live census recorded this plugin as absent. Never produced by static knowledge alone. |
+| `readback_mismatch` | Live readback returned a different identity than expected. |
+
+The production census can only produce `inferred` and `manifested` (see `production_reachable_states` in `logic://stock-plugins/capabilities`); `verified`, `observed`, `unavailable`, and `readback_mismatch` require injected live-census evidence and are never fabricated. Absence of a factory settings folder is deliberately **not** treated as evidence of absence.
+
+`known_presets` stays empty unless preset names have provenance. For `manifested` entries it lists factory preset filenames harvested from the probed settings folder (capped at `preset_name_cap`, currently 12; the full set remains on disk at the provenance `source_path`).
+
+Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Insert paths are menu hints unless their own state says otherwise. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced. Entries with `safe_write_capabilities: "insert_only"` (Gain, Compressor, Channel EQ) match the `logic_mixer insert_plugin` allowlist; everything else is discovery-only.
+
+### Workflow Skills
+
+`logic://workflow-skills` is also read-only. It returns workflow recipes that tell clients which resources/tools to call, which state checks must pass, when confirmation is required, and which response fields prove success. Reading a workflow never executes it.
+
+The pack is linted against the **real server surface** — no hand-maintained allowlists:
+
+- Tool references must name registered MCP tools, and every mutating step must carry an exact public `command` that exists in the per-tool command census (the census itself is pinned to the dispatcher sources by test).
+- Resource references must be servable by this build (exact static URI, a registered template, or a concrete instantiation of one) or be covered by the workflow's declared `depends_on` external dependencies.
+- `mutation_kind` must agree with step mutability in both directions; mutating steps must be covered by a declared confirmation (level `L1`/`L2` only, matching command); `live_verified` workflows must reference their evidence file.
+
+Each served workflow carries computed honesty fields: `dependencies_resolved` says whether every referenced resource is servable by **this** running build, and `unresolved_resources` lists the gaps. The stock-plugin workflows (`logic.workflow.plugins.stock_chain_plan`, `logic.workflow.plugins.stock_insert_gain_live_verified`) depend on the stock catalog resources and are only executable when this build serves those resources and the workflow's current-session state checks pass.
+
+Mutating workflows are not marked `production_ready` unless they have matching `live_verified` evidence. `logic.workflow.plugins.stock_insert_gain_live_verified` is the guarded L2 Gain insert recipe backed by the existing Logic Pro 12.2 live evidence file and still requires current-session confirmation/readback.
 
 ---
 
@@ -65,10 +109,10 @@ Prefer resources over repeated tool calls — they are cheap and safe to poll at
 | `pause` | — | text | CoreMIDI → CGEvent |
 | `rewind` | — | text | MCU → CoreMIDI → CGEvent |
 | `fast_forward` | — | text | MCU → CoreMIDI → CGEvent |
-| `toggle_cycle` | — | text | Accessibility → MCU → MIDIKeyCommands → CGEvent |
+| `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |
 | `toggle_metronome` | — | text | Accessibility → MIDIKeyCommands → CGEvent |
 | `toggle_count_in` | — | text | Accessibility → MIDIKeyCommands → CGEvent |
-| `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility → MIDIKeyCommands |
+| `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility |
 | `goto_position` | `{ bar: int }` (1..9999) or `{ position: string }` — `"B.B.S.S"` or `"HH:MM:SS:FF"` SMPTE | text | Accessibility (dialog, auto-extends project, ~800ms) → MCU → CoreMIDI → CGEvent |
 | `set_cycle_range` | `{ start: int, end: int }` | text | Accessibility |
 | `capture_recording` | — | text | MIDIKeyCommands → CGEvent |
@@ -130,7 +174,7 @@ Clients can detect stale snapshots without cross-referencing `logic://system/hea
 | `solo` | `{ index: int, enabled?: bool }` | text | MCU → AX → CGEvent |
 | `arm` | `{ index: int, enabled?: bool }` | text | MCU → AX → CGEvent |
 | `arm_only` | `{ index: int }` | text on full success; **error** when target arm fails or any disarm fails | composite (disarm-all + arm target) |
-| `record_sequence` | `{ bar?: int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: float }` | JSON on success; **error** when goto fails OR no new track is observed via live AX within 500 ms | **v2.3 rewrite**: SMF generation + AX `File → Import → MIDI File…` — byte-exact timing |
+| `record_sequence` | `{ bar?: int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: float }` (`ch` 1..16, SMF end ≤ 3,600,000 ms) | JSON on success; **error** when goto fails OR no new track is observed via live AX within 500 ms | **v2.3 rewrite**: SMF generation + AX `File → Import → MIDI File…` — byte-exact timing |
 | `set_automation` | `{ index: int, mode: "off"\|"read"\|"touch"\|"latch"\|"trim"\|"write" }` | text | MCU |
 | `set_instrument` | `{ index: int, path: string }` OR `{ index: int, category: string, preset: string }` — at least one path OR (category + preset) is required | text | Accessibility |
 | `list_library` | — | text | Accessibility |
@@ -191,6 +235,7 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 
 - `hasDocument` is false (no project open)
 - `notes` is empty, or no valid events parsed
+- `notes` exceeds the SMF safety cap (encoded sequence end > 3,600,000 ms)
 - Playhead reset (`transport.goto_position` with `bar=1`) fails — treated as a hard precondition because Logic's MIDI File Import anchors the region at playhead; without the reset, notes would land at the wrong bar
 - `midi.import_file` fails, rejects the path, or completes without a new live AX track
 - No new track is observed via live AX within 500 ms of import (v3.1.2+ switched from 2s cache polling to live `AXLogicProElements.allTrackHeaders` after the cache-poll race documented in CHANGELOG §3.1.2)
@@ -294,7 +339,7 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 | `send_chord` | `{ notes: "60,64,67" \| int[], velocity?: 0–127, channel?: 1–16, duration_ms?: 1–30000 }` | `"Chord sent: N notes"` | CoreMIDI |
 | `send_cc` | `{ controller: 0–127, value: 0–127, channel?: 1–16 }` | `"CC X=Y on ch Z"` | CoreMIDI |
 | `send_program_change` | `{ program: 0–127, channel?: 1–16 }` | text | CoreMIDI |
-| `send_pitch_bend` | `{ value: 0–16383 \| -8192..8191, channel?: 1–16 }` | text | CoreMIDI |
+| `send_pitch_bend` | `{ value: 0–16383, channel?: 1–16 }` where 8192 is center | text | CoreMIDI |
 | `send_aftertouch` | `{ value: 0–127, channel?: 1–16 }` | text | CoreMIDI |
 | `send_sysex` | `{ bytes: "F0 ... F7" \| int[] }` | text | CoreMIDI |
 | `import_file` | `{ path: "/tmp/LogicProMCP/name.mid" }` | HC JSON text; State A only after a new AX track appears | Accessibility |
@@ -317,10 +362,10 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 
 | Field | Rule |
 |-------|------|
-| `note` | 0–127 (values outside are clamped by CoreMIDI) |
+| `note` | 0–127; out-of-range values are rejected with `invalid_params` (nothing is clamped) |
 | `velocity` | 0–127; default `100` |
 | `channel` | 1–16 (wire: 0–15); default `1` |
-| `duration_ms` | Capped at **30,000** to prevent actor DoS |
+| `duration_ms` | 1–30,000; out-of-range values are rejected (cap prevents actor DoS) |
 | `import_file.path` | Must resolve to a regular `.mid` file under `/tmp/LogicProMCP/`; symlinks/path traversal/control characters are rejected |
 | `port name` | Newlines/nulls stripped; truncated to 63 chars |
 | SysEx bytes | Must start `0xF0`, end `0xF7`; 7-bit body |

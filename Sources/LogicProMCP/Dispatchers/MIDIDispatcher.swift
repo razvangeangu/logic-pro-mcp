@@ -16,31 +16,55 @@ struct MIDIDispatcher {
     ) async -> CallTool.Result {
         switch command {
         case "send_note":
-            guard params["note"] != nil else {
-                return invalidParamsResult(hint: "send_note requires explicit 'note'")
+            let note: Int
+            switch midiData7Param(params, "note", requiredBy: "send_note") {
+            case .success(let parsed): note = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
+            }
+            let velocity: Int
+            switch optionalMidiData7Param(params, "velocity", default: 100, requiredBy: "send_note") {
+            case .success(let parsed): velocity = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
+            }
+            let durationMs: Int
+            switch optionalDurationMsParam(params, "duration_ms", default: 500, requiredBy: "send_note") {
+            case .success(let parsed): durationMs = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await dispatchSendOp(
                 baseOp: "midi.send_note",
                 params: params,
                 additionalParams: [
-                    "note": String(intParam(params, "note", default: 60)),
-                    "velocity": String(intParam(params, "velocity", default: 100)),
-                    "duration_ms": String(intParam(params, "duration_ms", default: 500)),
+                    "note": String(note),
+                    "velocity": String(velocity),
+                    "duration_ms": String(durationMs),
                 ],
                 router: router
             )
 
         case "send_chord":
-            guard params["notes"] != nil else {
-                return invalidParamsResult(hint: "send_chord requires explicit 'notes'")
+            let notes: String
+            switch midiData7ListParam(params, "notes", requiredBy: "send_chord") {
+            case .success(let parsed): notes = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
+            }
+            let velocity: Int
+            switch optionalMidiData7Param(params, "velocity", default: 100, requiredBy: "send_chord") {
+            case .success(let parsed): velocity = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
+            }
+            let durationMs: Int
+            switch optionalDurationMsParam(params, "duration_ms", default: 500, requiredBy: "send_chord") {
+            case .success(let parsed): durationMs = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await dispatchSendOp(
                 baseOp: "midi.send_chord",
                 params: params,
                 additionalParams: [
-                    "notes": csvIntListOrStringParam(params, key: "notes"),
-                    "velocity": String(intParam(params, "velocity", default: 100)),
-                    "duration_ms": String(intParam(params, "duration_ms", default: 500)),
+                    "notes": notes,
+                    "velocity": String(velocity),
+                    "duration_ms": String(durationMs),
                 ],
                 router: router
             )
@@ -51,65 +75,97 @@ struct MIDIDispatcher {
             // Per-event channel lives inside the notes string and is parsed
             // by `NoteSequenceParser` (T3) — there is no top-level channel,
             // so we skip `validateMidiChannel` and only validate `port`.
+            guard params["channel"] == nil else {
+                return invalidParamsResult(
+                    hint: "play_sequence does not support top-level 'channel'; use the optional per-event channel field in notes"
+                )
+            }
+            guard let notes = params["notes"]?.stringValue, !notes.isEmpty else {
+                return invalidParamsResult(hint: "play_sequence requires 'notes' as a non-empty string")
+            }
+            switch NoteSequenceParser.parse(notes) {
+            case .success(let events):
+                guard !events.isEmpty, events.count <= 256 else {
+                    return invalidParamsResult(hint: "play_sequence 'notes' count must be 1..256")
+                }
+                if let violation = NoteSequenceParser.realtimeTimingViolation(in: events) {
+                    return invalidParamsResult(hint: "play_sequence: \(violation)")
+                }
+            case .failure(let error):
+                return invalidParamsResult(hint: "play_sequence: \(error.hint)")
+            }
             switch validatePort(params) {
             case .failure(let msg):
                 return invalidParamsResult(hint: msg.message)
             case .success(let port):
                 let opKey = port == "midi" ? "midi.play_sequence" : "midi.play_sequence.\(port)"
                 return await routedTextResult(router, operation: opKey, params: [
-                    "notes": stringParam(params, "notes"),
+                    "notes": notes,
                 ])
             }
 
         case "send_cc":
-            guard params["controller"] != nil, params["value"] != nil else {
-                return invalidParamsResult(hint: "send_cc requires explicit 'controller' and 'value'")
+            let controller: Int
+            switch midiData7Param(params, "controller", requiredBy: "send_cc") {
+            case .success(let parsed): controller = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
+            }
+            let value: Int
+            switch midiData7Param(params, "value", requiredBy: "send_cc") {
+            case .success(let parsed): value = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await dispatchSendOp(
                 baseOp: "midi.send_cc",
                 params: params,
                 additionalParams: [
-                    "controller": String(intParam(params, "controller")),
-                    "value": String(intParam(params, "value")),
+                    "controller": String(controller),
+                    "value": String(value),
                 ],
                 router: router
             )
 
         case "send_program_change":
-            guard params["program"] != nil else {
-                return invalidParamsResult(hint: "send_program_change requires explicit 'program'")
+            let program: Int
+            switch midiData7Param(params, "program", requiredBy: "send_program_change") {
+            case .success(let parsed): program = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await dispatchSendOp(
                 baseOp: "midi.send_program_change",
                 params: params,
                 additionalParams: [
-                    "program": String(intParam(params, "program")),
+                    "program": String(program),
                 ],
                 router: router
             )
 
         case "send_pitch_bend":
-            guard params["value"] != nil else {
-                return invalidParamsResult(hint: "send_pitch_bend requires explicit 'value'")
+            let value: Int
+            switch pitchBendParam(params, "value", requiredBy: "send_pitch_bend") {
+            case .success(let parsed): value = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await dispatchSendOp(
                 baseOp: "midi.send_pitch_bend",
                 params: params,
                 additionalParams: [
-                    "value": String(intParam(params, "value")),
+                    "value": String(value),
                 ],
                 router: router
             )
 
         case "send_aftertouch":
-            guard params["value"] != nil else {
-                return invalidParamsResult(hint: "send_aftertouch requires explicit 'value'")
+            let value: Int
+            switch midiData7Param(params, "value", requiredBy: "send_aftertouch") {
+            case .success(let parsed): value = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await dispatchSendOp(
                 baseOp: "midi.send_aftertouch",
                 params: params,
                 additionalParams: [
-                    "value": String(intParam(params, "value")),
+                    "value": String(value),
                 ],
                 router: router
             )
@@ -123,12 +179,9 @@ struct MIDIDispatcher {
                 return reject
             }
             let data: String
-            if let arr = params["bytes"]?.arrayValue {
-                data = arr.compactMap(\.intValue).map { String(format: "%02X", $0) }.joined(separator: " ")
-            } else if let s = params["bytes"]?.stringValue, !s.isEmpty {
-                data = s
-            } else {
-                data = stringParam(params, "data")
+            switch sysexDataParam(params) {
+            case .success(let parsed): data = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await routedTextResult(router, operation: "midi.send_sysex", params: ["data": data])
 
@@ -136,11 +189,13 @@ struct MIDIDispatcher {
             if let reject = rejectIfPortPresent(params, command: command) {
                 return reject
             }
-            guard params["path"] != nil else {
-                return invalidParamsResult(hint: "import_file requires explicit 'path'")
+            let path: String
+            switch importFilePathParam(params) {
+            case .success(let parsed): path = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
             }
             return await routedTextResult(router, operation: "midi.import_file", params: [
-                "path": stringParam(params, "path"),
+                "path": path,
             ])
 
         case "create_virtual_port":
@@ -180,16 +235,21 @@ struct MIDIDispatcher {
             // intParam handles int/double/string coercion, so a stringified bar
             // ("5") is accepted too.
             if params["bar"] != nil {
-                let bar = intParam(params, "bar", default: 1)
+                guard let bar = intParamOrNil(params, "bar") else {
+                    return invalidParamsResult(hint: "mmc_locate 'bar' must be an integer in 1..9999")
+                }
                 guard (1...9999).contains(bar) else {
-                    return toolTextResult("mmc_locate 'bar' must be in 1..9999 (got \(bar))", isError: true)
+                    return invalidParamsResult(hint: "mmc_locate 'bar' must be in 1..9999 (got \(bar))")
                 }
                 return await routedTextResult(router, operation: "transport.goto_position", params: [
                     "position": "\(bar).1.1.1",
                 ])
             }
+            guard let time = params["time"]?.stringValue, isValidSMPTE(time) else {
+                return invalidParamsResult(hint: "mmc_locate 'time' must be HH:MM:SS:FF")
+            }
             return await routedTextResult(router, operation: "mmc.locate", params: [
-                "time": stringParam(params, "time", default: "00:00:00:00"),
+                "time": time,
             ])
 
         case "step_input":
@@ -199,9 +259,19 @@ struct MIDIDispatcher {
             guard params["note"] != nil, params["duration"] != nil else {
                 return invalidParamsResult(hint: "step_input requires explicit 'note' and 'duration'")
             }
+            let note: Int
+            switch midiData7Param(params, "note", requiredBy: "step_input") {
+            case .success(let parsed): note = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
+            }
+            let duration: String
+            switch stepDurationParam(params, "duration", requiredBy: "step_input") {
+            case .success(let parsed): duration = parsed
+            case .failure(let msg): return invalidParamsResult(hint: msg.message)
+            }
             return await routedTextResult(router, operation: "midi.step_input", params: [
-                "note": String(intParam(params, "note", default: 60)),
-                "duration": stringParam(params, "duration", default: "1/4"),
+                "note": String(note),
+                "duration": duration,
             ])
 
         default:
@@ -273,14 +343,208 @@ struct MIDIDispatcher {
     // can exercise them directly. Production callers stay within this file.
 
     /// Wraps a validation error message as a Swift `Error`.
-    /// Enables `Result<T, ValidationFailure>` while preserving `.failure("literal")`
-    /// ergonomics via `ExpressibleByStringLiteral`. Tests read `.message` for
+    /// Enables `Result<T, ValidationFailure>` while preserving concise
+    /// `.failure(...)` call sites. Tests read `.message` for
     /// substring assertions; `description` mirrors `message` for logging.
     struct ValidationFailure: Error, Equatable, CustomStringConvertible, ExpressibleByStringLiteral {
         let message: String
         init(_ message: String) { self.message = message }
         init(stringLiteral value: String) { self.message = value }
         var description: String { message }
+    }
+
+    private static func strictInt(_ raw: Value?) -> Int? {
+        guard let raw else { return nil }
+        switch raw {
+        case .int(let n):
+            return n
+        case .double(let f):
+            guard f.isFinite else { return nil }
+            return Int(exactly: f)
+        case .string(let s):
+            return Int(s.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            return nil
+        }
+    }
+
+    private static func midiData7Param(
+        _ params: [String: Value],
+        _ key: String,
+        requiredBy command: String
+    ) -> Result<Int, ValidationFailure> {
+        guard params[key] != nil else {
+            return .failure(ValidationFailure("\(command) requires explicit '\(key)'"))
+        }
+        guard let value = strictInt(params[key]), (0...127).contains(value) else {
+            return .failure(ValidationFailure("\(command) '\(key)' must be an integer in 0..127"))
+        }
+        return .success(value)
+    }
+
+    private static func optionalMidiData7Param(
+        _ params: [String: Value],
+        _ key: String,
+        default defaultValue: Int,
+        requiredBy command: String
+    ) -> Result<Int, ValidationFailure> {
+        guard params[key] != nil else { return .success(defaultValue) }
+        guard let value = strictInt(params[key]), (0...127).contains(value) else {
+            return .failure(ValidationFailure("\(command) '\(key)' must be an integer in 0..127"))
+        }
+        return .success(value)
+    }
+
+    private static func optionalDurationMsParam(
+        _ params: [String: Value],
+        _ key: String,
+        default defaultValue: Int,
+        requiredBy command: String
+    ) -> Result<Int, ValidationFailure> {
+        guard params[key] != nil else { return .success(defaultValue) }
+        guard let value = strictInt(params[key]), (1...30_000).contains(value) else {
+            return .failure(ValidationFailure("\(command) '\(key)' must be an integer in 1..30000"))
+        }
+        return .success(value)
+    }
+
+    private static func midiData7ListParam(
+        _ params: [String: Value],
+        _ key: String,
+        requiredBy command: String
+    ) -> Result<String, ValidationFailure> {
+        guard let raw = params[key] else {
+            return .failure(ValidationFailure("\(command) requires explicit '\(key)'"))
+        }
+
+        let values: [Int]?
+        if let array = raw.arrayValue {
+            values = array.map { strictInt($0) }
+                .reduce(into: Optional<[Int]>([])) { partial, value in
+                    guard partial != nil, let value else {
+                        partial = nil
+                        return
+                    }
+                    partial?.append(value)
+                }
+        } else if let string = raw.stringValue {
+            let tokens = string.split(separator: ",", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            values = tokens.map { Int($0) }
+                .reduce(into: Optional<[Int]>([])) { partial, value in
+                    guard partial != nil, let value else {
+                        partial = nil
+                        return
+                    }
+                    partial?.append(value)
+                }
+        } else {
+            values = nil
+        }
+
+        guard let values, (1...24).contains(values.count),
+              values.allSatisfy({ (0...127).contains($0) }) else {
+            return .failure(ValidationFailure("\(command) '\(key)' must contain 1..24 MIDI notes, each integer 0..127"))
+        }
+        return .success(values.map(String.init).joined(separator: ","))
+    }
+
+    private static func pitchBendParam(
+        _ params: [String: Value],
+        _ key: String,
+        requiredBy command: String
+    ) -> Result<Int, ValidationFailure> {
+        guard params[key] != nil else {
+            return .failure(ValidationFailure("\(command) requires explicit '\(key)'"))
+        }
+        guard let value = strictInt(params[key]),
+              (0...16_383).contains(value) else {
+            return .failure(ValidationFailure("\(command) '\(key)' must be an integer in 0..16383 (center=8192)"))
+        }
+        return .success(value)
+    }
+
+    private static func sysexDataParam(
+        _ params: [String: Value]
+    ) -> Result<String, ValidationFailure> {
+        let bytes: [Int]?
+        if let arr = params["bytes"]?.arrayValue {
+            var parsed: [Int] = []
+            for item in arr {
+                guard let value = strictInt(item), (0...255).contains(value) else {
+                    return .failure(ValidationFailure("send_sysex 'bytes' array must contain only integers 0..255"))
+                }
+                parsed.append(value)
+            }
+            bytes = parsed
+        } else if let s = params["bytes"]?.stringValue, !s.isEmpty {
+            bytes = parseSysexHexBytes(s)
+        } else if let s = params["data"]?.stringValue, !s.isEmpty {
+            bytes = parseSysexHexBytes(s)
+        } else {
+            bytes = nil
+        }
+
+        guard let bytes, bytes.count >= 3, bytes.first == 0xF0, bytes.last == 0xF7 else {
+            return .failure(ValidationFailure("send_sysex requires bytes/data starting with F0, ending with F7, and at least one data byte"))
+        }
+        let interior = bytes.dropFirst().dropLast()
+        guard !interior.contains(0xF0), !interior.contains(0xF7) else {
+            return .failure(ValidationFailure("send_sysex bytes must not contain internal F0/F7 delimiters"))
+        }
+        guard interior.allSatisfy({ (0...0x7F).contains($0) }) else {
+            return .failure(ValidationFailure("send_sysex bytes must use a 7-bit body; only the first F0 and final F7 may be status bytes"))
+        }
+        return .success(bytes.map { String(format: "%02X", $0) }.joined(separator: " "))
+    }
+
+    private static func parseSysexHexBytes(_ raw: String) -> [Int]? {
+        let tokens = raw
+            .replacingOccurrences(of: "0x", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: ",", with: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+        guard !tokens.isEmpty else { return nil }
+        var bytes: [Int] = []
+        for token in tokens {
+            guard let value = Int(token, radix: 16), (0...255).contains(value) else {
+                return nil
+            }
+            bytes.append(value)
+        }
+        return bytes
+    }
+
+    private static func isValidSMPTE(_ s: String) -> Bool {
+        let parts = s.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 4,
+              let h = Int(parts[0]), (0...23).contains(h),
+              let m = Int(parts[1]), (0...59).contains(m),
+              let sec = Int(parts[2]), (0...59).contains(sec),
+              let f = Int(parts[3]), (0...99).contains(f) else {
+            return false
+        }
+        return true
+    }
+
+    private static func stepDurationParam(
+        _ params: [String: Value],
+        _ key: String,
+        requiredBy command: String
+    ) -> Result<String, ValidationFailure> {
+        guard let raw = params[key] else {
+            return .failure(ValidationFailure("\(command) requires explicit '\(key)'"))
+        }
+        let allowedDurations: Set<String> = ["1/1", "1/2", "1/4", "1/8", "1/16", "1/32"]
+        if let s = raw.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if allowedDurations.contains(s) { return .success(s) }
+            if let ms = Int(s), (1...30_000).contains(ms) { return .success(String(ms)) }
+            return .failure(ValidationFailure("\(command) '\(key)' must be one of \(allowedDurations.sorted().joined(separator: ", ")) or integer milliseconds 1..30000"))
+        }
+        if let ms = strictInt(raw), (1...30_000).contains(ms) {
+            return .success(String(ms))
+        }
+        return .failure(ValidationFailure("\(command) '\(key)' must be one of \(allowedDurations.sorted().joined(separator: ", ")) or integer milliseconds 1..30000"))
     }
 
     /// Validates the `port` parameter for MIDI routing.
@@ -291,13 +555,38 @@ struct MIDIDispatcher {
 
     internal static func validatePort(_ params: [String: Value]) -> Result<String, ValidationFailure> {
         // Empty string `""` is explicitly rejected (does not fall through to default).
-        guard let raw = params["port"]?.stringValue else {
+        guard let rawValue = params["port"] else {
             return .success("midi") // missing = default
         }
+        guard let raw = rawValue.stringValue else {
+            return .failure(ValidationFailure("port must be a string and one of: midi, keycmd"))
+        }
         guard Self.validPorts.contains(raw) else {
-            return .failure("port must be one of: midi, keycmd")
+            return .failure(ValidationFailure("port must be one of: midi, keycmd"))
         }
         return .success(raw)
+    }
+
+    private static func importFilePathParam(
+        _ params: [String: Value]
+    ) -> Result<String, ValidationFailure> {
+        guard let raw = params["path"] else {
+            return .failure(ValidationFailure("import_file requires explicit 'path'"))
+        }
+        guard let path = raw.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty else {
+            return .failure(ValidationFailure("import_file 'path' must be a non-empty string"))
+        }
+        guard !path.contains("\0"), !path.contains("\n"), !path.contains("\r") else {
+            return .failure(ValidationFailure("import_file 'path' must not contain control characters"))
+        }
+
+        let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard normalized.hasPrefix("/tmp/LogicProMCP/"),
+              normalized.lowercased().hasSuffix(".mid") else {
+            return .failure(ValidationFailure("import_file 'path' must be /tmp/LogicProMCP/*.mid"))
+        }
+        return .success(normalized)
     }
 
     /// Validates 1-based MIDI channel input and converts to wire byte (0..15).
@@ -322,10 +611,10 @@ struct MIDIDispatcher {
             }
         }()
         guard let v = intCandidate else {
-            return .failure("channel must be integer 1..16 (1-based)")
+            return .failure(ValidationFailure("channel must be integer 1..16 (1-based)"))
         }
         guard (1...16).contains(v) else {
-            return .failure("channel must be integer 1..16 (1-based)")
+            return .failure(ValidationFailure("channel must be integer 1..16 (1-based)"))
         }
         return .success(UInt8(v - 1))
     }
