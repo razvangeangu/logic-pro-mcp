@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### ⚠️ BREAKING
 
-Dispatcher input validation is now uniformly fail-closed: values that were previously clamped, coerced, silently ignored, or defaulted are rejected with `invalid_params`.
+Dispatcher input validation is now uniformly fail-closed: values that were previously clamped, coerced, silently ignored, or defaulted are now rejected — with a structured `invalid_params` error on most paths, and a descriptive parse error for `record_sequence` note parsing.
 
 - `logic_midi.send_pitch_bend` — `value` is strictly `0..16383` (center `8192`); the signed `-8192..8191` alias and the `>16383` clamp are removed. A caller still sending signed values gets `invalid_params`, and `value: 0` now means full-down, not center.
 - `logic_midi` 7-bit fields (`send_note`, `send_chord`, `send_cc`, `send_program_change`, `send_aftertouch`, `step_input`) — out-of-range values such as `note: 128` are rejected instead of clamped; `duration_ms` must be `1..30000`; chord size is `1..24` notes.
@@ -26,14 +26,14 @@ Dispatcher input validation is now uniformly fail-closed: values that were previ
 - `logic_midi.import_file` — `path` must resolve to a regular `.mid` file under `/tmp/LogicProMCP/` after symlink/`..` normalization; control characters are rejected.
 - `logic_midi.mmc_locate` — explicit `bar` (`1..9999`) or SMPTE `time` (`HH:MM:SS:FF`) is required; the implicit `00:00:00:00` default is removed.
 - `logic_midi.send_sysex` — strict `F0 … F7` framing with a 7-bit interior; embedded `F0`/`F7` delimiters are rejected.
-- `logic_tracks.record_sequence` — `bar` must be `1..9999`, `tempo` `5..999`; `notes` segments must have exactly 3–5 fields (extra fields were previously ignored) with whole-parse-fail on any malformed segment; the generated SMF may not exceed 60 minutes.
-- `logic_tracks.mute` / `solo` / `arm` — `enabled` must be a real boolean; `scan_library.mode` must be one of `ax|disk|both`; `scan_plugin_presets.submenuOpenDelayMs` must be `0..5000`.
+- `logic_tracks.record_sequence` — `bar` must be `1..9999` and `tempo` `5..999` (`invalid_params`); malformed `notes` now fail the whole parse with a descriptive error — segments must have exactly 3–5 fields (extra fields were previously ignored) — and the generated SMF may not exceed 60 minutes.
+- `logic_tracks.mute` / `solo` / `arm` — `enabled` must parse as a boolean (`true`/`false`, `0`/`1`, `"yes"`/`"no"`); anything else is rejected. `scan_library.mode` must be one of `ax|disk|both`; `scan_plugin_presets.submenuOpenDelayMs` must be `0..5000`.
 - `logic_navigate.goto_bar` — explicit `bar` (`1..9999`) is required (previously defaulted to bar 1); `set_zoom` numeric level is bounded to `1..10`.
-- `logic_navigate.goto_marker` — the name-miss path no longer falls back to the legacy CC 38 "go to next marker" keycmd; it returns State C `element_not_found` with cache guidance. This completes the v3.4.0 H-2 target-faithful fix, which removed the same fallback for the index path.
+- `logic_navigate.goto_marker` — a malformed (non-integer or negative) `index` is now rejected with `invalid_params` instead of silently falling through to the name lookup. (Cache misses already return State C `element_not_found`; the legacy CC 38 "next marker" fallback was removed in v3.4.0 H-2.)
 - `logic_transport.set_tempo` — explicit numeric `tempo`/`bpm` (`5..999`) is required (previously defaulted to 120); `goto_position` requires an explicit integer `bar` (`1..9999`) or a well-formed `bar.beat.sub.tick`/SMPTE `position`; `set_cycle_range` requires explicit integer `start`/`end` in `1..9999` with `start <= end` (previously defaulted to 1/5).
 - `logic_mixer.set_volume` / `set_pan` / `set_master_volume` / `set_plugin_param` / `insert_plugin` — explicit targets and strict ranges (`0.0..1.0` volume, `-1.0..1.0` pan, plugin param `0..17` with value `0.0..1.0`); conflicting parameter aliases (e.g. `track` vs `index`, `value` vs `volume`) are rejected instead of first-key-wins.
 - `logic_project` destructive commands — a malformed (non-boolean) `confirmed` param is rejected with `invalid_params` and audited as `rejected`, instead of being coerced to `false`.
-- Shared param parsing — numeric params reject non-finite values, booleans accept only `true`/`false`/`0`/`1`, and multi-alias keys (e.g. `track`/`index`) must agree when both are supplied.
+- Shared param parsing — numeric params reject non-finite values, booleans accept only `true`/`false`, `0`/`1`, or `"yes"`/`"no"`, and multi-alias keys (e.g. `track`/`index`) must agree when both are supplied.
 
 ### Fixed
 
