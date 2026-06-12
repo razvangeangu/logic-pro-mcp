@@ -23,8 +23,8 @@ private func readRepoFile(_ relativePath: String) throws -> String {
 @Test func testServerVersionMatchesPackagingArtefacts() throws {
     let sourceVersion = ServerConfig.serverVersion
     #expect(
-        sourceVersion == "3.4.6",
-        "PR branches must stay pinned to the latest published stable until the v3.5.0 tag and release assets exist"
+        sourceVersion == "3.5.0",
+        "version surfaces must match the published stable release — bump all packaging artefacts together"
     )
 
     let manifest = try readRepoFile("manifest.json")
@@ -64,17 +64,28 @@ private func readRepoFile(_ relativePath: String) throws -> String {
         "logic://midi/ports",
         "logic://mcu/state",
         "logic://library/inventory",
+        "logic://stock-plugins",
+        "logic://stock-plugins/census",
+        "logic://stock-plugins/capabilities",
+        "logic://workflow-skills",
+        "logic://workflow-skills/schema",
     ])
+    #expect(resources == Set(ResourceProvider.resources.map(\.uri)))
 
     let templates = Set(try #require(manifest["resource_templates"] as? [String]))
     #expect(templates == [
         "logic://tracks/{index}",
         "logic://tracks/{index}/regions",
         "logic://mixer/{strip}",
+        "logic://stock-plugins/{id}",
+        "logic://stock-plugins/search?query={query}",
+        "logic://workflow-skills/{id}",
+        "logic://workflow-skills/search?query={query}",
     ])
+    #expect(templates == Set(ResourceProvider.templates.map(\.uriTemplate)))
 
     let description = try #require(manifest["description"] as? String)
-    #expect(description.contains("9 resources + 3 templates"))
+    #expect(description.contains("14 resources + 7 templates"))
 }
 
 @Test func testReadmeAndAPIDocsMatchPublicSurfaceAndRouting() throws {

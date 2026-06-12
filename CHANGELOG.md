@@ -8,7 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-**Issue #14 + Issue #15 — verified stock plugin intelligence and workflow skills pack, plus a fail-closed dispatcher validation sweep.** This is the merge of the combined #17/#18 branch. It grows the public read surface from 9 resources + 3 templates to 14 resources + 7 templates and tightens every dispatcher input path; per the documented release contract, the first release that ships this surface must be `v3.5.0`.
+No unreleased changes yet.
+
+## [3.5.0] — 2026-06-12
+
+**Issue #14 + Issue #15 — verified stock plugin intelligence and workflow skills pack, plus a fail-closed dispatcher validation sweep.** This release ships the merge of the combined #17/#18 branch (PR #21). It grows the public read surface from 9 resources + 3 templates to 14 resources + 7 templates and tightens every dispatcher input path; per the release contract documented at merge time, this expanded surface ships as `v3.5.0` — the published packaging (manifest, Formula, installer) is unpinned from `v3.4.6` in this release.
 
 ### Added
 
@@ -44,6 +48,7 @@ Dispatcher input validation is now uniformly fail-closed: values that were previ
 
 ### Changed
 
+- **Version/release surfaces finalized to `3.5.0`** — `ServerConfig`, manifest (now advertising the 14-resource + 7-template surface with all stock-plugin and workflow-skill URIs, cross-checked against the live `ResourceProvider` by test), installer default, Formula version, startup-banner tests, and troubleshooting docs are synchronized for the stable release. The Formula `sha256` is updated post-publish from the released `SHA256SUMS.txt`.
 - **CI coverage gate raised to current-baseline floor** — global source coverage now hard-gates at region >=70% / line >=78%, while keeping line >=90% as the explicit uplift target. Maintainer and contribution docs now clarify that new high-risk production code should target about 90% line coverage on the touched surface or carry live/manual evidence when direct measurement is not practical.
 
 ### Tests
@@ -51,6 +56,7 @@ Dispatcher input validation is now uniformly fail-closed: values that were previ
 - Added adversarial dispatcher validation, stock plugin catalog, workflow skill catalog, fail-closed resource routing, and commercial readiness suites on top of the focused AX coverage below.
 - Added focused coverage for AX mouse/key injection, AX-backed Library selection, control-bar lookup fallbacks, accessibility routing validation, and Logic process/window detection.
 - Local gate: `swift test` (parallel) and `swift test --no-parallel` -> 1276 tests passed; CI coverage TOTAL 74.49% region / 81.76% line; Logic Pro 12.2 live E2E 313 passed / 0 skipped / 0 failed.
+- Release gates on the v3.5.0 tree: `python3 -m py_compile Scripts/live-e2e-test.py` -> PASS; `ruby -c Formula/logic-pro-mcp.rb` -> PASS; `swift test` -> 1276 passed; `swift build -c release` -> PASS; fresh strict live E2E (Logic Pro 12.2, `LOGIC_PRO_MCP_STRICT_LIVE=1`) -> 313 passed / 0 skipped / 0 failed (2026-06-12).
 
 ## [3.4.6] — 2026-06-09
 
