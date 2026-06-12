@@ -362,10 +362,10 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 
 | Field | Rule |
 |-------|------|
-| `note` | 0–127 (values outside are clamped by CoreMIDI) |
+| `note` | 0–127; out-of-range values are rejected with `invalid_params` (nothing is clamped) |
 | `velocity` | 0–127; default `100` |
 | `channel` | 1–16 (wire: 0–15); default `1` |
-| `duration_ms` | Capped at **30,000** to prevent actor DoS |
+| `duration_ms` | 1–30,000; out-of-range values are rejected (cap prevents actor DoS) |
 | `import_file.path` | Must resolve to a regular `.mid` file under `/tmp/LogicProMCP/`; symlinks/path traversal/control characters are rejected |
 | `port name` | Newlines/nulls stripped; truncated to 63 chars |
 | SysEx bytes | Must start `0xF0`, end `0xF7`; 7-bit body |

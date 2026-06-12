@@ -57,7 +57,7 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 | Read resources | 14 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, library inventory, stock plugin intelligence, and workflow skills |
 | Resource templates | 7 templates for track, region, mixer-strip, stock plugin detail/search, and workflow detail/search lookup |
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
-| Verification line | Current main: `1208` Swift tests + strict Logic Pro 12.2 live E2E `285 passed / 0 skipped / 0 failed`, backed by [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
+| Verification line | Current main: `1276` Swift tests + strict Logic Pro 12.2 live E2E `313 passed / 0 skipped / 0 failed`; published release backed by [v3.4.6 evidence](docs/live-verify-v3.4.6.md) |
 | Published release | `v3.4.6`, ADHOC universal artifacts, SHA256 metadata, macOS 14/15 install validation |
 
 If this project helps you make music with Claude, Cursor, or any MCP client, star the repo. It helps the project reach more Logic Pro users and maintainers.

@@ -8,11 +8,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+**Issue #14 + Issue #15 — verified stock plugin intelligence and workflow skills pack, plus a fail-closed dispatcher validation sweep.** This is the merge of the combined #17/#18 branch. It grows the public read surface from 9 resources + 3 templates to 14 resources + 7 templates and tightens every dispatcher input path; per the documented release contract, the first release that ships this surface must be `v3.5.0`.
+
+### Added
+
+- **Verified stock plugin intelligence (Issue #14)** — `StockPluginCatalog`: a provenance-gated catalog of Logic Pro 12.2 stock plugins with six truth states (`verified`, `observed`, `manifested`, `inferred`, `unavailable`, `readback_mismatch`). A `verified` claim is impossible without source + method + timestamp + evidence; census contradictions fail loud (`census_conflict`) and never resolve to `verified`; the production snapshot never claims beyond `manifested`; the live insert allowlist is cross-checked against the catalog. New resources: `logic://stock-plugins`, `logic://stock-plugins/census`, `logic://stock-plugins/capabilities`; new templates: `logic://stock-plugins/{id}`, `logic://stock-plugins/search?query={query}`.
+- **Workflow skills pack (Issue #15)** — `WorkflowSkillCatalog`: lint-gated multi-step Logic Pro recipes. Every step command is validated against the live dispatcher command census (pinned to dispatcher sources by test), resource references resolve against the live `ResourceProvider` surface (no hand-maintained allowlist), mutating steps require exact (level, command) confirmation coverage, and `live_verified` claims must reference an in-repo evidence file. Served workflows expose computed `dependencies_resolved` / `unresolved_resources` honesty fields. New resources: `logic://workflow-skills`, `logic://workflow-skills/schema`; new templates: `logic://workflow-skills/{id}`, `logic://workflow-skills/search?query={query}`.
+- `logic_system.help` now derives resource/template counts from `ResourceProvider` and lists the new stock-plugin and workflow-skill URIs.
+
+### ⚠️ BREAKING
+
+Dispatcher input validation is now uniformly fail-closed: values that were previously clamped, coerced, silently ignored, or defaulted are rejected with `invalid_params`.
+
+- `logic_midi.send_pitch_bend` — `value` is strictly `0..16383` (center `8192`); the signed `-8192..8191` alias and the `>16383` clamp are removed. A caller still sending signed values gets `invalid_params`, and `value: 0` now means full-down, not center.
+- `logic_midi` 7-bit fields (`send_note`, `send_chord`, `send_cc`, `send_program_change`, `send_aftertouch`, `step_input`) — out-of-range values such as `note: 128` are rejected instead of clamped; `duration_ms` must be `1..30000`; chord size is `1..24` notes.
+- `logic_midi.play_sequence` — top-level `channel` is rejected (channel is per-event inside `notes`); event count must be `1..256`; realtime timing caps are enforced on both `midi` and `keycmd` ports (per-event ≤ 30 s, total span ≤ 60 s).
+- `logic_midi.import_file` — `path` must resolve to a regular `.mid` file under `/tmp/LogicProMCP/` after symlink/`..` normalization; control characters are rejected.
+- `logic_midi.mmc_locate` — explicit `bar` (`1..9999`) or SMPTE `time` (`HH:MM:SS:FF`) is required; the implicit `00:00:00:00` default is removed.
+- `logic_midi.send_sysex` — strict `F0 … F7` framing with a 7-bit interior; embedded `F0`/`F7` delimiters are rejected.
+- `logic_tracks.record_sequence` — `bar` must be `1..9999`, `tempo` `5..999`; `notes` segments must have exactly 3–5 fields (extra fields were previously ignored) with whole-parse-fail on any malformed segment; the generated SMF may not exceed 60 minutes.
+- `logic_tracks.mute` / `solo` / `arm` — `enabled` must be a real boolean; `scan_library.mode` must be one of `ax|disk|both`; `scan_plugin_presets.submenuOpenDelayMs` must be `0..5000`.
+- `logic_navigate.goto_bar` — explicit `bar` (`1..9999`) is required (previously defaulted to bar 1); `set_zoom` numeric level is bounded to `1..10`.
+- `logic_navigate.goto_marker` — the name-miss path no longer falls back to the legacy CC 38 "go to next marker" keycmd; it returns State C `element_not_found` with cache guidance. This completes the v3.4.0 H-2 target-faithful fix, which removed the same fallback for the index path.
+- `logic_transport.set_tempo` — explicit numeric `tempo`/`bpm` (`5..999`) is required (previously defaulted to 120); `goto_position` requires an explicit integer `bar` (`1..9999`) or a well-formed `bar.beat.sub.tick`/SMPTE `position`; `set_cycle_range` requires explicit integer `start`/`end` in `1..9999` with `start <= end` (previously defaulted to 1/5).
+- `logic_mixer.set_volume` / `set_pan` / `set_master_volume` / `set_plugin_param` / `insert_plugin` — explicit targets and strict ranges (`0.0..1.0` volume, `-1.0..1.0` pan, plugin param `0..17` with value `0.0..1.0`); conflicting parameter aliases (e.g. `track` vs `index`, `value` vs `volume`) are rejected instead of first-key-wins.
+- `logic_project` destructive commands — a malformed (non-boolean) `confirmed` param is rejected with `invalid_params` and audited as `rejected`, instead of being coerced to `false`.
+- Shared param parsing — numeric params reject non-finite values, booleans accept only `true`/`false`/`0`/`1`, and multi-alias keys (e.g. `track`/`index`) must agree when both are supplied.
+
 ### Fixed
 
 - Hardened stock-plugin and workflow resource routing so percent-encoded paths, percent-encoded query parameter names, and malformed query escapes fail closed instead of aliasing canonical catalog URIs.
 - Corrected workflow required-field declarations for array/enveloped resource shapes, including track regions, markers, stock plugin detail/list reads, and mixer strip reads.
 - Documented the next public-surface release contract (`v3.5.0` after merge) while keeping install/Formula/manifest surfaces pinned to the published `v3.4.6` release until a real stable tag and assets exist.
+- `transport.toggle_cycle` / `toggle_metronome` / `toggle_count_in` now fall through to the next channel when the Accessibility channel reports terminal State C `element_not_found` (e.g. the control-bar button is hidden), instead of hard-stopping; `toggle_cycle` now tries MCU last instead of second.
 
 ### Changed
 
@@ -20,7 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Tests
 
-- Added focused coverage for AX mouse/key injection, AX-backed Library selection, control-bar lookup fallbacks, accessibility routing validation, and Logic process/window detection. Local gate: `swift test --no-parallel` -> 1208 tests passed; coverage TOTAL 73.62% region / 81.06% line.
+- Added adversarial dispatcher validation, stock plugin catalog, workflow skill catalog, fail-closed resource routing, and commercial readiness suites on top of the focused AX coverage below.
+- Added focused coverage for AX mouse/key injection, AX-backed Library selection, control-bar lookup fallbacks, accessibility routing validation, and Logic process/window detection.
+- Local gate: `swift test` (parallel) and `swift test --no-parallel` -> 1276 tests passed; CI coverage TOTAL 74.49% region / 81.76% line; Logic Pro 12.2 live E2E 313 passed / 0 skipped / 0 failed.
 
 ## [3.4.6] — 2026-06-09
 
