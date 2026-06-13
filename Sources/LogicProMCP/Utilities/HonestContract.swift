@@ -65,6 +65,30 @@ enum HonestContract {
         /// `port_unavailable` regardless of root cause).
         case channelsExhausted
 
+        // HC v2 (logic_plugins.* verified plugin path) — §4 error table.
+        // These codes only originate from the verified-plugin surface; the
+        // existing 8-tool surface never emits them, so adding them here is
+        // additive and leaves every prior State C byte-identical.
+        case unsupportedMode
+        case projectPathRequired
+        case projectIdentityMismatch
+        case unknownPluginIdentity
+        case unsupportedParamReadback
+        case incompleteInventory
+        case targetPluginMismatch
+        case slotOccupied
+        case trackSelectionFailed
+        case staleSnapshot
+        case windowOpenFailed
+        case windowIdentityUnresolved
+        case paramControlNotFound
+        case readbackLostAfterWrite
+        case postInsertPluginMismatch
+        case postInsertReadbackUnavailable
+        case rollbackFailed
+        case verifiedOpInProgress
+        case operationTimeout
+
         var rawValue: String {
             switch self {
             case .axWriteFailed: return "ax_write_failed"
@@ -77,6 +101,25 @@ enum HonestContract {
             case .notImplemented: return "not_implemented"
             case .portUnavailable: return "port_unavailable"
             case .channelsExhausted: return "channels_exhausted"
+            case .unsupportedMode: return "unsupported_mode"
+            case .projectPathRequired: return "project_path_required"
+            case .projectIdentityMismatch: return "project_identity_mismatch"
+            case .unknownPluginIdentity: return "unknown_plugin_identity"
+            case .unsupportedParamReadback: return "unsupported_param_readback"
+            case .incompleteInventory: return "incomplete_inventory"
+            case .targetPluginMismatch: return "target_plugin_mismatch"
+            case .slotOccupied: return "slot_occupied"
+            case .trackSelectionFailed: return "track_selection_failed"
+            case .staleSnapshot: return "stale_snapshot"
+            case .windowOpenFailed: return "window_open_failed"
+            case .windowIdentityUnresolved: return "window_identity_unresolved"
+            case .paramControlNotFound: return "param_control_not_found"
+            case .readbackLostAfterWrite: return "readback_lost_after_write"
+            case .postInsertPluginMismatch: return "post_insert_plugin_mismatch"
+            case .postInsertReadbackUnavailable: return "post_insert_readback_unavailable"
+            case .rollbackFailed: return "rollback_failed"
+            case .verifiedOpInProgress: return "verified_op_in_progress"
+            case .operationTimeout: return "operation_timeout"
             }
         }
     }
@@ -114,6 +157,54 @@ enum HonestContract {
         ]
         if let axCode { dict["axCode"] = axCode }
         if let hint { dict["hint"] = hint }
+        for (k, v) in extras { dict[k] = v }
+        return jsonString(dict)
+    }
+
+    // MARK: - HC v2 encoding (logic_plugins.* verified plugin surface only)
+
+    /// HC v2 schema number. Carried as `hc_schema` so a client can branch on
+    /// the richer verified-plugin envelope without sniffing for the presence
+    /// of individual fields.
+    static let schemaVersionV2 = 2
+
+    /// HC v2 is an ADDITIVE superset used exclusively by `logic_plugins.*`:
+    /// every envelope additionally carries `state` ("A"|"B"|"C") and
+    /// `hc_schema`, and State C additionally carries `verified:false`. The v1
+    /// encoders above are intentionally left byte-identical — the existing
+    /// 8-tool surface and its 1276 tests must not observe any change, and
+    /// `HonestContractTests` asserts v1 State C has no `verified` key. Phase /
+    /// success-vs-failure field requirements (what_was_*, safe_to_retry,
+    /// target_identity, write_source, verify_source) are supplied by the
+    /// caller through `extras` per the requirements §5.3 field table.
+    static func encodeV2StateA(extras: [String: Any] = [:]) -> String {
+        var dict: [String: Any] = [
+            "success": true, "verified": true, "state": "A",
+            "hc_schema": schemaVersionV2,
+        ]
+        for (k, v) in extras { dict[k] = v }
+        return jsonString(dict)
+    }
+
+    static func encodeV2StateB(reason: UncertainReason, extras: [String: Any] = [:]) -> String {
+        var dict: [String: Any] = [
+            "success": true, "verified": false, "state": "B",
+            "hc_schema": schemaVersionV2, "reason": reason.rawValue,
+        ]
+        for (k, v) in extras { dict[k] = v }
+        return jsonString(dict)
+    }
+
+    /// Unlike v1 `encodeStateC`, the v2 failure envelope carries an explicit
+    /// `verified:false` so a client that keys off `state`/`verified` sees a
+    /// uniform tri-state contract. `success:false` + `error` are preserved so
+    /// the detector and `ChannelRouter` terminal-state gate keep classifying
+    /// it as State C unchanged.
+    static func encodeV2StateC(error: FailureError, extras: [String: Any] = [:]) -> String {
+        var dict: [String: Any] = [
+            "success": false, "verified": false, "state": "C",
+            "hc_schema": schemaVersionV2, "error": error.rawValue,
+        ]
         for (k, v) in extras { dict[k] = v }
         return jsonString(dict)
     }
@@ -158,6 +249,33 @@ enum HonestContract {
         FailureError.portUnavailable.rawValue,
         FailureError.readbackUnavailable.rawValue,
         FailureError.channelsExhausted.rawValue,
+        // HC v2 verified-plugin path: every failure is terminal. The verified
+        // surface routes through `[.accessibility]` alone (no fallback chain),
+        // and falling back to Scripter/MCU would fabricate a false verified
+        // result — so the router must never continue past any of these. These
+        // codes are exclusive to `logic_plugins.*`; existing ops never emit
+        // them, so this does not change any prior fallback behaviour.
+        // `readbackMismatch` is deliberately NOT added here — it predates v2
+        // and is shared with channels where fallback is still legitimate.
+        FailureError.unsupportedMode.rawValue,
+        FailureError.projectPathRequired.rawValue,
+        FailureError.projectIdentityMismatch.rawValue,
+        FailureError.unknownPluginIdentity.rawValue,
+        FailureError.unsupportedParamReadback.rawValue,
+        FailureError.incompleteInventory.rawValue,
+        FailureError.targetPluginMismatch.rawValue,
+        FailureError.slotOccupied.rawValue,
+        FailureError.trackSelectionFailed.rawValue,
+        FailureError.staleSnapshot.rawValue,
+        FailureError.windowOpenFailed.rawValue,
+        FailureError.windowIdentityUnresolved.rawValue,
+        FailureError.paramControlNotFound.rawValue,
+        FailureError.readbackLostAfterWrite.rawValue,
+        FailureError.postInsertPluginMismatch.rawValue,
+        FailureError.postInsertReadbackUnavailable.rawValue,
+        FailureError.rollbackFailed.rawValue,
+        FailureError.verifiedOpInProgress.rawValue,
+        FailureError.operationTimeout.rawValue,
     ]
 
     /// Returns true if the given message is a State-C envelope whose `error`
