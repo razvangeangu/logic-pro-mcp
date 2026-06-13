@@ -6,6 +6,29 @@ For MCU-specific problems, see [SETUP.md §3](SETUP.md#3-register-mcu-control-su
 
 ---
 
+## Install (Homebrew)
+
+### `Error: Refusing to load formula … from untrusted tap monglong0214/logic-pro-mcp`
+
+Homebrew 6.0 introduced a tap trust model: formulae from third-party taps refuse to load until the tap is trusted once.
+
+```bash
+brew trust monglong0214/logic-pro-mcp
+```
+
+Then retry `brew install logic-pro-mcp`. On Homebrew older than 6.0 this error (and the `brew trust` command) does not exist.
+
+### `Errno::ENOENT: No such file or directory - SETUP.md` during `brew install` / `brew upgrade`
+
+The v3.4.6/v3.5.0 Formula installed helper assets from the tarball root while the published tarballs nest them under `docs/` and `Scripts/` (issue #22). Fixed on `main` — the tap serves the Formula from `main`, so:
+
+```bash
+brew update
+brew upgrade logic-pro-mcp   # or: brew install logic-pro-mcp
+```
+
+The published tarballs themselves were always correct; no pinned-hash change is involved. Both drift directions are now CI-gated (PR-time `VersionConsistencyTests` + a tag-time tarball-listing gate in the release workflow).
+
 ## Server Won't Start
 
 ### `claude mcp add` succeeds but server never responds

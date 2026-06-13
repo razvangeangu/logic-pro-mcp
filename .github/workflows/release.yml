@@ -255,6 +255,40 @@ jobs:
           shasum -a 256 LogicProMCP-macOS-arm64.tar.gz >> SHA256SUMS.txt
           shasum -a 256 LogicProMCP >> SHA256SUMS.txt
 
+      - name: Verify Formula install paths against tarball
+        # Issue #22: v3.4.6/v3.5.0 shipped a Formula whose pkgshare.install
+        # paths did not exist in the published tarball (formula flat vs
+        # tarball nested), so `brew install` failed at the install step.
+        # PR #2 fixed the same failure class in the opposite direction
+        # (formula nested vs tarball flat). This gate asserts — against the
+        # actual artifact about to be published — that every path the
+        # Formula installs is present in the tarball listing, so BOTH drift
+        # directions fail the release before anything ships. The PR-time
+        # half of the guard is VersionConsistencyTests
+        # .testFormulaInstallPathsMatchRepoAndReleaseStaging.
+        run: |
+          tar -tzf LogicProMCP-macOS-universal.tar.gz > tarball-listing.txt
+          echo "Tarball listing:"
+          cat tarball-listing.txt
+          PATHS=$(sed -nE 's/^[[:space:]]*(pkgshare|bin)\.install "([^"]+)".*/\2/p' Formula/logic-pro-mcp.rb)
+          if [ -z "$PATHS" ]; then
+            echo "::error::Parsed no install paths from Formula/logic-pro-mcp.rb — parser or Formula layout drifted"
+            exit 1
+          fi
+          FAIL=0
+          while IFS= read -r p; do
+            if grep -Fxq "$p" tarball-listing.txt; then
+              echo "OK: $p"
+            else
+              echo "::error::Formula installs '$p' but it is missing from LogicProMCP-macOS-universal.tar.gz"
+              FAIL=1
+            fi
+          done <<< "$PATHS"
+          if [ "$FAIL" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Formula install paths verified against the built tarball."
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191
         with:

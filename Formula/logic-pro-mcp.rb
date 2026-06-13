@@ -29,11 +29,18 @@ class LogicProMcp < Formula
     bin.install "LogicProMCP"
     # Helper assets shipped with the binary so users can complete Logic Pro
     # integration without re-cloning the repo.
-    pkgshare.install "SETUP.md"
-    pkgshare.install "install-keycmds.sh"
-    pkgshare.install "uninstall-keycmds.sh"
-    pkgshare.install "keycmd-preset.plist"
-    pkgshare.install "LogicProMCP-Scripter.js"
+    #
+    # Issue #22: these paths must match the tarball layout staged by
+    # .github/workflows/release.yml, which packages repo-relative nested
+    # paths (docs/, Scripts/). Homebrew flattens them into pkgshare by
+    # basename, which install-keycmds.sh relies on (sibling preset lookup).
+    # Guarded both ways: VersionConsistencyTests at PR time, and the
+    # release workflow's tarball-listing gate at tag time.
+    pkgshare.install "docs/SETUP.md"
+    pkgshare.install "Scripts/install-keycmds.sh"
+    pkgshare.install "Scripts/uninstall-keycmds.sh"
+    pkgshare.install "Scripts/keycmd-preset.plist"
+    pkgshare.install "Scripts/LogicProMCP-Scripter.js"
   end
 
   def caveats

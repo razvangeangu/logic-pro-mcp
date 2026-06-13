@@ -98,3 +98,54 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     #expect(api.contains("| `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |"))
     #expect(api.contains("| `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility |"))
 }
+
+/// Issue #22 (thomas-doesburg): `brew install` broke at v3.4.6/v3.5.0 because
+/// the Formula installed helper assets from the tarball root while the release
+/// workflow stages them with repo-relative nested paths (`docs/SETUP.md`,
+/// `Scripts/…`). PR #2 fixed the same failure class in the opposite direction
+/// (formula nested / tarball flat), so this guards BOTH drift directions at
+/// PR time: every `pkgshare.install` path must exist in the repo at exactly
+/// the staged relative path, and every installed path (including
+/// `bin.install`) must appear in the release workflow's tarball staging list.
+/// The tag-time half of the guard lives in release.yml ("Verify Formula
+/// install paths against tarball"), which re-asserts the same paths against
+/// the actual built artifact before anything is published.
+@Test func testFormulaInstallPathsMatchRepoAndReleaseStaging() throws {
+    let formula = try readRepoFile("Formula/logic-pro-mcp.rb")
+    let releaseWorkflow = try readRepoFile(".github/workflows/release.yml")
+
+    func installPaths(_ directive: String) -> [String] {
+        formula.components(separatedBy: "\n").compactMap { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("\(directive).install \"") else { return nil }
+            let parts = trimmed.components(separatedBy: "\"")
+            return parts.count >= 2 ? parts[1] : nil
+        }
+    }
+
+    let pkgsharePaths = installPaths("pkgshare")
+    let binPaths = installPaths("bin")
+    #expect(
+        pkgsharePaths.count == 5,
+        "expected the 5 helper assets in Formula pkgshare.install; parser or Formula drifted: \(pkgsharePaths)"
+    )
+    #expect(binPaths == ["LogicProMCP"], "Formula bin.install drifted: \(binPaths)")
+
+    let root = repositoryRootURL()
+    for path in pkgsharePaths {
+        #expect(
+            !path.hasPrefix("/") && !path.contains(".."),
+            "Formula install path '\(path)' must be a clean repo-relative path"
+        )
+        #expect(
+            FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path),
+            "Formula installs '\(path)' but no such file exists in the repo — the tarball stages repo-relative paths, so brew install would fail (issue #22)"
+        )
+    }
+    for path in pkgsharePaths + binPaths {
+        #expect(
+            releaseWorkflow.contains(path),
+            "Formula installs '\(path)' but release.yml does not stage it into the tarball (issue #22)"
+        )
+    }
+}

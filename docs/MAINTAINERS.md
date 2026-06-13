@@ -88,6 +88,8 @@ curl -fsSL "https://github.com/MongLong0214/logic-pro-mcp/releases/download/$VER
 
 Commit the formula update as a separate follow-up when needed. Users installing via `brew install` against the tap will then resolve to the newly-published artifact.
 
+The Formula's install paths are guarded in both directions after issue #22 (formula flat vs tarball nested — the inverse of PR #2): `VersionConsistencyTests.testFormulaInstallPathsMatchRepoAndReleaseStaging` fails any PR whose Formula paths don't exist in the repo or aren't staged by `release.yml`, and the release workflow's "Verify Formula install paths against tarball" step fails the tag run if any `pkgshare`/`bin` install path is missing from the actual built tarball. If you change the tarball layout or the Formula's install block, change both together.
+
 If you also maintain a private Homebrew tap, publish the formula update there.
 
 ### Environment variables (runtime)

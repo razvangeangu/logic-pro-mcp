@@ -19,10 +19,11 @@ Complete installation, Logic Pro integration, and verification. Should take ~10 
 
 ```bash
 brew tap MongLong0214/logic-pro-mcp https://github.com/MongLong0214/logic-pro-mcp
+brew trust monglong0214/logic-pro-mcp   # Homebrew 6.0+ requires trusting third-party taps
 brew install logic-pro-mcp
 ```
 
-Homebrew pins both the release tarball URL and its SHA256 in the formula, and Homebrew itself is a trusted delivery channel with its own signature chain. Use this path whenever possible.
+Homebrew pins both the release tarball URL and its SHA256 in the formula, and Homebrew itself is a trusted delivery channel with its own signature chain. Use this path whenever possible. (On Homebrew older than 6.0 the `brew trust` step does not exist — skip it.)
 
 ### Option B — Download-inspect-run one-line installer
 

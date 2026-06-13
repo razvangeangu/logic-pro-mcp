@@ -113,10 +113,11 @@ The current published stable release is `v3.5.0` (2026-06-12 KST). It ships ADHO
 
 ```bash
 brew tap MongLong0214/logic-pro-mcp https://github.com/MongLong0214/logic-pro-mcp
+brew trust monglong0214/logic-pro-mcp   # Homebrew 6.0+ requires trusting third-party taps
 brew install logic-pro-mcp
 ```
 
-The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew itself is a trusted delivery channel with its own signature chain. This is the hardened path for production installs.
+The Homebrew formula pins both the release tarball URL and its SHA256; Homebrew itself is a trusted delivery channel with its own signature chain. This is the hardened path for production installs. (On Homebrew older than 6.0 the `brew trust` step does not exist — skip it.)
 
 For source-tree development, build locally:
 
