@@ -676,15 +676,43 @@ enum AXLogicProElements {
         return plugins
     }
 
+    /// Read state of an insert slot, kept SEPARATE from `name` so an occupied
+    /// slot whose name could not be read is never mistaken for an empty one
+    /// (rev-4 D4). Raw values double as the public `get_inventory.read_status`
+    /// strings ("empty"/"ok"/"unreadable") per requirements R3.
+    enum SlotReadStatus: String, Sendable, Equatable {
+        case empty
+        case occupiedReadable = "ok"
+        case occupiedUnreadable = "unreadable"
+    }
+
     struct PluginInsertSlot {
+        /// PHYSICAL slot position. Preserved across unreadable occupied slots
+        /// so an explicit `insert: N` always addresses the same physical slot
+        /// (rev-4 D1 — drift fix).
         let index: Int
         let element: AXUIElement
         let name: String?
         let isBypassed: Bool?
+        let readStatus: SlotReadStatus
 
-        var isEmpty: Bool { name == nil }
+        var occupied: Bool { readStatus != .empty }
+
+        /// "Safe to write into" — true ONLY for a verified-empty slot. An
+        /// occupied slot whose name is unreadable returns false so the legacy
+        /// `insert_plugin` occupied-slot guard cannot silently overwrite it
+        /// (rev-4 D4 / AC21). Do NOT reduce this back to `name == nil`.
+        var isEmpty: Bool { readStatus == .empty }
     }
 
+    /// Enumerate a strip's audio-plugin insert slots WITHOUT dropping any slot.
+    ///
+    /// rev-4 D1: the previous implementation `continue`d past an occupied slot
+    /// whose name was unreadable and renumbered with `slots.count`, so a
+    /// physical insert 3 could be reported as insert 2. Now every recognised
+    /// slot — empty, occupied-readable, occupied-unreadable — keeps its
+    /// physical position; only non-slot children (fader / pan / sends / I/O)
+    /// are skipped, which never shifts a slot index relative to other slots.
     static func audioPluginInsertSlots(
         in strip: AXUIElement,
         runtime: AXHelpers.Runtime = .production
@@ -696,19 +724,22 @@ enum AXLogicProElements {
                     index: slots.count,
                     element: child,
                     name: nil,
-                    isBypassed: nil
+                    isBypassed: nil,
+                    readStatus: .empty
                 ))
-                continue
+            } else if isOccupiedPluginSlotElement(child, runtime: runtime) {
+                // Slot position is confirmed by structure (bypass + open/menu
+                // children); the name may still be unreadable.
+                let name = pluginSlotDisplayName(child, runtime: runtime)
+                slots.append(PluginInsertSlot(
+                    index: slots.count,
+                    element: child,
+                    name: name,
+                    isBypassed: pluginSlotBypassState(child, runtime: runtime),
+                    readStatus: name == nil ? .occupiedUnreadable : .occupiedReadable
+                ))
             }
-            guard let name = occupiedPluginSlotName(child, runtime: runtime) else {
-                continue
-            }
-            slots.append(PluginInsertSlot(
-                index: slots.count,
-                element: child,
-                name: name,
-                isBypassed: pluginSlotBypassState(child, runtime: runtime)
-            ))
+            // else: not an insert slot — skip without consuming an index.
         }
         return slots
     }
@@ -727,26 +758,18 @@ enum AXLogicProElements {
         return (text, isVolume, isPan)
     }
 
-    private static func occupiedPluginSlotName(
+    /// Structural predicate: is this element an OCCUPIED audio-plugin insert
+    /// slot, regardless of whether its name can be read? An occupied slot is an
+    /// AXGroup carrying both a bypass control and an open/menu control. Split
+    /// out of `occupiedPluginSlotName` (rev-4 D4) so the enumerator can mark a
+    /// slot occupied-but-unreadable instead of dropping it.
+    static func isOccupiedPluginSlotElement(
         _ element: AXUIElement,
         runtime: AXHelpers.Runtime
-    ) -> String? {
+    ) -> Bool {
         guard (AXHelpers.getRole(element, runtime: runtime) ?? "") == (kAXGroupRole as String) else {
-            return nil
+            return false
         }
-        guard let description = AXHelpers.getDescription(element, runtime: runtime)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !description.isEmpty else {
-            return nil
-        }
-        let lower = description.lowercased()
-        guard lower != "읽기, 오토메이션이 활성화됨",
-              lower != "read",
-              !lower.contains("automation"),
-              !lower.contains("오토메이션") else {
-            return nil
-        }
-
         let children = AXHelpers.getChildren(element, runtime: runtime)
         let hasBypass = children.contains { child in
             let text = elementSearchText(child, runtime: runtime)
@@ -759,7 +782,43 @@ enum AXLogicProElements {
                 || text.contains("list")
                 || text.contains("목록")
         }
-        return hasBypass && hasOpenOrMenu ? description : nil
+        return hasBypass && hasOpenOrMenu
+    }
+
+    /// Extract a usable plugin display name from an occupied slot group, or nil
+    /// if the description is missing or is an automation-mode label (not a
+    /// plugin name). Returning nil means "occupied but unreadable".
+    static func pluginSlotDisplayName(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> String? {
+        guard let description = AXHelpers.getDescription(element, runtime: runtime)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !description.isEmpty else {
+            return nil
+        }
+        let lower = description.lowercased()
+        guard lower != "읽기, 오토메이션이 활성화됨",
+              lower != "read",
+              !lower.contains("automation"),
+              !lower.contains("오토메이션") else {
+            return nil
+        }
+        return description
+    }
+
+    /// Name of an occupied plugin slot, or nil if the element is not an
+    /// occupied slot or its name is unreadable. Preserved as the composition of
+    /// the structural predicate + name extractor so the wire-path `pluginSlots`
+    /// enumerator keeps its exact prior behaviour (occupied-readable only).
+    private static func occupiedPluginSlotName(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> String? {
+        guard isOccupiedPluginSlotElement(element, runtime: runtime) else {
+            return nil
+        }
+        return pluginSlotDisplayName(element, runtime: runtime)
     }
 
     private static func isEmptyAudioPluginSlot(
