@@ -8,7 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Fixed
+
+- **`brew install` regression (Issue #22, thomas-doesburg)** — the Formula installed its five helper assets from the tarball root, while the published v3.4.6/v3.5.0 tarballs stage them under `docs/` and `Scripts/` (the inverse of the v3.1.x mismatch fixed in PR #2), so the Homebrew install step failed. `pkgshare.install` paths now match the staged layout. Two guards now block both drift directions: a PR-time test (`VersionConsistencyTests.testFormulaInstallPathsMatchRepoAndReleaseStaging`) asserts every Formula install path exists in the repo and is staged by `release.yml`, and a tag-time release-workflow gate asserts every install path against the actual built tarball (`tar -tzf`) before anything is published. Because the Homebrew tap serves the Formula from `main`, the fix applies to the already-published v3.4.6/v3.5.0 artifacts on `brew update` — the tarballs themselves were always correct; only the install paths were wrong.
 
 ## [3.5.0] — 2026-06-12
 
