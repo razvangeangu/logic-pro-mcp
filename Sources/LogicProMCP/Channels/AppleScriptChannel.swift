@@ -434,6 +434,28 @@ actor AppleScriptChannel: Channel {
         return raw.isEmpty ? nil : raw
     }
 
+    /// Static, side-effect-free POSIX-path comparison used by the verified
+    /// project-identity gate (R10, AC15). Mirrors the instance
+    /// `projectPathsMatch`/`normalizedProjectPath` logic exactly (symlink
+    /// resolution + `/private` prefix + trailing-slash normalization) so the
+    /// gate reuses the same comparison the open/save lifecycle already relies on.
+    static func projectPathsMatch(_ lhs: String, _ rhs: String) -> Bool {
+        let left = normalizedProjectPathStatic(lhs)
+        let right = normalizedProjectPathStatic(rhs)
+        if left == right { return true }
+        if left.hasPrefix("/private"), String(left.dropFirst(8)) == right { return true }
+        if right.hasPrefix("/private"), left == String(right.dropFirst(8)) { return true }
+        return false
+    }
+
+    static func normalizedProjectPathStatic(_ path: String) -> String {
+        let normalized = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        if normalized.hasSuffix("/") {
+            return String(normalized.dropLast())
+        }
+        return normalized
+    }
+
     private func logicCurrentDocumentPath() async -> String? {
         let result = await runScript(Self.currentDocumentPathScript())
         return Self.parseCurrentDocumentPath(from: result)

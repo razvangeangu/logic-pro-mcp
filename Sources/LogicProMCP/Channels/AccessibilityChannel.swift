@@ -480,6 +480,17 @@ actor AccessibilityChannel: Channel {
         case "plugin.list":
             return .error("Plugin list reading not yet implemented via AX")
 
+        // MARK: - Verified plugin surface (logic_plugins.*) — T3
+        // Drift-safe inventory + R6 validation gates. These route through AX
+        // alone (no fallback) per R16; the live State-A write/insert paths are
+        // T4-T6 and fail closed here.
+        case "plugin.get_inventory":
+            return AccessibilityChannel.defaultGetPluginInventory(params: params, runtime: runtime.logicRuntime)
+        case "plugin.set_param_verified":
+            return await AccessibilityChannel.defaultSetParamVerified(params: params, runtime: runtime.logicRuntime)
+        case "plugin.insert_verified":
+            return await AccessibilityChannel.defaultInsertVerified(params: params, runtime: runtime.logicRuntime)
+
         // MARK: - Automation
         case "automation.get_mode":
             return .error("Automation mode reading not yet implemented via AX")

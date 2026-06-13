@@ -100,6 +100,16 @@ actor ChannelRouter {
         "mixer.set_plugin_param":     [.scripter],  // public path narrowed to deterministic Scripter flow
         "plugin.insert":              [.accessibility],
 
+        // Verified plugin surface (logic_plugins.*) — T3 / R16. AX-only, NO
+        // fallback: a verified op that fell back to Scripter/MCU would fabricate
+        // a false verified result and bury the real AX error (same rationale as
+        // transport.set_tempo). Every verified-path State C is terminal
+        // (HonestContract.terminalErrorCodes), so the router never continues
+        // past them.
+        "plugin.get_inventory":       [.accessibility],
+        "plugin.set_param_verified":  [.accessibility],
+        "plugin.insert_verified":     [.accessibility],
+
         // MIDI — CoreMIDI only
         "midi.send_note":             [.coreMIDI],
         "midi.send_chord":            [.coreMIDI],

@@ -53,7 +53,7 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 
 | Surface | Current source tree |
 |---------|---------------------|
-| MCP tools | 8 tools covering transport, tracks, mixer, MIDI, edit, navigation, project lifecycle, and system health |
+| MCP tools | 9 tools covering transport, tracks, mixer, MIDI, edit, navigation, project lifecycle, system health, and verified plugin apply-back |
 | Read resources | 14 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, library inventory, stock plugin intelligence, and workflow skills |
 | Resource templates | 7 templates for track, region, mixer-strip, stock plugin detail/search, and workflow detail/search lookup |
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
@@ -206,7 +206,7 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [Setup Guide](docs/SETUP.md) | End users | One-page install + Logic Pro integration, ~10 min |
-| [API Reference](docs/API.md) | End users, MCP clients | All 8 tools, 14 resources, 7 templates, 130+ operations |
+| [API Reference](docs/API.md) | End users, MCP clients | All 9 tools, 14 resources, 7 templates, 130+ operations |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |
 | [Maintainer Guide](docs/MAINTAINERS.md) | Maintainers | Release, approvals, E2E checklist |

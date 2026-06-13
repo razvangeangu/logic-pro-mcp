@@ -24,6 +24,7 @@ private let serverResourceText = sharedResourceText
         "logic_navigate",
         "logic_project",
         "logic_system",
+        "logic_plugins",
     ])
     // MCU disconnected by default in a fresh LogicProServer, so the list
     // excludes `logic://mcu/state`.
@@ -194,7 +195,7 @@ private let serverResourceText = sharedResourceText
 
     let handlers = await server.makeHandlers()
     let toolNames = await handlers.listTools(ListTools.Parameters())
-    #expect(toolNames.tools.count == 8)
+    #expect(toolNames.tools.count == 9)
 }
 
 @Test func testLogicProServerStartUsesDefaultRegisterAndCleanupPaths() async throws {

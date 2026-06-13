@@ -34,6 +34,7 @@ enum ServerCatalog {
         NavigateDispatcher.tool,
         ProjectDispatcher.tool,
         SystemDispatcher.tool,
+        PluginsDispatcher.tool,
     ]
 
     static func startupBanner(channelCount: Int) -> String {
@@ -123,7 +124,7 @@ struct ServerRuntimePlan: @unchecked Sendable {
 }
 
 /// Main MCP server for Logic Pro integration.
-/// Exposes 8 dispatcher tools + 14 resources + 7 templates, routing through
+/// Exposes 9 dispatcher tools + 14 resources + 7 templates, routing through
 /// the ChannelRouter to the appropriate macOS communication channel.
 actor LogicProServer {
     private let server: Server
@@ -212,7 +213,7 @@ actor LogicProServer {
         }
     }
 
-    // MARK: - Tool Registration (8 dispatchers)
+    // MARK: - Tool Registration (9 dispatchers)
 
     func makeHandlers() -> LogicProServerHandlers {
         let router = self.router
@@ -246,6 +247,8 @@ actor LogicProServer {
                     return await ProjectDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
                 case "logic_system":
                     return await SystemDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache, poller: self.poller)
+                case "logic_plugins":
+                    return await PluginsDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
                 default:
                     return toolTextResult("Unknown tool: \(name)", isError: true)
                 }
