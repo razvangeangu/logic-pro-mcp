@@ -239,15 +239,19 @@ The `track` parameter is a 0-based index into the **visible mixer strip order**.
 
 ### Limitation 4 — Only Compressor `threshold` is verified-writable
 
-The first `set_param_verified` parameter to reach State A capability (`writeReadback`) is Compressor `threshold`. All other plugin parameters return State C `unsupported_param_readback` at the capability preflight step — no write is attempted. This is because other Compressor parameters (ratio, attack, release) have `AXDescription: "슬라이더"` (locale word for "slider") and cannot be identified by description alone.
+**라이브 E2E 검증 완료 (2026-06-14).** `set_param_verified` Compressor `threshold`는 Logic Pro 12.2 라이브 세션에서 State A `verified:true`가 확인됐다. Track 5 insert 6 Compressor에서 `requested_normalized 60 → observed_normalized 60, observed_display "60 %" ` (51→60→51 양방향), 독립 osascript readback으로 실제 AX write 입증. Evidence: `docs/spikes/compressor-t0-evidence.md`.
 
-Additional parameters will be promoted to `writeReadback` as T0 evidence is gathered for each one.
+All other plugin parameters return State C `unsupported_param_readback` at the capability preflight step — no write is attempted. This is because other Compressor parameters (ratio, attack, release) have `AXDescription: "슬라이더"` (locale word for "slider") and cannot be identified by description alone.
+
+Additional parameters will be promoted to `writeReadback` as evidence is gathered for each one.
 
 ---
 
 ## insert_verified (T6 preview)
 
-`insert_verified` runs all pre-insert gates but does not perform a live insert in this build. It is useful for validating the workflow before T6 ships.
+`insert_verified` runs all pre-insert gates (mode → project path → identity → inventory complete → slot empty) but does not perform a live insert in this build. **Pre-insert gates are live-E2E verified (2026-06-14):** `unsupported_mode`, `project_identity_mismatch`, `slot_occupied` (with `existing_plugin_name`) responses all confirmed live. When all gates pass, the response is State C `not_implemented` with `write_attempted: false`.
+
+The live AX insert step is deferred to T6. The programmatic plugin window opener is nil in the current build due to Logic mixer strip virtualization — opening a window automatically from outside Logic is brittle and not production-safe. This is tracked as T6/Release 1.x.
 
 ```json
 {
@@ -264,8 +268,6 @@ Additional parameters will be promoted to `writeReadback` as T0 evidence is gath
   }
 }
 ```
-
-When all gates pass, the response is State C `not_implemented` with `write_attempted: false` — the slot is confirmed empty and the project path matches, but no insert has been attempted.
 
 **Insertable allowlist:** `"gain"`, `"channel eq"` / `"channeleq"`, `"compressor"`. `"noise gate"` is in the identity allowlist but is not insertable (excluded from `insert_verified`).
 

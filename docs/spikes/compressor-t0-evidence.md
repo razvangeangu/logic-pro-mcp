@@ -54,3 +54,52 @@ restore      = AXValue 51.0
 - 식별: 열린 plugin window(제목=트랙명)에서 `AXSlider` + `AXDescription="Threshold"`.
 - 시퀀스(R6 6~13): window 확보 → slider 매칭 → before AXValue read → set AXValue → after AXValue read(+AXValueDescription) → tolerance → State A with `requested_normalized`/`observed_normalized`/`observed_display`("X %").
 - window 확보: 우선 "이미 열린 plugin window 찾기"(제목=대상 트랙명 + Threshold slider 존재), 자동 열기(R4)는 brittle하므로 후속.
+
+## 라이브 E2E 결과 (set_param_verified State A)
+
+- 실측일: 2026-06-14
+- 환경: Logic Pro 12.2, 복제본 `acid-track-applyback-test.logicx`, track 5 Compressor(물리 insert 6)
+
+### State A 실측 응답 (요약)
+
+```json
+{
+  "success": true,
+  "verified": true,
+  "state": "A",
+  "hc_schema": 2,
+  "operation": "logic_plugins.set_param_verified",
+  "param": "threshold",
+  "requested_normalized": 60.0,
+  "observed_normalized": 60.0,
+  "observed_display": "60 %",
+  "display_unit": "%",
+  "tolerance": 1.0,
+  "write_source": "ax_plugin_window",
+  "verify_source": "ax_plugin_window",
+  "target_identity": {
+    "track_index": 5,
+    "insert": 6,
+    "plugin_id": "logic.stock.effect.compressor"
+  }
+}
+```
+
+### 독립 osascript readback
+
+write 완료 후 별도 osascript 세션에서 `AXValueDescription`을 직접 읽어 `"60 %"` 확인. MCP readback과 독립된 실제 AX write 증거.
+
+### 양방향 round-trip
+
+51 → 60 → 51: value 설정 후 복원까지 양방향 write/readback 전수 확인.
+
+### fail-closed 라이브 전수 확인
+
+| 시나리오 | error code | 필드 비고 |
+|---------|-----------|----------|
+| `mode:"confirmed_live"` | `unsupported_mode` | write 전 거부 |
+| 잘못된 `project_expected_path` | `project_identity_mismatch` | `target_identity`에 `project_path_expected`/`project_path_observed` 포함 |
+| 점유 slot에 `insert_verified` | `slot_occupied` | `existing_plugin_name:"Compressor"` 포함 |
+| 빈 slot에 `insert_verified` (게이트 통과 후) | `not_implemented` | `write_attempted:false` — T6 pending |
+
+**판정: T0 spike의 State A 목표(컨트롤 식별 + write + readback)가 라이브 E2E로 완전히 검증됐다. 이 spike report는 T0 gate 충족 artifact다.**

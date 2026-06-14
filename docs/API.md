@@ -429,7 +429,9 @@ Writes a parameter on an already-open plugin window and reads the value back. Re
 
 All other plugin/parameter combinations return State C `unsupported_param_readback` at the capability preflight step; no write is attempted.
 
-Live E2E verification (State A observed from a running Logic session) is in progress. The implementation is complete and unit-tested.
+**라이브 E2E 검증 완료 (Compressor threshold State A, 2026-06-14).** Logic Pro 12.2 + 복제본 `acid-track-applyback-test.logicx`, track 5 Compressor(물리 insert 6)에서 `requested_normalized 60 → observed_normalized 60, observed_display "60 %"` State A 확인. 독립 osascript readback으로 실제 AX write 입증. Evidence: `docs/spikes/compressor-t0-evidence.md`.
+
+`insert_verified`의 pre-insert 게이트(mode/path/identity/slot-empty 검증)는 라이브로 전수 확인됐다. 실제 AX insert는 T6 pending(Logic mixer strip 가상화로 programmatic opener nil → `not_implemented`).
 
 **Plugin identity aliases (case-insensitive)**
 

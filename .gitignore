@@ -28,3 +28,6 @@ Resources/*-inventory-*.json
 artifacts/*
 !artifacts/acid-track-composition-v4/
 !artifacts/acid-track-composition-v4/**
+
+# Live-test duplicate created via save_as during live T0/E2E — not shipped
+artifacts/acid-track-composition-v4/acid-track-applyback-test.logicx/
