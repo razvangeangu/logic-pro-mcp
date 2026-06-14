@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **8 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **9 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -15,6 +15,7 @@ Every tool call returns a `CallTool.Result` with `content: [{ type: "text", text
 | [`logic_transport`](#logic_transport) | Play, stop, record, tempo, position | Write |
 | [`logic_tracks`](#logic_tracks) | Track create/delete/mute/solo/arm/rename/automation | Write |
 | [`logic_mixer`](#logic_mixer) | Fader, pan, send, plugin parameters | Write |
+| [`logic_plugins`](#logic_plugins) | Verified plugin inventory + parameter write/readback | Write (HC v2) |
 | [`logic_midi`](#logic_midi) | Raw MIDI + MMC + step input | Write |
 | [`logic_edit`](#logic_edit) | Undo/redo/cut/copy/paste/quantize | Write |
 | [`logic_navigate`](#logic_navigate) | Bar navigation, markers, zoom, view toggles | Write |
@@ -325,6 +326,251 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 {"command": "set_pan", "params": {"track": 2, "value": -0.3}}
 {"command": "set_plugin_param", "params": {"track": 1, "insert": 0, "param": 3, "value": 0.65}}
 {"command": "insert_plugin", "params": {"track": 0, "slot": 2, "plugin_name": "Gain", "confirmed": true}}
+```
+
+> **Deprecation notice:** `logic_mixer.insert_plugin` is superseded by `logic_plugins.insert_verified` for the allowlisted stock plugins (Gain / Channel EQ / Compressor). `insert_plugin` remains available in the current release cycle but will be removed in a future version.
+
+---
+
+## logic_plugins
+
+Verified plugin apply-back surface. All three commands use **HC v2** (`hc_schema: 2`) — every response carries `state` (`"A"` / `"B"` / `"C"`), `hc_schema: 2`, and (for State C) `verified: false`. This tool routes exclusively through the Accessibility channel; there is no fallback chain. All HC v2 error codes are terminal.
+
+### Commands
+
+| Command | Params | Returns | Channel |
+|---------|--------|---------|---------|
+| `get_inventory` | `{ track: int }` | HC v2 inventory envelope (State B when AX mixer unreachable) | Accessibility (read-only) |
+| `set_param_verified` | `{ track: int, insert: int, plugin: string, param: string, value: number, mode: "duplicate_applyback", project_expected_path: string, unit?: string }` | HC v2 State A on confirmed write, State C on any failure | Accessibility (AX plugin window) |
+| `insert_verified` | `{ track: int, insert: int, plugin: string, mode: "duplicate_applyback", project_expected_path: string }` | HC v2 State C `not_implemented` (live insert deferred to T6) | Accessibility (validation gate only) |
+
+### get_inventory
+
+Reads the physical AX insert chain for one track. Never mutates state. Every slot item always carries all six fields — no field is omitted; missing values are explicit `null`.
+
+**Input**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `track` | `int >= 0` | 0-based track index in the visible mixer. |
+
+**Output — success (State B shape when AX mixer unreachable)**
+
+```json
+{
+  "success": true,
+  "verified": false,
+  "state": "B",
+  "hc_schema": 2,
+  "reason": "readback_unavailable",
+  "operation": "logic_plugins.get_inventory",
+  "track": 3,
+  "plugins_source": "ax",
+  "plugins_fetched_at": "2026-06-14T12:00:00Z",
+  "plugins_unknown_reason": "ax_subtree_unreadable",
+  "what_was_attempted": "read insert chain inventory for track 3",
+  "what_was_observed": "mixer area was not locatable in the AX tree",
+  "safe_to_retry": true
+}
+```
+
+**Output — success (readable)**
+
+```json
+{
+  "operation": "logic_plugins.get_inventory",
+  "track": 5,
+  "plugins_source": "ax",
+  "plugins_fetched_at": "2026-06-14T12:00:00Z",
+  "plugins_unknown_reason": null,
+  "complete": true,
+  "plugins": [
+    {
+      "insert": 0,
+      "read_status": "empty",
+      "occupied": false,
+      "name": null,
+      "plugin_id": null,
+      "bypassed": null
+    },
+    {
+      "insert": 6,
+      "read_status": "ok",
+      "occupied": true,
+      "name": "Compressor",
+      "plugin_id": "logic.stock.effect.compressor",
+      "bypassed": false
+    }
+  ]
+}
+```
+
+**`read_status` values**
+
+| Value | Meaning |
+|-------|---------|
+| `"empty"` | Slot is unoccupied. |
+| `"ok"` | Slot is occupied and the plugin name was read successfully. |
+| `"unreadable"` | Slot appears occupied but the name could not be read; `name` / `plugin_id` / `bypassed` are `null`. When any slot is `unreadable`, `complete` is `false`. |
+
+**`plugin_id`** is set only when the observed name matches an allowlisted stock plugin (`logic.stock.effect.*`). Third-party plugins return `null` for `plugin_id` even when `read_status` is `"ok"`.
+
+> **Physical index vs mixer-cache index:** `insert` reflects the physical AX slot position, which may differ from the `logic://mixer` legacy index (D1 drift). Always use the `insert` value from `get_inventory` when targeting a slot for `set_param_verified` or `insert_verified`.
+
+### set_param_verified
+
+Writes a parameter on an already-open plugin window and reads the value back. Returns State A only when the write **and** readback both succeed within tolerance. Any failure before or during the write returns State C; a readback mismatch triggers rollback to the pre-write value and returns State C `readback_mismatch`.
+
+**Supported parameters (as of this build)**
+
+| Plugin identity | Param key | Unit | Range | Tolerance | AX control |
+|-----------------|-----------|------|-------|-----------|------------|
+| `logic.stock.effect.compressor` | `threshold` | `normalized` (display: `"X %"`) | 0–100 | 1.0 | `AXSlider` with `AXDescription: "Threshold"` |
+
+All other plugin/parameter combinations return State C `unsupported_param_readback` at the capability preflight step; no write is attempted.
+
+Live E2E verification (State A observed from a running Logic session) is in progress. The implementation is complete and unit-tested.
+
+**Plugin identity aliases (case-insensitive)**
+
+| Accepted alias | Canonical ID |
+|----------------|--------------|
+| `"compressor"`, `"logic.stock.effect.compressor"` | `logic.stock.effect.compressor` |
+| `"gain"`, `"logic.stock.effect.gain"` | `logic.stock.effect.gain` |
+| `"channel eq"`, `"channeleq"`, `"logic.stock.effect.channel_eq"` | `logic.stock.effect.channel_eq` |
+| `"noise gate"`, `"noisegate"`, `"logic.stock.effect.noise_gate"` | `logic.stock.effect.noise_gate` |
+
+**Input**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `track` | `int >= 0` | 0-based track index. |
+| `insert` | `int >= 0` | Physical insert slot index from `get_inventory`. |
+| `plugin` | `string` | Plugin identity alias (see table above). |
+| `param` | `string` | Parameter key (`"threshold"` for Compressor). |
+| `value` | `number` | Target value in the parameter's unit (normalized % for `threshold`). |
+| `mode` | `string` | Must be `"duplicate_applyback"` (only supported mode in Release 1). |
+| `project_expected_path` | `string` | Absolute path of the front Logic project. The project path gate reads the live front document and rejects any mismatch before writing. |
+| `unit` | `string?` | Optional. When supplied, must match the declared unit (`"normalized"` for `threshold`); mismatch → State C `invalid_params`. |
+
+**Output — State A (confirmed write)**
+
+```json
+{
+  "success": true,
+  "verified": true,
+  "state": "A",
+  "hc_schema": 2,
+  "operation": "logic_plugins.set_param_verified",
+  "target_identity": {
+    "track_index": 5,
+    "insert": 6,
+    "plugin_id": "logic.stock.effect.compressor"
+  },
+  "param": "threshold",
+  "requested_normalized": 60.0,
+  "observed_normalized": 60.0,
+  "observed_display": "60 %",
+  "display_unit": "%",
+  "tolerance": 1.0,
+  "write_source": "ax_plugin_window",
+  "verify_source": "ax_plugin_window"
+}
+```
+
+**Output — State C (failure, example: window not open)**
+
+```json
+{
+  "success": false,
+  "verified": false,
+  "state": "C",
+  "hc_schema": 2,
+  "error": "window_open_failed",
+  "operation": "logic_plugins.set_param_verified",
+  "target_identity": {
+    "track_index": 5,
+    "insert": 6,
+    "plugin_id": "logic.stock.effect.compressor"
+  },
+  "what_was_attempted": "acquire the plugin window before writing",
+  "what_was_observed": "no open plugin window titled 'Acid Wash Bass' exposes the 'Threshold' control, and one could not be opened",
+  "safe_to_retry": true,
+  "write_attempted": false
+}
+```
+
+**State C error codes (`logic_plugins.*` only)**
+
+| Code | Meaning | `write_attempted` |
+|------|---------|-------------------|
+| `invalid_params` | Missing / out-of-range / wrong-unit parameter. | `false` |
+| `unsupported_mode` | `mode` is not `"duplicate_applyback"`. | `false` |
+| `project_path_required` | `project_expected_path` not supplied for a mutating op. | `false` |
+| `project_identity_mismatch` | Front document path does not match `project_expected_path`. | `false` |
+| `unknown_plugin_identity` | Plugin alias or parameter key not in the allowlist. | `false` |
+| `unsupported_param_readback` | Parameter exists but has no verified write/readback method. | `false` |
+| `incomplete_inventory` | Insert chain is not fully readable, or target slot is empty. | `false` |
+| `track_selection_failed` | AX track selection write or readback confirmation failed. | `false` |
+| `window_open_failed` | No open plugin window matched; programmatic open also failed. | `false` |
+| `param_control_not_found` | No `AXSlider` with the expected `AXDescription` in the plugin window. | `false` |
+| `ax_write_failed` | `AXUIElementSetAttributeValue` was rejected. | `true` |
+| `readback_lost_after_write` | Could not read the slider value after writing. | `true` |
+| `readback_mismatch` | Observed value differs from requested beyond tolerance; rollback attempted. | `true` |
+| `not_implemented` | Live write path not enabled in this build (used by `insert_verified`). | `false` |
+
+All `logic_plugins.*` State C codes are **terminal** — the router never falls back to Scripter or MCU after any of these.
+
+### insert_verified
+
+Validates all pre-insert gates (schema → mode → project path → identity → inventory complete → slot empty) and returns State C `not_implemented`. The live AX insert step is deferred to T6. This command exists so callers can verify that the project path, target slot, and plugin identity are all correct before T6 ships the live insert.
+
+**Input** — same as `set_param_verified` except `param` / `value` / `unit` are replaced by no additional parameters (the target slot must be empty).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `track` | `int >= 0` | 0-based track index. |
+| `insert` | `int >= 0` | Physical insert slot index (must be empty). |
+| `plugin` | `string` | Insertable plugin alias: `"gain"`, `"channel eq"`, or `"compressor"`. `"noise gate"` is identity-only and not insertable. |
+| `mode` | `string` | Must be `"duplicate_applyback"`. |
+| `project_expected_path` | `string` | Front document path gate. |
+
+### HC v2 vs HC v1
+
+`logic_plugins.*` uses the HC v2 envelope; all other tools use HC v1. The two are distinguished by `hc_schema`.
+
+| Field | HC v1 (`logic_mixer.*`, etc.) | HC v2 (`logic_plugins.*`) |
+|-------|-------------------------------|---------------------------|
+| `success` | `true` / `false` | `true` / `false` |
+| `verified` | `true` (State A) / `false` (State B/C) | `true` (State A) / `false` (State B/C) |
+| `state` | absent | `"A"` / `"B"` / `"C"` |
+| `hc_schema` | absent | `2` |
+| State C `verified` field | absent | `false` (explicit) |
+
+> **Scripter `set_plugin_param` is legacy unverified State B.** `logic_mixer.set_plugin_param` routes through the Scripter MIDI FX channel, which is send-only and cannot confirm the write landed. It always returns State B `readback_unavailable`. Use `logic_plugins.set_param_verified` for Compressor `threshold` instead, which returns State A when the write is confirmed.
+
+### Examples
+
+```json
+{"command": "get_inventory", "params": {"track": 5}}
+
+{"command": "set_param_verified", "params": {
+  "track": 5,
+  "insert": 6,
+  "plugin": "compressor",
+  "param": "threshold",
+  "value": 60,
+  "mode": "duplicate_applyback",
+  "project_expected_path": "/Users/isaac/Music/acid-track-applyback-test.logicx"
+}}
+
+{"command": "insert_verified", "params": {
+  "track": 2,
+  "insert": 0,
+  "plugin": "gain",
+  "mode": "duplicate_applyback",
+  "project_expected_path": "/Users/isaac/Music/acid-track-applyback-test.logicx"
+}}
 ```
 
 ---
