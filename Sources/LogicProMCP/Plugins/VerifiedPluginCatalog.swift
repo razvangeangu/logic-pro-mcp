@@ -47,6 +47,12 @@ enum VerifiedPluginCatalog {
             "gain": "gain",
             "gain_db": "gain",
         ],
+        // Compressor `threshold` is the first verified-writable parameter (T5,
+        // T0 spike). The public key and the catalog parameter id are both
+        // `threshold` (normalized %, NOT dB) — see `StockPluginCatalog`.
+        "logic.stock.effect.compressor": [
+            "threshold": "threshold",
+        ],
     ]
 
     /// Resolve a caller-supplied plugin alias to its canonical catalog id, or
@@ -122,5 +128,23 @@ enum VerifiedPluginCatalog {
     static func paramRange(pluginID: String, paramKey: String) -> StockPluginValueRange? {
         StockPluginCatalog.entry(id: pluginID)?
             .parameters.first(where: { $0.id == paramKey })?.valueRange
+    }
+
+    /// The live `AXDescription` string that identifies a (canonical) plugin
+    /// parameter's `AXSlider` inside the plugin window (T0 evidence), or nil when
+    /// the parameter has no stable description matcher. The verified write path
+    /// (R6 step 9) matches a window slider by this description; a parameter
+    /// without one cannot reach a verified write (it stays `.unsupported`).
+    static func paramAXDescription(pluginID: String, paramKey: String) -> String? {
+        StockPluginCatalog.entry(id: pluginID)?
+            .parameters.first(where: { $0.id == paramKey })?.axDescription
+    }
+
+    /// The verified write/readback tolerance (in the parameter's own unit) for a
+    /// (canonical) plugin parameter, or nil when unknown / not verified-writable.
+    /// R6 step 13: |observed - requested| <= tolerance ⇒ State A.
+    static func paramTolerance(pluginID: String, paramKey: String) -> Double? {
+        StockPluginCatalog.entry(id: pluginID)?
+            .parameters.first(where: { $0.id == paramKey })?.tolerance
     }
 }

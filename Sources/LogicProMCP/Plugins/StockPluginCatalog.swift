@@ -174,6 +174,16 @@ struct StockPluginParameterMetadata: Codable, Sendable, Equatable {
     let valueRange: StockPluginValueRange?
     let writeMethod: String?
     let readbackMethod: String?
+    /// Tolerance (in the parameter's own unit) for a verified write/readback
+    /// round-trip: |observed - requested| <= tolerance ⇒ State A. nil when the
+    /// parameter declares no verified write path (display/readback methods nil).
+    let tolerance: Double?
+    /// AX `AXDescription` string that uniquely identifies this parameter's
+    /// control inside the live plugin window (T0 evidence). For Compressor only
+    /// `threshold` carries a stable description ("Threshold"); other params show
+    /// the locale word for "slider" with no name, so they get no matcher and
+    /// stay write-unsupported. nil ⇒ not AX-addressable by description.
+    let axDescription: String?
     let availabilityState: StockPluginTruthState
     let provenance: StockPluginProvenance
 
@@ -184,8 +194,34 @@ struct StockPluginParameterMetadata: Codable, Sendable, Equatable {
         case valueRange = "value_range"
         case writeMethod = "write_method"
         case readbackMethod = "readback_method"
+        case tolerance
+        case axDescription = "ax_description"
         case availabilityState = "availability_state"
         case provenance
+    }
+
+    init(
+        id: String,
+        displayName: String,
+        unit: String?,
+        valueRange: StockPluginValueRange?,
+        writeMethod: String?,
+        readbackMethod: String?,
+        tolerance: Double? = nil,
+        axDescription: String? = nil,
+        availabilityState: StockPluginTruthState,
+        provenance: StockPluginProvenance
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.unit = unit
+        self.valueRange = valueRange
+        self.writeMethod = writeMethod
+        self.readbackMethod = readbackMethod
+        self.tolerance = tolerance
+        self.axDescription = axDescription
+        self.availabilityState = availabilityState
+        self.provenance = provenance
     }
 }
 
@@ -782,6 +818,38 @@ enum StockPluginCatalog {
         ),
     ]
 
+    /// Compressor `threshold` — the FIRST verified-writable stock parameter.
+    /// Live T0 spike (2026-06-14, `docs/spikes/compressor-t0-evidence.md`)
+    /// proved a complete AX write/readback round-trip: the control is an
+    /// `AXSlider` with `AXDescription="Threshold"`, `AXValue` in a normalized
+    /// 0...100 range, `AXValueDescription` "X %". `set AXValue 60` → reads back
+    /// 60 ("60 %"); the value is normalized %, NOT dB (Logic AX does not expose
+    /// the dB mapping). `AXIdentifier` ("_NS:153") is an unstable NSView id, so
+    /// identification is by `AXDescription` only.
+    private static let compressorParameters = [
+        StockPluginParameterMetadata(
+            id: "threshold",
+            displayName: "Threshold",
+            unit: "normalized",
+            valueRange: StockPluginValueRange(min: 0, max: 100, defaultValue: nil),
+            writeMethod: "ax_slider_axvalue",
+            readbackMethod: "ax_slider_axvalue",
+            tolerance: 1.0,
+            axDescription: "Threshold",
+            availabilityState: .inferred,
+            provenance: StockPluginProvenance(
+                source: "static_catalog",
+                method: "logic_stock_plugin_schema",
+                observedAt: nil,
+                logicVersion: nil,
+                locale: nil,
+                sourcePath: nil,
+                inferenceReason: "AX slider write/readback round-trip proven on a duplicate (T0 spike, docs/spikes/compressor-t0-evidence.md); not census-verified on this machine in this response",
+                evidence: ["parameter_write_readback", "docs/spikes/compressor-t0-evidence.md"]
+            )
+        ),
+    ]
+
     /// Curated stock catalog seeds. Display names double as probe keys for the
     /// factory settings folders, so they must match Logic's folder spelling
     /// (e.g. "Ringshifter", "DeEsser 2", "Vintage B3").
@@ -796,7 +864,8 @@ enum StockPluginCatalog {
         fx("vintage_tube_eq", "Vintage Tube EQ", "EQ"),
         // Dynamics
         fx("adaptive_limiter", "Adaptive Limiter", "Dynamics"),
-        fx("compressor", "Compressor", "Dynamics", write: .insertOnly),
+        fx("compressor", "Compressor", "Dynamics", write: .parameterWriteReadback, parameters: compressorParameters,
+           notes: ["threshold parameter is verified-writable via AX (normalized %); other params are insert-only"]),
         fx("deesser_2", "DeEsser 2", "Dynamics"),
         fx("enveloper", "Enveloper", "Dynamics"),
         fx("expander", "Expander", "Dynamics"),

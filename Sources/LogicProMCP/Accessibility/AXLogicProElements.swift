@@ -871,6 +871,75 @@ enum AXLogicProElements {
         .lowercased()
     }
 
+    // MARK: - Plugin Windows (verified parameter write — T5)
+
+    /// Resolve the display name of the track header at `index` (0-based), or nil
+    /// when the header is absent / unnamed. The verified parameter write matches
+    /// the open plugin window by this name (T0 evidence: a stock-effect plugin
+    /// window's AX title is the TRACK name, not the plugin name).
+    static func trackName(at index: Int, runtime: Runtime = .production) -> String? {
+        guard let header = findTrackHeader(at: index, runtime: runtime) else { return nil }
+        let name = AXValueExtractors.extractTrackState(from: header, index: index, runtime: runtime.ax).name
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // `extractTrackState` falls back to "Untitled" when no name is readable;
+        // treat that as "no resolvable name" rather than a window-title match key.
+        guard !trimmed.isEmpty, trimmed != "Untitled" else { return nil }
+        return trimmed
+    }
+
+    /// Find an OPEN plugin window whose AX title equals `trackName` AND which
+    /// exposes a 1-level `AXSlider` matching `axDescription`. T0 evidence: a
+    /// stock-effect plugin window is a separate `AXWindow`/`AXDialog` titled with
+    /// the track name; its parameter controls are flat `AXSlider`s at the
+    /// window's first child level, and only `AXDescription` is a stable matcher.
+    ///
+    /// Returns nil when no such window is open (the caller then attempts to open
+    /// one, or fails closed). Both the title match and the slider presence are
+    /// required so an unrelated same-titled window is never mistaken for the
+    /// plugin window.
+    static func openPluginWindow(
+        forTrackName trackName: String,
+        matchingSliderDescription axDescription: String,
+        runtime: Runtime = .production
+    ) -> AXUIElement? {
+        guard let app = appRoot(runtime: runtime) else { return nil }
+        let windows: [AXUIElement] = AXHelpers.getAttribute(
+            app, kAXWindowsAttribute, runtime: runtime.ax
+        ) ?? []
+        let target = trackName.trimmingCharacters(in: .whitespacesAndNewlines)
+        for window in windows {
+            let title = (AXHelpers.getTitle(window, runtime: runtime.ax) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard title == target else { continue }
+            if pluginWindowSlider(in: window, axDescription: axDescription, runtime: runtime.ax) != nil {
+                return window
+            }
+        }
+        return nil
+    }
+
+    /// Find the parameter `AXSlider` inside a plugin window by its
+    /// `AXDescription` (T0 evidence: the ONLY stable identifier — `AXIdentifier`
+    /// is an unstable NSView id, and unnamed params share the locale word for
+    /// "slider"). Matches against the window's slider descendants; the match is
+    /// case-insensitive on the trimmed description.
+    static func pluginWindowSlider(
+        in window: AXUIElement,
+        axDescription: String,
+        runtime: AXHelpers.Runtime = .production
+    ) -> AXUIElement? {
+        let target = axDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return nil }
+        let sliders = AXHelpers.findAllDescendants(
+            of: window, role: kAXSliderRole, maxDepth: 4, runtime: runtime
+        )
+        return sliders.first { slider in
+            let desc = (AXHelpers.getDescription(slider, runtime: runtime) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return desc.caseInsensitiveCompare(target) == .orderedSame
+        }
+    }
+
     // MARK: - Menu Bar
 
     /// Get the menu bar for Logic Pro.

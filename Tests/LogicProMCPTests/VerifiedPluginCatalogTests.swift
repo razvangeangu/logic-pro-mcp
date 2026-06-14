@@ -57,10 +57,35 @@ import Testing
         VerifiedPluginCatalog.paramCapability(pluginID: "logic.stock.effect.gain", paramKey: "nope")
             == .unknownParameter
     )
+    // An unknown compressor param is still unknown; `threshold` itself is now
+    // writeReadback (T5) — see testCompressorThresholdCapabilityIsWriteReadback.
     #expect(
-        VerifiedPluginCatalog.paramCapability(pluginID: "logic.stock.effect.compressor", paramKey: "threshold")
+        VerifiedPluginCatalog.paramCapability(pluginID: "logic.stock.effect.compressor", paramKey: "ratio")
             == .unknownParameter
     )
+}
+
+// MARK: - T5: Compressor threshold is the first verified-writable parameter
+
+@Test func testCompressorThresholdCapabilityIsWriteReadback() {
+    // T0 spike filled the AX write/readback methods, so preflight now admits a
+    // verified write for this one parameter.
+    #expect(
+        VerifiedPluginCatalog.paramCapability(pluginID: "logic.stock.effect.compressor", paramKey: "threshold")
+            == .writeReadback
+    )
+    #expect(VerifiedPluginCatalog.canonicalParamKey(pluginID: "logic.stock.effect.compressor", alias: "threshold") == "threshold")
+}
+
+@Test func testCompressorThresholdUnitRangeToleranceAndAXDescription() {
+    let id = "logic.stock.effect.compressor"
+    #expect(VerifiedPluginCatalog.paramUnit(pluginID: id, paramKey: "threshold") == "normalized")
+    let range = VerifiedPluginCatalog.paramRange(pluginID: id, paramKey: "threshold")
+    #expect(range?.min == 0)
+    #expect(range?.max == 100)
+    #expect(VerifiedPluginCatalog.paramTolerance(pluginID: id, paramKey: "threshold") == 1.0)
+    // AX identification is by AXDescription only (AXIdentifier is unstable).
+    #expect(VerifiedPluginCatalog.paramAXDescription(pluginID: id, paramKey: "threshold") == "Threshold")
 }
 
 // MARK: - Unit + range exposure (R8)
