@@ -410,6 +410,37 @@ actor ChannelRouter {
             }
         }
 
+        // P2 (verified-plugin envelope fidelity) — a single-channel chain has
+        // NO fallback target, so when its sole channel already returned a valid
+        // Honest Contract State C envelope, masking it behind
+        // `channels_exhausted` would strip the State C fidelity the caller needs
+        // (write_attempted, rollback_*, target_identity, hc_schema, state:"C").
+        // This bites the verified-plugin ops (`plugin.set_param_verified` /
+        // `insert_verified`), whose post-write failures `ax_write_failed` and
+        // `readback_mismatch` are deliberately kept OUT of `terminalErrorCodes`
+        // so MULTI-channel chains (e.g. track.set_mute) can still fall back —
+        // but on a single `[.accessibility]` chain that non-terminal classification
+        // wrongly routed them into the exhaustion wrapper below. Return the
+        // channel's envelope verbatim instead.
+        //
+        // Scope guards keep this surgical:
+        //   • `chain.count == 1` — multi-channel chains keep the
+        //     `channels_exhausted` aggregate, so existing fallback semantics
+        //     (testNonTerminalStateCStillFallsThrough) are untouched.
+        //   • `stateCErrorCode(lastError) != nil` — the "channel never executed"
+        //     fallthrough (not registered / unhealthy / not runtime-ready) leaves
+        //     `lastError` as a free-form health string, which is naturally
+        //     excluded, so the MCU/no-channel exhaustion contract is preserved.
+        // Terminal State C is already returned verbatim inside the loop above, so
+        // this only ever fires for the non-terminal-but-valid single-channel case.
+        if chain.count == 1, HonestContract.stateCErrorCode(lastError) != nil {
+            Log.debug(
+                "\(operation) single-channel non-terminal State C surfaced verbatim (no fallback target to mask)",
+                subsystem: "router"
+            )
+            return .error(lastError)
+        }
+
         // v3.4.5-rc5 (Issues #10/#11) — wrap the "channels exhausted" fallthrough
         // in a Honest Contract State C envelope so external tooling can branch
         // on a structured error code instead of regex-matching a free-form
