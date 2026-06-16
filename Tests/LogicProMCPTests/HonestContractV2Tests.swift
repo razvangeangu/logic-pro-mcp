@@ -89,6 +89,9 @@ private func decode(_ json: String) -> [String: Any] {
         (.readbackLostAfterWrite, "readback_lost_after_write"),
         (.postInsertPluginMismatch, "post_insert_plugin_mismatch"),
         (.postInsertReadbackUnavailable, "post_insert_readback_unavailable"),
+        (.insertNotAxAutomatable, "insert_not_ax_automatable"),
+        (.insertSetupFailed, "insert_setup_failed"),
+        (.insertLandedAtDifferentSlot, "insert_landed_at_different_slot"),
         (.rollbackFailed, "rollback_failed"),
         (.verifiedOpInProgress, "verified_op_in_progress"),
         (.operationTimeout, "operation_timeout"),
@@ -127,7 +130,8 @@ private func decode(_ json: String) -> [String: Any] {
         .targetPluginMismatch, .slotOccupied, .trackSelectionFailed, .staleSnapshot,
         .windowOpenFailed, .windowIdentityUnresolved, .paramControlNotFound,
         .readbackLostAfterWrite, .postInsertPluginMismatch,
-        .postInsertReadbackUnavailable, .rollbackFailed, .verifiedOpInProgress,
+        .postInsertReadbackUnavailable, .insertNotAxAutomatable,
+        .insertSetupFailed, .insertLandedAtDifferentSlot, .rollbackFailed, .verifiedOpInProgress,
         .operationTimeout,
     ]
     for err in mustBeTerminal {

@@ -85,6 +85,31 @@ enum HonestContract {
         case readbackLostAfterWrite
         case postInsertPluginMismatch
         case postInsertReadbackUnavailable
+        /// `logic_plugins.insert_verified` reached its live-write boundary with
+        /// every deterministic gate passed, but the actual AX insert is not
+        /// performable in this Logic build: every result-selection strategy of the
+        /// "Search and Add Plug-in" path (double-click / add-button / keyboard)
+        /// completed without the requested plugin appearing in the readback
+        /// inventory. Honest-deferred terminal — no channel can do better in
+        /// Release 1, so the op fails closed here rather than fabricating a State A.
+        /// v3.5 T6. `set_param_verified` State A is unaffected.
+        case insertNotAxAutomatable
+        /// `logic_plugins.insert_verified` could not complete a TRANSIENT pre-mount
+        /// setup step (the Mix menu was not clickable, the search field/dialog was
+        /// not found, or results did not load). No write was attempted; the caller
+        /// can retry (`safe_to_retry:true`). Distinct from `insert_not_ax_automatable`
+        /// (every result-selection strategy ran but the plugin never mounted —
+        /// permanent). v3.5 T6 (P2-3).
+        case insertSetupFailed
+        /// `logic_plugins.insert_verified` mounted the requested plugin, but the
+        /// "Search and Add Plug-in" path places it at a slot Logic chooses (the
+        /// first available audio-effect slot, not always the requested `insert`),
+        /// and the post-insert readback observed it at a DIFFERENT slot than
+        /// requested. Rather than confirm a slot it did not target (false State A),
+        /// the op fails closed and reports `observed_slot`; the stray mount is
+        /// rolled back. Release 1: Search-and-Add does not support exact slot
+        /// targeting. v3.5 T6.
+        case insertLandedAtDifferentSlot
         case rollbackFailed
         case verifiedOpInProgress
         case operationTimeout
@@ -117,6 +142,9 @@ enum HonestContract {
             case .readbackLostAfterWrite: return "readback_lost_after_write"
             case .postInsertPluginMismatch: return "post_insert_plugin_mismatch"
             case .postInsertReadbackUnavailable: return "post_insert_readback_unavailable"
+            case .insertNotAxAutomatable: return "insert_not_ax_automatable"
+            case .insertSetupFailed: return "insert_setup_failed"
+            case .insertLandedAtDifferentSlot: return "insert_landed_at_different_slot"
             case .rollbackFailed: return "rollback_failed"
             case .verifiedOpInProgress: return "verified_op_in_progress"
             case .operationTimeout: return "operation_timeout"
@@ -273,6 +301,9 @@ enum HonestContract {
         FailureError.readbackLostAfterWrite.rawValue,
         FailureError.postInsertPluginMismatch.rawValue,
         FailureError.postInsertReadbackUnavailable.rawValue,
+        FailureError.insertNotAxAutomatable.rawValue,
+        FailureError.insertSetupFailed.rawValue,
+        FailureError.insertLandedAtDifferentSlot.rawValue,
         FailureError.rollbackFailed.rawValue,
         FailureError.verifiedOpInProgress.rawValue,
         FailureError.operationTimeout.rawValue,

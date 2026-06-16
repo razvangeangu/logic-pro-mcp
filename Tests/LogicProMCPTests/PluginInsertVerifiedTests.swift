@@ -3,9 +3,19 @@ import Foundation
 import Testing
 @testable import LogicProMCP
 
-// T3 — logic_plugins.insert_verified, validation gates only (R7 / AC5 / AC17 /
-// AC19 / AC21). The live AX insert + fail-closed post-insert readback is T6;
-// T3 fails closed at the live-write boundary after all deterministic gates pass.
+// logic_plugins.insert_verified — live validation gates (R7 / AC5 / AC17 / AC19 /
+// AC21) followed by the live "Mix > Search and Add Plug-in" insert (R12). The
+// deterministic gates (mode/path/identity/inventory/slot-empty/slot-is-first-free)
+// fail closed BEFORE the live-write boundary; once every gate passes, the op
+// drives an injected Search-and-Add driver and maps its post-insert readback to:
+//   - State A  ONLY when the requested plugin is observed at the requested slot
+//   - State C  post_insert_readback_unavailable (readback subtree unreadable)
+//   - State C  insert_not_ax_automatable (every strategy ran, plugin never mounted)
+//   - State C  post_insert_plugin_mismatch (driver reports a mount elsewhere)
+// The post-insert readback gate is the SOLE State A path → a false verified
+// insert is structurally impossible. The production driver
+// (liveSearchAndAddInsert) is exercised live; here we inject a fake so the
+// gate→outcome→envelope mapping is deterministic without a running Logic Pro.
 
 private let expectedPath = "/Users/me/Music/MySong copy.logicx"
 
@@ -50,19 +60,81 @@ private func makeMixerFixture(
     return b.makeLogicRuntime(appElement: app)
 }
 
+/// A driver that records its inputs and returns a canned outcome. Used to verify
+/// the gate→outcome→envelope mapping without driving any live UI. The driver is
+/// invoked at most once per test (sequentially, under --no-parallel), so plain
+/// mutable recording is race-free here; `@unchecked Sendable` documents that.
+private final class FakeInsertDriver: @unchecked Sendable {
+    private(set) var invoked = false
+    private(set) var lastTrack: Int?
+    private(set) var lastInsert: Int?
+    private(set) var lastPluginID: String?
+    private(set) var lastQuery: String?
+    private let outcome: AccessibilityChannel.InsertDriverOutcome
+    private let trace: [String: Any]
+
+    init(
+        outcome: AccessibilityChannel.InsertDriverOutcome,
+        trace: [String: Any] = ["fake": true]
+    ) {
+        self.outcome = outcome
+        self.trace = trace
+    }
+
+    var driver: AccessibilityChannel.SearchAndAddInsertDriver {
+        { track, insert, pluginID, query, _ in
+            self.invoked = true
+            self.lastTrack = track
+            self.lastInsert = insert
+            self.lastPluginID = pluginID
+            self.lastQuery = query
+            return (self.outcome, self.trace)
+        }
+    }
+}
+
+/// A driver that fails the test if ever invoked — used to assert that a gate
+/// short-circuits BEFORE the live-write boundary.
+private let neverCalledDriver: AccessibilityChannel.SearchAndAddInsertDriver = { _, _, _, _, _ in
+    Issue.record("insert driver must not run when a gate fails closed")
+    return (.mountMismatch(observedName: nil), [:])
+}
+
+/// Deterministic fake rollback so the gate's rollback reporting is hermetic (no
+/// live Logic / AppleScript). Defaults to a confirmed-removal result.
+private func fakeRollback(
+    attempted: Bool = true, succeeded: Bool = true, retries: Int = 0
+) -> AccessibilityChannel.PluginInsertRollback {
+    { _, _, _, _ in
+        AccessibilityChannel.RollbackResult(
+            attempted: attempted, succeeded: succeeded, retries: retries, lastClickResult: "ok"
+        )
+    }
+}
+
+/// Counts how many times the injected undo-click ran (P1-2 re-undo guard test).
+/// Invoked sequentially under --no-parallel, so plain mutation is race-free here.
+private final class ClickCounter: @unchecked Sendable {
+    private(set) var count = 0
+    func bump() { count += 1 }
+}
+
 private func runInsert(
     _ params: [String: String],
     runtime: AXLogicProElements.Runtime,
-    frontDoc: String? = expectedPath
+    frontDoc: String? = expectedPath,
+    driver: @escaping AccessibilityChannel.SearchAndAddInsertDriver = neverCalledDriver,
+    rollback: @escaping AccessibilityChannel.PluginInsertRollback = fakeRollback()
 ) async -> [String: Any] {
     let result = await AccessibilityChannel.defaultInsertVerified(
-        params: params, runtime: runtime, frontDocumentPath: { frontDoc }
+        params: params, runtime: runtime, frontDocumentPath: { frontDoc },
+        insertDriver: driver, rollback: rollback
     )
     return try! JSONSerialization.jsonObject(with: result.message.data(using: .utf8)!) as! [String: Any]
 }
 
 private func insertParams(
-    track: String = "0", insert: String = "1",
+    track: String = "0", insert: String = "0",
     plugin: String = "Gain", mode: String = "duplicate_applyback",
     path: String? = expectedPath
 ) -> [String: String] {
@@ -71,7 +143,186 @@ private func insertParams(
     return p
 }
 
-// MARK: - AC5: occupied slot refusal
+// MARK: - State A: post-insert readback confirms the requested plugin at slot K
+
+@Test func testInsertVerifiedStateAWhenReadbackConfirmsMount() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 940)] }
+    let fake = FakeInsertDriver(
+        outcome: .mounted(slot: 0, pluginID: "logic.stock.effect.gain", observedName: "Gain"),
+        trace: ["winning_strategy": "row_double_click"]
+    )
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
+
+    #expect(obj["state"] as? String == "A")
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["hc_schema"] as? Int == 2)
+    #expect(obj["observed_plugin_id"] as? String == "logic.stock.effect.gain")
+    #expect(obj["observed_plugin_name"] as? String == "Gain")
+    #expect(obj["observed_slot"] as? Int == 0)
+    #expect(obj["write_source"] as? String == "ax_search_and_add")
+    #expect(obj["verify_source"] as? String == "ax_plugin_inventory")
+    let trace = obj["select_trace"] as? [String: Any]
+    #expect(trace?["winning_strategy"] as? String == "row_double_click")
+    let identity = obj["target_identity"] as? [String: Any]
+    #expect(identity?["track_index"] as? Int == 0)
+    #expect(identity?["insert"] as? Int == 0)
+    #expect(identity?["plugin_id"] as? String == "logic.stock.effect.gain")
+    // The driver received the canonical id + display-name search query.
+    #expect(fake.invoked)
+    #expect(fake.lastPluginID == "logic.stock.effect.gain")
+    #expect(fake.lastQuery == "Gain")
+    #expect(fake.lastInsert == 0)
+}
+
+// MARK: - State C: readback subtree unreadable after the insert
+
+@Test func testInsertVerifiedReadbackUnavailableIsStateC() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 941)] }
+    let fake = FakeInsertDriver(outcome: .readbackUnavailable)
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
+
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "post_insert_readback_unavailable")
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["write_attempted"] as? Bool == true)
+    #expect(obj["safe_to_retry"] as? Bool == true)
+    #expect(obj["select_trace"] != nil)
+}
+
+// MARK: - State C: transient pre-mount setup failure is retry-able (P2-3)
+
+@Test func testInsertVerifiedTransientSetupFailureIsRetryable() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 942)] }
+    // The driver reports a transient UI-setup failure (e.g. the search dialog was
+    // not ready) — this is distinct from the permanent insert_not_ax_automatable
+    // and must be retry-able with no write attempted.
+    let fake = FakeInsertDriver(outcome: .transientSetupFailure(stage: "search_field_not_found"))
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
+
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "insert_setup_failed")
+    #expect(obj["setup_stage"] as? String == "search_field_not_found")
+    #expect(obj["safe_to_retry"] as? Bool == true)
+    #expect(obj["write_attempted"] as? Bool == false)
+}
+
+// MARK: - State C: every strategy ran, requested plugin never mounted
+
+@Test func testInsertVerifiedMountMismatchIsHonestStateC() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 942)] }
+    let fake = FakeInsertDriver(outcome: .mountMismatch(observedName: nil))
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
+
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "insert_not_ax_automatable")
+    #expect(obj["write_attempted"] as? Bool == true)
+    #expect(obj["safe_to_retry"] as? Bool == false)
+    #expect((obj["what_was_observed"] as? String)?.contains("Search-and-Add") == true)
+}
+
+@Test func testInsertVerifiedMountMismatchReportsObservedName() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 943)] }
+    // A different plugin lingered in the slot after rollback failed.
+    let fake = FakeInsertDriver(outcome: .mountMismatch(observedName: "Channel EQ"))
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
+    #expect(obj["error"] as? String == "insert_not_ax_automatable")
+    #expect(obj["observed_plugin_name"] as? String == "Channel EQ")
+}
+
+// MARK: - State C: driver reports a mount of the WRONG plugin → plugin mismatch
+
+@Test func testInsertVerifiedDriverWrongPluginIsPluginMismatch() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 944)] }
+    // The driver observed a DIFFERENT plugin mount than requested (Gain asked,
+    // Compressor appeared) — identity mismatch is post_insert_plugin_mismatch.
+    let fake = FakeInsertDriver(
+        outcome: .mounted(slot: 0, pluginID: "logic.stock.effect.compressor", observedName: "Compressor")
+    )
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "post_insert_plugin_mismatch")
+    #expect(obj["observed_plugin_id"] as? String == "logic.stock.effect.compressor")
+    #expect(obj["write_attempted"] as? Bool == true)
+}
+
+// MARK: - insert:K honesty — Search-and-Add chooses the slot (R15)
+
+@Test func testInsertVerifiedLandedAtDifferentSlotFailsClosed() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 945)] }
+    // Requested insert 0, but Search-and-Add placed the (correct) plugin at slot
+    // 6 — fail closed with insert_landed_at_different_slot + observed_slot, never
+    // a false "verified at 0". The (faked) rollback confirmed removal.
+    let fake = FakeInsertDriver(
+        outcome: .mounted(slot: 6, pluginID: "logic.stock.effect.gain", observedName: "Gain")
+    )
+    let obj = await runInsert(
+        insertParams(insert: "0"), runtime: runtime, driver: fake.driver,
+        rollback: fakeRollback(attempted: true, succeeded: true, retries: 1)
+    )
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "insert_landed_at_different_slot")
+    #expect(obj["observed_slot"] as? Int == 6)
+    #expect(obj["rollback_attempted"] as? Bool == true)
+    #expect(obj["rollback_succeeded"] as? Bool == true)
+    #expect(obj["rollback_retries"] as? Int == 1)
+    #expect(obj["write_attempted"] as? Bool == true)
+}
+
+@Test func testInsertVerifiedLandedAtDifferentSlotReportsRollbackFailureHonestly() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 945)] }
+    // The rollback could not confirm removal — the channel must report it
+    // honestly (rollback_succeeded:false), never claim a clean rollback.
+    let fake = FakeInsertDriver(
+        outcome: .mounted(slot: 6, pluginID: "logic.stock.effect.gain", observedName: "Gain")
+    )
+    let obj = await runInsert(
+        insertParams(insert: "0"), runtime: runtime, driver: fake.driver,
+        rollback: fakeRollback(attempted: true, succeeded: false, retries: 4)
+    )
+    #expect(obj["error"] as? String == "insert_landed_at_different_slot")
+    #expect(obj["rollback_attempted"] as? Bool == true)
+    #expect(obj["rollback_succeeded"] as? Bool == false)
+}
+
+@Test func testInsertVerifiedNonFirstFreeRequestStillDrivesInsert() async {
+    let b = FakeAXRuntimeBuilder()
+    // slot 0 empty, slot 1 empty; requesting insert 1 (NOT first-free) is no
+    // longer pre-rejected — Search-and-Add chooses the slot, so the driver runs.
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 945), addEmptySlot(b, 946)] }
+    let fake = FakeInsertDriver(
+        outcome: .mounted(slot: 1, pluginID: "logic.stock.effect.gain", observedName: "Gain")
+    )
+    let obj = await runInsert(insertParams(insert: "1"), runtime: runtime, driver: fake.driver)
+    #expect(obj["state"] as? String == "A", "driver-detected slot 1 matches requested insert 1")
+    #expect(fake.invoked)
+    #expect(fake.lastInsert == 1)
+}
+
+@Test func testInsertVerifiedFirstFreeSlotProceedsToDriver() async {
+    let b = FakeAXRuntimeBuilder()
+    // slot 0 occupied, slot 1 empty → first-free is 1; requesting insert 1 is OK.
+    let runtime = makeMixerFixture(b) { b in
+        [addOccupiedSlot(b, 947, name: "Compressor"), addEmptySlot(b, 948)]
+    }
+    let fake = FakeInsertDriver(
+        outcome: .mounted(slot: 1, pluginID: "logic.stock.effect.gain", observedName: "Gain")
+    )
+    let obj = await runInsert(insertParams(insert: "1"), runtime: runtime, driver: fake.driver)
+    #expect(obj["state"] as? String == "A")
+    #expect(fake.invoked)
+    #expect(fake.lastInsert == 1)
+}
+
+// MARK: - AC5: occupied slot refusal (gate fails BEFORE the live-write boundary)
 
 @Test func testInsertVerifiedRefusesOccupiedSlot() async {
     let b = FakeAXRuntimeBuilder()
@@ -83,6 +334,8 @@ private func insertParams(
     #expect(obj["error"] as? String == "slot_occupied")
     #expect(obj["write_attempted"] as? Bool == false)
     #expect((obj["target_identity"] as? [String: Any])?["plugin_id"] as? String == "logic.stock.effect.gain")
+    // The slot was never pressed — the gate refuses before any UI mutation.
+    #expect(b.actionCalls.isEmpty)
 }
 
 // MARK: - AC21: occupied-unreadable slot is never write-safe
@@ -113,34 +366,17 @@ private func insertParams(
     }
     let obj = await runInsert(insertParams(insert: "0"), runtime: runtime)
     #expect(obj["error"] as? String == "incomplete_inventory")
-}
-
-// MARK: - Happy-path gates pass, then fail closed at the live boundary
-
-@Test func testInsertVerifiedAllGatesPassThenFailsClosedAtLiveBoundary() async {
-    let b = FakeAXRuntimeBuilder()
-    let runtime = makeMixerFixture(b) { b in
-        [addEmptySlot(b, 940), addEmptySlot(b, 941)]
-    }
-    // Empty slot, complete inventory, valid mode/path/identity — all gates pass.
-    // T3 must NOT fabricate State A; it fails closed at the live-write boundary.
-    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime)
-    #expect(obj["state"] as? String == "C")
-    #expect(obj["verified"] as? Bool == false)
     #expect(obj["write_attempted"] as? Bool == false)
-    // The error must be a terminal code; the live insert path is not enabled in
-    // T3, so the honest signal is not_implemented (no write attempted).
-    #expect(obj["error"] as? String == "not_implemented")
-    #expect(obj["success"] as? Bool == false)
 }
 
-// MARK: - mode / path / identity gates
+// MARK: - mode / path / identity gates (still fail closed before the driver)
 
 @Test func testInsertVerifiedConfirmedLiveBlocked() async {
     let b = FakeAXRuntimeBuilder()
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 950)] }
     let obj = await runInsert(insertParams(mode: "confirmed_live"), runtime: runtime)
     #expect(obj["error"] as? String == "unsupported_mode")
+    #expect(obj["write_attempted"] as? Bool == false)
 }
 
 @Test func testInsertVerifiedMissingPathBlocked() async {
@@ -148,6 +384,17 @@ private func insertParams(
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 960)] }
     let obj = await runInsert(insertParams(path: nil), runtime: runtime)
     #expect(obj["error"] as? String == "project_path_required")
+    #expect(obj["write_attempted"] as? Bool == false)
+}
+
+@Test func testInsertVerifiedPathMismatchBlocked() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 965)] }
+    // Front document path disagrees with project_expected_path → identity gate.
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime,
+                              frontDoc: "/Users/me/Music/Other.logicx")
+    #expect(obj["error"] as? String == "project_identity_mismatch")
+    #expect(obj["write_attempted"] as? Bool == false)
 }
 
 @Test func testInsertVerifiedNoiseGateNotInsertable() async {
@@ -156,6 +403,7 @@ private func insertParams(
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 970)] }
     let obj = await runInsert(insertParams(plugin: "Noise Gate"), runtime: runtime)
     #expect(obj["error"] as? String == "unknown_plugin_identity")
+    #expect(obj["write_attempted"] as? Bool == false)
 }
 
 @Test func testInsertVerifiedUnknownIdentityBlocked() async {
@@ -163,4 +411,99 @@ private func insertParams(
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 980)] }
     let obj = await runInsert(insertParams(plugin: "com.apple.logic.gain"), runtime: runtime)
     #expect(obj["error"] as? String == "unknown_plugin_identity")
+    #expect(obj["write_attempted"] as? Bool == false)
+}
+
+// MARK: - Compressor also routes through the driver (not plugin-specific)
+
+@Test func testInsertVerifiedCompressorReachesStateAViaDriver() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 990)] }
+    let fake = FakeInsertDriver(
+        outcome: .mounted(slot: 0, pluginID: "logic.stock.effect.compressor", observedName: "Compressor")
+    )
+    let obj = await runInsert(insertParams(insert: "0", plugin: "Compressor"), runtime: runtime, driver: fake.driver)
+    #expect(obj["state"] as? String == "A")
+    #expect((obj["target_identity"] as? [String: Any])?["plugin_id"] as? String == "logic.stock.effect.compressor")
+    #expect(fake.lastQuery == "Compressor")
+}
+
+// MARK: - verifiedUndoPluginInsert removal-confirmation honesty (P2 Issue 2)
+// Hermetic: an injected `undoClick` (no live AppleScript) + a fake inventory.
+
+@Test func testVerifiedUndoUnverifiableStrayNeverReportsSuccess() async {
+    // A non-allowlisted stray mounted (plugin_id resolves to nil) and was reported
+    // with NEITHER an id NOR a slot — removal is structurally unverifiable, so the
+    // rollback must NOT claim success (the pre-fix code returned succeeded:true).
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in
+        [addOccupiedSlot(b, 700, name: "Roland TR-909")] // non-allowlisted → pluginID nil
+    }
+    let result = await AccessibilityChannel.verifiedUndoPluginInsert(
+        track: 0, strayPluginID: nil, straySlot: nil, runtime: runtime,
+        maxRetries: 2, undoClick: { "ok" }
+    )
+    #expect(result.succeeded == false, "unverifiable removal must never report succeeded:true")
+}
+
+@Test func testVerifiedUndoKnownSlotStillOccupiedReportsFailure() async {
+    // Known slot, unknown id: the slot is STILL occupied after undo → not removed.
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in
+        [addOccupiedSlot(b, 710, name: "Roland TR-909")]
+    }
+    let result = await AccessibilityChannel.verifiedUndoPluginInsert(
+        track: 0, strayPluginID: nil, straySlot: 0, runtime: runtime,
+        maxRetries: 1, undoClick: { "ok" }
+    )
+    #expect(result.succeeded == false, "a slot still occupied after undo is not a confirmed removal")
+}
+
+@Test func testVerifiedUndoKnownSlotNowEmptyReportsSuccess() async {
+    // Known slot, now empty after undo → confirmed removal → succeeded:true.
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 720)] } // slot 0 empty
+    let result = await AccessibilityChannel.verifiedUndoPluginInsert(
+        track: 0, strayPluginID: nil, straySlot: 0, runtime: runtime,
+        maxRetries: 1, undoClick: { "ok" }
+    )
+    #expect(result.succeeded == true, "an emptied slot is a confirmed removal")
+    #expect(result.attempted == true)
+}
+
+@Test func testVerifiedUndoKnownIdRemovedReportsSuccess() async {
+    // Known id (allowlisted Gain), absent everywhere after undo → confirmed gone.
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 730)] } // no Gain present
+    let result = await AccessibilityChannel.verifiedUndoPluginInsert(
+        track: 0, strayPluginID: "logic.stock.effect.gain", straySlot: nil, runtime: runtime,
+        maxRetries: 1, undoClick: { "ok" }
+    )
+    #expect(result.succeeded == true)
+}
+
+// P1-1: a non-allowlisted stray (nil id) is removable by NAME at its known slot.
+@Test func testVerifiedUndoNilIdStrayRemovedByNameReportsSuccess() async {
+    // Slot 0 now holds a DIFFERENT name than the stray → confirmed removed by name.
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addOccupiedSlot(b, 740, name: "Compressor")] }
+    let result = await AccessibilityChannel.verifiedUndoPluginInsert(
+        track: 0, strayPluginID: nil, straySlot: 0, strayName: "Roland TR-909",
+        runtime: runtime, maxRetries: 1, undoClick: { "ok" }
+    )
+    #expect(result.succeeded == true, "slot name differs from the stray → removal confirmed by name (P1-1)")
+}
+
+// P1-2 data-safety: an UNVERIFIABLE state must NOT trigger a second Undo click
+// (a blind retry could undo a prior user action).
+@Test func testVerifiedUndoUnverifiableDoesNotReUndo() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 750)] }
+    let counter = ClickCounter()
+    let result = await AccessibilityChannel.verifiedUndoPluginInsert(
+        track: 0, strayPluginID: nil, straySlot: nil, runtime: runtime,
+        maxRetries: 4, undoClick: { counter.bump(); return "ok" }
+    )
+    #expect(result.succeeded == false)
+    #expect(counter.count == 1, "unverifiable removal must click Undo at most once (no blind re-undo)")
 }
