@@ -16,7 +16,7 @@ Three commands cover the full workflow:
 |---------|-------------|
 | `get_inventory` | Read the physical insert chain for a track. |
 | `set_param_verified` | Write a parameter and confirm via readback. |
-| `insert_verified` | Gate-check a slot before inserting (live insert deferred to T6). |
+| `insert_verified` | Live, readback-verified plugin insert via Mix > Search and Add Plug-in (Logic chooses the slot; see limitation below). |
 
 ---
 
@@ -247,11 +247,15 @@ Additional parameters will be promoted to `writeReadback` as evidence is gathere
 
 ---
 
-## insert_verified (T6 preview)
+## insert_verified
 
-`insert_verified` runs all pre-insert gates (mode → project path → identity → inventory complete → slot empty) but does not perform a live insert in this build. **Pre-insert gates are live-E2E verified (2026-06-14):** `unsupported_mode`, `project_identity_mismatch`, `slot_occupied` (with `existing_plugin_name`) responses all confirmed live. When all gates pass, the response is State C `not_implemented` with `write_attempted: false`.
+`insert_verified` performs a **live, readback-verified** plugin insert via Logic's **Mix > Search and Add Plug-in…** menu path. **Live-E2E verified (2026-06-15):** `insert_verified { track, insert: 6, plugin: "gain" }` returned `verified: true` (`observed_slot: 6`), with the independent `get_inventory` readback confirming `logic.stock.effect.gain` mounted at insert 6.
 
-The live AX insert step is deferred to T6. The programmatic plugin window opener is nil in the current build due to Logic mixer strip virtualization — opening a window automatically from outside Logic is brittle and not production-safe. This is tracked as T6/Release 1.x.
+Flow: pre-insert gates (mode → project path → identity → inventory complete → slot empty) → clean state (hide plug-in windows, close any stray "위치로 이동"/"Go to Position" dialog, raise the mixer window) → click "Search and Add Plug-in…", type the plugin name, commit the auto-highlighted first result with **Return** → diff the pre/post inventory to detect where the plugin landed. **State A is emitted only when the post-insert readback observes the requested plugin newly mounted at the requested slot** — the readback diff is the sole State A path, so a false verified insert is structurally impossible. (Return only, not Down+Return: the dialog already highlights the exact-name match, so an extra Down would pick a wrong variant for a multi-result query like "Compressor".)
+
+### Slot-targeting limitation (Release 1)
+
+Search and Add lets **Logic** choose the slot (the first available audio-effect slot), which is **not** caller-controllable. If the requested `insert` differs from the slot Logic actually used, `insert_verified` does **not** confirm a slot it did not target — it fails closed with State C `insert_landed_at_different_slot`, reporting the actual `observed_slot`, and rolls the stray mount back (Edit > Undo, confirmed by readback; `rollback_succeeded` reflects whether removal was verified). Exact `insert:K` targeting is unsupported in Release 1.
 
 ```json
 {
@@ -260,12 +264,24 @@ The live AX insert step is deferred to T6. The programmatic plugin window opener
     "command": "insert_verified",
     "params": {
       "track": 2,
-      "insert": 0,
+      "insert": 6,
       "plugin": "gain",
       "mode": "duplicate_applyback",
       "project_expected_path": "/Users/isaac/Music/acid-track-applyback-test.logicx"
     }
   }
+}
+```
+
+State C example (Logic placed it elsewhere):
+
+```jsonc
+{
+  "success": false, "verified": false, "state": "C",
+  "error": "insert_landed_at_different_slot",
+  "observed_slot": 5,
+  "rollback_attempted": true, "rollback_succeeded": true
+  // requested insert 0, but Search-and-Add placed Gain at slot 5 → rolled back
 }
 ```
 
@@ -290,7 +306,9 @@ The live AX insert step is deferred to T6. The programmatic plugin window opener
 // → find "Compressor" at insert: 6, plugin_id: "logic.stock.effect.compressor"
 // → confirm complete: true
 
-// 3. Open the Compressor plugin window in Logic Pro (manual step until T6)
+// 3. Open the Compressor plugin window in Logic Pro (manual step — the
+//    set_param_verified window opener is nil in production; an already-open
+//    plugin window is required for the parameter write/readback)
 
 // 4. Write the parameter
 {

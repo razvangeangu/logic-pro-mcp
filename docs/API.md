@@ -342,7 +342,7 @@ Verified plugin apply-back surface. All three commands use **HC v2** (`hc_schema
 |---------|--------|---------|---------|
 | `get_inventory` | `{ track: int }` | HC v2 inventory envelope (State B when AX mixer unreachable) | Accessibility (read-only) |
 | `set_param_verified` | `{ track: int, insert: int, plugin: string, param: string, value: number, mode: "duplicate_applyback", project_expected_path: string, unit?: string }` | HC v2 State A on confirmed write, State C on any failure | Accessibility (AX plugin window) |
-| `insert_verified` | `{ track: int, insert: int, plugin: string, mode: "duplicate_applyback", project_expected_path: string }` | HC v2 State C `not_implemented` (live insert deferred to T6) | Accessibility (validation gate only) |
+| `insert_verified` | `{ track: int, insert: int, plugin: string, mode: "duplicate_applyback", project_expected_path: string }` | HC v2 State A on readback-confirmed insert; State C `insert_landed_at_different_slot` when Logic chose a different slot (rolled back); State C on any other failure | Accessibility (Mix > Search and Add Plug-in) |
 
 ### get_inventory
 
@@ -431,7 +431,7 @@ All other plugin/parameter combinations return State C `unsupported_param_readba
 
 **라이브 E2E 검증 완료 (Compressor threshold State A, 2026-06-14).** Logic Pro 12.2 + 복제본 `acid-track-applyback-test.logicx`, track 5 Compressor(물리 insert 6)에서 `requested_normalized 60 → observed_normalized 60, observed_display "60 %"` State A 확인. 독립 osascript readback으로 실제 AX write 입증. Evidence: `docs/spikes/compressor-t0-evidence.md`.
 
-`insert_verified`의 pre-insert 게이트(mode/path/identity/slot-empty 검증)는 라이브로 전수 확인됐다. 실제 AX insert는 T6 pending(Logic mixer strip 가상화로 programmatic opener nil → `not_implemented`).
+`insert_verified`는 Mix > Search and Add Plug-in 경로로 라이브 insert 후 pre/post 인벤토리 readback diff로 검증한다(2026-06-15 라이브 State A 확인: insert 6에 Gain mount → `verified:true`). Logic이 slot을 자동 선택하므로 요청 `insert`와 다르면 거짓 State A 대신 State C `insert_landed_at_different_slot`(observed_slot 보고 + rollback). 정확한 `insert:K` 타게팅은 Release 1 미지원.
 
 **Plugin identity aliases (case-insensitive)**
 
@@ -519,13 +519,17 @@ All other plugin/parameter combinations return State C `unsupported_param_readba
 | `ax_write_failed` | `AXUIElementSetAttributeValue` was rejected. | `true` |
 | `readback_lost_after_write` | Could not read the slider value after writing. | `true` |
 | `readback_mismatch` | Observed value differs from requested beyond tolerance; rollback attempted. | `true` |
-| `not_implemented` | Live write path not enabled in this build (used by `insert_verified`). | `false` |
+| `insert_landed_at_different_slot` | `insert_verified` mounted the plugin, but Logic placed it at a slot other than the requested `insert` (Search and Add chooses the slot). Reports `observed_slot`; the stray mount is rolled back. | `false` |
+| `insert_not_ax_automatable` | `insert_verified` ran every result-selection strategy but the requested plugin never appeared in the readback inventory (Logic-build AX limitation). | `false` |
+| `insert_setup_failed` | `insert_verified` could not complete a transient pre-mount setup step (Mix menu not clickable / search dialog not found / results not loaded). No write attempted; carries `setup_stage`. | `true` |
 
 All `logic_plugins.*` State C codes are **terminal** — the router never falls back to Scripter or MCU after any of these.
 
 ### insert_verified
 
-Validates all pre-insert gates (schema → mode → project path → identity → inventory complete → slot empty) and returns State C `not_implemented`. The live AX insert step is deferred to T6. This command exists so callers can verify that the project path, target slot, and plugin identity are all correct before T6 ships the live insert.
+Performs a live, readback-verified plugin insert via Logic's **Mix > Search and Add Plug-in…** menu path. Runs all pre-insert gates (schema → mode → project path → identity → inventory complete → slot empty), then clicks Search and Add, types the plugin name, commits the auto-highlighted first result with **Return** (no Down — the dialog highlights the exact-name match; an extra Down would select a wrong variant such as "Squash Compressor"), and diffs the pre/post insert inventory. **State A is returned only when the post-insert readback observes the requested plugin newly mounted at the requested slot** — the readback diff is the sole State A path, so a false verified insert is structurally impossible. Live-E2E verified 2026-06-15 across Gain, Compressor (4-result query → exact `logic.stock.effect.compressor`), and Channel EQ.
+
+**Slot-targeting limitation (Release 1):** Search and Add lets **Logic** choose the slot (the first available audio-effect slot), which is not caller-controllable. When the slot Logic used differs from the requested `insert`, the op fails closed with State C `insert_landed_at_different_slot` (reporting `observed_slot`) and rolls the stray mount back via Edit > Undo (confirmed by readback; `rollback_succeeded` reflects verified removal). Exact `insert:K` targeting is unsupported in Release 1.
 
 **Input** — same as `set_param_verified` except `param` / `value` / `unit` are replaced by no additional parameters (the target slot must be empty).
 
