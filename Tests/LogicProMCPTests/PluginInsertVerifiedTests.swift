@@ -4,17 +4,17 @@ import Testing
 @testable import LogicProMCP
 
 // logic_plugins.insert_verified — live validation gates (R7 / AC5 / AC17 / AC19 /
-// AC21) followed by the live "Mix > Search and Add Plug-in" insert (R12). The
-// deterministic gates (mode/path/identity/inventory/slot-empty/slot-is-first-free)
+// AC21) followed by the live exact-slot popup insert path. The
+// deterministic gates (mode/path/identity/inventory/slot-empty)
 // fail closed BEFORE the live-write boundary; once every gate passes, the op
-// drives an injected Search-and-Add driver and maps its post-insert readback to:
+// drives an injected insert driver and maps its post-insert readback to:
 //   - State A  ONLY when the requested plugin is observed at the requested slot
 //   - State C  post_insert_readback_unavailable (readback subtree unreadable)
 //   - State C  insert_not_ax_automatable (every strategy ran, plugin never mounted)
 //   - State C  post_insert_plugin_mismatch (driver reports a mount elsewhere)
 // The post-insert readback gate is the SOLE State A path → a false verified
 // insert is structurally impossible. The production driver
-// (liveSearchAndAddInsert) is exercised live; here we inject a fake so the
+// (liveExactSlotPopupInsert) is exercised live; here we inject a fake so the
 // gate→outcome→envelope mapping is deterministic without a running Logic Pro.
 
 private let expectedPath = "/Users/me/Music/MySong copy.logicx"
@@ -40,6 +40,36 @@ private func addOccupiedSlot(_ b: FakeAXRuntimeBuilder, _ id: Int, name: String?
     b.setAttribute(open, kAXRoleAttribute as String, kAXButtonRole as String)
     b.setAttribute(open, kAXDescriptionAttribute as String, "열기")
     return group
+}
+
+private func axPoint(_ x: CGFloat, _ y: CGFloat) -> AXValue {
+    var point = CGPoint(x: x, y: y)
+    return AXValueCreate(.cgPoint, &point)!
+}
+
+private func axSize(_ width: CGFloat, _ height: CGFloat) -> AXValue {
+    var size = CGSize(width: width, height: height)
+    return AXValueCreate(.cgSize, &size)!
+}
+
+private func addMenu(_ b: FakeAXRuntimeBuilder, _ id: Int, children: [AXUIElement] = []) -> AXUIElement {
+    let menu = b.element(id)
+    b.setAttribute(menu, kAXRoleAttribute as String, kAXMenuRole as String)
+    b.setChildren(menu, children)
+    return menu
+}
+
+private func addMenuItem(
+    _ b: FakeAXRuntimeBuilder,
+    _ id: Int,
+    title: String,
+    children: [AXUIElement] = []
+) -> AXUIElement {
+    let item = b.element(id)
+    b.setAttribute(item, kAXRoleAttribute as String, kAXMenuItemRole as String)
+    b.setAttribute(item, kAXTitleAttribute as String, title)
+    b.setChildren(item, children)
+    return item
 }
 
 private func makeMixerFixture(
@@ -81,7 +111,7 @@ private final class FakeInsertDriver: @unchecked Sendable {
         self.trace = trace
     }
 
-    var driver: AccessibilityChannel.SearchAndAddInsertDriver {
+    var driver: AccessibilityChannel.PluginInsertDriver {
         { track, insert, pluginID, query, _ in
             self.invoked = true
             self.lastTrack = track
@@ -95,7 +125,7 @@ private final class FakeInsertDriver: @unchecked Sendable {
 
 /// A driver that fails the test if ever invoked — used to assert that a gate
 /// short-circuits BEFORE the live-write boundary.
-private let neverCalledDriver: AccessibilityChannel.SearchAndAddInsertDriver = { _, _, _, _, _ in
+private let neverCalledDriver: AccessibilityChannel.PluginInsertDriver = { _, _, _, _, _ in
     Issue.record("insert driver must not run when a gate fails closed")
     return (.mountMismatch(observedName: nil), [:])
 }
@@ -123,7 +153,7 @@ private func runInsert(
     _ params: [String: String],
     runtime: AXLogicProElements.Runtime,
     frontDoc: String? = expectedPath,
-    driver: @escaping AccessibilityChannel.SearchAndAddInsertDriver = neverCalledDriver,
+    driver: @escaping AccessibilityChannel.PluginInsertDriver = neverCalledDriver,
     rollback: @escaping AccessibilityChannel.PluginInsertRollback = fakeRollback()
 ) async -> [String: Any] {
     let result = await AccessibilityChannel.defaultInsertVerified(
@@ -161,7 +191,7 @@ private func insertParams(
     #expect(obj["observed_plugin_id"] as? String == "logic.stock.effect.gain")
     #expect(obj["observed_plugin_name"] as? String == "Gain")
     #expect(obj["observed_slot"] as? Int == 0)
-    #expect(obj["write_source"] as? String == "ax_search_and_add")
+    #expect(obj["write_source"] as? String == "ax_exact_slot_popup")
     #expect(obj["verify_source"] as? String == "ax_plugin_inventory")
     let trace = obj["select_trace"] as? [String: Any]
     #expect(trace?["winning_strategy"] as? String == "row_double_click")
@@ -174,6 +204,54 @@ private func insertParams(
     #expect(fake.lastPluginID == "logic.stock.effect.gain")
     #expect(fake.lastQuery == "Gain")
     #expect(fake.lastInsert == 0)
+}
+
+@Test func testSlotPopupAnchorMustBeNearTargetSlotBeforeCommit() {
+    let b = FakeAXRuntimeBuilder()
+    let slot = addEmptySlot(b, 8000)
+    b.setAttribute(slot, kAXPositionAttribute as String, axPoint(400, 300))
+    b.setAttribute(slot, kAXSizeAttribute as String, axSize(70, 18))
+
+    let nearMenu = addMenu(b, 8010)
+    b.setAttribute(nearMenu, kAXPositionAttribute as String, axPoint(390, 280))
+    b.setAttribute(nearMenu, kAXSizeAttribute as String, axSize(240, 420))
+
+    let farMenu = addMenu(b, 8020)
+    b.setAttribute(farMenu, kAXPositionAttribute as String, axPoint(30, 30))
+    b.setAttribute(farMenu, kAXSizeAttribute as String, axSize(240, 420))
+
+    let runtime = b.makeAXRuntime()
+    #expect(AccessibilityChannel.slotPopupMenuIsAnchored(nearMenu, toSlot: slot, runtime: runtime))
+    #expect(!AccessibilityChannel.slotPopupMenuIsAnchored(farMenu, toSlot: slot, runtime: runtime))
+}
+
+@Test func testPopupExactLeafDiscoveryDoesNotDependOnLocalizedCategoryNames() {
+    let b = FakeAXRuntimeBuilder()
+    let gain = addMenuItem(b, 8110, title: "Gain")
+    let localizedCategoryMenu = addMenu(b, 8111, children: [gain])
+    let localizedCategory = addMenuItem(b, 8112, title: "Dienstprogramme", children: [localizedCategoryMenu])
+    let root = addMenu(b, 8113, children: [localizedCategory])
+
+    let paths = AccessibilityChannel.popupExactLeafPaths(
+        displayName: "Gain", rootMenu: root, runtime: b.makeAXRuntime()
+    )
+
+    #expect(paths.map { $0.joined(separator: " > ") } == ["Dienstprogramme > Gain"])
+}
+
+@Test func testPopupExactLeafDiscoveryPrefersDirectRootRecentItem() {
+    let b = FakeAXRuntimeBuilder()
+    let directGain = addMenuItem(b, 8120, title: "Gain")
+    let nestedGain = addMenuItem(b, 8121, title: "Gain")
+    let localizedCategoryMenu = addMenu(b, 8122, children: [nestedGain])
+    let localizedCategory = addMenuItem(b, 8123, title: "Utilitaires", children: [localizedCategoryMenu])
+    let root = addMenu(b, 8124, children: [directGain, localizedCategory])
+
+    let path = AccessibilityChannel.preferredPopupExactLeafPath(
+        displayName: "Gain", rootMenu: root, runtime: b.makeAXRuntime()
+    )
+
+    #expect(path == ["Gain"])
 }
 
 // MARK: - State C: readback subtree unreadable after the insert
@@ -210,6 +288,52 @@ private func insertParams(
     #expect(obj["write_attempted"] as? Bool == false)
 }
 
+@Test func testInsertVerifiedPostCommitTimeoutIsStateC() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 942)] }
+    // The live driver stops after a strategy appears to dismiss/commit the dialog
+    // but readback never observes the requested plugin. This prevents stale
+    // stale clicks after a popup/menu commit changed the UI.
+    let fake = FakeInsertDriver(outcome: .postCommitTimeout(strategy: "slot_popup_physical_menu_click"))
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
+
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "operation_timeout")
+    #expect(obj["commit_strategy"] as? String == "slot_popup_physical_menu_click")
+    #expect(obj["safe_to_retry"] as? Bool == true)
+    #expect(obj["write_attempted"] as? Bool == true)
+}
+
+@Test func testInsertVerifiedRollbackFailedAbortsStateC() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 942)] }
+    // A stray mount that cannot be rolled back is terminal: the driver must not
+    // keep trying fallback strategies and later report State A with residue left
+    // in the project.
+    let rollback = AccessibilityChannel.RollbackResult(
+        attempted: true, succeeded: false, retries: 2, lastClickResult: "ok"
+    )
+    let fake = FakeInsertDriver(
+        outcome: .rollbackFailed(
+            slot: 3,
+            pluginID: nil,
+            observedName: "Third Party FX",
+            rollback: rollback
+        )
+    )
+    let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
+
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "rollback_failed")
+    #expect(obj["observed_slot"] as? Int == 3)
+    #expect(obj["observed_plugin_name"] as? String == "Third Party FX")
+    #expect(obj["rollback_attempted"] as? Bool == true)
+    #expect(obj["rollback_succeeded"] as? Bool == false)
+    #expect(obj["rollback_retries"] as? Int == 2)
+    #expect(obj["write_attempted"] as? Bool == true)
+    #expect(obj["recovery_action"] != nil)
+}
+
 // MARK: - State C: every strategy ran, requested plugin never mounted
 
 @Test func testInsertVerifiedMountMismatchIsHonestStateC() async {
@@ -222,7 +346,7 @@ private func insertParams(
     #expect(obj["error"] as? String == "insert_not_ax_automatable")
     #expect(obj["write_attempted"] as? Bool == true)
     #expect(obj["safe_to_retry"] as? Bool == false)
-    #expect((obj["what_was_observed"] as? String)?.contains("Search-and-Add") == true)
+    #expect((obj["what_was_observed"] as? String)?.contains("exact slot popup") == true)
 }
 
 @Test func testInsertVerifiedMountMismatchReportsObservedName() async {
@@ -252,14 +376,14 @@ private func insertParams(
     #expect(obj["write_attempted"] as? Bool == true)
 }
 
-// MARK: - insert:K honesty — Search-and-Add chooses the slot (R15)
+// MARK: - insert:K honesty — wrong-slot readback still fails closed
 
 @Test func testInsertVerifiedLandedAtDifferentSlotFailsClosed() async {
     let b = FakeAXRuntimeBuilder()
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 945)] }
-    // Requested insert 0, but Search-and-Add placed the (correct) plugin at slot
-    // 6 — fail closed with insert_landed_at_different_slot + observed_slot, never
-    // a false "verified at 0". The (faked) rollback confirmed removal.
+    // Requested insert 0, but the insert driver reported the correct plugin at
+    // slot 6 — fail closed with insert_landed_at_different_slot + observed_slot,
+    // never a false "verified at 0". The (faked) rollback confirmed removal.
     let fake = FakeInsertDriver(
         outcome: .mounted(slot: 6, pluginID: "logic.stock.effect.gain", observedName: "Gain")
     )
@@ -295,8 +419,9 @@ private func insertParams(
 
 @Test func testInsertVerifiedNonFirstFreeRequestStillDrivesInsert() async {
     let b = FakeAXRuntimeBuilder()
-    // slot 0 empty, slot 1 empty; requesting insert 1 (NOT first-free) is no
-    // longer pre-rejected — Search-and-Add chooses the slot, so the driver runs.
+    // slot 0 empty, slot 1 empty; requesting insert 1 is no longer pre-rejected —
+    // The insert driver runs for any empty readable slot; the gate compares the
+    // observed slot against the requested one.
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 945), addEmptySlot(b, 946)] }
     let fake = FakeInsertDriver(
         outcome: .mounted(slot: 1, pluginID: "logic.stock.effect.gain", observedName: "Gain")
@@ -309,7 +434,7 @@ private func insertParams(
 
 @Test func testInsertVerifiedFirstFreeSlotProceedsToDriver() async {
     let b = FakeAXRuntimeBuilder()
-    // slot 0 occupied, slot 1 empty → first-free is 1; requesting insert 1 is OK.
+    // slot 0 occupied, slot 1 empty; requesting insert 1 is OK.
     let runtime = makeMixerFixture(b) { b in
         [addOccupiedSlot(b, 947, name: "Compressor"), addEmptySlot(b, 948)]
     }
@@ -367,6 +492,16 @@ private func insertParams(
     let obj = await runInsert(insertParams(insert: "0"), runtime: runtime)
     #expect(obj["error"] as? String == "incomplete_inventory")
     #expect(obj["write_attempted"] as? Bool == false)
+}
+
+@Test func testVerifiedDiffSnapshotRefusesUnreadableSlots() async {
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in
+        [addEmptySlot(b, 932), addOccupiedSlot(b, 933, name: nil)]
+    }
+
+    let snapshot = AccessibilityChannel.fullStripInventory(track: 0, runtime: runtime)
+    #expect(snapshot == nil, "verified insert diff must not treat unreadable existing slots as newly mounted later")
 }
 
 // MARK: - mode / path / identity gates (still fail closed before the driver)

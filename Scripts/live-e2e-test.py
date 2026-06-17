@@ -440,10 +440,11 @@ def main():
 
     r = list_tools(client)
     tools = r.get("result", {}).get("tools", []) if r else []
-    T("tools/list returns 8 tools", r, lambda r: len(tools) == 8)
+    T("tools/list returns 9 tools", r, lambda r: len(tools) == 9)
     tool_names = [t["name"] for t in tools]
     for name in ["logic_transport", "logic_tracks", "logic_mixer", "logic_midi",
-                 "logic_edit", "logic_navigate", "logic_project", "logic_system"]:
+                 "logic_edit", "logic_navigate", "logic_project", "logic_system",
+                 "logic_plugins"]:
         T(f"  tool '{name}' present", r, lambda _, n=name: n in tool_names)
 
     r = list_resources(client)
@@ -736,8 +737,9 @@ def main():
     )
 
     # scan_library walks the full Logic Library tree. A stock Logic 12 Library
-    # can take ~100s over live AX; server bails earlier if the panel is closed.
-    r = call_tool(client, "logic_tracks", "scan_library", timeout=180)
+    # can exceed 180s over live AX on Logic 12.2; avoid a client-side timeout
+    # leaving a stale large response in the tmux capture stream.
+    r = call_tool(client, "logic_tracks", "scan_library", timeout=240)
     scan_library_text = tool_text(r)
     scan_library_json = safe_json(scan_library_text)
     T(
@@ -1239,7 +1241,7 @@ def main():
 
     # Catalog contract stability under load
     r = list_tools(client)
-    T("tools/list still 8 after stress", r, lambda r: len(r.get("result", {}).get("tools", [])) == 8)
+    T("tools/list still 9 after stress", r, lambda r: len(r.get("result", {}).get("tools", [])) == 9)
 
     # ═══════════════════════════════════════════════════════════════
     # §14 State Consistency (8 tests)

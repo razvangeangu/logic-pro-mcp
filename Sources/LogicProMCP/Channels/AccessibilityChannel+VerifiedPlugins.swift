@@ -6,14 +6,13 @@ import Foundation
 /// T3 scope (requirements §8 / development board T3):
 ///   - `plugin.get_inventory` — fully deterministic, drift-safe inventory built
 ///     from the T2 `audioPluginInsertSlots` enumerator (R3, AC2/AC12/AC22).
-///   - `plugin.set_param_verified` — R6 precedence steps 1-5 only. The live
-///     write path (steps 6+) belongs to T4/T5 and requires T0 evidence; Gain's
-///     capability preflight (step 5) returns State C `unsupported_param_readback`
-///     today, so steps 6+ are unreachable by design (AC10).
+///   - `plugin.set_param_verified` — R6 precedence through live AX write/readback
+///     for verified write-capable parameters (currently Compressor threshold).
+///     Unsupported or unverified parameters fail closed at capability preflight.
 ///   - `plugin.insert_verified` — live validation gates (schema/mode/path/
-///     identity/inventory-complete/slot-empty/slot-is-first-free) followed by the
-///     live "Mix > Search and Add Plug-in" insert (R12 breakthrough). The
-///     Mix-menu search dialog mounts into the first empty audio-effect slot, and
+///     identity/inventory-complete/slot-empty) followed by the
+///     target slot's own popup menu, driven by CGEvent clicks. The
+///     slot-popup path preserves the target slot context, and
 ///     a post-insert `get_inventory` readback is the SOLE State A precondition —
 ///     State A is reachable only when the requested plugin is observed at the
 ///     requested slot, so a false verified insert is structurally impossible
@@ -131,7 +130,7 @@ extension AccessibilityChannel {
         let slots = AXLogicProElements.audioPluginInsertSlots(in: strips[track], runtime: runtime.ax)
         let built = pluginInventoryItems(for: slots)
 
-        return .success(HonestContract.jsonString([
+        return .success(HonestContract.encodeV2StateA(extras: [
             "operation": operation,
             "track": track,
             "plugins_source": "ax",
@@ -671,44 +670,53 @@ extension AccessibilityChannel {
         return false
     }
 
-    // MARK: - insert_verified (Search-and-Add live insert → readback-gated State A)
+    // MARK: - insert_verified (exact slot popup insert → readback-gated State A)
 
-    /// Structured result of one live "Search and Add Plug-in" attempt. The driver
-    /// diffs the pre- vs post-insert inventory to detect WHERE the requested
-    /// plugin actually landed (Search-and-Add chooses the slot, not the caller),
-    /// and reports that physical `slot`. Only `.mounted` whose `slot` equals the
-    /// requested `insert` becomes State A; a different slot is honest State C
+    /// Structured result of one live insert attempt. The production driver opens
+    /// the requested slot's own popup and physically clicks the plugin menu item,
+    /// then diffs the pre- vs post-insert inventory to detect WHERE the requested
+    /// plugin actually landed. Only `.mounted` whose `slot` equals the requested
+    /// `insert` becomes State A; a different slot is honest State C
     /// (`insert_landed_at_different_slot`), so a slot is never falsely confirmed.
     enum InsertDriverOutcome: Sendable {
         /// The requested plugin (`pluginID`) was observed newly mounted at the
         /// physical `slot` detected by the pre/post inventory diff. The gate maps
         /// `slot == insert` → State A, `slot != insert` → State C (after rollback).
         case mounted(slot: Int, pluginID: String, observedName: String?)
-        /// The Search-and-Add path ran but the post-insert inventory readback
+        /// The live insert path ran but the post-insert inventory readback
         /// could not be performed at all (mixer/strip unreadable). Uncertain →
         /// State C `post_insert_readback_unavailable` (fail-closed, not State B —
         /// a verified insert can never be uncertain-success).
         case readbackUnavailable
+        /// The target track selection did not complete or could not be verified
+        /// before opening the insert UI. No write was attempted.
+        case trackSelectionFailed(String)
+        /// A stray / wrong plugin appeared and automatic rollback could not
+        /// confirm cleanup. Terminal fail-closed: do not continue trying fallback
+        /// strategies while an unresolved mutation may remain in the project.
+        case rollbackFailed(slot: Int?, pluginID: String?, observedName: String?, rollback: RollbackResult)
+        /// A selection strategy appears to have committed/dismissed the dialog, but
+        /// the inventory never reached a confirmed changed state before timeout.
+        /// Do not keep clicking stale rows/buttons after the dialog has changed.
+        case postCommitTimeout(strategy: String)
         /// Readback succeeded but the requested plugin did not appear at ANY slot
         /// after every result-selection strategy. The driver reports the name (if
         /// any) it last observed at the requested slot for diagnostics.
         case mountMismatch(observedName: String?)
-        /// A TRANSIENT pre-mount setup step failed (the Search-and-Add UI was not
-        /// ready: the Mix menu could not be clicked, the search field was not
-        /// found, or no results loaded). No write was attempted. Distinct from the
+        /// A TRANSIENT pre-mount setup step failed (the slot popup could not be
+        /// opened/anchored or the exact plugin leaf could not be found). No write was
+        /// attempted. Distinct from the
         /// permanent `.mountMismatch` (every strategy ran but the plugin never
         /// mounted) — these are retry-able (`safe_to_retry:true`), P2-3.
         case transientSetupFailure(stage: String)
     }
 
-    /// The injectable live-insert seam. Performs the entire "Mix > Search and Add
-    /// Plug-in" sequence (mixer raise → menu → search field → result select+add →
-    /// post-insert inventory readback) and returns a structured outcome plus a
-    /// `select_trace` diagnostic dict. Injected so the gate→outcome→envelope
-    /// mapping is unit-testable without ever issuing real CGEvent/menu actions;
-    /// the production default (`liveSearchAndAddInsert`) is the only path that
-    /// touches the live UI.
-    typealias SearchAndAddInsertDriver = @Sendable (
+    /// The injectable live-insert seam. Performs the live insert sequence and
+    /// returns a structured outcome plus a `select_trace` diagnostic dict. Injected
+    /// so the gate→outcome→envelope mapping is unit-testable without ever issuing
+    /// real CGEvent/menu actions; the production default (`liveExactSlotPopupInsert`)
+    /// is the only path that touches the live UI.
+    typealias PluginInsertDriver = @Sendable (
         _ track: Int,
         _ insert: Int,
         _ pluginID: String,
@@ -735,26 +743,25 @@ extension AccessibilityChannel {
 
     /// Guarded verified insert entry. The write-preceding gates run live and are
     /// honest: schema → mode → project path → identity → inventory `complete:true`
-    /// → slot-empty. Only after every gate passes does the op drive the live
-    /// "Search and Add Plug-in" insert (R12 breakthrough), then a post-insert
+    /// → slot-empty. Only after every gate passes does the op drive the requested
+    /// slot's own popup menu by physical CGEvent clicks, then a post-insert
     /// `get_inventory` readback (pre/post diff) is the SOLE State A precondition.
     ///
     /// State A is reachable ONLY when the readback observes the requested plugin
     /// newly mounted at the requested slot — a false verified insert is
     /// structurally impossible because the readback diff is the only State A path.
     ///
-    /// `insert:K` honesty (R15 live): Search-and-Add lets Logic choose the slot
-    /// (the first available audio-effect slot, observed live at insert 6, and at
-    /// 1/7 in prior osascript runs — it is NOT caller-controllable). So the op
-    /// detects WHERE the plugin actually landed and, if that differs from the
-    /// requested `insert`, fails closed with `insert_landed_at_different_slot`
-    /// (reporting `observed_slot`) and rolls the stray mount back — never a false
-    /// "verified at K". `set_param_verified` State A is unaffected.
+    /// `insert:K` honesty: the exact-slot popup path is expected to target K, but
+    /// the op still detects WHERE the plugin actually landed and, if that differs
+    /// from the requested `insert`, fails closed with
+    /// `insert_landed_at_different_slot` (reporting `observed_slot`) and rolls the
+    /// stray mount back — never a false "verified at K". `set_param_verified`
+    /// State A is unaffected.
     static func defaultInsertVerified(
         params: [String: String],
         runtime: AXLogicProElements.Runtime = .production,
         frontDocumentPath: FrontDocumentPathProvider = liveFrontDocumentPath,
-        insertDriver: SearchAndAddInsertDriver = liveSearchAndAddInsert,
+        insertDriver: PluginInsertDriver = liveExactSlotPopupInsert,
         rollback: PluginInsertRollback = liveInsertRollback
     ) async -> ChannelResult {
         let operation = "logic_plugins.insert_verified"
@@ -880,8 +887,8 @@ extension AccessibilityChannel {
             ))
         }
 
-        // Step 6 — drive the live Search-and-Add insert. The driver lets Logic
-        // pick the slot, then diffs pre/post inventory to detect WHERE the
+        // Step 6 — drive the live exact-slot insert. The driver opens the target
+        // slot's own popup, then diffs pre/post inventory to detect WHERE the
         // requested plugin actually landed, and reports that physical slot. State
         // A is reachable ONLY when the detected slot equals the requested `insert`
         // AND the identity matches — the readback diff is the only State A path.
@@ -904,17 +911,16 @@ extension AccessibilityChannel {
                         "observed_plugin_name": observedName ?? NSNull(),
                         "observed_slot": observedSlot,
                         "select_trace": trace,
-                        "what_was_attempted": "verify the Search-and-Add insert is \(pluginID)",
+                        "what_was_attempted": "verify the exact slot popup insert is \(pluginID)",
                         "what_was_observed": "readback observed a different plugin \(observedID) at slot \(observedSlot)",
                         "safe_to_retry": false,
                         "write_attempted": true,
                     ]
                 ))
             }
-            // The plugin mounted, but Search-and-Add chose a slot. If it is not
-            // the requested slot, do NOT confirm a slot we did not target — roll
-            // the stray mount back and fail closed with the observed slot (R15:
-            // exact slot targeting is unsupported in Release 1).
+            // The plugin mounted somewhere other than the requested slot. Do NOT
+            // confirm a slot we did not target — roll the stray mount back and
+            // fail closed with the observed slot.
             guard observedSlot == insert else {
                 let rollbackResult = await rollback(track, observedID, observedSlot, runtime)
                 var extras: [String: Any] = [
@@ -928,8 +934,8 @@ extension AccessibilityChannel {
                     "rollback_retries": rollbackResult.retries,
                     "rollback_last_click": rollbackResult.lastClickResult,
                     "select_trace": trace,
-                    "what_was_attempted": "insert \(pluginID) at the requested slot \(insert) via Search and Add Plug-in",
-                    "what_was_observed": "Search and Add placed \(pluginID) at slot \(observedSlot) (Logic chooses the slot; exact targeting is unsupported in Release 1)",
+                    "what_was_attempted": "insert \(pluginID) at the requested slot \(insert) via the exact slot popup",
+                    "what_was_observed": "the exact slot popup flow placed \(pluginID) at slot \(observedSlot), not the requested slot \(insert)",
                     "safe_to_retry": false,
                     "write_attempted": true,
                 ]
@@ -951,7 +957,7 @@ extension AccessibilityChannel {
                 "observed_plugin_name": observedName ?? NSNull(),
                 "observed_slot": observedSlot,
                 "select_trace": trace,
-                "write_source": "ax_search_and_add",
+                "write_source": trace["write_source"] as? String ?? "ax_exact_slot_popup",
                 "verify_source": "ax_plugin_inventory",
             ]))
 
@@ -962,18 +968,60 @@ extension AccessibilityChannel {
                     "operation": operation,
                     "target_identity": identity,
                     "select_trace": trace,
-                    "what_was_attempted": "read back the insert inventory after Search-and-Add",
+                    "what_was_attempted": "read back the insert inventory after exact slot insert",
                     "what_was_observed": "the mixer/strip insert subtree was unreadable after the insert",
                     "safe_to_retry": true,
                     "write_attempted": true,
                 ]
             ))
 
+        case let .trackSelectionFailed(detail):
+            return .error(trackSelectionFailedStateC(operation, identity, detail))
+
+        case let .rollbackFailed(slot, observedID, observedName, rollbackResult):
+            return .error(HonestContract.encodeV2StateC(
+                error: .rollbackFailed,
+                extras: [
+                    "operation": operation,
+                    "target_identity": identity,
+                    "observed_plugin_id": observedID ?? NSNull(),
+                    "observed_plugin_name": observedName ?? NSNull(),
+                    "observed_slot": slot ?? NSNull(),
+                    "rollback_attempted": rollbackResult.attempted,
+                    "rollback_succeeded": rollbackResult.succeeded,
+                    "rollback_retries": rollbackResult.retries,
+                    "rollback_last_click": rollbackResult.lastClickResult,
+                    "select_trace": trace,
+                    "what_was_attempted": "roll back a stray exact-slot popup insert before continuing",
+                    "what_was_observed": "a plugin mutation remained after automatic rollback could not confirm removal",
+                    "recovery_action": slot.map {
+                        "inspect Logic Pro insert slot \($0) and undo/remove the stray plugin manually before retrying"
+                    } ?? "inspect Logic Pro and undo/remove the stray plugin manually before retrying",
+                    "safe_to_retry": false,
+                    "write_attempted": true,
+                ]
+            ))
+
+        case let .postCommitTimeout(strategy):
+            return .error(HonestContract.encodeV2StateC(
+                error: .operationTimeout,
+                extras: [
+                    "operation": operation,
+                    "target_identity": identity,
+                    "commit_strategy": strategy,
+                    "select_trace": trace,
+                    "what_was_attempted": "wait for post-insert inventory to confirm the exact slot popup commit",
+                    "what_was_observed": "the insert UI changed/closed before the requested plugin appeared in readback",
+                    "safe_to_retry": true,
+                    "write_attempted": true,
+                ]
+            ))
+
         case let .mountMismatch(observedName):
-            // Every result-selection strategy ran but the requested plugin never
-            // appeared at the requested slot. Honest-deferred terminal: the
-            // insert could not be verified in this Logic build. The driver has
-            // already attempted rollback for any stray mount it observed.
+            // The requested plugin never appeared at the requested slot.
+            // Honest-deferred terminal: the insert could not be verified in this
+            // Logic build. The driver has already attempted rollback for any stray
+            // mount it observed.
             return .error(HonestContract.encodeV2StateC(
                 error: .insertNotAxAutomatable,
                 extras: [
@@ -981,10 +1029,10 @@ extension AccessibilityChannel {
                     "target_identity": identity,
                     "observed_plugin_name": observedName ?? NSNull(),
                     "select_trace": trace,
-                    "what_was_attempted": "insert \(pluginID) into slot \(insert) via Mix > Search and Add Plug-in",
+                    "what_was_attempted": "insert \(pluginID) into slot \(insert) via the exact slot popup",
                     "what_was_observed": observedName == nil
-                        ? "no plugin appeared at slot \(insert) after every Search-and-Add result-selection strategy"
-                        : "slot \(insert) showed '\(observedName!)' which is not the requested \(pluginID) after every strategy",
+                        ? "no plugin appeared at slot \(insert) after the exact slot popup path"
+                        : "slot \(insert) showed '\(observedName!)' which is not the requested \(pluginID) after the exact slot popup path",
                     "safe_to_retry": false,
                     "write_attempted": true,
                 ]
@@ -1001,8 +1049,8 @@ extension AccessibilityChannel {
                     "target_identity": identity,
                     "setup_stage": stage,
                     "select_trace": trace,
-                    "what_was_attempted": "open the Search and Add Plug-in dialog and load results for \(pluginID)",
-                    "what_was_observed": "the Search-and-Add UI was not ready at stage '\(stage)' — no insert was attempted",
+                    "what_was_attempted": "open the requested slot popup and choose \(pluginID)",
+                    "what_was_observed": "the exact slot popup UI was not ready at stage '\(stage)' — no insert was attempted",
                     "safe_to_retry": true,
                     "write_attempted": false,
                 ]
@@ -1010,254 +1058,163 @@ extension AccessibilityChannel {
         }
     }
 
-    // MARK: - insert_verified live driver (Search and Add Plug-in)
+    // MARK: - insert_verified live drivers
 
-    /// Locale-aware (menu-bar title, menu-item title) pairs for the
-    /// "Mix > Search and Add Plug-in…" path. Korean primary, English fallback —
-    /// Logic localises the menu bar, and the item shows a trailing ellipsis (the
-    /// real `…` U+2026 and the ASCII `...` are both tried).
-    private static let searchAndAddMenuCandidates: [(bar: String, item: String)] = [
-        ("믹스", "플러그인 검색 및 추가…"),
-        ("믹스", "플러그인 검색 및 추가..."),
-        ("Mix", "Search and Add Plug-in…"),
-        ("Mix", "Search and Add Plug-in..."),
-    ]
     /// Window-menu "hide all plug-in windows" (menu-bar, menu-item) pairs.
     private static let hidePluginWindowsMenuCandidates: [(bar: String, item: String)] = [
         ("윈도우", "모든 플러그인 윈도우 가리기"),
         ("Window", "Hide All Plug-in Windows"),
     ]
 
-    /// Production "Search and Add Plug-in" insert driver (R12). Drives the whole
-    /// live sequence and returns a structured outcome plus a `select_trace`
-    /// diagnostic dict. This is the ONLY path that issues real menu/CGEvent
-    /// actions; `defaultInsertVerified` is unit-tested against an injected fake.
+    /// Production exact-slot popup insert driver. Drives the target insert slot's
+    /// own popup menu and returns a structured outcome plus a `select_trace`
+    /// diagnostic dict. This is the default path that issues real slot/menu
+    /// CGEvents; `defaultInsertVerified` is unit-tested against an injected fake.
     ///
     /// Sequence:
     ///   0. hide any stray plugin windows (a front plugin window from a prior
     ///      attempt steals the menu — R14 live: AXPress menu nav opened the track
     ///      instrument window instead of the search dialog);
-    ///   1. select the target track (so the Mix menu targets the right strip);
-    ///   2. raise the mixer/main window via `AXRaise` (else the Mix menu item is
-    ///      disabled — the R12 key finding);
-    ///   3. click "Mix > Search and Add Plug-in…" via AppleScript (R14: AXPress
-    ///      opened the wrong window; `click menu item ... of menu bar item ...`
-    ///      reliably opens the search dialog), polling `enabled` first;
-    ///   4. type the plugin name into the search dialog's `AXTextField` (AXValue
-    ///      set first, keystroke fallback);
-    ///   5. poll the results `AXOutline` until a row appears;
-    ///   5b. EXACT-row verify (P2-4): read the first result row's text and, when
-    ///      readable, require an exact (case-insensitive) match to the expected
-    ///      display name before committing — if no exactly-matching row exists,
-    ///      fail BEFORE any commit so a reordered "Squash Compressor"-type variant
-    ///      is never mounted;
-    ///   6. try each result-selection strategy in priority order — `return_only`
-    ///      (commit the auto-highlighted first result; R18), then `row_double_click`
-    ///      / `add_button_press` / `row_click_then_add_button` as fallbacks — and
-    ///      after each, CONDITION-poll the inventory (P1-2: wait for an actual
-    ///      change, not the first readable snapshot) and diff against the
-    ///      pre-snapshot to detect WHERE the requested plugin landed;
-    ///   7. report `.mounted(slot:)` with the detected physical slot — the gate
+    ///   1. select the target track and verify `AXSelected` readback;
+    ///   2. raise the mixer/main window and read the full pre-insert inventory;
+    ///   3. locate the requested filtered insert slot and click its center to open
+    ///      that slot's popup;
+    ///   4. prove the popup is anchored to the target slot, then choose the stock
+    ///      plugin by exact leaf title from that anchored popup (direct/search/
+    ///      recursive discovery), not by localized category names or AXPress;
+    ///   5. CONDITION-poll the inventory (wait for an actual change, not the first
+    ///      readable snapshot) and diff against the pre-snapshot to detect WHERE
+    ///      the requested plugin landed;
+    ///   6. report `.mounted(slot:)` with the detected physical slot — the gate
     ///      maps slot==insert to State A, slot!=insert to State C; a permanent
     ///      no-mount is `.mountMismatch` (insert_not_ax_automatable), a transient
-    ///      UI-setup failure (menu/field/results not ready) is
+    ///      UI-setup failure (slot popup/anchor/exact leaf not ready) is
     ///      `.transientSetupFailure` (insert_setup_failed, retry-able), and an
     ///      unreadable strip (pre OR post) is the retry-able `.readbackUnavailable`.
-    static let liveSearchAndAddInsert: SearchAndAddInsertDriver = { track, insert, pluginID, searchQuery, runtime in
+    static let liveExactSlotPopupInsert: PluginInsertDriver = { track, insert, pluginID, searchQuery, runtime in
         var trace: [String: Any] = [
             "requested_track": track,
             "requested_insert": insert,
             "requested_plugin_id": pluginID,
             "search_query": searchQuery,
+            "write_source": "ax_exact_slot_popup",
             "strategies_attempted": [String](),
         ]
 
-        // 0 — clean state so the Mix menu becomes enabled and is not captured by a
-        // stray window (R15 live: enabled=true needs all of these). (a) close any
-        // leftover "위치로 이동" / "Go to Position" floating dialog from a prior AX
-        // side effect, (b) hide all plug-in windows, (c) [step 2] raise the mixer.
-        trace["go_to_position_closed"] = await closeGoToPositionDialog()
-        trace["plugin_windows_hidden"] = await hideAllPluginWindows()
+        trace["go_to_position_closed"] = closeGoToPositionDialog(runtime: runtime)
+        trace["plugin_windows_hidden"] = await hideAllPluginWindows(runtime: runtime)
         try? await Task.sleep(for: .milliseconds(150))
 
-        // 1 — select the target track via the AX-native ladder.
         let trackSelected = AXLogicProElements.selectTrackViaAX(at: track, runtime: runtime)
         trace["track_select_ok"] = trackSelected
+        let selectedVerified = trackSelected
+            ? await verifiedTrackSelected(track: track, runtime: runtime)
+            : false
+        trace["track_select_verified"] = selectedVerified
+        guard selectedVerified else {
+            return (
+                .trackSelectionFailed(trackSelected
+                    ? "track \(track) selection could not be verified via AXSelected readback"
+                    : "AX track selection write failed for track \(track)"
+                ),
+                trace
+            )
+        }
         try? await Task.sleep(for: .milliseconds(150))
 
-        // 2 — raise the mixer/main window so the Mix menu becomes enabled.
         trace["window_raised"] = raiseMixerWindow(runtime: runtime)
         try? await Task.sleep(for: .milliseconds(150))
 
-        // Snapshot the FULL pre-insert inventory (slot → plugin_id) so a post-
-        // insert diff can detect WHERE the new plugin landed (Search-and-Add
-        // chooses the slot; R15 live observed insert 6, not the requested slot).
         let preSnapshot = fullStripInventory(track: track, runtime: runtime)
         trace["pre_inventory_readable"] = (preSnapshot != nil)
-
-        // A readable pre-snapshot is REQUIRED to diff against — without it every
-        // occupied slot would look "new" (false State A) AND a stray mount could
-        // not be rolled back (`newlyMountedAnyPlugin` needs the baseline). A nil
-        // snapshot is a TRANSIENT condition (the mixer/strip was momentarily
-        // unreadable), so bail out BEFORE driving any UI with the retry-able
-        // `.readbackUnavailable` (`safe_to_retry:true`) — NOT `.mountMismatch`
-        // (`insert_not_ax_automatable`, `safe_to_retry:false`), which would
-        // mislabel a transient read failure as a permanent AX limitation (P2).
         guard let preInventory = preSnapshot else {
             return (.readbackUnavailable, trace)
         }
 
-        // 3 — open Mix > Search and Add Plug-in… via AppleScript click. The menu
-        // `enabled` state is polled first (channel-strip focus sync is flaky:
-        // AXRaise alone is not always enough), and an AppleScript `click menu
-        // item` is used instead of an AX `AXPress` (R14: AXPress on this item
-        // opened the track instrument plugin window, not the search dialog).
-        let menuResult = await openSearchAndAddViaAppleScript()
-        trace["menu_press_method"] = "applescript_click"
-        trace["enabled_retries"] = menuResult.enabledRetries
-        trace["menu_item_found"] = menuResult.itemFound
-        trace["menu_pressed"] = menuResult.clicked
-        guard menuResult.clicked else {
-            // Transient: the Mix menu could not be clicked (UI not ready / not
-            // enabled) — no write attempted, retry-able (P2-3).
-            return (.transientSetupFailure(stage: "mix_menu_click"), trace)
+        guard let targetSlot = liveInsertSlot(track: track, insert: insert, runtime: runtime) else {
+            return (.transientSetupFailure(stage: "target_slot_not_found"), trace)
         }
-        try? await Task.sleep(for: .milliseconds(400))
+        trace["target_slot_found"] = true
 
-        // 4 — locate the search field. Live structure (R12): the search field is
-        // an `AXTextField` nested inside an `AXGroup` (NOT a window-direct child),
-        // and right after the menu press it is the systemwide focused element.
-        // Prefer the focused element; fall back to a RECURSIVE dialog search so a
-        // window-direct-only scan can no longer miss it.
-        let fieldResult = locateSearchField(runtime: runtime)
-        guard let field = fieldResult.field else {
-            trace["search_field_found"] = false
-            trace["search_field_via"] = fieldResult.via
+        guard clickElementCenter(targetSlot.element, runtime: runtime.ax) else {
+            return (.transientSetupFailure(stage: "target_slot_click_failed"), trace)
+        }
+        trace["slot_popup_open_clicked"] = true
+        try? await Task.sleep(for: .milliseconds(250))
+
+        guard let rootMenu = await pollSlotPopupMenu(runtime: runtime, timeoutMs: 1_200) else {
             AXMouseHelper.pressEscape()
-            // Transient: the search dialog/field was not located — retry-able (P2-3).
-            return (.transientSetupFailure(stage: "search_field_not_found"), trace)
+            return (.transientSetupFailure(stage: "slot_popup_menu_not_found"), trace)
         }
-        trace["search_field_found"] = true
-        trace["search_field_via"] = fieldResult.via
-        let typed = typeSearchQuery(searchQuery, into: field, runtime: runtime.ax)
-        trace["search_query_set"] = typed
-        let fieldValue: String? = AXHelpers.getAttribute(field, kAXValueAttribute as String, runtime: runtime.ax)
-        trace["search_field_value"] = fieldValue ?? NSNull()
+        trace["slot_popup_menu_found"] = true
 
-        // 5 — results live in the SAME container as the search field: the field's
-        // parent `AXGroup` holds an `AXScrollArea > AXOutline` sibling. Search up
-        // from the field for that container, then poll its outline for rows.
-        let resultsContainer = searchResultsContainer(forField: field, runtime: runtime.ax)
-            ?? searchAndAddDialog(runtime: runtime)
-        trace["results_container_found"] = (resultsContainer != nil)
-        let resultsReady: [AXUIElement]
-        if let resultsContainer {
-            resultsReady = await pollResultRows(in: resultsContainer, runtime: runtime.ax, timeoutMs: 2_000)
-        } else {
-            resultsReady = []
-        }
-        trace["result_rows"] = resultsReady.count
-        // `resultsContainer` is non-nil here: rows were enumerated from it.
-        guard let firstRow = resultsReady.first, let container = resultsContainer else {
+        let anchorVerified = slotPopupMenuIsAnchored(
+            rootMenu, toSlot: targetSlot.element, runtime: runtime.ax
+        )
+        trace["slot_popup_anchor_verified"] = anchorVerified
+        guard anchorVerified else {
             AXMouseHelper.pressEscape()
-            // Transient: results did not load (search still indexing / dialog not
-            // ready) — no write attempted, retry-able (P2-3).
-            return (.transientSetupFailure(stage: "no_result_rows"), trace)
+            return (.transientSetupFailure(stage: "slot_popup_not_anchored_to_target_slot"), trace)
         }
 
-        // P2-4 — exact-row verification BEFORE committing. `return_only` commits
-        // the auto-highlighted first row; if Logic reordered results (locale /
-        // version / install variance), that first row could be a wrong variant
-        // (e.g. "Squash Compressor" for a "Compressor" query). Read the first row's
-        // text and, when readable, require an EXACT match to the expected display
-        // name before any commit. When the text is unreadable we proceed (the
-        // post-insert readback diff still blocks a wrong variant as State C).
-        let firstRowText = resultRowText(firstRow, runtime: runtime.ax)
-        trace["first_result_row_text"] = firstRowText ?? NSNull()
-        trace["expected_result_name"] = searchQuery
-        if let firstRowText, firstRowText.caseInsensitiveCompare(searchQuery) != .orderedSame {
-            // Look for an exactly-matching row elsewhere in the result set; if none
-            // exists, fail BEFORE committing rather than mount a wrong variant.
-            let exactMatch = resultsReady.first {
-                resultRowMatchesExpected($0, expectedName: searchQuery, runtime: runtime.ax)
-            }
-            guard exactMatch != nil else {
-                AXMouseHelper.pressEscape()
-                trace["exact_row_match"] = false
-                return (.mountMismatch(observedName: firstRowText), trace)
-            }
-            trace["exact_row_match"] = true
+        guard let pluginClick = await clickPluginInAnchoredSlotPopup(
+            pluginID: pluginID,
+            displayName: searchQuery,
+            rootMenu: rootMenu,
+            runtime: runtime.ax
+        ) else {
+            AXMouseHelper.pressEscape()
+            return (.transientSetupFailure(stage: "plugin_exact_leaf_not_found"), trace)
         }
+        trace["strategies_attempted"] = pluginClick.strategies
+        trace["winning_strategy"] = pluginClick.strategy
+        trace["winning_menu_path"] = pluginClick.path.joined(separator: " > ")
+        trace["plugin_selection_id"] = pluginID
 
-        // 6 — try each result-selection strategy, then diff the FULL inventory
-        // against the pre-insert snapshot to detect WHERE the requested plugin
-        // newly appeared (Search-and-Add chooses the slot — R15). The first
-        // strategy after which the requested plugin newly appears at SOME slot
-        // wins; that detected slot is reported so the gate can compare it to the
-        // requested `insert`. Strategies that need the add button scan `container`
-        // (the field's parent group) where the '추가'/Add AXButton lives.
-        var strategiesTried: [String] = []
-        var anyPostReadbackSucceeded = false
-        for strategy in resultSelectionStrategies {
-            strategiesTried.append(strategy.name)
-            strategy.run(container, firstRow, runtime.ax)
-
-            // P1-2: CONDITION-poll for the inventory to actually CHANGE (the
-            // requested plugin appeared, or some stray did) rather than settling on
-            // the first merely-readable snapshot — a slow Logic commit could
-            // otherwise return the unchanged pre-insert state and drive a false
-            // "nothing mounted" → premature next strategy / mislabel. `preInventory`
-            // is guaranteed non-nil here (guarded before the menu press).
-            let poll = await pollStripInventoryUntil(
-                track: track, runtime: runtime, timeoutMs: 1_500
-            ) { inv in
-                newlyMountedSlot(pluginID: pluginID, pre: preInventory, post: inv) != nil
-                    || newlyMountedAnyPlugin(pre: preInventory, post: inv) != nil
-            }
-            guard let postInventory = poll.satisfied ?? poll.lastReadable else {
-                continue  // strip stayed unreadable this whole window
-            }
-            anyPostReadbackSucceeded = true
-
-            // A slot that did NOT hold the requested plugin before but does now is
-            // the freshly-mounted target. (Identity is matched here; the gate
-            // re-checks slot==insert.)
-            if let detected = newlyMountedSlot(
-                pluginID: pluginID, pre: preInventory, post: postInventory
-            ) {
-                trace["strategies_attempted"] = strategiesTried
-                trace["winning_strategy"] = strategy.name
-                trace["observed_slot"] = detected.slot
-                trace["observed_name"] = detected.name ?? NSNull()
-                return (.mounted(slot: detected.slot, pluginID: pluginID, observedName: detected.name), trace)
-            }
-
-            // If SOME other (non-requested) plugin newly appeared — including a
-            // non-allowlisted one whose canonical id is nil — roll it back so a
-            // wrong-plugin mount is not left behind before the next strategy. The
-            // observed display name lets the rollback confirm removal even when the
-            // id is nil (P1-1).
-            if let stray = newlyMountedAnyPlugin(pre: preInventory, post: postInventory) {
-                trace["stray_mount_plugin_id"] = stray.pluginID ?? NSNull()
-                trace["stray_mount_name"] = stray.name ?? NSNull()
-                let rollback = await verifiedUndoPluginInsert(
-                    track: track, strayPluginID: stray.pluginID, straySlot: stray.slot,
-                    strayName: stray.name, runtime: runtime
-                )
-                trace["stray_rollback_succeeded"] = rollback.succeeded
-            }
+        let poll = await pollStripInventoryUntil(
+            track: track, runtime: runtime, timeoutMs: 2_000
+        ) { inv in
+            newlyMountedSlot(pluginID: pluginID, pre: preInventory, post: inv) != nil
+                || newlyMountedAnyPlugin(pre: preInventory, post: inv) != nil
         }
-        trace["strategies_attempted"] = strategiesTried
-
-        // Dismiss any still-open dialog, then classify the final state. If NO
-        // post-strategy poll was ever readable, the strip went unreadable mid-op
-        // → retry-able `.readbackUnavailable`; otherwise readback worked but the
-        // requested plugin never appeared anywhere → honest `.mountMismatch`.
-        AXMouseHelper.pressEscape()
-        if !anyPostReadbackSucceeded {
+        guard let postInventory = poll.satisfied ?? poll.lastReadable else {
             return (.readbackUnavailable, trace)
         }
-        return (.mountMismatch(observedName: nil), trace)
+
+        if let detected = newlyMountedSlot(pluginID: pluginID, pre: preInventory, post: postInventory) {
+            trace["observed_slot"] = detected.slot
+            trace["observed_name"] = detected.name ?? NSNull()
+            return (.mounted(slot: detected.slot, pluginID: pluginID, observedName: detected.name), trace)
+        }
+
+        if let stray = newlyMountedAnyPlugin(pre: preInventory, post: postInventory) {
+            trace["stray_mount_plugin_id"] = stray.pluginID ?? NSNull()
+            trace["stray_mount_name"] = stray.name ?? NSNull()
+            let rollback = await verifiedUndoPluginInsert(
+                track: track, strayPluginID: stray.pluginID, straySlot: stray.slot,
+                strayName: stray.name, runtime: runtime
+            )
+            trace["stray_rollback_succeeded"] = rollback.succeeded
+            trace["stray_rollback_attempted"] = rollback.attempted
+            trace["stray_rollback_retries"] = rollback.retries
+            trace["stray_rollback_last_click"] = rollback.lastClickResult
+            guard rollback.succeeded else {
+                return (
+                    .rollbackFailed(
+                        slot: stray.slot,
+                        pluginID: stray.pluginID,
+                        observedName: stray.name,
+                        rollback: rollback
+                    ),
+                    trace
+                )
+            }
+        }
+
+        if poll.satisfied == nil {
+            return (.postCommitTimeout(strategy: "slot_popup_physical_menu_click"), trace)
+        }
+        return (.mountMismatch(observedName: postInventory[insert]?.name), trace)
     }
 
     // MARK: - insert_verified live driver helpers
@@ -1284,161 +1241,179 @@ extension AccessibilityChannel {
         return false
     }
 
-    /// Click "Mix > Search and Add Plug-in…" via AppleScript (`click menu item …
-    /// of menu 1 of menu bar item … of menu bar 1`). R14 live: an AX `AXPress`
-    /// on this item opened the track instrument plugin window instead of the
-    /// search dialog, while the AppleScript click reliably opens the search
-    /// dialog. The menu `enabled` state is polled first (channel-strip focus sync
-    /// is flaky: AXRaise alone is not always enough), forcing the mixer window to
-    /// the front and re-raising between attempts. Returns whether the item was
-    /// found/clicked and how many enabled-poll iterations were needed.
-    private static func openSearchAndAddViaAppleScript(
-        maxEnabledRetries: Int = 8
-    ) async -> (itemFound: Bool, clicked: Bool, enabledRetries: Int) {
-        var itemFound = false
-        for attempt in 0..<maxEnabledRetries {
-            for candidate in searchAndAddMenuCandidates {
-                let probe = await runMenuItemAppleScript(
-                    bar: candidate.bar, item: candidate.item, action: .checkEnabled
-                )
-                switch probe {
-                case .missing:
-                    continue  // wrong locale / item label — try the next candidate
-                case .disabled:
-                    itemFound = true  // exists but not yet enabled — retry below
-                case .ok:
-                    itemFound = true
-                    let click = await runMenuItemAppleScript(
-                        bar: candidate.bar, item: candidate.item, action: .click
-                    )
-                    if click == .ok {
-                        return (true, true, attempt)
-                    }
-                }
-            }
-            // Not enabled yet (or click failed): nudge focus to the mixer window
-            // and wait briefly before re-polling.
-            _ = forceMixerWindowFront()
-            try? await Task.sleep(for: .milliseconds(250))
-        }
-        return (itemFound, false, maxEnabledRetries)
-    }
-
     /// Hide every open plug-in window via "Window > Hide All Plug-in Windows" so a
     /// stray front plugin window (e.g. a track instrument window left open by a
     /// prior attempt) cannot capture the subsequent Mix-menu click (R14 live root
     /// cause). Best-effort: returns whether the menu item was clicked.
     @discardableResult
-    private static func hideAllPluginWindows() async -> Bool {
-        for candidate in hidePluginWindowsMenuCandidates {
-            let result = await runMenuItemAppleScript(
-                bar: candidate.bar, item: candidate.item, action: .click
-            )
-            if result == .ok { return true }
-        }
-        return false
+    private static func hideAllPluginWindows(runtime: AXLogicProElements.Runtime) async -> Bool {
+        let result = await clickTopLevelMenuItemViaAXMenuClick(
+            candidates: hidePluginWindowsMenuCandidates,
+            runtime: runtime,
+            maxEnabledRetries: 1,
+            focusBetweenAttempts: false
+        )
+        return result.clicked
     }
 
-    /// Outcome of an AppleScript menu-item probe/click.
+    private static func clickTopLevelMenuItemViaAXMenuClick(
+        candidates: [(bar: String, item: String)],
+        runtime: AXLogicProElements.Runtime,
+        maxEnabledRetries: Int,
+        focusBetweenAttempts: Bool
+    ) async -> (itemFound: Bool, clicked: Bool, enabledRetries: Int) {
+        var itemFound = false
+        for attempt in 0..<maxEnabledRetries {
+            _ = ProcessUtils.Runtime.production.activateLogicPro()
+            for candidate in candidates {
+                guard let barItem = menuBarItem(titled: candidate.bar, runtime: runtime) else {
+                    continue
+                }
+
+                if !openMenuBarItem(barItem, runtime: runtime.ax) {
+                    continue
+                }
+                try? await Task.sleep(for: .milliseconds(120))
+
+                guard let item = menuItem(titled: candidate.item, under: barItem, runtime: runtime.ax) else {
+                    AXMouseHelper.pressEscape()
+                    continue
+                }
+                itemFound = true
+
+                if let enabled: Bool = AXHelpers.getAttribute(item, kAXEnabledAttribute, runtime: runtime.ax),
+                   enabled == false {
+                    AXMouseHelper.pressEscape()
+                    continue
+                }
+
+                if clickElementCenter(item, runtime: runtime.ax) {
+                    return (true, true, attempt)
+                }
+                AXMouseHelper.pressEscape()
+            }
+
+            if focusBetweenAttempts {
+                _ = forceMixerWindowFront()
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return (itemFound, false, maxEnabledRetries)
+    }
+
+    private static func menuBarItem(
+        titled title: String,
+        runtime: AXLogicProElements.Runtime
+    ) -> AXUIElement? {
+        guard let menuBar = AXLogicProElements.getMenuBar(runtime: runtime) else { return nil }
+        return AXHelpers.getChildren(menuBar, runtime: runtime.ax).first {
+            AXHelpers.getTitle($0, runtime: runtime.ax) == title
+        }
+    }
+
+    private static func openMenuBarItem(
+        _ item: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        if clickElementCenter(item, runtime: runtime) {
+            return true
+        }
+        return AXHelpers.performAction(item, kAXPressAction as String, runtime: runtime)
+    }
+
+    private static func menuItem(
+        titled title: String,
+        under menuBarItem: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> AXUIElement? {
+        if let direct = AXHelpers.findDescendant(
+            of: menuBarItem,
+            role: kAXMenuItemRole as String,
+            title: title,
+            maxDepth: 5,
+            runtime: runtime
+        ) {
+            return direct
+        }
+        return AXHelpers.findAllDescendants(
+            of: menuBarItem,
+            role: kAXMenuItemRole as String,
+            maxDepth: 5,
+            runtime: runtime
+        ).first { item in
+            AXHelpers.getTitle(item, runtime: runtime) == title
+                || AXHelpers.getDescription(item, runtime: runtime) == title
+        }
+    }
+
+    private static func menuItem(
+        titleStartingWith prefix: String,
+        under menuBarItem: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> AXUIElement? {
+        AXHelpers.findAllDescendants(
+            of: menuBarItem,
+            role: kAXMenuItemRole as String,
+            maxDepth: 5,
+            runtime: runtime
+        ).first { item in
+            (AXHelpers.getTitle(item, runtime: runtime) ?? "").hasPrefix(prefix)
+                || (AXHelpers.getDescription(item, runtime: runtime) ?? "").hasPrefix(prefix)
+        }
+    }
+
+    /// Outcome of a menu-item probe/click.
     private enum MenuItemScriptResult: String {
         case ok
         case disabled
         case missing
     }
 
-    private enum MenuItemScriptAction {
-        case checkEnabled
-        case click
-    }
-
-    /// Run an AppleScript that targets a single `menu item <item> of menu 1 of
-    /// menu bar item <bar> of menu bar 1` of the Logic Pro process and either
-    /// checks `enabled` or clicks it. Activates Logic first so the menu bar is
-    /// live. Reuses `AppleScriptChannel.executeAppleScript` (in-process
-    /// NSAppleScript with TCC inheritance + osascript fallback, no FD leak).
-    private static func runMenuItemAppleScript(
-        bar: String, item: String, action: MenuItemScriptAction
+    private static func clickEditUndoViaAXMenuClick(
+        runtime: AXLogicProElements.Runtime = .production
     ) async -> MenuItemScriptResult {
-        let barLit = appleScriptStringLiteral(bar)
-        let itemLit = appleScriptStringLiteral(item)
-        let body: String
-        switch action {
-        case .checkEnabled:
-            body = """
-                    set mi to menu item \(itemLit) of menu 1 of menu bar item \(barLit) of menu bar 1
-                    if enabled of mi then
-                        return "ok"
-                    else
-                        return "disabled"
-                    end if
-            """
-        case .click:
-            body = """
-                    click menu item \(itemLit) of menu 1 of menu bar item \(barLit) of menu bar 1
-                    return "ok"
-            """
-        }
-        let script = """
-        tell application "Logic Pro" to activate
-        delay 0.1
-        tell application "System Events"
-            tell process "Logic Pro"
-                try
-        \(body)
-                on error
-                    return "missing"
-                end try
-            end tell
-        end tell
-        """
-        let result = await AppleScriptChannel.executeAppleScript(script)
-        let text = AppleScriptChannel.appleScriptResultText(from: result)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "missing"
-        return MenuItemScriptResult(rawValue: text) ?? .missing
-    }
-
-    /// Click the FIRST enabled Edit-menu undo item by PREFIX, via AppleScript.
-    /// Logic appends the specific action to the undo label (e.g. "실행 취소
-    /// 채널 스트립의 플러그인 삽입" / "Undo Insert Plug-in on Channel Strip"), so the
-    /// exact-title click is brittle. This matches the localized undo PREFIX
-    /// ("실행 취소" / "Undo"), only clicks it when `enabled`, and reports the
-    /// result — so a disabled (nothing-to-undo) item is honestly `disabled`, not
-    /// a false `ok`. R16 live: the exact-label `undoPluginInsert` reported `ok`
-    /// but did not remove the stray Gain (label mismatch / disabled at click).
-    private static func clickEditUndoViaAppleScript() async -> MenuItemScriptResult {
+        _ = ProcessUtils.Runtime.production.activateLogicPro()
         for bar in ["편집", "Edit"] {
+            guard let barItem = menuBarItem(titled: bar, runtime: runtime) else {
+                continue
+            }
             for prefix in ["실행 취소", "Undo"] {
-                let barLit = appleScriptStringLiteral(bar)
-                let prefixLit = appleScriptStringLiteral(prefix)
-                let script = """
-                tell application "Logic Pro" to activate
-                delay 0.1
-                tell application "System Events"
-                    tell process "Logic Pro"
-                        try
-                            set undoItems to (every menu item of menu 1 of menu bar item \(barLit) of menu bar 1 whose name starts with \(prefixLit))
-                            if (count of undoItems) is 0 then return "missing"
-                            set mi to item 1 of undoItems
-                            if not (enabled of mi) then return "disabled"
-                            click mi
-                            return "ok"
-                        on error
-                            return "missing"
-                        end try
-                    end tell
-                end tell
-                """
-                let result = await AppleScriptChannel.executeAppleScript(script)
-                let text = AppleScriptChannel.appleScriptResultText(from: result)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "missing"
-                switch MenuItemScriptResult(rawValue: text) ?? .missing {
-                case .ok: return .ok
-                case .disabled: return .disabled   // nothing to undo under this locale
-                case .missing: continue            // wrong locale — try next
+                if !openMenuBarItem(barItem, runtime: runtime.ax) {
+                    continue
                 }
+                try? await Task.sleep(for: .milliseconds(120))
+                guard let item = menuItem(
+                    titleStartingWith: prefix, under: barItem, runtime: runtime.ax
+                ) else {
+                    AXMouseHelper.pressEscape()
+                    continue
+                }
+                if let enabled: Bool = AXHelpers.getAttribute(
+                    item, kAXEnabledAttribute, runtime: runtime.ax
+                ), enabled == false {
+                    AXMouseHelper.pressEscape()
+                    return .disabled
+                }
+                if clickElementCenter(item, runtime: runtime.ax) {
+                    return .ok
+                }
+                AXMouseHelper.pressEscape()
             }
         }
         return .missing
+    }
+
+    private static func postCommandZToLogic() -> Bool {
+        guard let pid = ProcessUtils.logicProPID() else { return false }
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let down = CGEvent(keyboardEventSource: source, virtualKey: 0x06, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: 0x06, keyDown: false)
+        else { return false }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.postToPid(pid)
+        up.postToPid(pid)
+        return true
     }
 
     /// Force the mixer-bearing window to the AX front (`AXMain` + `AXFocused`
@@ -1459,245 +1434,384 @@ extension AccessibilityChannel {
         return raiseMixerWindow(runtime: .production)
     }
 
-    /// AppleScript double-quoted string literal with full escaping (backslash,
-    /// quote, and newline/CR → `\n`/`\r`).
-    ///
-    /// SCOPE / SAFETY: every caller passes a CONTROLLED STATIC menu string (the
-    /// locale-keyed menu-bar/item labels declared as `let` constants above) —
-    /// never runtime-variable data. Runtime values (the plugin name / search
-    /// query) are injected through AX (`AXValue` set) or CGEvent keystrokes, NOT
-    /// AppleScript string interpolation, so untrusted input never reaches a
-    /// generated script. The `\`/`"` escaping is the load-bearing defense for the
-    /// static labels; newline/CR escaping is added defensively so a future caller
-    /// passing a multi-line string cannot break out of the literal. If a
-    /// runtime-VARIABLE string is ever passed in, prefer AX/CGEvent injection over
-    /// AppleScript interpolation regardless.
-    private static func appleScriptStringLiteral(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-        return "\"\(escaped)\""
-    }
-
-    /// Locate the Search-and-Add search `AXTextField`. R12 live structure: the
-    /// field is NOT a window-direct child — it sits inside an `AXGroup`
-    /// (`AXGroup{AXImage, AXTextField, AXButton, AXScrollArea > AXOutline}`) and
-    /// is the systemwide focused element right after the menu press.
-    ///
-    /// Priority:
-    ///   1. `kAXFocusedUIElementAttribute` on the app — if it is an `AXTextField`,
-    ///      that IS the search field (a `keystroke` already lands in it live);
-    ///   2. fall back to a RECURSIVE descendant search of the matched dialog
-    ///      window (a window-direct-only scan would miss the nested field).
-    /// Returns the field and which path found it (for `select_trace`).
-    private static func locateSearchField(
+    private static func liveInsertSlot(
+        track: Int,
+        insert: Int,
         runtime: AXLogicProElements.Runtime
-    ) -> (field: AXUIElement?, via: String) {
-        if let app = AXLogicProElements.appRoot(runtime: runtime),
-           let focused: AXUIElement = AXHelpers.getAttribute(
-               app, kAXFocusedUIElementAttribute as String, runtime: runtime.ax
-           ),
-           (AXHelpers.getRole(focused, runtime: runtime.ax) ?? "") == (kAXTextFieldRole as String) {
-            return (focused, "focused_element")
-        }
-        if let dialog = searchAndAddDialog(runtime: runtime),
-           let field = AXHelpers.findDescendant(
-               of: dialog, role: kAXTextFieldRole as String, maxDepth: 8, runtime: runtime.ax
-           ) {
-            return (field, "dialog_recursive")
-        }
-        return (nil, "not_found")
+    ) -> AXLogicProElements.PluginInsertSlot? {
+        guard let mixer = AXLogicProElements.getMixerArea(runtime: runtime) else { return nil }
+        let strips = AXLogicProElements.mixerChannelStrips(in: mixer, runtime: runtime.ax)
+        guard track >= 0, track < strips.count else { return nil }
+        let slots = AXLogicProElements.audioPluginInsertSlots(in: strips[track], runtime: runtime.ax)
+        guard insert >= 0, insert < slots.count else { return nil }
+        return slots[insert]
     }
 
-    /// From the search field, walk up to the nearest ancestor `AXGroup` that also
-    /// contains the results `AXScrollArea > AXOutline` (the live shape: field and
-    /// results are siblings under one group). Returns that container, or nil when
-    /// no ancestor holds an outline. Bounded ancestor walk (the parent chain is
-    /// shallow: field → group → window).
-    private static func searchResultsContainer(
-        forField field: AXUIElement, runtime: AXHelpers.Runtime
-    ) -> AXUIElement? {
-        var current: AXUIElement? = field
-        var depth = 0
-        while let node = current, depth < 6 {
-            if AXHelpers.findDescendant(
-                of: node, role: kAXOutlineRole as String, maxDepth: 6, runtime: runtime
-            ) != nil {
-                return node
+    private static func pollSlotPopupMenu(
+        runtime: AXLogicProElements.Runtime,
+        timeoutMs: Int
+    ) async -> AXUIElement? {
+        let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+        repeat {
+            if let menu = slotPopupMenu(runtime: runtime) {
+                return menu
             }
-            current = AXHelpers.getAttribute(node, kAXParentAttribute as String, runtime: runtime)
-            depth += 1
-        }
+            try? await Task.sleep(for: .milliseconds(80))
+        } while Date() < deadline
         return nil
     }
 
-    /// Locate the Search-and-Add search dialog: a window whose subtree exposes a
-    /// text field next to a results outline (the R12-observed shape
-    /// `AXGroup{AXImage, AXTextField, AXButton, AXScrollArea > AXOutline}`).
-    private static func searchAndAddDialog(runtime: AXLogicProElements.Runtime) -> AXUIElement? {
+    private static func slotPopupMenu(runtime: AXLogicProElements.Runtime) -> AXUIElement? {
         guard let app = AXLogicProElements.appRoot(runtime: runtime) else { return nil }
-        let windows: [AXUIElement] = AXHelpers.getAttribute(
-            app, kAXWindowsAttribute as String, runtime: runtime.ax
-        ) ?? []
-        for window in windows {
-            let hasField = AXHelpers.findDescendant(
-                of: window, role: kAXTextFieldRole as String, maxDepth: 6, runtime: runtime.ax
-            ) != nil
-            let hasOutline = AXHelpers.findDescendant(
-                of: window, role: kAXOutlineRole as String, maxDepth: 6, runtime: runtime.ax
-            ) != nil
-            if hasField && hasOutline { return window }
+        let menus = AXHelpers.findAllDescendants(
+            of: app, role: kAXMenuRole as String, maxDepth: 9, runtime: runtime.ax
+        )
+        return menus.first(where: { menu in
+            isVisibleMenu(menu, runtime: runtime.ax)
+                && AXHelpers.findDescendant(
+                    of: menu, role: kAXTextFieldRole as String, maxDepth: 3, runtime: runtime.ax
+                ) != nil
+                && AXHelpers.getChildren(menu, runtime: runtime.ax).contains(where: {
+                    (AXHelpers.getRole($0, runtime: runtime.ax) ?? "") == (kAXMenuItemRole as String)
+                })
+        })
+    }
+
+    private static func isVisibleMenu(_ menu: AXUIElement, runtime: AXHelpers.Runtime) -> Bool {
+        guard let pos = AXHelpers.getPosition(menu, runtime: runtime),
+              let size = AXHelpers.getSize(menu, runtime: runtime) else {
+            return false
         }
+        return pos.x > 0 && pos.y > 0 && size.width > 20 && size.height > 20
+    }
+
+    static func slotPopupMenuIsAnchored(
+        _ menu: AXUIElement,
+        toSlot slot: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        guard let menuPos = AXHelpers.getPosition(menu, runtime: runtime),
+              let menuSize = AXHelpers.getSize(menu, runtime: runtime),
+              let slotPos = AXHelpers.getPosition(slot, runtime: runtime),
+              let slotSize = AXHelpers.getSize(slot, runtime: runtime),
+              menuSize.width > 20,
+              menuSize.height > 20,
+              slotSize.width > 1,
+              slotSize.height > 1 else {
+            return false
+        }
+
+        let slotCenter = CGPoint(x: slotPos.x + slotSize.width / 2, y: slotPos.y + slotSize.height / 2)
+        let verticalBand = (menuPos.y - 96)...(menuPos.y + menuSize.height + 96)
+        let horizontalBand = (slotPos.x - 140)...(slotPos.x + slotSize.width + 360)
+        return verticalBand.contains(slotCenter.y) && horizontalBand.contains(menuPos.x)
+    }
+
+    static func popupExactLeafPaths(
+        displayName: String,
+        rootMenu: AXUIElement,
+        runtime: AXHelpers.Runtime,
+        maxDepth: Int = 6
+    ) -> [[String]] {
+        popupExactLeafPaths(
+            displayName: displayName,
+            menu: rootMenu,
+            prefix: [],
+            runtime: runtime,
+            maxDepth: maxDepth
+        )
+    }
+
+    static func preferredPopupExactLeafPath(
+        displayName: String,
+        rootMenu: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> [String]? {
+        if let direct = directExactPopupMenuItem(displayName: displayName, in: rootMenu, runtime: runtime),
+           let label = popupMenuItemLabel(direct, runtime: runtime) {
+            return [label]
+        }
+        return popupExactLeafPaths(displayName: displayName, rootMenu: rootMenu, runtime: runtime).first
+    }
+
+    private struct SlotPopupPluginClick: Sendable {
+        let strategy: String
+        let path: [String]
+        let strategies: [String]
+    }
+
+    private static func clickPluginInAnchoredSlotPopup(
+        pluginID: String,
+        displayName: String,
+        rootMenu: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) async -> SlotPopupPluginClick? {
+        var strategies: [String] = []
+
+        strategies.append("slot_popup_direct_exact_leaf")
+        if let item = directExactPopupMenuItem(displayName: displayName, in: rootMenu, runtime: runtime),
+           let label = popupMenuItemLabel(item, runtime: runtime),
+           await clickPopupPluginLeaf(item, runtime: runtime) {
+            return SlotPopupPluginClick(
+                strategy: "slot_popup_direct_exact_leaf",
+                path: [label],
+                strategies: strategies
+            )
+        }
+
+        strategies.append("slot_popup_search_exact_leaf")
+        if await filterSlotPopupSearchField(displayName: displayName, rootMenu: rootMenu, runtime: runtime),
+           let item = directExactPopupMenuItem(displayName: displayName, in: rootMenu, runtime: runtime),
+           let label = popupMenuItemLabel(item, runtime: runtime),
+           await clickPopupPluginLeaf(item, runtime: runtime) {
+            return SlotPopupPluginClick(
+                strategy: "slot_popup_search_exact_leaf",
+                path: [label],
+                strategies: strategies
+            )
+        }
+
+        strategies.append("slot_popup_recursive_exact_leaf")
+        if let result = await clickPopupExactLeafRecursively(
+            displayName: displayName,
+            menu: rootMenu,
+            path: [],
+            runtime: runtime,
+            maxDepth: 5
+        ) {
+            return SlotPopupPluginClick(
+                strategy: "slot_popup_recursive_exact_leaf",
+                path: result,
+                strategies: strategies
+            )
+        }
+
+        _ = pluginID // kept in the trace by the caller; selection is by exact display leaf.
         return nil
     }
 
-    /// Set the search field text: prefer a direct `AXValue` write, fall back to
-    /// focus + Unicode keystroke (the field is a standard NSTextField, so the
-    /// AXValue write usually lands).
-    private static func typeSearchQuery(
-        _ query: String, into field: AXUIElement, runtime: AXHelpers.Runtime
-    ) -> Bool {
-        if AXHelpers.setAttribute(field, kAXValueAttribute as String, query as CFTypeRef, runtime: runtime) {
-            let readBack: String? = AXHelpers.getAttribute(field, kAXValueAttribute as String, runtime: runtime)
-            if readBack == query { return true }
+    private static func filterSlotPopupSearchField(
+        displayName: String,
+        rootMenu: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) async -> Bool {
+        guard let field = AXHelpers.findDescendant(
+            of: rootMenu, role: kAXTextFieldRole as String, maxDepth: 4, runtime: runtime
+        ) else {
+            return false
         }
         _ = AXHelpers.setAttribute(field, kAXFocusedAttribute as String, true as CFTypeRef, runtime: runtime)
-        AXMouseHelper.typeText(query)
+        _ = AXHelpers.setAttribute(field, kAXValueAttribute as String, "" as CFTypeRef, runtime: runtime)
+        guard AXHelpers.setAttribute(
+            field, kAXValueAttribute as String, displayName as CFTypeRef, runtime: runtime
+        ) else {
+            return false
+        }
+        let deadline = Date().addingTimeInterval(0.9)
+        repeat {
+            if directExactPopupMenuItem(displayName: displayName, in: rootMenu, runtime: runtime) != nil {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(90))
+        } while Date() < deadline
+        return false
+    }
+
+    private static func clickPopupExactLeafRecursively(
+        displayName: String,
+        menu: AXUIElement,
+        path: [String],
+        runtime: AXHelpers.Runtime,
+        maxDepth: Int
+    ) async -> [String]? {
+        guard maxDepth >= 0 else { return nil }
+
+        if let direct = directExactPopupMenuItem(displayName: displayName, in: menu, runtime: runtime),
+           let label = popupMenuItemLabel(direct, runtime: runtime),
+           await clickPopupPluginLeaf(direct, runtime: runtime) {
+            return path + [label]
+        }
+
+        let items = popupMenuItems(in: menu, runtime: runtime)
+        for item in items {
+            guard let label = popupMenuItemLabel(item, runtime: runtime),
+                  !popupMenuItemMatches(item, displayName: displayName, runtime: runtime),
+                  menuItemEnabled(item, runtime: runtime),
+                  moveElementCenter(item, runtime: runtime) else {
+                continue
+            }
+            try? await Task.sleep(for: .milliseconds(140))
+            guard let submenu = visibleSubmenu(of: item, runtime: runtime) else {
+                continue
+            }
+            if let found = await clickPopupExactLeafRecursively(
+                displayName: displayName,
+                menu: submenu,
+                path: path + [label],
+                runtime: runtime,
+                maxDepth: maxDepth - 1
+            ) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    private static func clickPopupPluginLeaf(
+        _ item: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) async -> Bool {
+        guard moveElementCenter(item, runtime: runtime) else { return false }
+        try? await Task.sleep(for: .milliseconds(120))
+        if let submenu = visibleSubmenu(of: item, runtime: runtime),
+           let leaf = preferredFormatLeaf(in: submenu, runtime: runtime) {
+            return clickElementCenter(leaf, runtime: runtime)
+        }
+        return clickElementCenter(item, runtime: runtime)
+    }
+
+    private static func popupExactLeafPaths(
+        displayName: String,
+        menu: AXUIElement,
+        prefix: [String],
+        runtime: AXHelpers.Runtime,
+        maxDepth: Int
+    ) -> [[String]] {
+        guard maxDepth >= 0 else { return [] }
+        var paths: [[String]] = []
+        for item in popupMenuItems(in: menu, runtime: runtime) {
+            guard let label = popupMenuItemLabel(item, runtime: runtime) else { continue }
+            let next = prefix + [label]
+            if popupMenuItemMatches(item, displayName: displayName, runtime: runtime) {
+                paths.append(next)
+            }
+            for submenu in AXHelpers.getChildren(item, runtime: runtime)
+                where (AXHelpers.getRole(submenu, runtime: runtime) ?? "") == (kAXMenuRole as String) {
+                paths.append(contentsOf: popupExactLeafPaths(
+                    displayName: displayName,
+                    menu: submenu,
+                    prefix: next,
+                    runtime: runtime,
+                    maxDepth: maxDepth - 1
+                ))
+            }
+        }
+        return paths
+    }
+
+    private static func directExactPopupMenuItem(
+        displayName: String,
+        in menu: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> AXUIElement? {
+        popupMenuItems(in: menu, runtime: runtime).first {
+            popupMenuItemMatches($0, displayName: displayName, runtime: runtime)
+                && menuItemEnabled($0, runtime: runtime)
+        }
+    }
+
+    private static func popupMenuItems(
+        in menu: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> [AXUIElement] {
+        AXHelpers.getChildren(menu, runtime: runtime).filter {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXMenuItemRole as String)
+        }
+    }
+
+    private static func popupMenuItemMatches(
+        _ item: AXUIElement,
+        displayName: String,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        guard let label = popupMenuItemLabel(item, runtime: runtime) else { return false }
+        return label.caseInsensitiveCompare(displayName) == .orderedSame
+    }
+
+    private static func popupMenuItemLabel(
+        _ item: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> String? {
+        for text in [
+            AXHelpers.getTitle(item, runtime: runtime),
+            AXHelpers.getDescription(item, runtime: runtime),
+        ] {
+            if let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    private static func menuItemEnabled(
+        _ item: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        let enabled: Bool? = AXHelpers.getAttribute(item, kAXEnabledAttribute as String, runtime: runtime)
+        return enabled ?? true
+    }
+
+    private static func visibleSubmenu(
+        of item: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> AXUIElement? {
+        AXHelpers.getChildren(item, runtime: runtime).first {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXMenuRole as String)
+                && isVisibleMenu($0, runtime: runtime)
+        }
+    }
+
+    private static func preferredFormatLeaf(
+        in submenu: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> AXUIElement? {
+        let items = AXHelpers.getChildren(submenu, runtime: runtime).filter {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXMenuItemRole as String)
+                && elementCenter($0, runtime: runtime) != nil
+        }
+        let preferredTitles = [
+            "스테레오", "Stereo",
+            "모노", "Mono",
+            "모노->스테레오", "Mono->Stereo",
+            "듀얼 모노", "Dual Mono",
+        ]
+        for title in preferredTitles {
+            if let match = items.first(where: {
+                AXHelpers.getTitle($0, runtime: runtime) == title
+                    || AXHelpers.getDescription($0, runtime: runtime) == title
+            }) {
+                return match
+            }
+        }
+        return items.first
+    }
+
+    @discardableResult
+    private static func moveElementCenter(_ element: AXUIElement, runtime: AXHelpers.Runtime) -> Bool {
+        guard let center = elementCenter(element, runtime: runtime) else { return false }
+        let source = CGEventSource(stateID: .combinedSessionState)
+        guard let move = CGEvent(
+            mouseEventSource: source,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: center,
+            mouseButton: .left
+        ) else { return false }
+        move.post(tap: .cghidEventTap)
         return true
     }
 
-    /// Poll the results outline for rows until at least one appears or the
-    /// timeout elapses.
-    private static func pollResultRows(
-        in dialog: AXUIElement, runtime: AXHelpers.Runtime, timeoutMs: Int
-    ) async -> [AXUIElement] {
-        let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
-        repeat {
-            if let outline = AXHelpers.findDescendant(
-                of: dialog, role: kAXOutlineRole as String, maxDepth: 6, runtime: runtime
-            ) {
-                let rows = AXHelpers.getChildren(outline, runtime: runtime).filter {
-                    (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXRowRole as String)
-                }
-                if !rows.isEmpty { return rows }
-            }
-            try? await Task.sleep(for: .milliseconds(120))
-        } while Date() < deadline
-        return []
-    }
-
-    /// Read a result row's display text (R12: row → AXCell → AXStaticText holds
-    /// the plugin name; some builds expose it as the row's own title/value). Tries
-    /// the cell static text first, then the row title/value, trimmed.
-    private static func resultRowText(_ row: AXUIElement, runtime: AXHelpers.Runtime) -> String? {
-        if let cellText = AXHelpers.findDescendant(
-            of: row, role: kAXStaticTextRole as String, maxDepth: 4, runtime: runtime
-        ) {
-            if let v: String = AXHelpers.getAttribute(cellText, kAXValueAttribute as String, runtime: runtime),
-               !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return v.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            if let t = AXHelpers.getTitle(cellText, runtime: runtime),
-               !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return t.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
-        if let t = AXHelpers.getTitle(row, runtime: runtime),
-           !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return t.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let v: String = AXHelpers.getAttribute(row, kAXValueAttribute as String, runtime: runtime),
-           !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return v.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return nil
-    }
-
-    /// Whether a result row's text is an EXACT, case-insensitive match for the
-    /// expected plugin display name (P2-4). Exact (not substring) so "Compressor"
-    /// does not match "Squash Compressor" / "AUMultibandCompressor" / "Multipressor".
-    private static func resultRowMatchesExpected(
-        _ row: AXUIElement, expectedName: String, runtime: AXHelpers.Runtime
-    ) -> Bool {
-        guard let text = resultRowText(row, runtime: runtime) else { return false }
-        return text.caseInsensitiveCompare(expectedName) == .orderedSame
-    }
-
-    /// One result-selection strategy: a named UI action that attempts to commit
-    /// the first result into the first empty insert slot.
-    private struct ResultSelectionStrategy: Sendable {
-        let name: String
-        let run: @Sendable (_ dialog: AXUIElement, _ firstRow: AXUIElement, _ runtime: AXHelpers.Runtime) -> Void
-    }
-
-    /// Result-selection strategies in priority order. R17 multi-plugin live:
-    /// **Return only** (no Down) is the correct trigger — after typing, the search
-    /// dialog already AUTO-HIGHLIGHTS the first result (the exact-name match), so a
-    /// bare Return commits it. An extra Down moves selection to the SECOND row,
-    /// which for a multi-result query mounts the wrong variant (e.g. "Compressor"
-    /// search → Compressor / Squash Compressor / … ; Down+Return picked Squash).
-    /// Verified live: Compressor (4 results), Channel EQ (1), Gain (1) all mount
-    /// the exact match with Return only. The CGEvent double-click / add-button
-    /// strategies failed live (coordinate-system / titleless-button issues) but are
-    /// kept as fallbacks. The readback gate (`newlyMountedSlot` matches the exact
-    /// `plugin_id`) is the safety net: a wrong variant fails closed as
-    /// `post_insert_plugin_mismatch` + rollback, never a false State A.
-    private static let resultSelectionStrategies: [ResultSelectionStrategy] = [
-        ResultSelectionStrategy(name: "return_only") { _, _, _ in
-            AXMouseHelper.pressReturn()
-        },
-        ResultSelectionStrategy(name: "row_double_click") { _, firstRow, runtime in
-            doubleClickElementCenter(firstRow, runtime: runtime)
-        },
-        ResultSelectionStrategy(name: "add_button_press") { dialog, _, runtime in
-            if let button = addButton(in: dialog, runtime: runtime) {
-                _ = AXHelpers.performAction(button, kAXPressAction as String, runtime: runtime)
-            }
-        },
-        ResultSelectionStrategy(name: "row_click_then_add_button") { dialog, firstRow, runtime in
-            clickElementCenter(firstRow, runtime: runtime)
-            if let button = addButton(in: dialog, runtime: runtime) {
-                _ = AXHelpers.performAction(button, kAXPressAction as String, runtime: runtime)
-            }
-        },
-    ]
-
-    /// The dialog's add button: the AXButton with a press action and no title
-    /// (R12 — the '추가'/Add button surfaces no title). Prefers a button that is
-    /// NOT inside the results outline so we don't press a disclosure triangle.
-    private static func addButton(in dialog: AXUIElement, runtime: AXHelpers.Runtime) -> AXUIElement? {
-        let buttons = AXHelpers.findAllDescendants(
-            of: dialog, role: kAXButtonRole as String, maxDepth: 6, runtime: runtime
-        )
-        // A titled button is more likely the intended add/commit control; else
-        // fall back to the first untitled button.
-        if let titled = buttons.first(where: {
-            let t = AXHelpers.getTitle($0, runtime: runtime)
-            return t != nil && !(t!.isEmpty)
-        }) {
-            return titled
-        }
-        return buttons.first
-    }
-
-    /// Post a native CGEvent double-click at the screen centre of an AX element
-    /// (uses its real `AXPosition`/`AXSize`; the results row exposes a normal
-    /// frame, unlike the insert-popup leaf).
-    private static func doubleClickElementCenter(_ element: AXUIElement, runtime: AXHelpers.Runtime) {
-        guard let center = elementCenter(element, runtime: runtime) else { return }
-        AXMouseHelper.doubleClick(at: center)
-    }
-
-    private static func clickElementCenter(_ element: AXUIElement, runtime: AXHelpers.Runtime) {
-        guard let center = elementCenter(element, runtime: runtime) else { return }
+    @discardableResult
+    private static func clickElementCenter(_ element: AXUIElement, runtime: AXHelpers.Runtime) -> Bool {
+        guard let center = elementCenter(element, runtime: runtime) else { return false }
         let source = CGEventSource(stateID: .combinedSessionState)
         if let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: center, mouseButton: .left),
            let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: center, mouseButton: .left) {
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)
+            return true
         }
+        return false
     }
 
     /// Screen centre of an element, or nil when its frame is degenerate (the
@@ -1712,7 +1826,7 @@ extension AccessibilityChannel {
 
     /// One readable, occupied insert slot observed during a strip inventory pass:
     /// physical slot index → (canonical plugin id, display name).
-    private struct InventoryEntry: Sendable {
+    struct InventoryEntry: Sendable {
         let pluginID: String?
         let name: String?
     }
@@ -1721,16 +1835,19 @@ extension AccessibilityChannel {
     /// index → observed (plugin id, name). Reuses the drift-safe enumerator and
     /// the same observed-name → canonical-id mapping as `get_inventory`, so the
     /// readback diff is identical to the inventory view. Returns nil when the
-    /// mixer/strip subtree is unreadable. Only readable-occupied slots are keyed;
-    /// empty and occupied-unreadable slots are omitted (a diff cares only about a
-    /// newly-readable plugin appearing).
-    private static func fullStripInventory(
+    /// mixer/strip subtree is unreadable OR when any occupied slot is unreadable:
+    /// diff-based verification must never treat "previously unreadable" as
+    /// "newly mounted".
+    static func fullStripInventory(
         track: Int, runtime: AXLogicProElements.Runtime
     ) -> [Int: InventoryEntry]? {
         guard let mixer = AXLogicProElements.getMixerArea(runtime: runtime) else { return nil }
         let strips = AXLogicProElements.mixerChannelStrips(in: mixer, runtime: runtime.ax)
         guard track < strips.count else { return nil }
         let slots = AXLogicProElements.audioPluginInsertSlots(in: strips[track], runtime: runtime.ax)
+        guard !slots.contains(where: { $0.readStatus == .occupiedUnreadable }) else {
+            return nil
+        }
         var result: [Int: InventoryEntry] = [:]
         for slot in slots where slot.readStatus == .occupiedReadable {
             let name = slot.name
@@ -1831,40 +1948,48 @@ extension AccessibilityChannel {
 
     /// Close a leftover "위치로 이동" / "Go to Position" floating dialog (a prior
     /// AX side effect) so it cannot steal focus / keep the Mix menu disabled.
-    /// Best-effort via AppleScript: click its cancel/close button if present.
-    /// Returns whether a dialog was found and dismissed.
+    /// Best-effort via AX + CGEvent only: click Cancel/close if present, otherwise
+    /// Escape. Returns whether a matching dialog was found.
     @discardableResult
-    private static func closeGoToPositionDialog() async -> Bool {
-        let script = """
-        tell application "System Events"
-            tell process "Logic Pro"
-                set didClose to false
-                repeat with w in (every window whose name contains "위치" or name contains "Go to Position")
-                    try
-                        set didClose to true
-                        if (exists button "취소" of w) then
-                            click button "취소" of w
-                        else if (exists button "Cancel" of w) then
-                            click button "Cancel" of w
-                        else
-                            try
-                                click (first button of w whose subrole is "AXCloseButton")
-                            end try
-                        end if
-                    end try
-                end repeat
-                if didClose then
-                    return "ok"
-                else
-                    return "missing"
-                end if
-            end tell
-        end tell
-        """
-        let result = await AppleScriptChannel.executeAppleScript(script)
-        let text = AppleScriptChannel.appleScriptResultText(from: result)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "missing"
-        return text == "ok"
+    private static func closeGoToPositionDialog(runtime: AXLogicProElements.Runtime) -> Bool {
+        guard let app = AXLogicProElements.appRoot(runtime: runtime) else { return false }
+        let windows: [AXUIElement] = AXHelpers.getAttribute(
+            app, kAXWindowsAttribute as String, runtime: runtime.ax
+        ) ?? []
+        var found = false
+        for window in windows {
+            let title = AXHelpers.getTitle(window, runtime: runtime.ax) ?? ""
+            guard title.contains("위치") || title.localizedCaseInsensitiveContains("Go to Position") else {
+                continue
+            }
+            found = true
+            if let cancel = AXHelpers.findDescendant(
+                of: window, role: kAXButtonRole as String, title: "취소",
+                maxDepth: 4, runtime: runtime.ax
+            ) ?? AXHelpers.findDescendant(
+                of: window, role: kAXButtonRole as String, title: "Cancel",
+                maxDepth: 4, runtime: runtime.ax
+            ) {
+                if AXHelpers.performAction(cancel, kAXPressAction as String, runtime: runtime.ax)
+                    || clickElementCenter(cancel, runtime: runtime.ax) {
+                    continue
+                }
+            }
+            if let close = AXHelpers.findAllDescendants(
+                of: window, role: kAXButtonRole as String, maxDepth: 4, runtime: runtime.ax
+            ).first(where: {
+                let subrole: String? = AXHelpers.getAttribute(
+                    $0, kAXSubroleAttribute as String, runtime: runtime.ax
+                )
+                return subrole == kAXCloseButtonSubrole as String
+            }) {
+                _ = AXHelpers.performAction(close, kAXPressAction as String, runtime: runtime.ax)
+                    || clickElementCenter(close, runtime: runtime.ax)
+            } else {
+                AXMouseHelper.pressEscape()
+            }
+        }
+        return found
     }
 
     /// Honest outcome of a verified rollback attempt.
@@ -1880,8 +2005,15 @@ extension AccessibilityChannel {
     /// then click the Edit-menu undo item by localized prefix. Returns the click
     /// result's raw string ("ok"/"disabled"/"missing").
     static let liveUndoClick: @Sendable () async -> String = {
-        _ = await hideAllPluginWindows()
-        return await clickEditUndoViaAppleScript().rawValue
+        _ = await hideAllPluginWindows(runtime: .production)
+        let menuResult = await clickEditUndoViaAXMenuClick()
+        if menuResult == .ok || menuResult == .disabled {
+            return menuResult.rawValue
+        }
+        if postCommandZToLogic() {
+            return "ok"
+        }
+        return menuResult.rawValue
     }
 
     /// Removal-confirmation tristate for a readback snapshot: true (verified
@@ -1918,9 +2050,9 @@ extension AccessibilityChannel {
     /// next Undo only fires when the stray is still DEFINITIVELY present.
     ///
     /// `undoClick` is the injectable per-attempt undo action (hide plug-in windows
-    /// + click Edit-menu undo), returning "ok"/"disabled"/"missing". Production
-    /// wires the live AppleScript; tests inject a canned result so the honesty-
-    /// critical removal-confirmation is exercised hermetically.
+    /// + send Undo), returning "ok"/"disabled"/"missing". Production wires the
+    /// live AX/CGEvent path; tests inject a canned result so the honesty-critical
+    /// removal-confirmation is exercised hermetically.
     static func verifiedUndoPluginInsert(
         track: Int,
         strayPluginID: String?,

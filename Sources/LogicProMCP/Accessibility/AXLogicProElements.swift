@@ -718,8 +718,9 @@ enum AXLogicProElements {
         runtime: AXHelpers.Runtime = .production
     ) -> [PluginInsertSlot] {
         var slots: [PluginInsertSlot] = []
-        for child in AXHelpers.getChildren(strip, runtime: runtime) {
-            if isEmptyAudioPluginSlot(child, runtime: runtime) {
+        let children = AXHelpers.getChildren(strip, runtime: runtime)
+        for (offset, child) in children.enumerated() {
+            if isEmptyAudioPluginSlot(child, siblings: children, offset: offset, runtime: runtime) {
                 slots.append(PluginInsertSlot(
                     index: slots.count,
                     element: child,
@@ -782,7 +783,15 @@ enum AXLogicProElements {
                 || text.contains("list")
                 || text.contains("목록")
         }
-        return hasBypass && hasOpenOrMenu
+        if hasBypass && hasOpenOrMenu {
+            return true
+        }
+        // Locale-neutral fallback: Logic's occupied insert row is a short group
+        // containing one bypass checkbox plus two action buttons (open + list).
+        // This avoids depending on localized child descriptions such as
+        // "바이패스"/"열기"/"목록"; the automation row has only one button and
+        // is therefore not promoted.
+        return isLanguageNeutralOccupiedPluginSlotElement(element, runtime: runtime)
     }
 
     /// Extract a usable plugin display name from an occupied slot group, or nil
@@ -823,9 +832,20 @@ enum AXLogicProElements {
 
     private static func isEmptyAudioPluginSlot(
         _ element: AXUIElement,
+        siblings: [AXUIElement],
+        offset: Int,
         runtime: AXHelpers.Runtime
     ) -> Bool {
         guard (AXHelpers.getRole(element, runtime: runtime) ?? "") == (kAXButtonRole as String) else {
+            return false
+        }
+        // Logic Pro 12.2 exposes a short (~9 px) "Audio Plug-in" button at the
+        // bottom of some strips. Live E2E showed that it is an add/append affordance
+        // rather than an addressable insert row: clicking it mounts into a different
+        // real slot. When AXSize is available, exclude these short stubs so
+        // `insert:N` only names rows that can actually be targeted.
+        if let size = AXHelpers.getSize(element, runtime: runtime),
+           size.height > 0, size.height < 12 {
             return false
         }
         let text = elementSearchText(element, runtime: runtime)
@@ -839,7 +859,12 @@ enum AXLogicProElements {
             || text.contains("output")
             || text.contains("입력")
             || text.contains("출력")
-        return isAudioSlot && !isSendOrIO
+        if isAudioSlot && !isSendOrIO {
+            return true
+        }
+        return isLanguageNeutralEmptyAudioPluginSlot(
+            element, siblings: siblings, offset: offset, runtime: runtime
+        )
     }
 
     private static func pluginSlotBypassState(
@@ -850,10 +875,137 @@ enum AXLogicProElements {
         guard let bypass = children.first(where: { child in
             let text = elementSearchText(child, runtime: runtime)
             return text.contains("bypass") || text.contains("바이패스")
+        }) ?? children.first(where: { child in
+            (AXHelpers.getRole(child, runtime: runtime) ?? "") == (kAXCheckBoxRole as String)
         }) else {
             return nil
         }
         return AXValueExtractors.extractButtonState(bypass, runtime: runtime)
+    }
+
+    private static func isLanguageNeutralOccupiedPluginSlotElement(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        guard pluginSlotFrame(element, runtime: runtime) != nil else { return false }
+        let children = AXHelpers.getChildren(element, runtime: runtime)
+        let hasCheckbox = children.contains {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXCheckBoxRole as String)
+        }
+        let buttonCount = children.filter {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXButtonRole as String)
+        }.count
+        return hasCheckbox && buttonCount >= 2
+    }
+
+    private static func isLanguageNeutralEmptyAudioPluginSlot(
+        _ element: AXUIElement,
+        siblings: [AXUIElement],
+        offset: Int,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        guard languageNeutralEmptySlotCandidate(element, runtime: runtime),
+              let frame = pluginSlotFrame(element, runtime: runtime) else {
+            return false
+        }
+
+        var clusterCount = 1
+        var cursor = offset - 1
+        var lastFrame = frame
+        while cursor >= 0,
+              let other = pluginSlotFrame(siblings[cursor], runtime: runtime),
+              languageNeutralEmptySlotCandidate(siblings[cursor], runtime: runtime),
+              pluginSlotFramesAlign(frame, other),
+              pluginSlotFramesAreAdjacent(lastFrame, other) {
+            clusterCount += 1
+            lastFrame = other
+            cursor -= 1
+        }
+        cursor = offset + 1
+        lastFrame = frame
+        while cursor < siblings.count,
+              let other = pluginSlotFrame(siblings[cursor], runtime: runtime),
+              languageNeutralEmptySlotCandidate(siblings[cursor], runtime: runtime),
+              pluginSlotFramesAlign(frame, other),
+              pluginSlotFramesAreAdjacent(lastFrame, other) {
+            clusterCount += 1
+            lastFrame = other
+            cursor += 1
+        }
+        if clusterCount >= 3 {
+            return true
+        }
+
+        for neighborOffset in [offset - 1, offset + 1] where siblings.indices.contains(neighborOffset) {
+            let neighbor = siblings[neighborOffset]
+            guard isLanguageNeutralOccupiedPluginSlotElement(neighbor, runtime: runtime),
+                  let neighborFrame = pluginSlotFrame(neighbor, runtime: runtime),
+                  pluginSlotFramesAlign(frame, neighborFrame),
+                  pluginSlotFramesAreAdjacent(frame, neighborFrame) else {
+                continue
+            }
+            return true
+        }
+        return false
+    }
+
+    private static func languageNeutralEmptySlotCandidate(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        guard (AXHelpers.getRole(element, runtime: runtime) ?? "") == (kAXButtonRole as String),
+              pluginSlotFrame(element, runtime: runtime) != nil else {
+            return false
+        }
+        let subrole: String? = AXHelpers.getAttribute(
+            element, kAXSubroleAttribute as String, runtime: runtime
+        )
+        guard subrole != (kAXSwitchSubrole as String) else { return false }
+        guard AXHelpers.getChildren(element, runtime: runtime).isEmpty else { return false }
+        return !isKnownNonInsertButtonText(elementSearchText(element, runtime: runtime))
+    }
+
+    private static func pluginSlotFrame(
+        _ element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> CGRect? {
+        guard let position = AXHelpers.getPosition(element, runtime: runtime),
+              let size = AXHelpers.getSize(element, runtime: runtime),
+              size.width >= 44,
+              size.height >= 12,
+              size.height <= 24 else {
+            return nil
+        }
+        return CGRect(origin: position, size: size)
+    }
+
+    private static func pluginSlotFramesAlign(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.minX - rhs.minX) <= 3
+            && abs(lhs.width - rhs.width) <= 3
+            && abs(lhs.height - rhs.height) <= 6
+    }
+
+    private static func pluginSlotFramesAreAdjacent(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.minY - rhs.minY) <= max(lhs.height, rhs.height) + 6
+    }
+
+    private static func isKnownNonInsertButtonText(_ text: String) -> Bool {
+        [
+            "send", "센드",
+            "input", "입력",
+            "output", "출력",
+            "group", "그룹",
+            "channel mode", "채널 모드",
+            "eq",
+            "setting", "설정",
+            "gain reduction", "게인 축소",
+            "mute", "음소거",
+            "solo", "record", "녹음",
+            "monitor", "모니터링",
+            "volume", "볼륨",
+            "fader", "페이더",
+            "pan", "패닝", "밸런스",
+        ].contains { text.contains($0) }
     }
 
     private static func elementSearchText(

@@ -40,6 +40,37 @@ private func addFader(_ builder: FakeAXRuntimeBuilder, _ id: Int) -> AXUIElement
     return el
 }
 
+private func axPoint(_ x: CGFloat, _ y: CGFloat) -> AXValue {
+    var point = CGPoint(x: x, y: y)
+    return AXValueCreate(.cgPoint, &point)!
+}
+
+private func axSize(_ width: CGFloat, _ height: CGFloat) -> AXValue {
+    var size = CGSize(width: width, height: height)
+    return AXValueCreate(.cgSize, &size)!
+}
+
+private func addFramedButton(
+    _ builder: FakeAXRuntimeBuilder,
+    _ id: Int,
+    x: CGFloat = 100,
+    y: CGFloat,
+    width: CGFloat = 58,
+    height: CGFloat = 18,
+    description: String? = nil,
+    help: String? = nil,
+    subrole: String? = nil
+) -> AXUIElement {
+    let el = builder.element(id)
+    builder.setAttribute(el, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(el, kAXPositionAttribute as String, axPoint(x, y))
+    builder.setAttribute(el, kAXSizeAttribute as String, axSize(width, height))
+    if let description { builder.setAttribute(el, kAXDescriptionAttribute as String, description) }
+    if let help { builder.setAttribute(el, kAXHelpAttribute as String, help) }
+    if let subrole { builder.setAttribute(el, kAXSubroleAttribute as String, subrole) }
+    return el
+}
+
 // MARK: - AC12: physical index preserved across an unreadable occupied slot
 
 @Test func testInsertSlotsPreservePhysicalIndexAcrossUnreadableOccupied() {
@@ -113,4 +144,35 @@ private func addFader(_ builder: FakeAXRuntimeBuilder, _ id: Int) -> AXUIElement
     #expect(slots.map(\.readStatus) == [.occupiedReadable, .empty, .occupiedUnreadable])
     #expect(slots.map(\.index) == [0, 1, 2])
     #expect(slots[2].isEmpty == false, "an unreadable slot is never treated as the empty slot")
+}
+
+@Test func testLanguageNeutralEmptySlotClusterIsRecognizedByGeometry() {
+    let builder = FakeAXRuntimeBuilder()
+    let strip = builder.element(580)
+    let output = addFramedButton(builder, 581, y: 560, description: "Ausgang")
+    let send = addFramedButton(builder, 582, y: 540, width: 40, description: "Send")
+    let slot0 = addFramedButton(builder, 583, y: 500)
+    let slot1 = addFramedButton(builder, 584, y: 483)
+    let slot2 = addFramedButton(builder, 585, y: 466)
+    let slot3 = addFramedButton(builder, 586, y: 449)
+    let input = addFramedButton(builder, 587, y: 420, description: "Eingang")
+    builder.setChildren(strip, [output, send, slot0, slot1, slot2, slot3, input])
+
+    let slots = AXLogicProElements.audioPluginInsertSlots(in: strip, runtime: builder.makeAXRuntime())
+
+    #expect(slots.count == 4)
+    #expect(slots.map(\.index) == [0, 1, 2, 3])
+    #expect(slots.allSatisfy { $0.isEmpty })
+}
+
+@Test func testLanguageNeutralGeometryDoesNotPromoteSingleButtonOrPhantomStub() {
+    let builder = FakeAXRuntimeBuilder()
+    let strip = builder.element(590)
+    let settings = addFramedButton(builder, 591, y: 500, description: "Einstellungen")
+    let phantom = addFramedButton(builder, 592, y: 470, width: 58, height: 9)
+    builder.setChildren(strip, [settings, phantom])
+
+    let slots = AXLogicProElements.audioPluginInsertSlots(in: strip, runtime: builder.makeAXRuntime())
+
+    #expect(slots.isEmpty)
 }

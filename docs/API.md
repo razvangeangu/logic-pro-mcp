@@ -342,7 +342,7 @@ Verified plugin apply-back surface. All three commands use **HC v2** (`hc_schema
 |---------|--------|---------|---------|
 | `get_inventory` | `{ track: int }` | HC v2 inventory envelope (State B when AX mixer unreachable) | Accessibility (read-only) |
 | `set_param_verified` | `{ track: int, insert: int, plugin: string, param: string, value: number, mode: "duplicate_applyback", project_expected_path: string, unit?: string }` | HC v2 State A on confirmed write, State C on any failure | Accessibility (AX plugin window) |
-| `insert_verified` | `{ track: int, insert: int, plugin: string, mode: "duplicate_applyback", project_expected_path: string }` | HC v2 State A on readback-confirmed insert; State C `insert_landed_at_different_slot` when Logic chose a different slot (rolled back); State C on any other failure | Accessibility (Mix > Search and Add Plug-in) |
+| `insert_verified` | `{ track: int, insert: int, plugin: string, mode: "duplicate_applyback", project_expected_path: string }` | HC v2 State A on readback-confirmed exact-slot insert; State C `insert_landed_at_different_slot` if readback observes a different slot (rolled back); State C on any other failure | Accessibility (exact slot popup + CGEvent menu click) |
 
 ### get_inventory
 
@@ -378,6 +378,10 @@ Reads the physical AX insert chain for one track. Never mutates state. Every slo
 
 ```json
 {
+  "success": true,
+  "verified": true,
+  "state": "A",
+  "hc_schema": 2,
   "operation": "logic_plugins.get_inventory",
   "track": 5,
   "plugins_source": "ax",
@@ -431,7 +435,7 @@ All other plugin/parameter combinations return State C `unsupported_param_readba
 
 **라이브 E2E 검증 완료 (Compressor threshold State A, 2026-06-14).** Logic Pro 12.2 + 복제본 `acid-track-applyback-test.logicx`, track 5 Compressor(물리 insert 6)에서 `requested_normalized 60 → observed_normalized 60, observed_display "60 %"` State A 확인. 독립 osascript readback으로 실제 AX write 입증. Evidence: `docs/spikes/compressor-t0-evidence.md`.
 
-`insert_verified`는 Mix > Search and Add Plug-in 경로로 라이브 insert 후 pre/post 인벤토리 readback diff로 검증한다(2026-06-15 라이브 State A 확인: insert 6에 Gain mount → `verified:true`). Logic이 slot을 자동 선택하므로 요청 `insert`와 다르면 거짓 State A 대신 State C `insert_landed_at_different_slot`(observed_slot 보고 + rollback). 정확한 `insert:K` 타게팅은 Release 1 미지원.
+`insert_verified`는 요청 slot의 자체 popup을 CGEvent로 열고, 그 popup이 target slot에 anchored 되었는지 먼저 검증한 뒤, popup 안에서 stock plugin의 exact leaf title을 실제 mouse hover/click으로 선택하고 pre/post 인벤토리 readback diff로 검증한다. 이 경로는 `Utility` 같은 localized category name에 의존하지 않는다. Logic Pro 12.2가 노출하는 9px짜리 bottom "Audio Plug-in" stub는 실제 주소 가능한 insert row가 아니라 append affordance라서 `get_inventory`에서 제외한다. State A는 post-insert readback이 요청 `insert`에 요청 plugin을 새로 관측할 때만 반환한다.
 
 **Plugin identity aliases (case-insensitive)**
 
@@ -519,17 +523,19 @@ All other plugin/parameter combinations return State C `unsupported_param_readba
 | `ax_write_failed` | `AXUIElementSetAttributeValue` was rejected. | `true` |
 | `readback_lost_after_write` | Could not read the slider value after writing. | `true` |
 | `readback_mismatch` | Observed value differs from requested beyond tolerance; rollback attempted. | `true` |
-| `insert_landed_at_different_slot` | `insert_verified` mounted the plugin, but Logic placed it at a slot other than the requested `insert` (Search and Add chooses the slot). Reports `observed_slot`; the stray mount is rolled back. | `false` |
-| `insert_not_ax_automatable` | `insert_verified` ran every result-selection strategy but the requested plugin never appeared in the readback inventory (Logic-build AX limitation). | `false` |
-| `insert_setup_failed` | `insert_verified` could not complete a transient pre-mount setup step (Mix menu not clickable / search dialog not found / results not loaded). No write attempted; carries `setup_stage`. | `true` |
+| `insert_landed_at_different_slot` | `insert_verified` mounted the plugin, but readback observed it at a slot other than the requested `insert`. Reports `observed_slot`; the stray mount is rolled back. | `true` |
+| `insert_not_ax_automatable` | `insert_verified` drove the exact-slot popup path but the requested plugin never appeared in the readback inventory (Logic-build UI limitation). | `true` |
+| `insert_setup_failed` | `insert_verified` could not complete a transient pre-mount setup step (target slot not found/clickable, slot popup not found, popup not anchored to the target slot, exact plugin leaf not found). No write attempted; carries `setup_stage`. | `false` |
+| `rollback_failed` | A stray mutation could not be automatically rolled back, so the operation aborted instead of continuing with unresolved residue. | `true` |
+| `operation_timeout` | The anchored popup exact-leaf selection appeared to commit, but readback never confirmed the requested mount before timeout. | `true` |
 
 All `logic_plugins.*` State C codes are **terminal** — the router never falls back to Scripter or MCU after any of these.
 
 ### insert_verified
 
-Performs a live, readback-verified plugin insert via Logic's **Mix > Search and Add Plug-in…** menu path. Runs all pre-insert gates (schema → mode → project path → identity → inventory complete → slot empty), then clicks Search and Add, types the plugin name, commits the auto-highlighted first result with **Return** (no Down — the dialog highlights the exact-name match; an extra Down would select a wrong variant such as "Squash Compressor"), and diffs the pre/post insert inventory. **State A is returned only when the post-insert readback observes the requested plugin newly mounted at the requested slot** — the readback diff is the sole State A path, so a false verified insert is structurally impossible. Live-E2E verified 2026-06-15 across Gain, Compressor (4-result query → exact `logic.stock.effect.compressor`), and Channel EQ.
+Performs a live, readback-verified plugin insert through the requested insert slot's own popup. Runs all pre-insert gates (schema → mode → project path → identity → inventory complete → slot empty), selects and verifies the target track, clicks the target slot center with CGEvent, verifies the resulting popup is spatially anchored to that slot, chooses the stock plugin by exact leaf title from that anchored popup (direct/root item, popup search result, then recursive hover discovery), then diffs the pre/post insert inventory. The production path does not depend on localized category names. **State A is returned only when the post-insert readback observes the requested plugin newly mounted at the requested slot** — the readback diff is the sole State A path, so a false verified insert is structurally impossible. Live-E2E verified 2026-06-17 for Gain on track 6 insert 6 (`write_source: ax_exact_slot_popup`, `slot_popup_anchor_verified: true`, `observed_slot: 6`).
 
-**Slot-targeting limitation (Release 1):** Search and Add lets **Logic** choose the slot (the first available audio-effect slot), which is not caller-controllable. When the slot Logic used differs from the requested `insert`, the op fails closed with State C `insert_landed_at_different_slot` (reporting `observed_slot`) and rolls the stray mount back via Edit > Undo (confirmed by readback; `rollback_succeeded` reflects verified removal). Exact `insert:K` targeting is unsupported in Release 1.
+**Slot model:** Use `get_inventory` immediately before insertion and pass the `insert` value it returns. `get_inventory` filters Logic Pro 12.2's short bottom "Audio Plug-in" append stub because live E2E showed it is not an addressable insert row. For exposed empty insert rows, the exact-slot popup path preserves the target slot context by proving the popup anchor before any plugin leaf is clicked. Known wrong-slot causes are blocked before the write boundary: phantom append rows, stale plugin/search dialogs, unverified track selection, unanchored popup menus, and localized category lookup misses. If unknown Logic UI drift ever places the plugin elsewhere, the op fails closed with State C `insert_landed_at_different_slot` (reporting `observed_slot`) and rolls the stray mount back via Undo (confirmed by readback; `rollback_succeeded` reflects verified removal).
 
 **Input** — same as `set_param_verified` except `param` / `value` / `unit` are replaced by no additional parameters (the target slot must be empty).
 

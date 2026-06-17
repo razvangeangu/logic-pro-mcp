@@ -99,6 +99,19 @@ private func addEmptySlot(_ b: FakeAXRuntimeBuilder, _ id: Int) -> AXUIElement {
     return el
 }
 
+private func addEmptySlot(
+    _ b: FakeAXRuntimeBuilder,
+    _ id: Int,
+    size: CGSize
+) -> AXUIElement {
+    let el = addEmptySlot(b, id)
+    var mutableSize = size
+    if let axSize = AXValueCreate(.cgSize, &mutableSize) {
+        b.setAttribute(el, kAXSizeAttribute as String, axSize)
+    }
+    return el
+}
+
 private func addOccupiedSlot(_ b: FakeAXRuntimeBuilder, _ id: Int, name: String?) -> AXUIElement {
     let group = b.element(id)
     let bypass = b.element(id * 10 + 1)
@@ -149,6 +162,10 @@ private func makeMixerFixture(
     #expect(result.isSuccess)
     let obj = decodeObject(result.message)
 
+    #expect(obj["state"] as? String == "A")
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["hc_schema"] as? Int == 2)
     #expect(obj["complete"] as? Bool == false)
     #expect(obj["plugins_source"] as? String == "ax")
     #expect(obj["plugins_unknown_reason"] is NSNull)
@@ -165,6 +182,31 @@ private func makeMixerFixture(
     #expect(plugins[2]["name"] is NSNull)
 }
 
+@Test func testGetInventorySkipsNonWritableShortEmptySlotStub() {
+    // Logic Pro 12.2 exposes a 9px "Audio Plug-in" button at the bottom of some
+    // strips. Live E2E showed that clicking it does NOT insert into that physical
+    // row; Logic appends into a different real slot. It must not be exposed as an
+    // addressable insert index.
+    let b = FakeAXRuntimeBuilder()
+    let runtime = makeMixerFixture(b) { b in
+        [
+            addEmptySlot(b, 713, size: CGSize(width: 58, height: 9)),
+            addOccupiedSlot(b, 714, name: "Gain"),
+            addEmptySlot(b, 715, size: CGSize(width: 58, height: 18)),
+        ]
+    }
+
+    let result = AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
+    #expect(result.isSuccess)
+    let obj = decodeObject(result.message)
+    let plugins = obj["plugins"] as! [[String: Any]]
+
+    #expect(plugins.count == 2)
+    #expect(plugins.map { $0["insert"] as! Int } == [0, 1])
+    #expect(plugins[0]["name"] as? String == "Gain")
+    #expect(plugins[1]["read_status"] as? String == "empty")
+}
+
 @Test func testGetInventoryAllReadableIsComplete() {
     let b = FakeAXRuntimeBuilder()
     let runtime = makeMixerFixture(b) { b in
@@ -172,6 +214,10 @@ private func makeMixerFixture(
     }
     let result = AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
     let obj = decodeObject(result.message)
+    #expect(obj["state"] as? String == "A")
+    #expect(obj["success"] as? Bool == true)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["hc_schema"] as? Int == 2)
     #expect(obj["complete"] as? Bool == true)
     let plugins = obj["plugins"] as! [[String: Any]]
     #expect(plugins[0]["plugin_id"] as? String == "logic.stock.effect.noise_gate")

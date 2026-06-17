@@ -87,28 +87,26 @@ enum HonestContract {
         case postInsertReadbackUnavailable
         /// `logic_plugins.insert_verified` reached its live-write boundary with
         /// every deterministic gate passed, but the actual AX insert is not
-        /// performable in this Logic build: every result-selection strategy of the
-        /// "Search and Add Plug-in" path (double-click / add-button / keyboard)
-        /// completed without the requested plugin appearing in the readback
+        /// performable in this Logic build: the exact slot popup path completed
+        /// without the requested plugin appearing in the readback
         /// inventory. Honest-deferred terminal — no channel can do better in
-        /// Release 1, so the op fails closed here rather than fabricating a State A.
+        /// this verified path, so the op fails closed here rather than fabricating a State A.
         /// v3.5 T6. `set_param_verified` State A is unaffected.
         case insertNotAxAutomatable
         /// `logic_plugins.insert_verified` could not complete a TRANSIENT pre-mount
-        /// setup step (the Mix menu was not clickable, the search field/dialog was
-        /// not found, or results did not load). No write was attempted; the caller
-        /// can retry (`safe_to_retry:true`). Distinct from `insert_not_ax_automatable`
-        /// (every result-selection strategy ran but the plugin never mounted —
-        /// permanent). v3.5 T6 (P2-3).
+        /// setup step (the target slot popup was not clickable, the popup menu was
+        /// not anchored to the target slot, or the exact plugin leaf was not found).
+        /// No write was
+        /// attempted; the caller can retry (`safe_to_retry:true`). Distinct from
+        /// `insert_not_ax_automatable` (the exact popup selection committed but the plugin
+        /// never mounted — permanent). v3.5 T6 (P2-3).
         case insertSetupFailed
         /// `logic_plugins.insert_verified` mounted the requested plugin, but the
-        /// "Search and Add Plug-in" path places it at a slot Logic chooses (the
-        /// first available audio-effect slot, not always the requested `insert`),
-        /// and the post-insert readback observed it at a DIFFERENT slot than
-        /// requested. Rather than confirm a slot it did not target (false State A),
-        /// the op fails closed and reports `observed_slot`; the stray mount is
-        /// rolled back. Release 1: Search-and-Add does not support exact slot
-        /// targeting. v3.5 T6.
+        /// post-insert readback observed it at a DIFFERENT slot than requested.
+        /// Rather than confirm a slot it did not target (false State A), the op
+        /// fails closed and reports `observed_slot`; the stray mount is rolled
+        /// back. This is a defensive guard for Logic UI drift, not the expected
+        /// success path. v3.5 T6.
         case insertLandedAtDifferentSlot
         case rollbackFailed
         case verifiedOpInProgress

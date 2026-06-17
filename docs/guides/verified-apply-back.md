@@ -16,7 +16,7 @@ Three commands cover the full workflow:
 |---------|-------------|
 | `get_inventory` | Read the physical insert chain for a track. |
 | `set_param_verified` | Write a parameter and confirm via readback. |
-| `insert_verified` | Live, readback-verified plugin insert via Mix > Search and Add Plug-in (Logic chooses the slot; see limitation below). |
+| `insert_verified` | Live, readback-verified plugin insert via the target slot's own popup menu. |
 
 ---
 
@@ -50,6 +50,10 @@ Before writing any parameter, call `get_inventory` to obtain the physical insert
 
 ```json
 {
+  "success": true,
+  "verified": true,
+  "state": "A",
+  "hc_schema": 2,
   "complete": true,
   "plugins": [
     {
@@ -249,13 +253,17 @@ Additional parameters will be promoted to `writeReadback` as evidence is gathere
 
 ## insert_verified
 
-`insert_verified` performs a **live, readback-verified** plugin insert via Logic's **Mix > Search and Add Plug-in…** menu path. **Live-E2E verified (2026-06-15):** `insert_verified { track, insert: 6, plugin: "gain" }` returned `verified: true` (`observed_slot: 6`), with the independent `get_inventory` readback confirming `logic.stock.effect.gain` mounted at insert 6.
+`insert_verified` performs a **live, readback-verified** plugin insert via the target insert slot's own popup menu. **Live-E2E verified (2026-06-17):** target slot CGEvent click → anchored popup verification → exact plugin leaf selection returned `verified: true` for track 6 insert 6 (`write_source: ax_exact_slot_popup`, `slot_popup_anchor_verified: true`, `observed_slot: 6`), with independent `get_inventory` readback confirming `logic.stock.effect.gain` mounted at the requested insert while the previous empty slot stayed empty.
 
-Flow: pre-insert gates (mode → project path → identity → inventory complete → slot empty) → clean state (hide plug-in windows, close any stray "위치로 이동"/"Go to Position" dialog, raise the mixer window) → click "Search and Add Plug-in…", type the plugin name, commit the auto-highlighted first result with **Return** → diff the pre/post inventory to detect where the plugin landed. **State A is emitted only when the post-insert readback observes the requested plugin newly mounted at the requested slot** — the readback diff is the sole State A path, so a false verified insert is structurally impossible. (Return only, not Down+Return: the dialog already highlights the exact-name match, so an extra Down would pick a wrong variant for a multi-result query like "Compressor".)
+Flow: pre-insert gates (mode → project path → identity → inventory complete → slot empty) → clean state (hide plug-in windows, close any stray "위치로 이동"/"Go to Position" dialog, raise the mixer window) → select and verify the target track → click the target slot's AX center with CGEvent → verify the resulting popup is spatially anchored to that slot → choose the stock plugin by exact leaf title from that anchored popup (direct/root item, popup search result, then recursive hover discovery) → diff the pre/post inventory to detect where the plugin landed. The production path does not depend on localized category names such as `Utility`. **State A is emitted only when the post-insert readback observes the requested plugin newly mounted at the requested slot** — the readback diff is the sole State A path, so a false verified insert is structurally impossible.
 
-### Slot-targeting limitation (Release 1)
+### Slot model
 
-Search and Add lets **Logic** choose the slot (the first available audio-effect slot), which is **not** caller-controllable. If the requested `insert` differs from the slot Logic actually used, `insert_verified` does **not** confirm a slot it did not target — it fails closed with State C `insert_landed_at_different_slot`, reporting the actual `observed_slot`, and rolls the stray mount back (Edit > Undo, confirmed by readback; `rollback_succeeded` reflects whether removal was verified). Exact `insert:K` targeting is unsupported in Release 1.
+Use `get_inventory` immediately before insertion and pass the `insert` value it returns. Logic Pro 12.2 exposes a short bottom "Audio Plug-in" append stub in some strips; live E2E showed that clicking it does **not** insert into that physical row, so `get_inventory` filters it out and only exposes addressable insert rows.
+
+For exposed empty rows, the exact-slot popup path preserves the target slot context by proving the popup is anchored before any plugin leaf is clicked. Known wrong-slot causes (phantom append rows, stale plugin/search dialogs, unverified track selection, unanchored popup menus, localized category lookup misses) are blocked before the write boundary. If an unknown Logic UI drift still places the plugin at a different slot, `insert_verified` does **not** confirm a slot it did not target — it fails closed with State C `insert_landed_at_different_slot`, reporting the actual `observed_slot`, and rolls the stray mount back (Undo, confirmed by readback; `rollback_succeeded` reflects whether removal was verified).
+
+If a stray/wrong plugin appears and automatic cleanup cannot confirm removal, the operation stops immediately with State C `rollback_failed` instead of trying more fallback clicks. This rollback path is an emergency invariant guard, not part of the normal exact-slot path. If the anchored popup selection appears to commit but readback never confirms the requested mount, the operation returns State C `operation_timeout` rather than clicking stale UI.
 
 ```json
 {
@@ -281,7 +289,7 @@ State C example (Logic placed it elsewhere):
   "error": "insert_landed_at_different_slot",
   "observed_slot": 5,
   "rollback_attempted": true, "rollback_succeeded": true
-  // requested insert 0, but Search-and-Add placed Gain at slot 5 → rolled back
+  // requested insert 0, but readback observed Gain at slot 5 → rolled back
 }
 ```
 

@@ -480,10 +480,10 @@ actor AccessibilityChannel: Channel {
         case "plugin.list":
             return .error("Plugin list reading not yet implemented via AX")
 
-        // MARK: - Verified plugin surface (logic_plugins.*) — T3
-        // Drift-safe inventory + R6 validation gates. These route through AX
-        // alone (no fallback) per R16; the live State-A write/insert paths are
-        // T4-T6 and fail closed here.
+        // MARK: - Verified plugin surface (logic_plugins.*)
+        // Drift-safe inventory and verified live plugin writes. These route
+        // through AX/CGEvent only, with readback as the only State-A authority
+        // and State-C fail-closed behavior for unsupported or drifting UI.
         case "plugin.get_inventory":
             return AccessibilityChannel.defaultGetPluginInventory(params: params, runtime: runtime.logicRuntime)
         case "plugin.set_param_verified":
