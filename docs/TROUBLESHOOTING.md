@@ -207,6 +207,27 @@ Use it to confirm whether Logic echoes a host write (see the `echo_timeout` entr
 
 ---
 
+## Tracks Resource
+
+### `logic://tracks` returns placeholder rows (`Track 1`, `Track 2`, …) despite MCU connected
+
+**Symptom:** The tracks resource envelope carries `source: "ax_live_with_file_count"` and every track row has `placeholder: true`, `type: "unknown"`, generic name (`"Track \(idx + 1)"`). `logic://mixer` is healthy at the same time — `mcu_connected: true`, `mcu_registered: true`, `data_source: "ax_poll"`, real strips with `plugins_source: "ax"`. Mixer writes work; track-name reads don't.
+
+**Cause:** `AXLogicProElements.getTrackHeaders` failed to locate the track-header rail under the Arrange window, so `StatePoller.pollTracks` cached nothing and `ResourceHandlers.readTracks` fell to Tier 2 placeholder synthesis from `MetaData.plist`'s track count. Most common reason this happens with MCU otherwise healthy is an accessibility description-string drift between Logic versions (e.g. Logic 12.2 + macOS 26 exposes the rail as `AXGroup desc="Tracks header"`, distinct from earlier `"Track Headers"`).
+
+**Fix:**
+1. Update to a current build — Strategy 3's description matcher now accepts `track header(s)` / `tracks header(s)` variants plus the Korean `트랙 헤더`. Live-verified on macOS 26.3.1 + Logic Pro 12.2.
+2. Make sure Logic's main Arrange (Tracks) window is visible and not occluded by a modal dialog. The Mixer panel alone is not enough — `getTrackHeaders` reads from the Arrange window's track-header rail.
+3. If `placeholder: true` persists after both of the above, the Arrange window's AX description likely drifted again. Open Xcode's Accessibility Inspector against Logic's track-header rail, read off the actual `Role` / `Description` / `Identifier`, and file an issue (or send a PR expanding `getTrackHeaders` Strategy 3 to accept the new spelling). The matcher is intentionally a small allowlist of equality checks — easy to extend, easy to test.
+
+### `logic://tracks` returns real names but `type: "unknown"` on non-master strips
+
+**Cause:** Track-type classification reads a separate AX path from track-name discovery. Older description-string assumptions may not match newer Logic UIs even after `getTrackHeaders` itself is healthy.
+
+**Fix:** Not yet fixed for Logic 12.2 + macOS 26 as of this writing. Track names are still accurate; only the `type` field (`audio` / `software_instrument` / `aux` / `bus` / `master` / etc.) is unreliable. Master bus typing was observed working correctly in field testing; other types fall back to `"unknown"`. Open an issue if your tooling depends on the type field.
+
+---
+
 ## MIDI
 
 ### Virtual MIDI ports not visible in Logic Pro
