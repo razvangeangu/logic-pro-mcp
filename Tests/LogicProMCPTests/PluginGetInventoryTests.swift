@@ -146,7 +146,7 @@ private func makeMixerFixture(
     return b.makeLogicRuntime(appElement: app)
 }
 
-@Test func testGetInventoryMixedSequencePreservesPhysicalIndex() {
+@Test func testGetInventoryMixedSequencePreservesPhysicalIndex() async {
     // [occupied-readable Gain, empty, occupied-unreadable] — physical index
     // preserved, unreadable placeholder, complete:false (AC2/AC12).
     let b = FakeAXRuntimeBuilder()
@@ -158,7 +158,7 @@ private func makeMixerFixture(
         ]
     }
 
-    let result = AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
+    let result = await AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
     #expect(result.isSuccess)
     let obj = decodeObject(result.message)
 
@@ -182,7 +182,7 @@ private func makeMixerFixture(
     #expect(plugins[2]["name"] is NSNull)
 }
 
-@Test func testGetInventorySkipsNonWritableShortEmptySlotStub() {
+@Test func testGetInventorySkipsNonWritableShortEmptySlotStub() async {
     // Logic Pro 12.2 exposes a 9px "Audio Plug-in" button at the bottom of some
     // strips. Live E2E showed that clicking it does NOT insert into that physical
     // row; Logic appends into a different real slot. It must not be exposed as an
@@ -196,7 +196,7 @@ private func makeMixerFixture(
         ]
     }
 
-    let result = AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
+    let result = await AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
     #expect(result.isSuccess)
     let obj = decodeObject(result.message)
     let plugins = obj["plugins"] as! [[String: Any]]
@@ -207,12 +207,12 @@ private func makeMixerFixture(
     #expect(plugins[1]["read_status"] as? String == "empty")
 }
 
-@Test func testGetInventoryAllReadableIsComplete() {
+@Test func testGetInventoryAllReadableIsComplete() async {
     let b = FakeAXRuntimeBuilder()
     let runtime = makeMixerFixture(b) { b in
         [addOccupiedSlot(b, 720, name: "Noise Gate"), addEmptySlot(b, 721)]
     }
-    let result = AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
+    let result = await AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
     let obj = decodeObject(result.message)
     #expect(obj["state"] as? String == "A")
     #expect(obj["success"] as? Bool == true)
@@ -223,14 +223,14 @@ private func makeMixerFixture(
     #expect(plugins[0]["plugin_id"] as? String == "logic.stock.effect.noise_gate")
 }
 
-@Test func testGetInventoryStateBWhenSubtreeUnreadable() {
+@Test func testGetInventoryStateBWhenSubtreeUnreadable() async {
     // Track index out of range → the AX subtree cannot be read → State B
     // readback_unavailable + plugins_unknown_reason (AC2). Not a fabricated
     // empty chain.
     let b = FakeAXRuntimeBuilder()
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 730)] }
 
-    let result = AccessibilityChannel.defaultGetPluginInventory(params: ["track": "5"], runtime: runtime)
+    let result = await AccessibilityChannel.defaultGetPluginInventory(params: ["track": "5"], runtime: runtime)
     #expect(result.isSuccess) // State B is success:true, verified:false
     let obj = decodeObject(result.message)
     #expect(obj["state"] as? String == "B")
@@ -241,12 +241,97 @@ private func makeMixerFixture(
     #expect(obj["plugins"] == nil, "State B carries no plugins array")
 }
 
-@Test func testGetInventoryRejectsMissingTrack() {
+@Test func testGetInventoryRejectsMissingTrack() async {
     let b = FakeAXRuntimeBuilder()
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 740)] }
-    let result = AccessibilityChannel.defaultGetPluginInventory(params: [:], runtime: runtime)
+    let result = await AccessibilityChannel.defaultGetPluginInventory(params: [:], runtime: runtime)
     #expect(!result.isSuccess)
     let obj = decodeObject(result.message)
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "invalid_params")
+}
+
+@Test func testGetInventoryRevealsMixerWhenInitiallyHidden() async {
+    let b = FakeAXRuntimeBuilder()
+    let app = b.element(760)
+    let window = b.element(761)
+    let runtime = b.makeLogicRuntime(appElement: app)
+    b.setAttribute(app, kAXMainWindowAttribute as String, window)
+    b.setChildren(window, [])
+
+    let result = await AccessibilityChannel.defaultGetPluginInventory(
+        params: ["track": "0"],
+        runtime: runtime,
+        revealMixer: { _ in
+            let mixer = b.element(762)
+            let strip = b.element(763)
+            let slot = addOccupiedSlot(b, 764, name: "Gain")
+            b.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
+            b.setAttribute(mixer, kAXDescriptionAttribute as String, "Mixer")
+            b.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+            b.setChildren(strip, [slot])
+            b.setChildren(mixer, [strip])
+            b.setChildren(window, [mixer])
+            return (
+                mixer,
+                .init(
+                    attempted: true,
+                    alreadyVisible: false,
+                    strategies: ["ax_menu_view_show_mixer"],
+                    menuItemFound: true,
+                    menuClicked: true,
+                    keySent: false,
+                    mixerVisible: true
+                )
+            )
+        }
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeObject(result.message)
+    #expect(obj["state"] as? String == "A")
+    #expect(obj["mixer_reveal_attempted"] as? Bool == true)
+    #expect((obj["mixer_reveal_strategies"] as? [String]) == ["ax_menu_view_show_mixer"])
+    let plugins = obj["plugins"] as? [[String: Any]]
+    #expect(plugins?.count == 1)
+    #expect(plugins?.first?["plugin_id"] as? String == "logic.stock.effect.gain")
+}
+
+@Test func testGetInventoryReportsMixerNotVisibleDirectlyWhenRevealFails() async {
+    let b = FakeAXRuntimeBuilder()
+    let app = b.element(770)
+    let window = b.element(771)
+    let runtime = b.makeLogicRuntime(appElement: app)
+    b.setAttribute(app, kAXMainWindowAttribute as String, window)
+    b.setChildren(window, [])
+
+    let result = await AccessibilityChannel.defaultGetPluginInventory(
+        params: ["track": "0"],
+        runtime: runtime,
+        revealMixer: { _ in
+            (
+                nil,
+                .init(
+                    attempted: true,
+                    alreadyVisible: false,
+                    strategies: ["ax_menu_view_show_mixer", "cgevent_x"],
+                    menuItemFound: true,
+                    menuClicked: true,
+                    keySent: true,
+                    mixerVisible: false
+                )
+            )
+        }
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeObject(result.message)
+    #expect(obj["state"] as? String == "B")
+    #expect(obj["reason"] as? String == "readback_unavailable")
+    #expect(obj["plugins_unknown_reason"] as? String == "mixer_not_visible")
+    #expect(obj["mixer_reveal_attempted"] as? Bool == true)
+    #expect(obj["mixer_reveal_menu_item_found"] as? Bool == true)
+    #expect(obj["mixer_reveal_menu_clicked"] as? Bool == true)
+    #expect(obj["mixer_reveal_key_sent"] as? Bool == true)
+    #expect((obj["recovery_hint"] as? String)?.contains("Show Mixer") == true)
 }

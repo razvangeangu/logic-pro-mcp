@@ -364,6 +364,18 @@ def safe_json(text):
     except: return None
 
 
+def plugin_inventory_result_ok(resp):
+    env = safe_json(tool_text(resp))
+    return (
+        isinstance(env, dict)
+        and env.get("success") is True
+        and env.get("verified") is True
+        and env.get("operation") == "logic_plugins.get_inventory"
+        and env.get("plugins_source") == "ax"
+        and isinstance(env.get("plugins"), list)
+    )
+
+
 def is_library_root_json(value):
     return (
         isinstance(value, dict)
@@ -788,6 +800,15 @@ def main():
     # B1 (#11): provenance — data_source present on the new build's envelope.
     T("logic://mixer carries data_source provenance (B1/#11)", r,
       lambda _: "data_source" in mix_text or "No Logic Pro document is open" in response_dump(r))
+
+    r = call_tool(client, "logic_plugins", "get_inventory", {"track": 0})
+    T_LIVE(
+        "logic_plugins.get_inventory(track=0) returns verified visible-mixer inventory",
+        r,
+        plugin_inventory_result_ok,
+        live_logic_ready,
+        "Logic Pro + Accessibility are required",
+    )
 
     # Volume range testing
     for vol in [0.0, 0.25, 0.5, 0.75, 1.0]:
