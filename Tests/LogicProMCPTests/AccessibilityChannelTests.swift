@@ -347,7 +347,24 @@ private func makeAXBackedAccessibilityChannel(
     builder.setAttribute(tempoField, kAXDescriptionAttribute as String, "템포")
     builder.setAttribute(tempoField, kAXValueAttribute as String, NSNumber(value: 120.0))
 
-    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let logicRuntime = builder.makeLogicRuntime(
+        appElement: app,
+        setAttributeHandler: nil,
+        performActionHandler: { element, action in
+            guard action == kAXPressAction as String else { return false }
+            if builder.elementID(element) == builder.elementID(cycle) {
+                let raw = builder.attributeValue(cycle, kAXValueAttribute as String)
+                let current = (raw as? NSNumber)?.boolValue
+                    ?? (raw as? Bool)
+                    ?? ((raw as? Int).map { $0 != 0 } ?? false)
+                builder.setAttribute(cycle, kAXValueAttribute as String, NSNumber(value: !current))
+            }
+            return true
+        }
+    )
+    let channel = makeAXBackedAccessibilityChannel(
+        builder: builder, app: app, logicRuntime: logicRuntime
+    )
 
     let transportResult = await channel.execute(operation: "transport.get_state", params: [:])
     #expect(transportResult.isSuccess)
@@ -362,7 +379,7 @@ private func makeAXBackedAccessibilityChannel(
 
     let toggleResult = await channel.execute(operation: "transport.toggle_cycle", params: [:])
     #expect(toggleResult.isSuccess)
-    #expect(builder.actionCalls.contains { $0.elementID == builder.elementID(cycle) && $0.action == kAXPressAction as String })
+    #expect((builder.attributeValue(cycle, kAXValueAttribute as String) as? NSNumber)?.boolValue == true)
 
     // v3.0.2: set_tempo uses CGEvent double-click + typed entry on the tempo
     // slider. CGEvent is real mouse input that our fake AX runtime can't
@@ -390,6 +407,59 @@ private func makeAXBackedAccessibilityChannel(
     // "locator fields not found" error rather than "not yet implemented".
     #expect(!cycleUnsupported.isSuccess)
     #expect(cycleUnsupported.message.contains("Cycle range") || cycleUnsupported.message.contains("locator"))
+}
+
+@Test func testTransportStatePrefersLogic12ControlBarOverLegacyTransportGroup() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(2100)
+    let window = builder.element(2101)
+    let legacyTransport = builder.element(2102)
+    let staleCycle = builder.element(2103)
+    let controlBar = builder.element(2104)
+    let cycle = builder.element(2105)
+    let metronome = builder.element(2106)
+    let tempo = builder.element(2107)
+    let position = builder.element(2108)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [legacyTransport, controlBar])
+
+    builder.setAttribute(legacyTransport, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(legacyTransport, kAXIdentifierAttribute as String, "Transport")
+    builder.setChildren(legacyTransport, [staleCycle])
+    builder.setAttribute(staleCycle, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(staleCycle, kAXDescriptionAttribute as String, "Cycle")
+    builder.setAttribute(staleCycle, kAXValueAttribute as String, 0)
+
+    builder.setAttribute(controlBar, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(controlBar, kAXDescriptionAttribute as String, "Control Bar")
+    builder.setChildren(controlBar, [cycle, metronome, tempo, position])
+    builder.setAttribute(cycle, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(cycle, kAXDescriptionAttribute as String, "Generic checkbox")
+    builder.setAttribute(cycle, kAXTitleAttribute as String, "Cycle")
+    builder.setAttribute(cycle, kAXValueAttribute as String, true)
+    builder.setAttribute(metronome, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(metronome, kAXDescriptionAttribute as String, "Generic checkbox")
+    builder.setAttribute(metronome, kAXTitleAttribute as String, "Metronome")
+    builder.setAttribute(metronome, kAXValueAttribute as String, false)
+    builder.setAttribute(tempo, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(tempo, kAXDescriptionAttribute as String, "Tempo")
+    builder.setAttribute(tempo, kAXValueAttribute as String, "90.5 BPM")
+    builder.setAttribute(position, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(position, kAXDescriptionAttribute as String, "Position")
+    builder.setAttribute(position, kAXValueAttribute as String, "1.1.1.1")
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let result = await channel.execute(operation: "transport.get_state", params: [:])
+
+    #expect(result.isSuccess)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let state = try decoder.decode(TransportState.self, from: Data(result.message.utf8))
+    #expect(state.isCycleEnabled)
+    #expect(!state.isMetronomeEnabled)
+    #expect(state.tempo == 90.5)
+    #expect(state.position == "1.1.1.1")
 }
 
 @Test func testAccessibilityChannelAXBackedTransportErrorPaths() async {

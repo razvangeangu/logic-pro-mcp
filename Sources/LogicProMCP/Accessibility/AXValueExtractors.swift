@@ -39,6 +39,9 @@ enum AXValueExtractors {
         if let number = value as? NSNumber {
             return number.boolValue
         }
+        if let bool = value as? Bool {
+            return bool
+        }
         // Some buttons use string "1"/"0"
         if let str = value as? String {
             return str == "1" || str.lowercased() == "true"
@@ -199,9 +202,10 @@ enum AXValueExtractors {
         let controls = AXHelpers.findAllDescendants(of: transport, role: kAXButtonRole, maxDepth: 4, runtime: runtime)
             + AXHelpers.findAllDescendants(of: transport, role: kAXCheckBoxRole, maxDepth: 4, runtime: runtime)
         for control in controls {
-            let desc = AXHelpers.getDescription(control, runtime: runtime)
-                ?? AXHelpers.getTitle(control, runtime: runtime)
-                ?? ""
+            let desc = [
+                AXHelpers.getDescription(control, runtime: runtime),
+                AXHelpers.getTitle(control, runtime: runtime),
+            ].compactMap { $0 }.joined(separator: " ")
             let pressed = extractButtonState(control, runtime: runtime) ?? false
             let descLower = desc.lowercased()
 
@@ -324,11 +328,29 @@ enum AXValueExtractors {
     }
 
     private static func inferTrackType(from header: AXUIElement, runtime: AXHelpers.Runtime) -> TrackType {
-        // Attempt to infer type from icon description or element identifiers.
-        let desc = AXHelpers.getDescription(header, runtime: runtime)?.lowercased() ?? ""
-        let title = AXHelpers.getTitle(header, runtime: runtime)?.lowercased() ?? ""
-        let name = extractTrackName(from: header, runtime: runtime).lowercased()
-        let combined = [desc, title, name].joined(separator: " ")
+        // Logic 12.2 often puts the human track name on the AXLayoutItem and
+        // the type hint on a descendant icon/control, so scan both levels.
+        var signals = [
+            AXHelpers.getDescription(header, runtime: runtime),
+            AXHelpers.getTitle(header, runtime: runtime),
+            AXHelpers.getIdentifier(header, runtime: runtime),
+            AXHelpers.getHelp(header, runtime: runtime),
+            extractTrackName(from: header, runtime: runtime)
+        ]
+        let descendants = AXHelpers.findAllDescendants(of: header, maxDepth: 4, runtime: runtime)
+        for element in descendants {
+            signals.append(contentsOf: [
+                AXHelpers.getDescription(element, runtime: runtime),
+                AXHelpers.getTitle(element, runtime: runtime),
+                AXHelpers.getIdentifier(element, runtime: runtime),
+                AXHelpers.getHelp(element, runtime: runtime),
+                extractTextValue(element, runtime: runtime)
+            ])
+        }
+        let combined = signals
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
 
         if combined.contains("audio") || combined.contains("오디오") { return .audio }
         if combined.contains("instrument") || combined.contains("software") || combined.contains("악기") { return .softwareInstrument }

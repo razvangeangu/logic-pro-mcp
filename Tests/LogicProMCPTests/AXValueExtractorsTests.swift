@@ -227,6 +227,25 @@ import Testing
     #expect(unknownTrack.color == nil)
 }
 
+@Test func testAXValueExtractorsInfersTrackTypeFromHeaderDescendants() {
+    let builder = FakeAXRuntimeBuilder()
+    let header = builder.element(240)
+    let name = builder.element(241)
+    let icon = builder.element(242)
+
+    builder.setChildren(header, [name, icon])
+    builder.setAttribute(header, kAXDescriptionAttribute as String, "1개의 ‘Clean Echoes’ 트랙")
+    builder.setAttribute(name, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(name, kAXValueAttribute as String, "Clean Echoes")
+    builder.setAttribute(icon, kAXDescriptionAttribute as String, "Software Instrument Track")
+
+    let runtime = builder.makeAXRuntime()
+    let track = AXValueExtractors.extractTrackState(from: header, index: 0, runtime: runtime)
+
+    #expect(track.name == "Clean Echoes")
+    #expect(track.type == .softwareInstrument)
+}
+
 @Test func testAXValueExtractorsTransportSupportsLoopClickAndHeuristicFields() {
     let builder = FakeAXRuntimeBuilder()
     let transport = builder.element(30)
