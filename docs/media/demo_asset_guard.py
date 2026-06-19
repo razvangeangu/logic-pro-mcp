@@ -365,6 +365,13 @@ def write_evidence_manifest(
     thumbnail: dict[str, Any],
     contact_sheet: dict[str, Any],
 ) -> dict[str, Any]:
+    existing_manifest: dict[str, Any] | None = None
+    if evidence_path.exists():
+        try:
+            existing_manifest = load_json(evidence_path)
+        except Exception:
+            existing_manifest = None
+
     audio_stream = first_audio_stream(probe)
     sanitized_probe = deepcopy(probe)
     fmt = sanitized_probe.get("format")
@@ -372,8 +379,7 @@ def write_evidence_manifest(
         fmt["filename"] = repo_relative_path(source_capture, repo_root)
     relative_contact_sheet = dict(contact_sheet)
     relative_contact_sheet["path"] = repo_relative_path(Path(contact_sheet["path"]), repo_root)
-    manifest = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+    manifest_body = {
         "source_capture": repo_relative_path(source_capture, repo_root),
         "brief": repo_relative_path(brief_path, repo_root),
         "transcript": repo_relative_path(transcript_path, repo_root),
@@ -392,5 +398,14 @@ def write_evidence_manifest(
         "thumbnail_validation": thumbnail,
         "contact_sheet": relative_contact_sheet,
     }
+    generated_at = datetime.now(timezone.utc).isoformat()
+    if isinstance(existing_manifest, dict):
+        existing_generated_at = existing_manifest.get("generated_at")
+        existing_body = dict(existing_manifest)
+        existing_body.pop("generated_at", None)
+        if existing_body == manifest_body and isinstance(existing_generated_at, str):
+            generated_at = existing_generated_at
+
+    manifest = {"generated_at": generated_at, **manifest_body}
     evidence_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return manifest
