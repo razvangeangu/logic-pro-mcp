@@ -56,6 +56,24 @@ import Testing
     #expect(AXLogicProElements.mainWindow(runtime: runtime) == arrange)
 }
 
+@Test func testMainWindowPrefersLogic122TracksHeaderDescription() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(11)
+    let floatingPane = builder.element(12)
+    let arrange = builder.element(13)
+    let trackHeadersGroup = builder.element(14)
+
+    builder.setChildren(arrange, [trackHeadersGroup])
+    builder.setAttribute(trackHeadersGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(trackHeadersGroup, kAXDescriptionAttribute as String, "Tracks header")
+
+    builder.setAttribute(app, kAXWindowsAttribute as String, [floatingPane, arrange])
+    builder.setAttribute(app, kAXMainWindowAttribute as String, floatingPane)
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+    #expect(AXLogicProElements.mainWindow(runtime: runtime) == arrange)
+}
+
 @Test func testMainWindowFallsBackToFirstNonDialogWindow() {
     // No window carries the Track Headers group (e.g. Library detached
     // pane in front, arrange minimized). We still skip dialogs and return

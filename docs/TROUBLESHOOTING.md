@@ -207,6 +207,28 @@ Use it to confirm whether Logic echoes a host write (see the `echo_timeout` entr
 
 ---
 
+## Tracks Resource
+
+### `logic://tracks` returns placeholder rows (`Track 1`, `Track 2`, ...) while real tracks are visible
+
+**Symptom:** the resource envelope reports `source: "ax_live_with_file_count"` and rows have `placeholder: true`, generic names, and `type: "unknown"`. At the same time `logic://mixer` may look healthy (`mcu_registered: true`, `data_source: "ax_poll"`, real strips), because mixer and track-header discovery use separate AX surfaces.
+
+**Cause:** the AX poller could not locate Logic's Arrange-window track-header rail, so it cached an empty live track list. The resource layer then fell back to safe placeholder synthesis from the saved project track count. The known Logic 12.2 + macOS 26 drift was the rail description changing from older `Track Headers` to `Tracks header`.
+
+**Resolution:** current builds use one shared matcher for Arrange-window selection and `getTrackHeaders()`. It accepts `Track Headers`, `Track Header`, `Tracks Header(s)`, and `트랙 헤더`, so the poller reads the real visible headers instead of falling through to placeholders. After upgrading, bring the main Arrange/Tracks window frontmost, dismiss modal dialogs, then run:
+
+```bash
+logic_system refresh_cache
+```
+
+A healthy read should show `source: "ax_live"` and real track names with no `placeholder: true`.
+
+### `logic://tracks` has real names but some `type` values are `unknown`
+
+This is separate from placeholder mode. Current builds scan both the track-header element and its descendants for type hints (`Audio`, `Software Instrument`, `External MIDI`, `Aux`, `Bus`, `Master`, plus localized signals). If the value still remains `unknown`, Logic did not expose a trustworthy type signal in the visible header AX subtree for that row. Treat `unknown` as an explicit absence of type metadata, not as a failed track-name read.
+
+---
+
 ## MIDI
 
 ### Virtual MIDI ports not visible in Logic Pro

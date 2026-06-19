@@ -508,10 +508,31 @@ actor AccessibilityChannel: Channel {
     // MARK: - Transport
 
     private static func defaultGetTransportState(runtime: AXLogicProElements.Runtime = .production) -> ChannelResult {
-        guard let transport = AXLogicProElements.getTransportBar(runtime: runtime) else {
+        guard let transport = AXLogicProElements.getControlBar(runtime: runtime)
+            ?? AXLogicProElements.getTransportBar(runtime: runtime) else {
             return .error("Cannot locate transport bar")
         }
-        let state = AXValueExtractors.extractTransportState(from: transport, runtime: runtime.ax)
+        var state = AXValueExtractors.extractTransportState(from: transport, runtime: runtime.ax)
+        if let cycle = AXLogicProElements.readControlBarCheckboxValue(
+            named: "사이클", englishName: "Cycle", runtime: runtime
+        ) {
+            state.isCycleEnabled = cycle
+        }
+        if let metronome = AXLogicProElements.readControlBarCheckboxValue(
+            named: "메트로놈 클릭", englishName: "Metronome", runtime: runtime
+        ) {
+            state.isMetronomeEnabled = metronome
+        }
+        if let play = AXLogicProElements.readControlBarCheckboxValue(
+            named: "재생", englishName: "Play", runtime: runtime
+        ) {
+            state.isPlaying = play
+        }
+        if let record = AXLogicProElements.readControlBarCheckboxValue(
+            named: "녹음", englishName: "Record", runtime: runtime
+        ) {
+            state.isRecording = record
+        }
         return encodeResult(state)
     }
 
@@ -2691,10 +2712,59 @@ actor AccessibilityChannel: Channel {
         ) else {
             return nil
         }
+        let before = AXLogicProElements.readControlBarCheckboxValue(
+            named: korean, englishName: english, runtime: runtime
+        )
         guard AXHelpers.performAction(cb, kAXPressAction, runtime: runtime.ax) else {
             return .error("Failed to click control-bar checkbox: \(korean)")
         }
-        return .success("{\"clicked\":\"\(korean)\"}")
+        if let before {
+            usleep(120_000)
+            if let after = AXLogicProElements.readControlBarCheckboxValue(
+                named: korean, englishName: english, runtime: runtime
+            ), after != before {
+                return .success(HonestContract.encodeStateA(extras: [
+                    "button": english,
+                    "via": "control_bar_axpress",
+                    "requested": "toggle",
+                    "observed": after
+                ]))
+            }
+
+            // Logic can report AXPress success without committing the toggle.
+            // Use the same real-click fallback as track checkboxes, then verify
+            // the value changed before claiming the action worked.
+            postMouseClickAt(element: cb, runtime: runtime.ax)
+            usleep(160_000)
+            if let afterClick = AXLogicProElements.readControlBarCheckboxValue(
+                named: korean, englishName: english, runtime: runtime
+            ), afterClick != before {
+                return .success(HonestContract.encodeStateA(extras: [
+                    "button": english,
+                    "via": "control_bar_mouse_click",
+                    "requested": "toggle",
+                    "observed": afterClick
+                ]))
+            }
+
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "control-bar checkbox '\(english)' did not change after AXPress or mouse-click",
+                extras: [
+                    "button": english,
+                    "before": before,
+                    "safe_to_retry": true
+                ]
+            ))
+        }
+        return .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: [
+                "button": english,
+                "via": "control_bar_axpress",
+                "requested": "toggle"
+            ]
+        ))
     }
 
     /// Ensure a control-bar checkbox matches `desired` state. Reads current
@@ -2715,12 +2785,66 @@ actor AccessibilityChannel: Channel {
             named: korean, englishName: english, runtime: runtime
         )
         if current == desired {
-            return .success("{\"\(korean)\":\(desired),\"unchanged\":true}")
+            return .success(HonestContract.encodeStateA(extras: [
+                "button": english,
+                "via": "control_bar_readback",
+                "requested": desired,
+                "observed": desired,
+                "unchanged": true
+            ]))
         }
         guard AXHelpers.performAction(cb, kAXPressAction, runtime: runtime.ax) else {
             return .error("Failed to click control-bar checkbox: \(korean)")
         }
-        return .success("{\"\(korean)\":\(desired)}")
+        usleep(120_000)
+        if let after = AXLogicProElements.readControlBarCheckboxValue(
+            named: korean, englishName: english, runtime: runtime
+        ), after == desired {
+            return .success(HonestContract.encodeStateA(extras: [
+                "button": english,
+                "via": "control_bar_axpress",
+                "requested": desired,
+                "observed": after
+            ]))
+        }
+
+        postMouseClickAt(element: cb, runtime: runtime.ax)
+        usleep(160_000)
+        if let afterClick = AXLogicProElements.readControlBarCheckboxValue(
+            named: korean, englishName: english, runtime: runtime
+        ), afterClick == desired {
+            return .success(HonestContract.encodeStateA(extras: [
+                "button": english,
+                "via": "control_bar_mouse_click",
+                "requested": desired,
+                "observed": afterClick
+            ]))
+        }
+
+        if current == nil {
+            return .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: [
+                    "button": english,
+                    "via": "control_bar_axpress",
+                    "requested": desired,
+                    "observed": NSNull()
+                ]
+            ))
+        }
+
+        return .error(HonestContract.encodeStateC(
+            error: .axWriteFailed,
+            hint: "control-bar checkbox '\(english)' did not reach requested state \(desired) after AXPress or mouse-click",
+            extras: [
+                "button": english,
+                "requested": desired,
+                "observed": AXLogicProElements.readControlBarCheckboxValue(
+                    named: korean, englishName: english, runtime: runtime
+                ) as Any? ?? NSNull(),
+                "safe_to_retry": true
+            ]
+        ))
     }
 
     private static func defaultSetMixerValue(
