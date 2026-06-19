@@ -27,6 +27,7 @@ class FakeRunner:
 
 def present_snapshot(
     *,
+    title=None,
     buttons=None,
     checkboxes=None,
     radio_buttons=None,
@@ -35,7 +36,7 @@ def present_snapshot(
     return {
         "status": "present",
         "kind": "sheet",
-        "title": "Free Tempo Recording",
+        "title": title or "Free Tempo Recording",
         "buttons": buttons or ["Cancel", "OK"],
         "checkboxes": checkboxes or [{"name": "Don't show again", "value": "0"}],
         "radio_buttons": radio_buttons or [
@@ -117,6 +118,38 @@ class ResolveFreeTempoModalTests(unittest.TestCase):
         result = resolve_free_tempo_modal(runner=runner, pause=lambda _: None)
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "modal_still_visible")
+
+    def test_resolve_handles_korean_localized_modal(self):
+        runner = FakeRunner(
+            [
+                present_snapshot(
+                    title="프리 템포 녹음",
+                    buttons=["취소", "확인"],
+                    checkboxes=[{"name": "다시 표시 안 함", "value": "0"}],
+                    radio_buttons=[
+                        {"name": "프로젝트에 리전 템포 적용", "value": "0"},
+                        {"name": "프로젝트에 평균 리전 템포 적용", "value": "0"},
+                        {"name": "리전에 프로젝트 템포 적용", "value": "0"},
+                        {
+                            "name": "리전 템포를 분석하거나 프로젝트 템포를 변경하지 않음",
+                            "value": "0",
+                        },
+                    ],
+                    static_texts=["프리 템포 녹음"],
+                ),
+                {"status": "not_present"},
+            ]
+        )
+        result = resolve_free_tempo_modal(runner=runner, pause=lambda _: None)
+        self.assertEqual(result["status"], "dismissed")
+        self.assertEqual(
+            runner.clicks,
+            [
+                ("radio button", "리전 템포를 분석하거나 프로젝트 템포를 변경하지 않음"),
+                ("checkbox", "다시 표시 안 함"),
+                ("button", "확인"),
+            ],
+        )
 
 
 if __name__ == "__main__":

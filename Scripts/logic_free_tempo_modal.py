@@ -15,18 +15,26 @@ LIST_SEPARATOR = "||"
 STATE_SEPARATOR = "::"
 MODAL_MARKERS = (
     "Free Tempo Recording",
+    "프리 템포 녹음",
     "analyze region tempo",
     "project tempo",
     "Don't show again",
+    "리전 템포",
+    "프로젝트 템포",
+    "다시 표시 안 함",
 )
 
 DEFAULT_FREE_TEMPO_POLICY: dict[str, Any] = {
     "policy_id": "keep_project_tempo_no_analysis",
-    "selection_labels": ["Don't analyze region tempo or change project tempo"],
+    "selection_labels": [
+        "Don't analyze region tempo or change project tempo",
+        "리전 템포를 분석하거나 프로젝트 템포를 변경하지 않음",
+    ],
     "selection_fragment_sets": [
         ("don't analyze region tempo", "change project tempo"),
+        ("리전 템포", "프로젝트 템포", "변경하지 않음"),
     ],
-    "suppress_future_prompt_labels": ["Don't show again"],
+    "suppress_future_prompt_labels": ["Don't show again", "다시 표시 안 함"],
     "confirm_button_labels": ["OK", "Done", "Confirm", "Continue", "확인"],
 }
 
