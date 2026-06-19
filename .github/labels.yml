@@ -1,0 +1,103 @@
+# GitHub label policy for logic-pro-mcp.
+#
+# Keep labels practical:
+# - Every accepted open issue should have exactly one type, priority, status,
+#   and primary area label.
+# - Status labels describe triage/execution state, not release readiness.
+# - Use issue body, PR notes, and linked evidence for State A/B/C details.
+# - Avoid evidence/status micro-labels unless they change day-to-day execution.
+
+- name: bug
+  color: d73a4a
+  description: Something is broken, unsafe, or contradicts the documented contract.
+- name: enhancement
+  color: a2eeef
+  description: New feature, workflow, or product improvement.
+- name: documentation
+  color: 0075ca
+  description: Documentation-only work.
+- name: question
+  color: d876e3
+  description: More information is required before triage can proceed.
+- name: duplicate
+  color: cfd3d7
+  description: Already tracked by another issue or pull request.
+- name: invalid
+  color: e4e669
+  description: Not actionable as filed.
+- name: wontfix
+  color: ffffff
+  description: Intentionally not planned.
+- name: help wanted
+  color: 008672
+  description: Maintainer-approved work where external help is useful.
+- name: good first issue
+  color: 7057ff
+  description: Small, well-scoped issue suitable for new contributors.
+
+- name: epic
+  color: 5319e7
+  description: Cross-cutting parent issue that groups multiple deliverables.
+
+- name: "priority: p0"
+  color: b60205
+  description: Critical safety, destructive wrong-target, data loss, or release-blocking issue.
+- name: "priority: p1"
+  color: d93f0b
+  description: Core workflow blocker or high-risk correctness gap.
+- name: "priority: p2"
+  color: fbca04
+  description: Important improvement with a workaround or limited blast radius.
+- name: "priority: p3"
+  color: c5def5
+  description: Low-risk polish, cleanup, or nice-to-have improvement.
+
+- name: "status: needs triage"
+  color: ededed
+  description: Newly filed and not yet accepted into a work bundle.
+- name: "status: ready"
+  color: 0e8a16
+  description: Triaged and scoped for a focused implementation PR; not done or release-ready.
+- name: "status: in progress"
+  color: 0052cc
+  description: Actively being worked.
+- name: "status: blocked"
+  color: b60205
+  description: Cannot move until a named dependency or external condition changes.
+
+- name: "area: logic-ui"
+  color: bfd4f2
+  description: Accessibility, UI element matching, localization, edit commands, navigation, or view state.
+- name: "area: docs"
+  color: 0075ca
+  description: README, guides, API docs, troubleshooting, or maintainer docs.
+- name: "area: demo"
+  color: fef2c0
+  description: Public demos, live capture, transcripts, media artifacts, or evidence rendering.
+- name: "area: project-export"
+  color: 0366d6
+  description: Project lifecycle, save/open/close, bounce, stems, files, or cleanup.
+- name: "area: midi"
+  color: c5def5
+  description: CoreMIDI, MIDI files, note generation, import, sequencing, or ports.
+- name: "area: mixer"
+  color: d4c5f9
+  description: Mixer strips, volume, pan, sends, MCU feedback, or readback.
+- name: "area: plugins"
+  color: 5319e7
+  description: Plugin, instrument library, patch, insert slot, parameter, Scripter, or verified apply-back.
+- name: "area: resources"
+  color: 006b75
+  description: MCP resources, templates, cache envelopes, freshness, or provenance.
+- name: "area: setup-release"
+  color: f9d0c4
+  description: Setup, permissions, Homebrew, install scripts, release assets, signing, or CI packaging.
+- name: "area: tracks"
+  color: c2e0c6
+  description: Track creation, selection, naming, arming, types, or track header readback.
+- name: "area: transport"
+  color: fef2c0
+  description: Play, stop, record, tempo, cycle, locator, metronome, or transport resources.
+- name: "area: workflow"
+  color: bfdadc
+  description: Higher-level agent workflows, planning surfaces, or workflow skills.

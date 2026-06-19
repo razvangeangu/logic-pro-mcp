@@ -1,0 +1,118 @@
+name: Bug report
+description: Report a reproducible product bug, regression, or contract violation.
+title: "Bug: "
+labels: ["bug", "status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for behavior that is broken, unsafe, unverifiable, or different from the documented contract. Report security issues privately through SECURITY.md.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: This is not a private security report.
+          required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - data loss, destructive wrong target, or unsafe write
+        - P1 - core workflow blocked or incorrect verified state
+        - P2 - degraded workflow with a usable workaround
+        - P3 - low-risk polish or diagnostics issue
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Primary area
+      options:
+        - logic-ui
+        - transport
+        - tracks
+        - midi
+        - mixer
+        - plugins
+        - project-export
+        - resources
+        - setup-release
+        - workflow
+        - demo
+        - docs
+        - unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        - Logic Pro version:
+        - macOS version:
+        - Logic Pro MCP version or commit:
+        - Install method: Homebrew / release asset / source build
+        - MCP client:
+        - Required Logic setup completed: MCU / Accessibility / Automation / Scripter
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start from...
+        2. Call...
+        3. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened? Include the exact response envelope, log, or screenshot when useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: |
+        Expected user-visible result:
+        Expected State A / State B / State C outcome:
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      placeholder: |
+        - Command:
+        - Output:
+        - Transcript:
+        - Screenshot/video:
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done when
+      placeholder: |
+        - [ ] Failure is reproduced or narrowed to an unsupported state.
+        - [ ] Test or live probe covers the fix.
+        - [ ] Public contract/docs are updated if behavior changed.
+    validations:
+      required: true

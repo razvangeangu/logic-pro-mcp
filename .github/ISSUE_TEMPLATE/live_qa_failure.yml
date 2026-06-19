@@ -1,0 +1,86 @@
+name: Live QA failure
+description: Capture a failure found during real Logic Pro testing, demo production, or live E2E.
+title: "Live QA: "
+labels: ["bug", "area: demo", "status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when a real Logic Pro session, demo transcript, or live E2E run exposes uncertain or failed behavior.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I checked whether this is already covered by an existing issue.
+          required: true
+        - label: I separated product behavior from demo/rendering artifacts.
+          required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - unsafe write, data loss, or destructive wrong target
+        - P1 - public claim, core workflow, or verified-state blocker
+        - P2 - important live gap with workaround
+        - P3 - low-risk demo or diagnostic gap
+    validations:
+      required: true
+
+  - type: textarea
+    id: live_context
+    attributes:
+      label: Live context
+      placeholder: |
+        - Date/time:
+        - Logic Pro version:
+        - Project/session state:
+        - Capture or E2E script:
+        - Transcript/provenance path:
+        - Related media artifact:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: state
+    attributes:
+      label: Observed outcome
+      options:
+        - State B - uncertain success
+        - State C - hard failure
+        - Mismatch between response and live UI/resource
+        - Public evidence boundary problem
+        - Unknown, needs triage
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed evidence
+      description: Include exact response snippets, resource readback, transcript entries, or artifact paths.
+    validations:
+      required: true
+
+  - type: textarea
+    id: user_claim_risk
+    attributes:
+      label: Claim boundary
+      placeholder: |
+        Until this is fixed, do not claim...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done when
+      placeholder: |
+        - [ ] Failure is reproduced or documented as unsupported.
+        - [ ] State A is returned only with readback evidence.
+        - [ ] Public demo/docs avoid unverified claims.
+    validations:
+      required: true

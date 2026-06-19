@@ -1,0 +1,93 @@
+name: Feature request
+description: Propose a new user workflow, MCP surface, or product capability.
+title: "Feature: "
+labels: ["enhancement", "status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for new capabilities. If current behavior is broken or unverifiable, file a bug.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues for related work.
+          required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - enables a critical adoption or safety path
+        - P1 - unlocks a high-value Logic Pro workflow
+        - P2 - improves an existing workflow
+        - P3 - nice-to-have polish or convenience
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - logic-ui
+        - transport
+        - tracks
+        - midi
+        - mixer
+        - plugins
+        - project-export
+        - resources
+        - setup-release
+        - workflow
+        - demo
+        - docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      placeholder: |
+        As a Logic Pro MCP user, I need...
+        Today this fails because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      placeholder: |
+        The server should...
+        The client should be able to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: contract
+    attributes:
+      label: Safety and contract notes
+      placeholder: |
+        - Mutating operation?
+        - Required explicit target?
+        - Readback source:
+        - Failure/uncertain state:
+        - Destructive confirmation:
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done when
+      placeholder: |
+        - [ ] Public behavior is documented.
+        - [ ] Tests cover the new contract.
+        - [ ] Live Logic evidence is attached if the feature writes to Logic.
+    validations:
+      required: true
