@@ -89,6 +89,29 @@ private actor FailingExecuteChannel: Channel {
     }
 }
 
+private actor FixedResultChannel: Channel {
+    nonisolated let id: ChannelID
+    let result: ChannelResult
+    var executedOps: [(String, [String: String])] = []
+
+    init(id: ChannelID, result: ChannelResult) {
+        self.id = id
+        self.result = result
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        executedOps.append((operation, params))
+        return result
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "fixed result")
+    }
+}
+
 // MARK: - TransportDispatcher
 
 @Test func testTransportDispatcherRoutesPrimaryCommands() async {
@@ -865,6 +888,29 @@ private actor FailingExecuteChannel: Channel {
         ("track.set_solo", ["index": "5", "enabled": "true"]),
         ("track.set_arm", ["index": "5", "enabled": "false"]),
     ])
+}
+
+@Test func testTrackDispatcherRenameTreatsStateBAsError() async {
+    let router = ChannelRouter()
+    let ax = FixedResultChannel(
+        id: .accessibility,
+        result: .success("""
+        {"success":true,"verified":false,"reason":"readback_mismatch","track":0,"requested":"Bass","observed":"Deluxe Classic"}
+        """)
+    )
+    await router.register(ax)
+
+    let result = await TrackDispatcher.handle(
+        command: "rename",
+        params: ["index": .int(0), "name": .string("Bass")],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError == true)
+    #expect(dispatcherText(result).contains("\"verified\":false"))
+    let ops = await ax.executedOps
+    expectExecutedOps(ops, equals: [("track.rename", ["index": "0", "name": "Bass"])])
 }
 
 @Test func testTrackDispatcherDeleteAndDuplicateRespectSelectionFlow() async {

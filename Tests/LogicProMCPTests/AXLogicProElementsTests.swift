@@ -97,6 +97,32 @@ import Testing
     #expect(AXLogicProElements.findPanKnob(trackIndex: 0, runtime: runtime) == pan)
 }
 
+@Test func testAXLogicProElementsFindTrackNameFieldPrefersTextFieldOverStaticText() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(90)
+    let window = builder.element(91)
+    let trackList = builder.element(92)
+    let header = builder.element(93)
+    let staticName = builder.element(94)
+    let editableName = builder.element(95)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [trackList])
+    builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
+    builder.setChildren(trackList, [header])
+    builder.setAttribute(header, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setChildren(header, [staticName, editableName])
+    builder.setAttribute(staticName, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(staticName, kAXValueAttribute as String, "Old Label")
+    builder.setAttribute(editableName, kAXRoleAttribute as String, kAXTextFieldRole as String)
+    builder.setAttribute(editableName, kAXDescriptionAttribute as String, "Live Name")
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    #expect(AXLogicProElements.findTrackNameField(trackIndex: 0, runtime: runtime) == editableName)
+}
+
 @Test func testAXLogicProElementsResolveMenuItemsAcrossNestedMenus() {
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(1)

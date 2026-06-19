@@ -289,15 +289,14 @@ enum AXValueExtractors {
     // MARK: - Private helpers
 
     private static func extractTrackName(from header: AXUIElement, runtime: AXHelpers.Runtime) -> String {
-        // Try static text first.
-        if let text = AXHelpers.findDescendant(of: header, role: kAXStaticTextRole, maxDepth: 3, runtime: runtime),
-           let name = extractTextValue(text, runtime: runtime)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !name.isEmpty {
-            return name
-        }
-
-        // Text fields in live Logic often expose the track name via AXDescription, while AXValue is a numeric placeholder.
-        if let field = AXHelpers.findDescendant(of: header, role: kAXTextFieldRole, maxDepth: 3, runtime: runtime) {
+        // Logic 12.2 commonly exposes the authoritative live name on an
+        // AXTextField's description while AXValue stays the numeric placeholder
+        // "0". Prefer text-field metadata when it contains a real name; fall
+        // back to static text only when the text-field path is empty/useless.
+        let textFields = AXHelpers.findAllDescendants(
+            of: header, role: kAXTextFieldRole, maxDepth: 3, runtime: runtime
+        )
+        for field in textFields {
             let candidates = [
                 AXHelpers.getDescription(field, runtime: runtime),
                 AXHelpers.getTitle(field, runtime: runtime),
@@ -308,6 +307,14 @@ enum AXValueExtractors {
                     return candidate
                 }
             }
+        }
+
+        if let text = AXHelpers.findDescendant(
+            of: header, role: kAXStaticTextRole, maxDepth: 3, runtime: runtime
+        ),
+           let name = extractTextValue(text, runtime: runtime)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            return name
         }
 
         // AXLayoutItem headers commonly describe themselves as `4개의 ‘Holographic Squares’ 트랙`.

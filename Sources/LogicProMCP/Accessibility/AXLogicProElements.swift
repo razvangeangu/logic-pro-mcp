@@ -1235,8 +1235,8 @@ enum AXLogicProElements {
     /// Find the track name text field on a header.
     static func findTrackNameField(trackIndex: Int, runtime: Runtime = .production) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex, runtime: runtime) else { return nil }
-        return AXHelpers.findDescendant(of: header, role: kAXStaticTextRole, maxDepth: 4, runtime: runtime.ax)
-            ?? AXHelpers.findDescendant(of: header, role: kAXTextFieldRole, maxDepth: 4, runtime: runtime.ax)
+        return AXHelpers.findDescendant(of: header, role: kAXTextFieldRole, maxDepth: 4, runtime: runtime.ax)
+            ?? AXHelpers.findDescendant(of: header, role: kAXStaticTextRole, maxDepth: 4, runtime: runtime.ax)
     }
 
     // MARK: - Markers

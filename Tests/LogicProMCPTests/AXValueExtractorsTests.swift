@@ -227,6 +227,25 @@ import Testing
     #expect(unknownTrack.color == nil)
 }
 
+@Test func testAXValueExtractorsPreferTrackTextFieldDescriptionOverStaticText() {
+    let builder = FakeAXRuntimeBuilder()
+    let header = builder.element(230)
+    let staticName = builder.element(231)
+    let editableName = builder.element(232)
+
+    builder.setChildren(header, [staticName, editableName])
+    builder.setAttribute(staticName, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(staticName, kAXValueAttribute as String, "Old Label")
+    builder.setAttribute(editableName, kAXRoleAttribute as String, kAXTextFieldRole as String)
+    builder.setAttribute(editableName, kAXDescriptionAttribute as String, "Live Label")
+    builder.setAttribute(editableName, kAXValueAttribute as String, 0)
+
+    let runtime = builder.makeAXRuntime()
+    let track = AXValueExtractors.extractTrackState(from: header, index: 0, runtime: runtime)
+
+    #expect(track.name == "Live Label")
+}
+
 @Test func testAXValueExtractorsInfersTrackTypeFromHeaderDescendants() {
     let builder = FakeAXRuntimeBuilder()
     let header = builder.element(240)

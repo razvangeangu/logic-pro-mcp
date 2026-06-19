@@ -35,6 +35,8 @@ private final class ControlBarMouseRecorder: @unchecked Sendable {
     var unicodeEvents: [UniChar] = []
     var sleeps: [useconds_t] = []
     var onMouseEvent: ((CGEventType, CGPoint, Int64) -> Void)?
+    var onKeyEvent: ((CGKeyCode) -> Void)?
+    var onUnicodeScalar: ((UniChar) -> Void)?
 
     func runtime() -> AXMouseHelper.Runtime {
         AXMouseHelper.Runtime(
@@ -45,10 +47,12 @@ private final class ControlBarMouseRecorder: @unchecked Sendable {
             },
             postKeyEvent: { keyCode in
                 self.keyEvents.append(keyCode)
+                self.onKeyEvent?(keyCode)
                 return true
             },
             postUnicodeScalar: { scalar in
                 self.unicodeEvents.append(scalar)
+                self.onUnicodeScalar?(scalar)
                 return true
             },
             sleepMicros: { micros in
@@ -56,6 +60,23 @@ private final class ControlBarMouseRecorder: @unchecked Sendable {
             }
         )
     }
+}
+
+private final class TrackRenameSession: @unchecked Sendable {
+    var editing = false
+    var typed = ""
+    var renamePressed = false
+    var selectionCommitted = false
+}
+
+private func makeProcessRuntime(isRunning: Bool = true) -> ProcessUtils.Runtime {
+    ProcessUtils.Runtime(
+        logicProPID: { 4242 },
+        fallbackLogicProPID: { 4242 },
+        logicProRunning: { isRunning },
+        activateLogicPro: { true },
+        logicProBundleURL: { nil }
+    )
 }
 
 private func makeAccessibilityRuntime(
@@ -125,6 +146,13 @@ private func makeAXBackedAccessibilityChannel(
         postUnicodeScalar: { _ in false },
         sleepMicros: { _ in }
     ),
+    trackRenameMouseRuntime: AXMouseHelper.Runtime = AXMouseHelper.Runtime(
+        postMouseEvent: { _, _, _ in false },
+        postKeyEvent: { _ in false },
+        postUnicodeScalar: { _ in false },
+        sleepMicros: { _ in }
+    ),
+    processRuntime: ProcessUtils.Runtime = makeProcessRuntime(),
     runTempoFallback: @escaping @Sendable (String) -> Bool = { _ in false }
 ) -> AccessibilityChannel {
     let runtime = AccessibilityChannel.Runtime.axBacked(
@@ -132,6 +160,8 @@ private func makeAXBackedAccessibilityChannel(
         isLogicProRunning: { isRunning },
         logicRuntime: logicRuntime ?? builder.makeLogicRuntime(appElement: app),
         controlBarMouseRuntime: controlBarMouseRuntime,
+        trackRenameMouseRuntime: trackRenameMouseRuntime,
+        processRuntime: processRuntime,
         runTempoFallback: runTempoFallback
     )
     return AccessibilityChannel(runtime: runtime)
@@ -991,6 +1021,159 @@ private func makeAXBackedAccessibilityChannel(
     #expect(selectedTrack.isSelected)
 }
 
+@Test func testAccessibilityChannelTrackRenameFallsBackToTrackMenuAndVerifiesTrackName() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(560)
+    let window = builder.element(561)
+    let menuBar = builder.element(562)
+    let trackMenu = builder.element(563)
+    let renameItem = builder.element(564)
+    let trackList = builder.element(565)
+    let header = builder.element(566)
+    let nameField = builder.element(567)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setAttribute(app, kAXMenuBarAttribute as String, menuBar)
+    builder.setChildren(window, [trackList])
+    builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
+    builder.setChildren(trackList, [header])
+    builder.setAttribute(header, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(header, kAXDescriptionAttribute as String, "Track 1 “Deluxe Classic”")
+    builder.setAttribute(header, kAXSelectedAttribute as String, false)
+    builder.setChildren(header, [nameField])
+    builder.setAttribute(nameField, kAXRoleAttribute as String, kAXTextFieldRole as String)
+    builder.setAttribute(nameField, kAXDescriptionAttribute as String, "Deluxe Classic")
+    builder.setAttribute(nameField, kAXValueAttribute as String, 0)
+
+    builder.setChildren(menuBar, [trackMenu])
+    builder.setAttribute(trackMenu, kAXTitleAttribute as String, "Track")
+    builder.setChildren(trackMenu, [renameItem])
+    builder.setAttribute(renameItem, kAXTitleAttribute as String, "Rename Track")
+
+    let mouseRecorder = ControlBarMouseRecorder()
+    let session = TrackRenameSession()
+    mouseRecorder.onUnicodeScalar = { scalar in
+        guard session.editing, let unicode = UnicodeScalar(scalar) else { return }
+        session.typed.append(Character(unicode))
+    }
+    mouseRecorder.onKeyEvent = { keyCode in
+        guard session.editing else { return }
+        switch keyCode {
+        case 0x24:
+            builder.setAttribute(nameField, kAXDescriptionAttribute as String, session.typed)
+            builder.setAttribute(header, kAXDescriptionAttribute as String, "Track 1 “\(session.typed)”")
+            session.editing = false
+        default:
+            break
+        }
+    }
+
+    let logicRuntime = builder.makeLogicRuntime(
+        appElement: app,
+        setAttributeHandler: nil,
+        performActionHandler: { element, action in
+            if builder.elementID(element) == builder.elementID(header), action == kAXPressAction as String {
+                builder.setAttribute(header, kAXSelectedAttribute as String, true)
+                session.selectionCommitted = true
+                return true
+            }
+            if builder.elementID(element) == builder.elementID(renameItem), action == kAXPressAction as String {
+                session.renamePressed = true
+                session.editing = true
+                session.typed = ""
+                return true
+            }
+            return true
+        }
+    )
+    let channel = makeAXBackedAccessibilityChannel(
+        builder: builder,
+        app: app,
+        logicRuntime: logicRuntime,
+        trackRenameMouseRuntime: mouseRecorder.runtime()
+    )
+
+    let result = await channel.execute(operation: "track.rename", params: ["index": "0", "name": "Track Alpha"])
+    #expect(result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["via"] as? String == "track_menu")
+    #expect(obj["observed"] as? String == "Track Alpha")
+    #expect(builder.attributeValue(nameField, kAXDescriptionAttribute as String) as? String == "Track Alpha")
+    #expect((builder.attributeValue(header, kAXDescriptionAttribute as String) as? String)?.contains("Track Alpha") == true)
+    #expect(session.selectionCommitted)
+    #expect(session.renamePressed)
+    #expect(mouseRecorder.keyEvents.contains(0x24))
+}
+
+@Test func testAccessibilityChannelTrackRenameReturnsReadbackMismatchWhenTrackMenuDoesNotChangeName() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(570)
+    let window = builder.element(571)
+    let menuBar = builder.element(572)
+    let trackMenu = builder.element(573)
+    let renameItem = builder.element(574)
+    let trackList = builder.element(575)
+    let header = builder.element(576)
+    let nameField = builder.element(577)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setAttribute(app, kAXMenuBarAttribute as String, menuBar)
+    builder.setChildren(window, [trackList])
+    builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
+    builder.setChildren(trackList, [header])
+    builder.setAttribute(header, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(header, kAXDescriptionAttribute as String, "Track 1 “Deluxe Classic”")
+    builder.setAttribute(header, kAXSelectedAttribute as String, false)
+    builder.setChildren(header, [nameField])
+    builder.setAttribute(nameField, kAXRoleAttribute as String, kAXTextFieldRole as String)
+    builder.setAttribute(nameField, kAXDescriptionAttribute as String, "Deluxe Classic")
+    builder.setAttribute(nameField, kAXValueAttribute as String, 0)
+
+    builder.setChildren(menuBar, [trackMenu])
+    builder.setAttribute(trackMenu, kAXTitleAttribute as String, "Track")
+    builder.setChildren(trackMenu, [renameItem])
+    builder.setAttribute(renameItem, kAXTitleAttribute as String, "Rename Track")
+
+    let mouseRecorder = ControlBarMouseRecorder()
+    let session = TrackRenameSession()
+    let logicRuntime = builder.makeLogicRuntime(
+        appElement: app,
+        setAttributeHandler: nil,
+        performActionHandler: { element, action in
+            if builder.elementID(element) == builder.elementID(header), action == kAXPressAction as String {
+                builder.setAttribute(header, kAXSelectedAttribute as String, true)
+                return true
+            }
+            if builder.elementID(element) == builder.elementID(renameItem), action == kAXPressAction as String {
+                session.editing = true
+                return true
+            }
+            return true
+        }
+    )
+    mouseRecorder.onKeyEvent = { keyCode in
+        guard session.editing, keyCode == 0x24 else { return }
+        session.editing = false
+    }
+    let channel = makeAXBackedAccessibilityChannel(
+        builder: builder,
+        app: app,
+        logicRuntime: logicRuntime,
+        trackRenameMouseRuntime: mouseRecorder.runtime()
+    )
+
+    let result = await channel.execute(operation: "track.rename", params: ["index": "0", "name": "Track Beta"])
+    #expect(result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["reason"] as? String == "readback_mismatch")
+    #expect(obj["via"] as? String == "track_menu")
+    #expect(obj["observed"] as? String == "Deluxe Classic")
+}
+
 @Test func testAccessibilityChannelAXBackedTrackSelectFailsWhenVerifiedSelectionSettlesElsewhere() async {
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(610)
@@ -1078,10 +1261,10 @@ private func makeAXBackedAccessibilityChannel(
     #expect(!missingMute.isSuccess)
     #expect(missingMute.message.contains("Cannot find Mute button"))
 
-    let missingRenameField = await channel.execute(operation: "track.rename", params: ["index": "0", "name": "Lead"])
-    #expect(!missingRenameField.isSuccess)
-    #expect(missingRenameField.message.contains("\"error\":\"element_not_found\""))
-    #expect(missingRenameField.message.contains("name field for track 0 not located"))
+    let missingRenameMenu = await channel.execute(operation: "track.rename", params: ["index": "0", "name": "Lead"])
+    #expect(!missingRenameMenu.isSuccess)
+    #expect(missingRenameMenu.message.contains("\"error\":\"element_not_found\""))
+    #expect(missingRenameMenu.message.contains("Track > Rename Track menu item not found"))
 
     let missingRenameParams = await channel.execute(operation: "track.rename", params: ["index": "0"])
     #expect(!missingRenameParams.isSuccess)
