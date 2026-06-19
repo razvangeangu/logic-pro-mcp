@@ -34,10 +34,16 @@ The only visible Logic content is the actual Logic window capture.
   evidence.
 - The MP4 is a live capture artifact. `docs/media/render-demo.py` validates the
   MP4 and regenerates the GIF/thumbnail derivatives from it.
+- If a public demo includes audio, it must use live Logic output or a verified
+  Logic Bounce/export file. Synthetic guide audio is only allowed when it is
+  explicitly labeled and not treated as public-demo ready.
 
 ## Verification checklist
 
 - `python3 docs/media/render-demo.py` validates the MP4 and regenerates GIF and thumbnail.
+- `python3 docs/media/logic_bounce_guard.py ...` verifies any attached Logic
+  Bounce/export audio for duration, loudness, and non-silence before it can be
+  treated as public-demo ready.
 - `ffprobe` confirms the MP4 duration, dimensions, frame rate, and frame count.
 - `sips` confirms GIF and thumbnail dimensions.
 - Sampled frames confirm the hero is real Logic UI with playhead and meter movement.
