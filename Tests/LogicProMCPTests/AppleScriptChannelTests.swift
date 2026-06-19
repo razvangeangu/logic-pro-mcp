@@ -344,6 +344,7 @@ private func makeAppleScriptRuntime(
     let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(transportRecorder: recorder))
 
     let operations = [
+        "transport.play": "play",
         "transport.stop": "stop",
         "transport.record": "record",
     ]
@@ -356,12 +357,8 @@ private func makeAppleScriptRuntime(
     }
 }
 
-@Test func testAppleScriptTransportRejectsUnsupportedPlaybackCommands() async {
+@Test func testAppleScriptTransportRejectsUnsupportedPauseCommand() async {
     let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime())
-
-    let play = await channel.execute(operation: "transport.play", params: [:])
-    #expect(!play.isSuccess)
-    #expect(play.message.contains("Unsupported AppleScript operation"))
 
     let pause = await channel.execute(operation: "transport.pause", params: [:])
     #expect(!pause.isSuccess)

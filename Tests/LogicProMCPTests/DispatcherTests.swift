@@ -89,6 +89,36 @@ private actor FailingExecuteChannel: Channel {
     }
 }
 
+private actor TransportStateSequenceChannel: Channel {
+    nonisolated let id: ChannelID
+    private var states: [String]
+    private let mutationResults: [String: ChannelResult]
+    private(set) var executedOps: [(String, [String: String])] = []
+
+    init(id: ChannelID, states: [String], mutationResults: [String: ChannelResult]) {
+        self.id = id
+        self.states = states
+        self.mutationResults = mutationResults
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        executedOps.append((operation, params))
+        if operation == "transport.get_state" {
+            guard !states.isEmpty else { return .error("transport state unavailable") }
+            let next = states.count > 1 ? states.removeFirst() : states[0]
+            return .success(next)
+        }
+        return mutationResults[operation] ?? .success("Mock: \(operation)")
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "transport sequence")
+    }
+}
+
 // MARK: - TransportDispatcher
 
 @Test func testTransportDispatcherRoutesPrimaryCommands() async {
@@ -127,6 +157,108 @@ private actor FailingExecuteChannel: Channel {
         #expect(ops.count == 1)
         #expect(ops[0].0 == testCase.operation)
     }
+}
+
+@Test func testTransportDispatcherPlayFallsBackAndReturnsVerifiedStateA() async {
+    let router = ChannelRouter()
+    let ax = TransportStateSequenceChannel(
+        id: .accessibility,
+        states: [
+            #"{"isPlaying":false,"isRecording":false,"position":"1.1.1.1","tempo":120}"#,
+            #"{"isPlaying":true,"isRecording":false,"position":"1.1.1.1","tempo":120}"#
+        ],
+        mutationResults: [
+            "transport.play": .error(HonestContract.encodeStateC(
+                error: .elementNotFound,
+                hint: "transport button 'Play' not located"
+            ))
+        ]
+    )
+    let coreMIDI = MockChannel(id: .coreMIDI)
+    await router.register(ax)
+    await router.register(coreMIDI)
+
+    let result = await TransportDispatcher.handle(
+        command: "play",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    let text = dispatcherText(result)
+    #expect(result.isError == false)
+    #expect(text.contains(#""verified":true"#))
+    #expect(text.contains(#""operation":"transport.play""#))
+    #expect(text.contains(#""write_attempted":true"#))
+    let coreOps = await coreMIDI.executedOps
+    #expect(coreOps.count == 1)
+    #expect(coreOps[0].0 == "transport.play")
+}
+
+@Test func testTransportDispatcherStopReturnsVerifiedUnchangedWhenAlreadyStopped() async {
+    let router = ChannelRouter()
+    let ax = TransportStateSequenceChannel(
+        id: .accessibility,
+        states: [#"{"isPlaying":false,"isRecording":false,"position":"1.1.1.1","tempo":120}"#],
+        mutationResults: [:]
+    )
+    let coreMIDI = MockChannel(id: .coreMIDI)
+    await router.register(ax)
+    await router.register(coreMIDI)
+
+    let result = await TransportDispatcher.handle(
+        command: "stop",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    let text = dispatcherText(result)
+    #expect(result.isError == false)
+    #expect(text.contains(#""verified":true"#))
+    #expect(text.contains(#""write_attempted":false"#))
+    #expect(text.contains(#""unchanged":true"#))
+    let coreOps = await coreMIDI.executedOps
+    #expect(coreOps.isEmpty)
+}
+
+@Test func testTransportDispatcherRecordReturnsReadbackMismatchWhenFallbackDoesNotRecord() async {
+    let router = ChannelRouter()
+    let ax = TransportStateSequenceChannel(
+        id: .accessibility,
+        states: [
+            #"{"isPlaying":false,"isRecording":false,"position":"1.1.1.1","tempo":120}"#,
+            #"{"isPlaying":true,"isRecording":false,"position":"1.1.1.1","tempo":120}"#
+        ],
+        mutationResults: [
+            "transport.record": .error(HonestContract.encodeStateC(
+                error: .elementNotFound,
+                hint: "transport button 'Record' not located"
+            ))
+        ]
+    )
+    let coreMIDI = MockChannel(id: .coreMIDI)
+    await router.register(ax)
+    await router.register(coreMIDI)
+
+    let result = await TransportDispatcher.handle(
+        command: "record",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    let text = dispatcherText(result)
+    #expect(result.isError == false)
+    #expect(text.contains(#""verified":false"#))
+    #expect(text.contains(#""reason":"readback_mismatch""#))
+    #expect(text.contains(#""operation":"transport.record""#))
+    let coreOps = await coreMIDI.executedOps
+    #expect(coreOps.count == 1)
+    #expect(coreOps[0].0 == "transport.record")
 }
 
 @Test func testTransportDispatcherSetTempoGotoPositionAndCycleRange() async {

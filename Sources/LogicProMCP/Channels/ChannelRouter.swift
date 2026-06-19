@@ -23,6 +23,9 @@ actor ChannelRouter {
     private var channels: [ChannelID: any Channel] = [:]
 
     private static let transportToggleOpsAllowingAXElementFallback: Set<String> = [
+        "transport.play",
+        "transport.stop",
+        "transport.record",
         "transport.toggle_cycle",
         "transport.toggle_metronome",
         "transport.toggle_count_in",
@@ -33,7 +36,7 @@ actor ChannelRouter {
     static let v2RoutingTable: [String: [ChannelID]] = [
         // Transport — AX control-bar click primary (works without MCU / MIDI Learn),
         // MCU / CoreMIDI / CGEvent / AppleScript as fallbacks.
-        "transport.play":             [.accessibility, .mcu, .coreMIDI, .cgEvent],
+        "transport.play":             [.accessibility, .mcu, .coreMIDI, .cgEvent, .appleScript],
         "transport.stop":             [.accessibility, .mcu, .coreMIDI, .cgEvent, .appleScript],
         "transport.record":           [.accessibility, .mcu, .coreMIDI, .cgEvent, .appleScript],
         "transport.pause":            [.coreMIDI, .cgEvent],

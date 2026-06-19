@@ -119,6 +119,34 @@ actor FailingStartChannel: Channel {
     #expect(appleScriptOps[0].0 == "transport.stop")
 }
 
+@Test func testRouterTransportPlayFallsBackToAppleScriptAfterAXLookupMiss() async {
+    let router = ChannelRouter()
+    let ax = TerminalStateCChannel(
+        id: .accessibility,
+        envelope: HonestContract.encodeStateC(
+            error: .elementNotFound,
+            hint: "transport button 'Play' not located in the visible Logic transport UI",
+            extras: ["button": "Play"]
+        )
+    )
+    let mcu = MockChannel(id: .mcu, available: false)
+    let coreMIDI = MockChannel(id: .coreMIDI, available: false)
+    let cgEvent = MockChannel(id: .cgEvent, available: false)
+    let appleScript = MockChannel(id: .appleScript)
+    await router.register(ax)
+    await router.register(mcu)
+    await router.register(coreMIDI)
+    await router.register(cgEvent)
+    await router.register(appleScript)
+
+    let result = await router.route(operation: "transport.play")
+    #expect(result.isSuccess, "transport.play should fall through after AX element_not_found")
+
+    let appleScriptOps = await appleScript.executedOps
+    #expect(appleScriptOps.count == 1)
+    #expect(appleScriptOps[0].0 == "transport.play")
+}
+
 @Test func testRouterSkipsManualValidationChannelsAndFallsBackToRuntimeReadyChannel() async {
     let router = ChannelRouter()
     let keyCmd = MockChannel(id: .midiKeyCommands, healthOverride: .healthy(

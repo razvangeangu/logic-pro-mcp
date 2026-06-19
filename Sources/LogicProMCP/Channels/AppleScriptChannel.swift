@@ -41,6 +41,10 @@ actor AppleScriptChannel: Channel {
             },
             executeTransportAction: { action in
                 switch action {
+                case "play":
+                    return await AppleScriptChannel.executeAppleScript(
+                        AppleScriptChannel.transportScript(action: action)
+                    )
                 case "stop":
                     return await AppleScriptChannel.executeAppleScript(
                         AppleScriptChannel.transportScript(action: action)
@@ -133,7 +137,15 @@ actor AppleScriptChannel: Channel {
             let raw = await runtime.executeTransportAction(action)
             return Self.wrapMutatingResult(raw, operation: operation)
 
-        case "transport.play", "transport.pause":
+        case "transport.play":
+            let action = operation.replacingOccurrences(of: "transport.", with: "")
+            guard AppleScriptSafety.isAllowedTransportAction(action) else {
+                return .error("Transport action not in whitelist: \(action)")
+            }
+            let raw = await runtime.executeTransportAction(action)
+            return Self.wrapMutatingResult(raw, operation: operation)
+
+        case "transport.pause":
             return .error("Unsupported AppleScript operation: \(operation)")
 
         default:
