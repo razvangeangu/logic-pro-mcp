@@ -44,8 +44,14 @@ struct TransportDispatcher {
             return toolTextResult(result)
 
         case "toggle_metronome":
+            let beforeTransport = await liveTransportState(router: router, cache: cache)
             let result = await router.route(operation: "transport.toggle_metronome")
-            return toolTextResult(result)
+            return await finalizeToggleMetronomeResult(
+                result,
+                beforeTransport: beforeTransport,
+                router: router,
+                cache: cache
+            )
 
         case "toggle_count_in":
             let result = await router.route(operation: "transport.toggle_count_in")
@@ -111,7 +117,12 @@ struct TransportDispatcher {
                     operation: "transport.goto_position",
                     params: ["position": "\(bar).1.1.1"]
                 )
-                return toolTextResult(result)
+                return await finalizeGotoPositionResult(
+                    result,
+                    requestedPosition: "\(bar).1.1.1",
+                    router: router,
+                    cache: cache
+                )
             }
             let time = stringParam(params, "position", default: "1.1.1.1")
             // Validate position format before routing. Accept:
@@ -126,7 +137,12 @@ struct TransportDispatcher {
                 operation: "transport.goto_position",
                 params: ["position": time]
             )
-            return toolTextResult(result)
+            return await finalizeGotoPositionResult(
+                result,
+                requestedPosition: time,
+                router: router,
+                cache: cache
+            )
 
         case "set_cycle_range":
             guard params["start"] != nil, params["end"] != nil else {
@@ -198,5 +214,97 @@ struct TransportDispatcher {
         }
 
         return false
+    }
+
+    static func finalizeGotoPositionResult(
+        _ result: ChannelResult,
+        requestedPosition: String,
+        router: ChannelRouter,
+        cache: StateCache
+    ) async -> CallTool.Result {
+        guard result.isSuccess else {
+            return toolTextResult(result)
+        }
+        guard channelResultIsUnverified(result) else {
+            return toolTextResult(result)
+        }
+        guard let observedTransport = await liveTransportState(router: router, cache: cache) else {
+            return toolTextResult(
+                HonestContract.addExtras(
+                    ["verification_source": "transport_state"],
+                    into: result.message
+                ),
+                isError: true
+            )
+        }
+
+        var extras = honestContractExtras(from: result.message)
+        extras["verification_source"] = "transport_state"
+        extras["requested"] = requestedPosition
+        extras["observed"] = observedTransport.position
+        extras["observed_time_position"] = observedTransport.timePosition
+
+        if !requestedPosition.contains(":"), observedTransport.position == requestedPosition {
+            return toolTextResult(HonestContract.encodeStateA(extras: extras))
+        }
+
+        let reason: HonestContract.UncertainReason =
+            requestedPosition.contains(":") ? .readbackUnavailable : .readbackMismatch
+        return toolTextResult(
+            HonestContract.encodeStateB(reason: reason, extras: extras),
+            isError: true
+        )
+    }
+
+    private static func finalizeToggleMetronomeResult(
+        _ result: ChannelResult,
+        beforeTransport: TransportState?,
+        router: ChannelRouter,
+        cache: StateCache
+    ) async -> CallTool.Result {
+        guard result.isSuccess else {
+            return toolTextResult(result)
+        }
+        guard channelResultIsUnverified(result) else {
+            return toolTextResult(result)
+        }
+        guard let beforeTransport,
+              let afterTransport = await liveTransportState(router: router, cache: cache) else {
+            return toolTextResult(
+                HonestContract.addExtras(
+                    ["verification_source": "transport_state"],
+                    into: result.message
+                ),
+                isError: true
+            )
+        }
+
+        var extras = honestContractExtras(from: result.message)
+        extras["verification_source"] = "transport_state"
+        extras["previous_enabled"] = beforeTransport.isMetronomeEnabled
+        extras["requested_enabled"] = !beforeTransport.isMetronomeEnabled
+        extras["observed_enabled"] = afterTransport.isMetronomeEnabled
+
+        if beforeTransport.isMetronomeEnabled != afterTransport.isMetronomeEnabled {
+            return toolTextResult(HonestContract.encodeStateA(extras: extras))
+        }
+
+        return toolTextResult(
+            HonestContract.encodeStateB(reason: .readbackMismatch, extras: extras),
+            isError: true
+        )
+    }
+
+    private static func liveTransportState(
+        router: ChannelRouter,
+        cache: StateCache
+    ) async -> TransportState? {
+        let readback = await router.route(operation: "transport.get_state")
+        guard readback.isSuccess,
+              let transport = decodeJSONValue(TransportState.self, from: readback.message) else {
+            return nil
+        }
+        await cache.updateTransport(transport)
+        return transport
     }
 }

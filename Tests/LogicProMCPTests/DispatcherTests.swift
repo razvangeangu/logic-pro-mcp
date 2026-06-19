@@ -39,6 +39,21 @@ private func makeLogicProjectPath(name: String = UUID().uuidString, create: Bool
     return path.path
 }
 
+private func encodeDispatcherJSON<T: Encodable>(_ value: T) -> String {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let data = try! encoder.encode(value)
+    return String(decoding: data, as: UTF8.self)
+}
+
+private func parseDispatcherObject(_ raw: String) -> [String: Any]? {
+    guard let data = raw.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+    return object
+}
+
 private final class ProjectLifecycleHarness {
     var scripts: [String] = []
     var runningStates: [Bool]
@@ -86,6 +101,110 @@ private actor FailingExecuteChannel: Channel {
 
     func healthCheck() async -> ChannelHealth {
         .healthy(detail: "failing execute channel")
+    }
+}
+
+private actor StaticResultChannel: Channel {
+    nonisolated let id: ChannelID
+    let results: [String: ChannelResult]
+    let defaultResult: ChannelResult
+    var executedOps: [(String, [String: String])] = []
+
+    init(
+        id: ChannelID,
+        results: [String: ChannelResult],
+        defaultResult: ChannelResult = .error("unexpected operation")
+    ) {
+        self.id = id
+        self.results = results
+        self.defaultResult = defaultResult
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        executedOps.append((operation, params))
+        return results[operation] ?? defaultResult
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "static result channel")
+    }
+}
+
+private actor SequencedTransportReadbackChannel: Channel {
+    nonisolated let id: ChannelID
+    let toggleResult: ChannelResult
+    let gotoPositionResult: ChannelResult
+    var transportStates: [TransportState]
+    var executedOps: [(String, [String: String])] = []
+
+    init(
+        id: ChannelID = .accessibility,
+        toggleResult: ChannelResult = .error("unexpected toggle"),
+        gotoPositionResult: ChannelResult = .error("unexpected goto"),
+        transportStates: [TransportState]
+    ) {
+        self.id = id
+        self.toggleResult = toggleResult
+        self.gotoPositionResult = gotoPositionResult
+        self.transportStates = transportStates
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        executedOps.append((operation, params))
+        switch operation {
+        case "transport.toggle_metronome":
+            return toggleResult
+        case "transport.goto_position":
+            return gotoPositionResult
+        case "transport.get_state":
+            guard !transportStates.isEmpty else {
+                return .error("missing transport state")
+            }
+            let next = transportStates.removeFirst()
+            return .success(encodeDispatcherJSON(next))
+        default:
+            return .error("unexpected operation: \(operation)")
+        }
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "sequenced transport readback")
+    }
+}
+
+private actor SequencedMarkersChannel: Channel {
+    nonisolated let id: ChannelID
+    var markerSnapshots: [[MarkerState]]
+    var executedOps: [(String, [String: String])] = []
+
+    init(id: ChannelID = .accessibility, markerSnapshots: [[MarkerState]]) {
+        self.id = id
+        self.markerSnapshots = markerSnapshots
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        executedOps.append((operation, params))
+        guard operation == "nav.get_markers" else {
+            return .error("unexpected operation: \(operation)")
+        }
+        guard !markerSnapshots.isEmpty else {
+            return .error("missing marker snapshot")
+        }
+        let next = markerSnapshots.removeFirst()
+        return .success(encodeDispatcherJSON(next))
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "sequenced marker readback")
     }
 }
 
@@ -189,6 +308,89 @@ private actor FailingExecuteChannel: Channel {
         ("transport.goto_position", ["position": "00:00:10:12"]),
         ("transport.set_cycle_range", ["start": "4.1.1.1", "end": "12.1.1.1"]),
     ])
+}
+
+@Test func testTransportDispatcherToggleMetronomeVerifiesViaTransportStateReadback() async throws {
+    let router = ChannelRouter()
+    let ax = SequencedTransportReadbackChannel(
+        toggleResult: .error(HonestContract.encodeStateC(
+            error: .elementNotFound,
+            hint: "transport button not visible"
+        )),
+        transportStates: [
+            TransportState(
+                isMetronomeEnabled: false,
+                position: "1.1.1.1",
+                timePosition: "00:00:00.000",
+                lastUpdated: Date()
+            ),
+            TransportState(
+                isMetronomeEnabled: true,
+                position: "1.1.1.1",
+                timePosition: "00:00:00.000",
+                lastUpdated: Date()
+            ),
+        ]
+    )
+    let keyCmd = StaticResultChannel(
+        id: .midiKeyCommands,
+        results: [
+            "transport.toggle_metronome": .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["method": "midi_key_command"]
+            ))
+        ]
+    )
+    await router.register(ax)
+    await router.register(keyCmd)
+
+    let result = await TransportDispatcher.handle(
+        command: "toggle_metronome",
+        params: [:],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(!result.isError!)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect(object["verified"] as? Bool == true)
+    #expect(object["verification_source"] as? String == "transport_state")
+    #expect(object["previous_enabled"] as? Bool == false)
+    #expect(object["requested_enabled"] as? Bool == true)
+    #expect(object["observed_enabled"] as? Bool == true)
+}
+
+@Test func testTransportDispatcherGotoPositionReturnsErrorWhenTransportReadbackDoesNotMatch() async throws {
+    let router = ChannelRouter()
+    let ax = SequencedTransportReadbackChannel(
+        gotoPositionResult: .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: ["via": "dialog"]
+        )),
+        transportStates: [
+            TransportState(
+                position: "8.1.1.1",
+                timePosition: "00:00:08.000",
+                lastUpdated: Date()
+            )
+        ]
+    )
+    await router.register(ax)
+
+    let result = await TransportDispatcher.handle(
+        command: "goto_position",
+        params: ["bar": .int(9)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError == true)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect(object["verified"] as? Bool == false)
+    #expect(object["reason"] as? String == "readback_mismatch")
+    #expect(object["verification_source"] as? String == "transport_state")
+    #expect(object["requested"] as? String == "9.1.1.1")
+    #expect(object["observed"] as? String == "8.1.1.1")
 }
 
 @Test func testTransportDispatcherRejectsMissingSemanticPayloads() async {
@@ -1482,6 +1684,43 @@ private actor SelectiveFailChannel: Channel {
     #expect(await missingKeyCmd.executedOps.isEmpty)
 }
 
+@Test func testEditDispatcherTreatsUnverifiedStateBAsError() async {
+    let router = ChannelRouter()
+    let keyCmd = StaticResultChannel(
+        id: .midiKeyCommands,
+        results: [
+            "edit.select_all": .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["method": "midi_key_command"]
+            )),
+            "edit.quantize": .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["method": "midi_key_command"]
+            )),
+        ]
+    )
+    await router.register(keyCmd)
+    let cache = StateCache()
+
+    let selectAllResult = await EditDispatcher.handle(
+        command: "select_all",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+    let quantizeResult = await EditDispatcher.handle(
+        command: "quantize",
+        params: ["value": .string("1/16")],
+        router: router,
+        cache: cache
+    )
+
+    #expect(selectAllResult.isError == true)
+    #expect(quantizeResult.isError == true)
+    #expect(dispatcherText(selectAllResult).contains("\"verified\":false"))
+    #expect(dispatcherText(quantizeResult).contains("\"verified\":false"))
+}
+
 @Test func testEditDispatcherUnknownFails() async {
     let router = ChannelRouter()
     let cache = StateCache()
@@ -2189,6 +2428,149 @@ private actor SelectiveFailChannel: Channel {
         ("nav.set_zoom_level", ["level": "2"]),
         ("nav.set_zoom_level", ["level": "5"]),
     ])
+}
+
+@Test func testNavigateDispatcherGotoBarUsesTransportStateReadbackVerification() async throws {
+    let router = ChannelRouter()
+    let ax = SequencedTransportReadbackChannel(
+        gotoPositionResult: .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: ["via": "dialog"]
+        )),
+        transportStates: [
+            TransportState(
+                position: "17.1.1.1",
+                timePosition: "00:00:17.000",
+                lastUpdated: Date()
+            )
+        ]
+    )
+    await router.register(ax)
+
+    let result = await NavigateDispatcher.handle(
+        command: "goto_bar",
+        params: ["bar": .int(17)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(!result.isError!)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect(object["verified"] as? Bool == true)
+    #expect(object["verification_source"] as? String == "transport_state")
+    #expect(object["observed"] as? String == "17.1.1.1")
+}
+
+@Test func testNavigateDispatcherCreateMarkerVerifiesViaMarkerReadback() async throws {
+    let router = ChannelRouter()
+    let markersAX = SequencedMarkersChannel(markerSnapshots: [
+        [MarkerState(id: 0, name: "Intro", position: "1.1.1.1", positionSource: .parser)],
+        [
+            MarkerState(id: 0, name: "Intro", position: "1.1.1.1", positionSource: .parser),
+            MarkerState(id: 1, name: "Marker 1", position: "9.1.1.1", positionSource: .parser),
+        ],
+    ])
+    let keyCmd = StaticResultChannel(
+        id: .midiKeyCommands,
+        results: [
+            "nav.create_marker": .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["method": "midi_key_command"]
+            ))
+        ]
+    )
+    await router.register(markersAX)
+    await router.register(keyCmd)
+    let cache = StateCache()
+
+    let result = await NavigateDispatcher.handle(
+        command: "create_marker",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+
+    #expect(!result.isError!)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect(object["verified"] as? Bool == true)
+    #expect(object["verification_source"] as? String == "logic://markers")
+    #expect(object["marker_count_before"] as? Int == 1)
+    #expect(object["marker_count_after"] as? Int == 2)
+    #expect(object["observed_marker_name"] as? String == "Marker 1")
+    #expect(await cache.getMarkers().count == 2)
+}
+
+@Test func testNavigateDispatcherCreateMarkerReturnsErrorWhenObservedNameDoesNotMatch() async throws {
+    let router = ChannelRouter()
+    let markersAX = SequencedMarkersChannel(markerSnapshots: [
+        [MarkerState(id: 0, name: "Intro", position: "1.1.1.1", positionSource: .parser)],
+        [
+            MarkerState(id: 0, name: "Intro", position: "1.1.1.1", positionSource: .parser),
+            MarkerState(id: 1, name: "Marker 2", position: "9.1.1.1", positionSource: .parser),
+        ],
+    ])
+    let keyCmd = StaticResultChannel(
+        id: .midiKeyCommands,
+        results: [
+            "nav.create_marker": .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["method": "midi_key_command"]
+            ))
+        ]
+    )
+    await router.register(markersAX)
+    await router.register(keyCmd)
+
+    let result = await NavigateDispatcher.handle(
+        command: "create_marker",
+        params: ["name": .string("Bridge")],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError == true)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect(object["verified"] as? Bool == false)
+    #expect(object["reason"] as? String == "readback_mismatch")
+    #expect(object["requested_name"] as? String == "Bridge")
+    #expect(object["observed_marker_name"] as? String == "Marker 2")
+}
+
+@Test func testNavigateDispatcherZoomCommandsTreatUnverifiedStateBAsError() async {
+    let router = ChannelRouter()
+    let keyCmd = StaticResultChannel(
+        id: .midiKeyCommands,
+        results: [
+            "nav.zoom_to_fit": .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["method": "midi_key_command"]
+            )),
+            "nav.set_zoom_level": .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["method": "midi_key_command"]
+            )),
+        ]
+    )
+    await router.register(keyCmd)
+    let cache = StateCache()
+
+    let fitResult = await NavigateDispatcher.handle(
+        command: "zoom_to_fit",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+    let zoomInResult = await NavigateDispatcher.handle(
+        command: "set_zoom",
+        params: ["level": .string("in")],
+        router: router,
+        cache: cache
+    )
+
+    #expect(fitResult.isError == true)
+    #expect(zoomInResult.isError == true)
+    #expect(dispatcherText(fitResult).contains("\"verified\":false"))
+    #expect(dispatcherText(zoomInResult).contains("\"verified\":false"))
 }
 
 // RB-1.b (2026-05-08 enterprise review): pre-fix `delete_marker` and
