@@ -373,12 +373,14 @@ actor AccessibilityChannel: Channel {
             return await AccessibilityChannel.createTrackViaMenu(
                 korean: "새로운 소프트웨어 악기 트랙",
                 english: "New Software Instrument Track",
+                expectedTrackType: .softwareInstrument,
                 runtime: runtime.logicRuntime
             )
         case "track.create_audio":
             return await AccessibilityChannel.createTrackViaMenu(
                 korean: "새로운 오디오 트랙",
                 english: "New Audio Track",
+                expectedTrackType: .audio,
                 runtime: runtime.logicRuntime
             )
         case "track.create_drummer":
@@ -388,18 +390,21 @@ actor AccessibilityChannel: Channel {
             let l12 = await AccessibilityChannel.createTrackViaMenu(
                 korean: "새로운 Session Player SI 트랙…",
                 english: "New Session Player SI Track…",
+                expectedTrackType: .drummer,
                 runtime: runtime.logicRuntime
             )
             if l12.isSuccess { return l12 }
             return await AccessibilityChannel.createTrackViaMenu(
                 korean: "새로운 Drummer 트랙",
                 english: "New Drummer Track",
+                expectedTrackType: .drummer,
                 runtime: runtime.logicRuntime
             )
         case "track.create_external_midi":
             return await AccessibilityChannel.createTrackViaMenu(
                 korean: "새로운 외부 MIDI 트랙",
                 english: "New External MIDI Track",
+                expectedTrackType: .externalMIDI,
                 runtime: runtime.logicRuntime
             )
 
@@ -1370,13 +1375,15 @@ actor AccessibilityChannel: Channel {
     private static func createTrackViaMenu(
         korean: String,
         english: String,
+        expectedTrackType: TrackType,
         runtime: AXLogicProElements.Runtime = .production
     ) async -> ChannelResult {
         guard AXLogicProElements.mainWindow(runtime: runtime) != nil else {
             return .error("No document open for track creation")
         }
 
-        let beforeCount = AXLogicProElements.allTrackHeaders(runtime: runtime).count
+        let beforeTracks = observedTrackStates(runtime: runtime)
+        let beforeCount = beforeTracks.count
 
         // Try Korean locale first
         let result = clickTrackMenu(korean, menuName: "트랙", englishMenuName: "Track", runtime: runtime)
@@ -1397,14 +1404,17 @@ actor AccessibilityChannel: Channel {
         // dialog is up and send Return; verify after.
         try? await Task.sleep(nanoseconds: 400_000_000)
         let midCount = AXLogicProElements.allTrackHeaders(runtime: runtime).count
-        if midCount == beforeCount {
+        let dialogConfirmationAttempted = midCount == beforeCount
+        if dialogConfirmationAttempted {
             // Track not created yet — assume New Track dialog is awaiting confirmation
             sendReturnKey()
         }
 
         return await verifyTrackCreation(
             title: menuClickedTitle,
-            beforeCount: beforeCount,
+            expectedTrackType: expectedTrackType,
+            beforeTracks: beforeTracks,
+            dialogConfirmationAttempted: dialogConfirmationAttempted,
             runtime: runtime
         )
     }
@@ -1425,25 +1435,38 @@ actor AccessibilityChannel: Channel {
 
     private static func verifyTrackCreation(
         title: String,
-        beforeCount: Int,
+        expectedTrackType: TrackType,
+        beforeTracks: [TrackState],
+        dialogConfirmationAttempted: Bool,
         runtime: AXLogicProElements.Runtime
     ) async -> ChannelResult {
+        let beforeCount = beforeTracks.count
         var lastObservedCount = beforeCount
 
         let extras: [String: Any] = [
             "menu_clicked": title,
             "track_count_before": beforeCount,
-            "requested_delta": 1
+            "requested_delta": 1,
+            "dialog_confirmation_attempted": dialogConfirmationAttempted,
+            "observed_track_type": expectedTrackType.rawValue,
+            "track_type_verification_source": "menu_clicked",
+            "verification_source": "track_count_delta"
         ]
 
         for attempt in 0..<4 {
-            let currentCount = AXLogicProElements.allTrackHeaders(runtime: runtime).count
+            let currentTracks = observedTrackStates(runtime: runtime)
+            let currentCount = currentTracks.count
             lastObservedCount = currentCount
             if currentCount > beforeCount {
-                let merged = extras.merging([
+                var merged = extras.merging([
                     "track_count_after": currentCount,
                     "observed_delta": currentCount - beforeCount
                 ]) { _, new in new }
+                if let observedTrack = observedCreatedTrack(before: beforeTracks, after: currentTracks) {
+                    merged["observed_track_index"] = observedTrack.id
+                    merged["observed_track_name"] = observedTrack.name
+                    merged["observed_track_type_inferred"] = observedTrack.type.rawValue
+                }
                 return .success(HonestContract.encodeStateA(extras: merged))
             }
 
@@ -1452,15 +1475,64 @@ actor AccessibilityChannel: Channel {
             }
         }
 
-        let merged = extras.merging([
+        var merged = extras.merging([
             "track_count_after": lastObservedCount,
             "observed_delta": lastObservedCount - beforeCount
         ]) { _, new in new }
+        let dialogPresent = AXLogicProElements.dialogPresent(runtime: runtime)
+        merged["dialog_present"] = dialogPresent
+        if dialogPresent {
+            merged["waiting_for_user"] = true
+            return .success(HonestContract.encodeStateB(
+                reason: .retryExhausted,
+                extras: merged
+            ))
+        }
         return .error(HonestContract.encodeStateC(
             error: .axWriteFailed,
             hint: "track count did not increase after '\(title)' click within 4×1s budget",
             extras: merged
         ))
+    }
+
+    private static func observedTrackStates(
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> [TrackState] {
+        AXLogicProElements.allTrackHeaders(runtime: runtime).enumerated().map { index, header in
+            AXValueExtractors.extractTrackState(from: header, index: index, runtime: runtime.ax)
+        }
+    }
+
+    private static func observedCreatedTrack(
+        before: [TrackState],
+        after: [TrackState]
+    ) -> TrackState? {
+        if let selected = after.first(where: { $0.isSelected }) {
+            return selected
+        }
+        guard after.count == before.count + 1 else {
+            return after.last
+        }
+        var prefix = 0
+        while prefix < before.count,
+              trackCreationSignature(before[prefix]) == trackCreationSignature(after[prefix]) {
+            prefix += 1
+        }
+        if prefix < after.count {
+            return after[prefix]
+        }
+        return after.last
+    }
+
+    private static func trackCreationSignature(_ track: TrackState) -> String {
+        [
+            track.name,
+            track.type.rawValue,
+            String(track.isMuted),
+            String(track.isSoloed),
+            String(track.isArmed),
+            track.color ?? ""
+        ].joined(separator: "|")
     }
 
     /// Delete the currently-selected track via the `트랙 → 트랙 삭제` menu and

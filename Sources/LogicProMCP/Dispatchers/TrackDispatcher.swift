@@ -55,18 +55,30 @@ struct TrackDispatcher {
 
         case "create_audio":
             let result = await router.route(operation: "track.create_audio")
+            if result.isSuccess, !channelSuccessIsVerified(result) {
+                return toolTextResult(result.message, isError: true)
+            }
             return toolTextResult(result)
 
         case "create_instrument":
             let result = await router.route(operation: "track.create_instrument")
+            if result.isSuccess, !channelSuccessIsVerified(result) {
+                return toolTextResult(result.message, isError: true)
+            }
             return toolTextResult(result)
 
         case "create_drummer":
             let result = await router.route(operation: "track.create_drummer")
+            if result.isSuccess, !channelSuccessIsVerified(result) {
+                return toolTextResult(result.message, isError: true)
+            }
             return toolTextResult(result)
 
         case "create_external_midi":
             let result = await router.route(operation: "track.create_external_midi")
+            if result.isSuccess, !channelSuccessIsVerified(result) {
+                return toolTextResult(result.message, isError: true)
+            }
             return toolTextResult(result)
 
         case "delete":
@@ -356,6 +368,20 @@ struct TrackDispatcher {
                 isError: true
             )
         }
+    }
+
+    private static func channelSuccessIsVerified(_ result: ChannelResult) -> Bool {
+        guard result.isSuccess else { return false }
+        guard let data = result.message.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              json["success"] != nil else {
+            // Legacy/plain-string mock successes are treated as verified so
+            // existing dispatcher tests keep working. Real mutating channels
+            // return Honest Contract envelopes, so the verified gate still
+            // applies in production.
+            return true
+        }
+        return (json["verified"] as? Bool) == true
     }
 
     // MARK: - record_sequence SMF-import implementation

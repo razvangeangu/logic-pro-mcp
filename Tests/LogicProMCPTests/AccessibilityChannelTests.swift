@@ -803,11 +803,19 @@ private func makeAXBackedAccessibilityChannel(
     builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
     builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
     builder.setChildren(trackList, [trackHeader])
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(trackHeader, kAXTitleAttribute as String, "Audio Track")
+    builder.setAttribute(trackHeader, kAXSelectedAttribute as String, false)
 
     builder.setChildren(menuBar, [trackMenu])
     builder.setAttribute(trackMenu, kAXTitleAttribute as String, "트랙")
     builder.setChildren(trackMenu, [createItem])
     builder.setAttribute(createItem, kAXTitleAttribute as String, "새로운 소프트웨어 악기 트랙")
+
+    builder.setAttribute(createdTrackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(createdTrackHeader, kAXTitleAttribute as String, "Studio Grand")
+    builder.setAttribute(createdTrackHeader, kAXDescriptionAttribute as String, "Software Instrument Track")
+    builder.setAttribute(createdTrackHeader, kAXSelectedAttribute as String, true)
 
     let runtime = builder.makeLogicRuntime(
         appElement: app,
@@ -827,6 +835,11 @@ private func makeAXBackedAccessibilityChannel(
     #expect(result.message.contains("\"verified\":true"))
     #expect(result.message.contains("\"track_count_before\":1"))
     #expect(result.message.contains("\"track_count_after\":2"))
+    #expect(result.message.contains("\"observed_track_index\":1"))
+    #expect(result.message.contains("\"observed_track_name\":\"Studio Grand\""))
+    #expect(result.message.contains("\"observed_track_type\":\"software_instrument\""))
+    #expect(result.message.contains("\"track_type_verification_source\":\"menu_clicked\""))
+    #expect(result.message.contains("\"verification_source\":\"track_count_delta\""))
 }
 
 @Test func testAccessibilityChannelCreateInstrumentFailsWhenTrackCountDoesNotIncrease() async {
@@ -864,6 +877,49 @@ private func makeAXBackedAccessibilityChannel(
     #expect(result.message.contains("\"error\":\"ax_write_failed\""))
     #expect(result.message.contains("track count did not increase"))
     #expect(result.message.contains("\"observed_delta\":0"))
+}
+
+@Test func testAccessibilityChannelCreateInstrumentReportsDialogPendingWhenModalPersists() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(280)
+    let window = builder.element(281)
+    let dialog = builder.element(282)
+    let menuBar = builder.element(283)
+    let trackMenu = builder.element(284)
+    let createItem = builder.element(285)
+    let trackList = builder.element(286)
+    let trackHeader = builder.element(287)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setAttribute(app, kAXWindowsAttribute as String, [window, dialog])
+    builder.setAttribute(dialog, kAXSubroleAttribute as String, kAXDialogSubrole as String)
+    builder.setAttribute(app, kAXMenuBarAttribute as String, menuBar)
+    builder.setChildren(window, [trackList])
+    builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
+    builder.setChildren(trackList, [trackHeader])
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(trackHeader, kAXTitleAttribute as String, "Audio Track")
+
+    builder.setChildren(menuBar, [trackMenu])
+    builder.setAttribute(trackMenu, kAXTitleAttribute as String, "트랙")
+    builder.setChildren(trackMenu, [createItem])
+    builder.setAttribute(createItem, kAXTitleAttribute as String, "새로운 소프트웨어 악기 트랙")
+
+    let runtime = builder.makeLogicRuntime(
+        appElement: app,
+        setAttributeHandler: nil,
+        performActionHandler: { _, _ in true }
+    )
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app, logicRuntime: runtime)
+
+    let result = await channel.execute(operation: "track.create_instrument", params: [:])
+
+    #expect(result.isSuccess)
+    #expect(result.message.contains("\"verified\":false"))
+    #expect(result.message.contains("\"reason\":\"retry_exhausted\""))
+    #expect(result.message.contains("\"dialog_present\":true"))
+    #expect(result.message.contains("\"waiting_for_user\":true"))
 }
 
 @Test func testAccessibilityChannelAXBackedTrackDefaultsUseFakeAXTree() async throws {

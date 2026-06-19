@@ -89,6 +89,31 @@ private actor FailingExecuteChannel: Channel {
     }
 }
 
+private actor UnverifiedCreateChannel: Channel {
+    nonisolated let id: ChannelID
+
+    init(id: ChannelID = .accessibility) {
+        self.id = id
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        if operation.hasPrefix("track.create_") {
+            return .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["operation": operation, "method": "mock_keycmd"]
+            ))
+        }
+        return .success("Mock: \(operation)")
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "unverified create channel")
+    }
+}
+
 // MARK: - TransportDispatcher
 
 @Test func testTransportDispatcherRoutesPrimaryCommands() async {
@@ -865,6 +890,21 @@ private actor FailingExecuteChannel: Channel {
         ("track.set_solo", ["index": "5", "enabled": "true"]),
         ("track.set_arm", ["index": "5", "enabled": "false"]),
     ])
+}
+
+@Test func testTrackDispatcherCreateCommandsReturnErrorForUnverifiedEnvelope() async {
+    let router = ChannelRouter()
+    let ax = UnverifiedCreateChannel()
+    await router.register(ax)
+    let cache = StateCache()
+
+    for command in ["create_audio", "create_instrument", "create_drummer", "create_external_midi"] {
+        let result = await TrackDispatcher.handle(command: command, params: [:], router: router, cache: cache)
+        let text = dispatcherText(result)
+        #expect(result.isError!, "Expected \(command) to surface outer error for State B")
+        #expect(text.contains("\"verified\":false"))
+        #expect(text.contains("\"reason\":\"readback_unavailable\""))
+    }
 }
 
 @Test func testTrackDispatcherDeleteAndDuplicateRespectSelectionFlow() async {
