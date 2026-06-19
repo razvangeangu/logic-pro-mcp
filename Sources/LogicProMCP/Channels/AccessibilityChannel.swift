@@ -1076,7 +1076,8 @@ actor AccessibilityChannel: Channel {
         let baseExtras: [String: Any] = [
             "track": index,
             "button": buttonName,
-            "requested": desired
+            "requested": desired,
+            "verification_source": "ax_value"
         ]
 
         if let cur = current, cur == desired {

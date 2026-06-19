@@ -207,6 +207,9 @@ struct TrackDispatcher {
                 operation: "track.set_arm",
                 params: ["index": String(index), "enabled": String(enabled)]
             )
+            if result.isSuccess, !trackArmResultIsVerified(result) {
+                return toolTextResult(result.message, isError: true)
+            }
             return toolTextResult(result)
 
         case "record_sequence":
@@ -218,13 +221,20 @@ struct TrackDispatcher {
             }
             let tracks = await cache.getTracks()
             var disarmed: [Int] = []
+            var unverifiedDisarm: [Int] = []
             var failedDisarm: [Int] = []
             for t in tracks where t.id != index && t.isArmed {
                 let r = await router.route(
                     operation: "track.set_arm",
                     params: ["index": String(t.id), "enabled": "false"]
                 )
-                if r.isSuccess { disarmed.append(t.id) } else { failedDisarm.append(t.id) }
+                if !r.isSuccess {
+                    failedDisarm.append(t.id)
+                } else if trackArmResultIsVerified(r) {
+                    disarmed.append(t.id)
+                } else {
+                    unverifiedDisarm.append(t.id)
+                }
             }
             let armResult = await router.route(
                 operation: "track.set_arm",
@@ -233,23 +243,52 @@ struct TrackDispatcher {
             // If the primary arm action failed, return an explicit error instead
             // of a structured success payload. Partial-disarm visibility still
             // available in the error detail.
-            let detail = armResult.message.replacingOccurrences(of: "\"", with: "\\\"")
             guard armResult.isSuccess else {
                 return toolTextResult(
                     "arm_only failed: target arm rejected — \(armResult.message); disarmed=\(disarmed) failedDisarm=\(failedDisarm)",
                     isError: true
                 )
             }
+            if !trackArmResultIsVerified(armResult) {
+                return toolTextResult(
+                    armOnlyResponse(
+                        targetIndex: index,
+                        armResult: armResult,
+                        armedSuccess: false,
+                        verified: false,
+                        disarmed: disarmed,
+                        unverifiedDisarm: unverifiedDisarm,
+                        failedDisarm: failedDisarm
+                    ),
+                    isError: true
+                )
+            }
             // Report partial disarm failures explicitly — the target arm
             // succeeded, but some other tracks may still be armed.
-            if !failedDisarm.isEmpty {
+            if !failedDisarm.isEmpty || !unverifiedDisarm.isEmpty {
                 return toolTextResult(
-                    "arm_only partial: target \(index) armed, but these tracks failed to disarm: \(failedDisarm) (disarmed: \(disarmed))",
+                    armOnlyResponse(
+                        targetIndex: index,
+                        armResult: armResult,
+                        armedSuccess: false,
+                        verified: false,
+                        disarmed: disarmed,
+                        unverifiedDisarm: unverifiedDisarm,
+                        failedDisarm: failedDisarm
+                    ),
                     isError: true
                 )
             }
             return toolTextResult(.success(
-                "{\"armed\":\(index),\"armedSuccess\":true,\"disarmed\":\(disarmed),\"failedDisarm\":[],\"detail\":\"\(detail)\"}"
+                armOnlyResponse(
+                    targetIndex: index,
+                    armResult: armResult,
+                    armedSuccess: true,
+                    verified: true,
+                    disarmed: disarmed,
+                    unverifiedDisarm: [],
+                    failedDisarm: []
+                )
             ))
 
         case "set_color":
@@ -356,6 +395,73 @@ struct TrackDispatcher {
                 isError: true
             )
         }
+    }
+
+    private static func trackArmResultIsVerified(_ result: ChannelResult) -> Bool {
+        guard result.isSuccess else { return false }
+        guard let json = trackArmEnvelope(result),
+              json["success"] != nil else {
+            // Legacy/plain-string mock successes are treated as verified so
+            // existing non-HC test doubles keep working. Real product channels
+            // now return HC envelopes, so the verified gate still applies in
+            // production.
+            return true
+        }
+        return (json["verified"] as? Bool) == true
+    }
+
+    private static func trackArmEnvelope(_ result: ChannelResult) -> [String: Any]? {
+        guard let data = result.message.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
+    private static func armOnlyResponse(
+        targetIndex: Int,
+        armResult: ChannelResult,
+        armedSuccess: Bool,
+        verified: Bool,
+        disarmed: [Int],
+        unverifiedDisarm: [Int],
+        failedDisarm: [Int]
+    ) -> String {
+        var response: [String: Any] = [
+            "armed": targetIndex,
+            "target_track": targetIndex,
+            "armedSuccess": armedSuccess,
+            "verified": verified,
+            "requested_enabled": true,
+            "observed_enabled": NSNull(),
+            "verification_source": NSNull(),
+            "disarmed": disarmed,
+            "unverifiedDisarm": unverifiedDisarm,
+            "failedDisarm": failedDisarm,
+            "detail": armResult.message,
+        ]
+        if let envelope = trackArmEnvelope(armResult) {
+            response["requested_enabled"] = envelope["requested"] ?? envelope["enabled"] ?? true
+            response["observed_enabled"] = envelope["observed"] ?? NSNull()
+            response["verification_source"] =
+                envelope["verification_source"] ?? envelope["method"] ?? NSNull()
+            if let reason = envelope["reason"] {
+                response["reason"] = reason
+            }
+            if let function = envelope["function"] {
+                response["function"] = function
+            }
+            if let button = envelope["button"] {
+                response["button"] = button
+            }
+            if let action = envelope["action"] {
+                response["action"] = action
+            }
+            if let writeSource = envelope["write_source"] {
+                response["write_source"] = writeSource
+            }
+        }
+        return HonestContract.jsonString(response)
     }
 
     // MARK: - record_sequence SMF-import implementation
