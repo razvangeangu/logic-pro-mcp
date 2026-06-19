@@ -61,6 +61,29 @@ private actor LiveTransportStateChannel: Channel {
     }
 }
 
+private actor FailingTransportStateChannel: Channel {
+    nonisolated let id: ChannelID = .accessibility
+    private let errorMessage: String
+
+    init(errorMessage: String) {
+        self.errorMessage = errorMessage
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params _: [String: String]) async -> ChannelResult {
+        if operation == "transport.get_state" {
+            return .error(errorMessage)
+        }
+        return .error("unexpected operation: \(operation)")
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "failing transport test channel")
+    }
+}
+
 private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     var json = try sharedParseJSON(text) as! [String: Any]
 
@@ -155,6 +178,7 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     let state = json["state"] as! [String: Any]
 
     #expect(await channel.executedOperations() == ["transport.get_state"])
+    #expect(envelope["source"] as? String == "ax_live")
     #expect(state["isPlaying"] as? Bool == false)
     #expect(state["tempo"] as? Double == 90.5)
     #expect(state["isCycleEnabled"] as? Bool == true)
@@ -162,6 +186,39 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     #expect(cached.isPlaying == false)
     #expect(cached.tempo == 90.5)
     #expect(cached.isCycleEnabled == true)
+}
+
+@Test func testTransportStateResourceMarksCachedFallbackAsUnverifiedWhenLiveRefreshFails() async {
+    let cache = StateCache()
+    var staleTransport = TransportState()
+    staleTransport.isPlaying = true
+    staleTransport.isRecording = true
+    staleTransport.position = "96.1.1.1"
+    staleTransport.lastUpdated = Date(timeIntervalSinceNow: -42)
+    await cache.updateTransport(staleTransport)
+    await cache.updateDocumentState(true)
+
+    let router = ChannelRouter()
+    let channel = FailingTransportStateChannel(errorMessage: HonestContract.encodeStateC(
+        error: .elementNotFound,
+        hint: "Cannot locate transport bar"
+    ))
+    await router.register(channel)
+
+    let result = try! await ResourceHandlers.read(uri: "logic://transport/state", cache: cache, router: router)
+    let envelope = try! sharedParseJSON(resourceText(result)) as! [String: Any]
+    let json = envelope["data"] as! [String: Any]
+    let state = json["state"] as! [String: Any]
+
+    #expect(envelope["source"] as? String == "cache")
+    #expect(envelope["unverified"] as? Bool == true)
+    #expect(envelope["stale"] as? Bool == true)
+    #expect(envelope["refresh_error"] as? String == "element_not_found")
+    #expect((envelope["recovery_hint"] as? String)?.contains("refresh_cache") == true)
+    #expect((envelope["cache_age_sec"] as? Double ?? 0) > 0)
+    #expect(state["isPlaying"] as? Bool == true)
+    #expect(state["isRecording"] as? Bool == true)
+    #expect(state["position"] as? String == "96.1.1.1")
 }
 
 @Test func testTransportStateResourceSignalsStaleAfterClose() async {

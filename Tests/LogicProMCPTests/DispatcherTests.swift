@@ -119,12 +119,43 @@ private actor TransportStateSequenceChannel: Channel {
     }
 }
 
+private actor ScriptedTransportChannel: Channel {
+    nonisolated let id: ChannelID
+    let results: [String: ChannelResult]
+    var executedOps: [String] = []
+
+    init(id: ChannelID, results: [String: ChannelResult]) {
+        self.id = id
+        self.results = results
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params _: [String: String]) async -> ChannelResult {
+        executedOps.append(operation)
+        return results[operation] ?? .error("unexpected operation: \(operation)")
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "scripted transport channel")
+    }
+}
+
+private func liveTransportJSON(
+    isPlaying: Bool,
+    isRecording: Bool,
+    position: String = "1.1.1.1"
+) -> String {
+    """
+    {"isPlaying":\(isPlaying),"isRecording":\(isRecording),"isPaused":false,"tempo":120.0,"position":"\(position)","timePosition":"00:00:00.000","sampleRate":44100,"isCycleEnabled":false,"isMetronomeEnabled":false,"lastUpdated":"2026-06-19T02:17:42.000Z"}
+    """
+}
 // MARK: - TransportDispatcher
 
 @Test func testTransportDispatcherRoutesPrimaryCommands() async {
     let cases: [(command: String, operation: String)] = [
         ("play", "transport.play"),
-        ("stop", "transport.stop"),
         ("record", "transport.record"),
         ("pause", "transport.pause"),
         ("rewind", "transport.rewind"),
@@ -321,6 +352,131 @@ private actor TransportStateSequenceChannel: Channel {
         ("transport.goto_position", ["position": "00:00:10:12"]),
         ("transport.set_cycle_range", ["start": "4.1.1.1", "end": "12.1.1.1"]),
     ])
+}
+
+@Test func testTransportDispatcherStopPromotesFallbackWriteToVerifiedReadback() async {
+    let router = ChannelRouter()
+    let ax = TransportStateSequenceChannel(
+        id: .accessibility,
+        states: [
+            liveTransportJSON(
+                isPlaying: true,
+                isRecording: false,
+                position: "8.4.1.1"
+            ),
+            liveTransportJSON(
+                isPlaying: false,
+                isRecording: false,
+                position: "9.1.1.1"
+            )
+        ],
+        mutationResults: [
+            "transport.stop": .error(HonestContract.encodeStateC(
+                error: .readbackMismatch,
+                hint: "play checkbox did not clear on first AX attempt"
+            ))
+        ]
+    )
+    let mcu = MockChannel(id: .mcu)
+    await router.register(ax)
+    await router.register(mcu)
+    let cache = StateCache()
+
+    let result = await TransportDispatcher.handle(
+        command: "stop",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+
+    let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
+    #expect(result.isError == false)
+    #expect(json["verified"] as? Bool == true)
+    #expect(json["verify_source"] as? String == "ax_transport_state")
+    #expect(json["observed_isPlaying"] as? Bool == false)
+    #expect(json["observed_isRecording"] as? Bool == false)
+    #expect(json["observed_position"] as? String == "9.1.1.1")
+    #expect(await ax.executedOps.map(\.0) == ["transport.get_state", "transport.stop", "transport.get_state"])
+    #expect(await mcu.executedOps.map(\.0) == ["transport.stop"])
+
+    let cached = await cache.getTransport()
+    #expect(cached.isPlaying == false)
+    #expect(cached.isRecording == false)
+    #expect(cached.position == "9.1.1.1")
+}
+
+@Test func testTransportDispatcherStopFailsClosedWhenLiveReadbackUnavailable() async {
+    let router = ChannelRouter()
+    let ax = ScriptedTransportChannel(id: .accessibility, results: [
+        "transport.stop": .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: ["button": "Stop"]
+        )),
+        "transport.get_state": .error(HonestContract.encodeStateC(
+            error: .elementNotFound,
+            hint: "Cannot locate transport bar"
+        )),
+    ])
+    await router.register(ax)
+    let cache = StateCache()
+    await cache.updateTransport(TransportState(
+        isPlaying: true,
+        isRecording: true,
+        position: "96.1.1.1",
+        lastUpdated: Date(timeIntervalSinceNow: -18)
+    ))
+
+    let result = await TransportDispatcher.handle(
+        command: "stop",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+
+    let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
+    #expect(result.isError == true)
+    #expect(json["error"] as? String == "readback_unavailable")
+    #expect(json["refresh_error"] as? String == "element_not_found")
+    #expect(json["cached_source"] as? String == "cache")
+    #expect((json["cache_age_sec"] as? Double ?? 0) > 0)
+    #expect((json["hint"] as? String)?.contains("refresh_cache") == true)
+}
+
+@Test func testTransportDispatcherStopFailsClosedWhenLiveStateStillReportsPlayback() async {
+    let router = ChannelRouter()
+    let ax = ScriptedTransportChannel(id: .accessibility, results: [
+        "transport.stop": .success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: ["button": "Stop"]
+        )),
+        "transport.get_state": .success(liveTransportJSON(
+            isPlaying: true,
+            isRecording: true,
+            position: "96.1.1.1"
+        )),
+    ])
+    await router.register(ax)
+    let cache = StateCache()
+
+    let result = await TransportDispatcher.handle(
+        command: "stop",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+
+    let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
+    #expect(result.isError == true)
+    #expect(json["error"] as? String == "readback_mismatch")
+    #expect(json["observed_isPlaying"] as? Bool == true)
+    #expect(json["observed_isRecording"] as? Bool == true)
+    #expect(json["observed_position"] as? String == "96.1.1.1")
+    #expect(json["safe_to_retry"] as? Bool == true)
+
+    let cached = await cache.getTransport()
+    #expect(cached.isPlaying == true)
+    #expect(cached.isRecording == true)
+    #expect(cached.position == "96.1.1.1")
 }
 
 @Test func testTransportDispatcherRejectsMissingSemanticPayloads() async {

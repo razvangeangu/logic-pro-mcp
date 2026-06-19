@@ -24,11 +24,7 @@ struct TransportDispatcher {
             )
 
         case "stop":
-            return await handleVerifiedTransportCommand(
-                action: .stop,
-                router: router,
-                sleep: sleep
-            )
+            return await verifiedStopResult(router: router, cache: cache)
 
         case "record":
             return await handleVerifiedTransportCommand(
@@ -176,6 +172,88 @@ struct TransportDispatcher {
         }
     }
 
+    private static func verifiedStopResult(
+        router: ChannelRouter,
+        cache: StateCache
+    ) async -> CallTool.Result {
+        if let beforeState = await readTransportState(router: router),
+           beforeState.isPlaying == false,
+           beforeState.isRecording == false {
+            return toolTextResult(.success(HonestContract.encodeStateA(
+                extras: [
+                    "operation": "transport.stop",
+                    "requested_state": "stopped",
+                    "verify_source": "transport_state",
+                    "write_attempted": false,
+                    "unchanged": true,
+                    "observed_before": transportStateSummary(beforeState),
+                    "observed_after": transportStateSummary(beforeState)
+                ]
+            )))
+        }
+
+        let writeResult = await router.route(operation: "transport.stop")
+        guard writeResult.isSuccess else {
+            return toolTextResult(writeResult)
+        }
+
+        let liveRefresh = await ResourceHandlers.readLiveTransportState(router: router)
+        guard let liveState = liveRefresh.state else {
+            let cachedState = await cache.getTransport()
+            return toolTextResult(HonestContract.encodeStateC(
+                error: .readbackUnavailable,
+                hint: "transport.stop executed, but live transport state could not be refreshed. Focus Logic's Tracks window, dismiss modal or plugin dialogs, then retry or run logic_system refresh_cache.",
+                extras: stopReadbackUnavailableExtras(
+                    cachedState: cachedState,
+                    refreshError: liveRefresh.errorCode
+                )
+            ), isError: true)
+        }
+
+        await cache.updateTransport(liveState)
+        let observedExtras: [String: Any] = [
+            "operation": "transport.stop",
+            "requested_state": "stopped",
+            "verify_source": "ax_transport_state",
+            "observed_isPlaying": liveState.isPlaying,
+            "observed_isRecording": liveState.isRecording,
+            "observed_position": liveState.position,
+            "observed_time_position": liveState.timePosition,
+        ]
+
+        guard liveState.isPlaying == false, liveState.isRecording == false else {
+            return toolTextResult(HonestContract.encodeStateC(
+                error: .readbackMismatch,
+                hint: "transport.stop executed, but live transport state still reports playback or recording",
+                extras: observedExtras.merging(["safe_to_retry": true]) { _, new in new }
+            ), isError: true)
+        }
+
+        return toolTextResult(HonestContract.encodeStateA(extras: observedExtras))
+    }
+
+    private static func stopReadbackUnavailableExtras(
+        cachedState: TransportState,
+        refreshError: String?
+    ) -> [String: Any] {
+        [
+            "operation": "transport.stop",
+            "requested_state": "stopped",
+            "verify_source": "cache_only",
+            "cached_source": cachedState.lastUpdated > .distantPast ? "cache" : "default",
+            "cache_age_sec": cacheAgeExtra(for: cachedState),
+            "refresh_error": refreshError ?? "live_transport_read_failed",
+            "safe_to_retry": true,
+        ]
+    }
+
+    private static func cacheAgeExtra(for state: TransportState) -> Any {
+        guard state.lastUpdated > .distantPast else {
+            return NSNull()
+        }
+        return max(0, Date().timeIntervalSince(state.lastUpdated))
+    }
+
     /// Accept "bar.beat.sub.tick" (each positive) or "HH:MM:SS:FF" (with
     /// each field within its canonical range). Anything else — including
     /// empty string and malformed tokens like "99:99:99:99" — is rejected.
@@ -212,7 +290,6 @@ struct TransportDispatcher {
 
     private enum VerifiedTransportAction: String {
         case play
-        case stop
         case record
 
         var operation: String { "transport.\(rawValue)" }
@@ -221,8 +298,6 @@ struct TransportDispatcher {
             switch self {
             case .play:
                 return state.isPlaying
-            case .stop:
-                return !state.isPlaying && !state.isRecording
             case .record:
                 return state.isPlaying && state.isRecording
             }

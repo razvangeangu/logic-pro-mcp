@@ -369,21 +369,6 @@ def tool_json(resp):
     return value if isinstance(value, dict) else None
 
 
-def read_transport_envelope(client):
-    return safe_json(resource_text(read_resource(client, "logic://transport/state")))
-
-
-def read_transport_state(client):
-    envelope = read_transport_envelope(client)
-    if not isinstance(envelope, dict):
-        return None
-    data = envelope.get("data")
-    if not isinstance(data, dict) or data.get("has_document") is False:
-        return None
-    state = data.get("state")
-    return state if isinstance(state, dict) else None
-
-
 def read_tracks_data(client):
     envelope = safe_json(resource_text(read_resource(client, "logic://tracks")))
     if not isinstance(envelope, dict):
@@ -395,17 +380,6 @@ def read_tracks_data(client):
 def read_track_regions(client, index):
     regions = safe_json(resource_text(read_resource(client, f"logic://tracks/{index}/regions")))
     return regions if isinstance(regions, list) else None
-
-
-def wait_for_transport_state(client, predicate, timeout=6.0):
-    deadline = time.time() + timeout
-    last = None
-    while time.time() < deadline:
-        last = read_transport_state(client)
-        if last is not None and predicate(last):
-            return last
-        time.sleep(0.2)
-    return last
 
 
 def wait_for_track_arm(client, index, enabled, timeout=5.0):
@@ -434,6 +408,62 @@ def fresh_transport_bootstrap_status(client):
     if len(regions) != 0:
         return False, f"expected 0 regions on track 0, found {len(regions)}"
     return True, "fresh bootstrap detected"
+
+
+def transport_envelope(client):
+    return safe_json(resource_text(read_resource(client, "logic://transport/state")))
+
+
+def transport_state(client):
+    envelope = transport_envelope(client)
+    if not isinstance(envelope, dict):
+        return None, None
+    data = envelope.get("data", {})
+    if not isinstance(data, dict) or data.get("has_document") is False:
+        return envelope, None
+    state = data.get("state")
+    if not isinstance(state, dict):
+        return envelope, None
+    return envelope, state
+
+
+def wait_for_transport_state_envelope(client, predicate, timeout=5.0, interval=0.2):
+    deadline = time.time() + timeout
+    last_envelope = None
+    last_state = None
+    while time.time() < deadline:
+        last_envelope, last_state = transport_state(client)
+        if predicate(last_envelope, last_state):
+            return last_envelope, last_state
+        time.sleep(interval)
+    return last_envelope, last_state
+
+
+def wait_for_transport_state(client, predicate, timeout=6.0, interval=0.2):
+    deadline = time.time() + timeout
+    last_state = None
+    while time.time() < deadline:
+        _, last_state = transport_state(client)
+        if isinstance(last_state, dict) and predicate(last_state):
+            return last_state
+        time.sleep(interval)
+    return last_state
+
+
+def ui_stop_logic_transport():
+    script = """
+    tell application "Logic Pro" to activate
+    delay 0.1
+    tell application "System Events"
+        key code 49
+    end tell
+    """
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
 
 
 def is_library_root_json(value):
@@ -677,6 +707,84 @@ def main():
     else:
         T("cycle roundtrip (skipped — no project)", "ok", lambda _: True)
     call_tool(client, "logic_transport", "toggle_cycle")  # restore
+
+    def transport_playing_verified(envelope, state):
+        return (
+            isinstance(envelope, dict)
+            and envelope.get("unverified") is not True
+            and isinstance(state, dict)
+            and state.get("isPlaying") is True
+        )
+
+    def transport_stopped_verified(envelope, state):
+        return (
+            isinstance(envelope, dict)
+            and envelope.get("unverified") is not True
+            and isinstance(state, dict)
+            and state.get("isPlaying") is False
+            and state.get("isRecording") is False
+        )
+
+    stop_live_ready = live_logic_ready and has_document
+    ui_stop_envelope = None
+    ui_stop_state = None
+    mcp_stop_response = None
+    mcp_stop_envelope = None
+    mcp_stop_state = None
+    if stop_live_ready:
+        call_tool(client, "logic_transport", "play")
+        _, playing_state = wait_for_transport_state_envelope(client, transport_playing_verified, timeout=5.0)
+        if isinstance(playing_state, dict) and ui_stop_logic_transport():
+            ui_stop_envelope, ui_stop_state = wait_for_transport_state_envelope(
+                client, transport_stopped_verified, timeout=5.0
+            )
+
+        call_tool(client, "logic_transport", "play")
+        _, replay_state = wait_for_transport_state_envelope(client, transport_playing_verified, timeout=5.0)
+        if isinstance(replay_state, dict):
+            mcp_stop_response = call_tool(client, "logic_transport", "stop")
+            mcp_stop_envelope, mcp_stop_state = wait_for_transport_state_envelope(
+                client, transport_stopped_verified, timeout=5.0
+            )
+        call_tool(client, "logic_transport", "stop")
+
+    T_LIVE(
+        "transport readback reflects external UI stop",
+        {"envelope": ui_stop_envelope, "state": ui_stop_state},
+        lambda _: (
+            isinstance(ui_stop_envelope, dict)
+            and ui_stop_envelope.get("unverified") is not True
+            and isinstance(ui_stop_state, dict)
+            and ui_stop_state.get("isPlaying") is False
+            and ui_stop_state.get("isRecording") is False
+        ),
+        stop_live_ready,
+        "Logic Pro + visible document are required",
+    )
+    T_LIVE(
+        "logic_transport.stop returns verified success after live readback",
+        mcp_stop_response,
+        lambda _: (
+            mcp_stop_response is not None
+            and not is_error(mcp_stop_response)
+            and (safe_json(tool_text(mcp_stop_response)) or {}).get("verified") is True
+        ),
+        stop_live_ready,
+        "Logic Pro + visible document are required",
+    )
+    T_LIVE(
+        "transport readback reflects logic_transport.stop immediately",
+        {"envelope": mcp_stop_envelope, "state": mcp_stop_state},
+        lambda _: (
+            isinstance(mcp_stop_envelope, dict)
+            and mcp_stop_envelope.get("unverified") is not True
+            and isinstance(mcp_stop_state, dict)
+            and mcp_stop_state.get("isPlaying") is False
+            and mcp_stop_state.get("isRecording") is False
+        ),
+        stop_live_ready,
+        "Logic Pro + visible document are required",
+    )
 
     # Transport commands that route to MCU/CoreMIDI
     r = call_tool(client, "logic_transport", "toggle_cycle")
