@@ -62,6 +62,8 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 
 If this project helps you make music with Claude, Cursor, or any MCP client, star the repo. It helps the project reach more Logic Pro users and maintainers.
 
+Want to contribute? Start with [`good first issue`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22), [`help wanted`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22), and the [Contributing Guide](CONTRIBUTING.md). Most first PRs do not require Logic Pro; docs, examples, validation tests, and CLI-message improvements are welcome.
+
 ## Why It Exists
 
 Most Logic Pro automation attempts fall into one of three traps:
@@ -216,7 +218,7 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 | [Live Verify v3.5.0](docs/live-verify-v3.5.0.md) | Maintainers, QA | Previous stable deterministic, coverage, release-build, packaging, and fresh Logic Pro 12.2 strict live E2E evidence |
 | [Security Policy](SECURITY.md) | Security reviewers | Threat model, reporting, hardening |
 | [Changelog](CHANGELOG.md) | Everyone | Per-release changes |
-| [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, PR workflow |
+| [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, first issue workflow, PR verification |
 
 ## Status
 
@@ -290,6 +292,6 @@ MIT. See [LICENSE](LICENSE).
 
 ## Contributing
 
-Bug reports, PRs, and feature discussions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow.
+Bug reports, PRs, and feature discussions are welcome. The best starting points are [`good first issue`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22), [`help wanted`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22), and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Security vulnerabilities: please do **not** open a public issue. See [SECURITY.md](SECURITY.md) for the private disclosure process.
