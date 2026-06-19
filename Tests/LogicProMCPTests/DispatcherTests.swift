@@ -1430,7 +1430,7 @@ private actor SelectiveFailChannel: Channel {
 
 @Test func testArmOnlySuccessPathReportsArmedSuccess() async {
     let router = ChannelRouter()
-    let ax = MockChannel(id: .accessibility)
+    let ax = TrackArmEnvelopeChannel()
     await router.register(ax)
     let cache = StateCache()
     await cache.updateTracks([
