@@ -75,6 +75,15 @@ enum AXMouseHelper {
         post(.leftMouseUp, at: point, clickCount: 2, runtime: runtime)
     }
 
+    /// Post a single native left-click at the screen point.
+    @discardableResult
+    static func click(at point: CGPoint, runtime: Runtime = .production) -> Bool {
+        let down = runtime.postMouseEvent(.leftMouseDown, point, 1)
+        runtime.sleepMicros(20_000)
+        let up = runtime.postMouseEvent(.leftMouseUp, point, 1)
+        return down && up
+    }
+
     private static func post(
         _ type: CGEventType,
         at point: CGPoint,

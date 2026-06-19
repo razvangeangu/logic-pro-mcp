@@ -1,12 +1,14 @@
 # Verification Evidence — mixer-verification-honesty / Issues #10-13
 
+> Historical record for the v3.4.5/v3.4.6 mixer-verification cycle. Current release-candidate evidence lives in `docs/live-verify-v3.6.0.md`; published stable evidence lives in `docs/live-verify-v3.5.0.md`.
+
 Date: 2026-06-09 KST
 Repo: `/Users/isaac/projects/logic-pro-mcp`
-Scope: current working tree, stable `v3.4.5` release tag, Logic Pro 12.2 live session, release binary `.build/release/LogicProMCP`, published GitHub Release artifacts.
+Scope: then-current working tree, stable `v3.4.5` release tag, Logic Pro 12.2 live session, release binary `.build/release/LogicProMCP`, published GitHub Release artifacts.
 
 ## Claim Boundary
 
-This is a hard verification pass for the current #10-#13 work in the current machine/environment. It is not a universal guarantee across every Logic Pro version, locale, project shape, parent-app TCC context, clean host, notarized release artifact, or future OS update.
+This is a hard verification pass for the then-current #10-#13 work in the 2026-06-09 machine/environment. It is not a universal guarantee across every Logic Pro version, locale, project shape, parent-app TCC context, clean host, notarized release artifact, or future OS update.
 
 ## Deterministic Gates
 
@@ -80,11 +82,11 @@ Targeted issue checks:
 - Full strict live E2E was run after the harness timing fix: `285 passed`, `0 skipped`, `0 failed`. The run includes broad editor/project actions (`cut`, `delete`, `paste`, `bounce`, renames, marker creation, etc.) against the current local Logic session.
 - C1 version finalize is part of the v3.4.5 release pass. Published SHA256 lockstep and GitHub Actions macOS 14/15 install validation are verified for the stable release artifacts.
 - Multi-version Logic matrix is release-follow-up work, not closed by this pass.
-- The current verified claim is: #10-#13 are fixed and verified for the current working tree against Logic Pro 12.2 on this machine, with deterministic tests, release build, coverage gate, full strict live E2E, and targeted live E2E all green.
+- The verified claim for this historical cycle is: #10-#13 were fixed and verified for the then-current working tree against Logic Pro 12.2 on this machine, with deterministic tests, release build, coverage gate, full strict live E2E, and targeted live E2E all green.
 
 ## v3.4.6 Release Sync Addendum
 
-After the v3.4.5 release, the current mainline was published as `v3.4.6` to align the stable tag, server version, installer default, manifest URL, Formula version/SHA, and release evidence docs with the final current-main verification state.
+After the v3.4.5 release, the then-current mainline was published as `v3.4.6` to align the stable tag, server version, installer default, manifest URL, Formula version/SHA, and release evidence docs with the final v3.4.6-cycle verification state.
 
 - Source commit: `4592248b9fe70a8d07be0eea800e457c77577d50`.
 - GitHub Release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.4.6

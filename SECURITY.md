@@ -94,6 +94,20 @@ Duration caps prevent an MCP client from hanging a channel actor with `UInt64.ma
 
 Destructive project operations (`quit`, `close`, `open`, `save_as`, `bounce`) require explicit `{ "confirmed": true }` in params. Without the flag they return a structured `confirmation_required` response. See `DestructivePolicy.swift`.
 
+### Verified plugin apply-back gate
+
+`logic_plugins` is the v3.6.0 verified apply-back surface. Its mutating commands (`insert_verified`, `set_param_verified`) are scoped to `mode:"duplicate_applyback"` and require an explicit `project_expected_path`. The server reads the live front Logic project path at call time and returns State C `project_identity_mismatch` before any write if the document changed.
+
+The insert path is fail-closed:
+
+- target track selection must verify before the write boundary;
+- `get_inventory` must report a complete, readable physical insert chain;
+- the requested physical slot must be empty;
+- the slot popup must be spatially anchored to the requested slot before any plugin leaf is clicked;
+- State A is emitted only after post-write inventory readback observes the requested plugin at the requested slot.
+
+Unknown plugin aliases, unsupported parameters, unreadable inventory, unanchored popups, wrong-slot mounts, and rollback failures all return HC v2 State C with `verified:false`. The router treats these codes as terminal and never falls back to Scripter, MCU, or a best-effort macro path.
+
 ### Manual-validation approval gate
 
 MIDIKeyCommands and Scripter channels cannot be programmatically verified as wired up in Logic Pro. They require operator approval via CLI:
@@ -150,7 +164,7 @@ The env-var overrides (`LOGIC_PRO_MCP_SHA256`, `LOGIC_PRO_MCP_TEAM_ID`) protect 
 For hardened installs, prefer Homebrew (Option A in README) or the download-inspect-run pattern:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.0.0/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/<release-tag>/Scripts/install.sh -o install.sh
 # inspect install.sh
 shasum -a 256 install.sh    # cross-check against a trusted second channel
 LOGIC_PRO_MCP_SHA256=<hex> LOGIC_PRO_MCP_TEAM_ID=ADHOC bash install.sh
@@ -224,3 +238,4 @@ See `CHANGELOG.md` v2.1.0 entry for per-finding details.
 - The server trusts the MCP host's identity — there is no authentication between the MCP client and server beyond the stdio pipe.
 - The destructive-operation gate protects against accidental calls but is not a security control against a malicious MCP host that sets `confirmed: true` directly.
 - AX-based reads of track/project data may surface arbitrary UI text (track names are user-controlled). Callers rendering that text should apply their own output escaping.
+- `logic_plugins.set_param_verified` currently verifies only Compressor `threshold`; callers must treat unsupported-plugin/unsupported-param State C responses as hard failures rather than retrying through unverified channels.

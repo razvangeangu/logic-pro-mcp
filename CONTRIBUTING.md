@@ -15,7 +15,7 @@ git clone https://github.com/MongLong0214/logic-pro-mcp.git
 cd logic-pro-mcp
 
 swift build              # debug
-swift test               # 1143 unit + integration tests on current main
+swift test               # 1388 unit + integration tests on current v3.6.0 source
 swift build -c release   # release binary at .build/release/LogicProMCP
 ```
 
@@ -32,7 +32,7 @@ With Logic Pro launched and the MCP server registered, run the live test script:
 
 ```bash
 Scripts/live-e2e-test.py
-# Strict live release-candidate attestation:
+# Strict live release-tree attestation:
 LOGIC_PRO_MCP_STRICT_LIVE=1 Scripts/live-e2e-test.sh
 ```
 
@@ -46,7 +46,7 @@ This exercises every tool against a real Logic Pro instance. Requires:
 ```
 Sources/LogicProMCP/
 ├── Channels/          7 native channels (MCU, AX, AppleScript, CoreMIDI, CGEvent, MIDIKeyCmds, Scripter)
-├── Dispatchers/       8 MCP tool handlers (Transport, Tracks, Mixer, MIDI, Edit, Navigate, Project, System)
+├── Dispatchers/       9 MCP tool handlers (Transport, Tracks, Mixer, Plugins, MIDI, Edit, Navigate, Project, System)
 ├── MIDI/              Protocol layer (MCU, MMC, SMF, NoteSequenceParser)
 ├── Accessibility/     AX helpers (AXHelpers, AXLogicProElements, AXValueExtractors)
 ├── State/             StateCache actor + StatePoller + models
@@ -54,7 +54,7 @@ Sources/LogicProMCP/
 ├── Server/            LogicProServer + ServerConfig
 └── Utilities/         DestructivePolicy, AppleScriptSafety, Logger, PermissionChecker
 
-Tests/LogicProMCPTests/  1143 tests across the Swift test target
+Tests/LogicProMCPTests/  1388 tests across the Swift test target on the v3.6.0 source
 Scripts/                 install / uninstall / live E2E / Scripter JS
 docs/                    SETUP, API, ARCHITECTURE, TROUBLESHOOTING, MAINTAINERS, live verification notes
 artifacts/               generated local artifacts; only final v4 MIDI-only package is allowed in git
@@ -79,13 +79,14 @@ Register the operation in `ChannelRouter.v2RoutingTable` as an ordered list; the
 ## Pull Request Checklist
 
 - [ ] `swift build` clean
-- [ ] `swift test` green (all 1276 tests on current main)
+- [ ] `swift test` green (all 1388 tests on current v3.6.0 source)
 - [ ] New behavior covered by at least one unit test
 - [ ] Changed production code keeps the global coverage floor green (`region >=70%`, `line >=78%`); high-risk Logic-facing changes target about 90% line coverage on the touched surface or document the live/manual evidence that substitutes for direct measurement
-- [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`
+- [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`; new MCP tools also require README, `docs/API.md`, `docs/ARCHITECTURE.md`, and release-note updates
 - [ ] New dependency → justification in PR description
 - [ ] Security-sensitive change → update `SECURITY.md`
-- [ ] Logic-facing write/readback change → update `docs/API.md`, `docs/TROUBLESHOOTING.md`, and the current `docs/live-verify-*.md`
+- [ ] Logic-facing write/readback change → update `docs/API.md`, `docs/TROUBLESHOOTING.md`, the relevant user guide, and the current `docs/live-verify-*.md`
+- [ ] Release version change → keep published install URLs pinned to the existing stable tag until a real release exists; when publishing, bump `ServerConfig`, manifest, Formula, installer default, tests, README, SETUP, CHANGELOG, release notes, and live evidence docs together
 
 ## Security Reports
 

@@ -4,6 +4,8 @@ This guide covers the `logic_plugins` tool — the verified apply-back surface f
 
 **Audience:** Thomas apply_moves workflow and any caller that needs to read a plugin's insert state and write back a parameter value to a duplicate project.
 
+**Release line:** `logic_plugins` is the `v3.6.0` release-targeted public tool surface. Published `v3.5.0` installs do not include this tool.
+
 ---
 
 ## Overview
@@ -25,6 +27,7 @@ Three commands cover the full workflow:
 1. **Logic Pro is running** with the duplicate project as the front document.
 2. **AX permissions granted** (`System Settings → Privacy & Security → Accessibility`).
 3. For `set_param_verified`: **the target plugin window must already be open** in Logic Pro (see [Plugin window limitation](#limitation-1-plugin-window-must-already-be-open)).
+4. Before any mutating call, capture the live front-project path from `logic://project/info` and pass it as `project_expected_path`.
 
 ---
 

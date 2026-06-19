@@ -37,8 +37,8 @@ Revoke whenever the preset is removed, the Scripter instance is removed, or the 
 ### ADHOC release (no Apple Developer Program)
 
 ```bash
-Scripts/release-stable.sh v3.5.0
-Scripts/release.sh v3.5.0-rc1
+Scripts/release-stable.sh v3.6.0
+Scripts/release.sh v3.6.0-rc1
 ```
 
 Apple Developer ID is optional for this project. `Scripts/release-stable.sh` publishes a stable tag after clean-main, duplicate tag/release, test, and build preflight. `.github/workflows/release.yml` then builds a universal binary, ADHOC-signs it when Developer ID credentials are absent, publishes both tarball aliases, writes `RELEASE-METADATA.json` with `team_id:"ADHOC"` / `signing:"adhoc"`, and runs installer validation on macOS 14 and macOS 15.
@@ -60,7 +60,7 @@ If Developer ID credentials are ever configured, the same workflow automatically
 Release:
 
 ```bash
-Scripts/release-stable.sh v3.5.0
+Scripts/release-stable.sh v3.6.0
 ```
 
 Do not push stable tags manually. `Scripts/release-stable.sh` verifies a clean `main` branch matching `origin/main`, absent local/remote tags, absent GitHub Release, and local deterministic gates before it creates and pushes the stable tag.
@@ -80,7 +80,7 @@ For new or changed production code, treat the global gate as a regression floor,
 After the GitHub release is published, verify that the Homebrew formula points at the published universal tarball SHA256. If it still points at the old hash, update it:
 
 ```bash
-VERSION=v3.5.0
+VERSION=v3.6.0
 curl -fsSL "https://github.com/MongLong0214/logic-pro-mcp/releases/download/$VERSION/SHA256SUMS.txt" \
     | awk '$2 == "LogicProMCP-macOS-universal.tar.gz" {print $1}'
 # copy the hex into Formula/logic-pro-mcp.rb `sha256 "…"`
@@ -119,6 +119,9 @@ After any release, exercise these against live Logic Pro 12:
 9. `logic_project.save_as` (with `confirmed: true`) — require HC `verified:true`, `observed`, and `observed_mtime`
 10. `logic_midi.import_file` — import a staged `/tmp/LogicProMCP/*.mid` and require a new live AX track before the next import
 11. `logic://project/info` — confirm live transport tempo/sample-rate provenance and saved metadata fallback behave as documented
+12. `logic_plugins.get_inventory` — require HC v2 State A, `complete:true`, physical insert slots, and no unreadable occupied slots before write tests
+13. `logic_plugins.insert_verified` — require exact-slot State A on an empty allowlisted stock-plugin slot, then verify cleanup with a second `get_inventory`
+14. `logic_plugins.set_param_verified` — with the target plugin window already open, verify Compressor `threshold` State A write/readback and restore the original value
 
 Evidence to capture for a release:
 
@@ -126,6 +129,7 @@ Evidence to capture for a release:
 - `LogicProMCP --check-permissions` output
 - `LogicProMCP --list-approvals` output
 - `logic_system.health` JSON payload
+- `logic_plugins` State A/B/C payloads for inventory, exact-slot insert, unsupported parameter, and project-path mismatch
 - `swift test` and `swift build -c release` output
 - For composition artifacts, a `ProjectData` or package-level check proving expected MIDI regions exist and no unintended audio files were packaged
 

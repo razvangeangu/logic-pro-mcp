@@ -59,7 +59,7 @@ Legend — `↕` bidirectional, `↑` read, `↓` write.
 |-------|---------------|------|-----------|
 | **Transport** | MCP JSON-RPC framing via `swift-sdk` | stdio | Task-isolated |
 | **Server** | `LogicProServer` — composition root, handler wiring, lifecycle | `actor` | Actor |
-| **Dispatchers** | 8 MCP tool structs — argument coercion, destructive-policy gating | `struct` | Immutable |
+| **Dispatchers** | 9 MCP tool structs — argument coercion, destructive-policy / verified-op gating | `struct` | Immutable |
 | **Routing** | `ChannelRouter` — priority chain selection, fallback, health checks | `actor` | Actor |
 | **Channels** | 7 communication channels, each wrapping one macOS API | `actor` | Actor per channel |
 | **State** | `StateCache` (store) + `StatePoller` (3s AX refresh) | `actor` | Actor |
@@ -134,6 +134,9 @@ The complete table is `ChannelRouter.v2RoutingTable` (90+ entries). Excerpt:
 | `mixer.set_volume` | **MCU** | *(none)* | **Requires MCU registration** |
 | `mixer.set_pan` | MCU | *(none)* | MCU-only |
 | `mixer.get_state` | MCU | Accessibility | AX fallback for read |
+| `plugin.get_inventory` | Accessibility | *(none)* | HC v2, physical insert inventory, no write |
+| `plugin.insert_verified` | Accessibility | *(none)* | HC v2, exact-slot popup + inventory diff |
+| `plugin.set_param_verified` | Accessibility | *(none)* | HC v2, plugin-window AX write/readback |
 | `track.get_tracks` | Accessibility | *(none)* | AX only |
 | `track.set_mute` | MCU | Accessibility → CGEvent | Full fallback |
 | `edit.undo` | MIDIKeyCommands | CGEvent | KeyCmd preferred if approved |
@@ -176,6 +179,9 @@ The complete table is `ChannelRouter.v2RoutingTable` (90+ entries). Excerpt:
 
 **Why not "live AX poll everything"?**
 AX reads are ~15-50ms and Logic Pro's AX tree changes per locale (Korean vs English) and per Logic version. MCU is more stable, faster, and matches the real DAW state exactly.
+
+**Why `logic_plugins` bypasses fallback routing:**
+Verified plugin apply-back is intentionally single-channel. Falling through from AX to Scripter, MCU, or a key-command macro after a verified-path failure would erase the evidence boundary and could turn an unverified write into a false State A. `logic_plugins.*` therefore routes only to Accessibility and returns HC v2 State C directly when a gate fails.
 
 ---
 

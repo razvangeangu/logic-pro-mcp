@@ -1,6 +1,6 @@
 # Live Verification Runbook — v3.2.0 (Marker Provenance, NG10 Deferred)
 
-> Historical record (2026-06-12 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
 
 **Verification timing**: Immediately before v3.2.0 release + permanent T0 spike record.
 **Scope**: Marker `position_source` provenance + `goto_marker` uncertainty surfacing.

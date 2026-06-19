@@ -1,7 +1,7 @@
 # Live Verification — v3.5.0
 
 Date: 2026-06-12 KST
-Scope: stable `v3.5.0` release tag, current mainline source, local deterministic gates, published GitHub Release artifacts, and fresh Logic Pro 12.2 strict live E2E evidence captured on the release tree.
+Scope: stable `v3.5.0` release tag, exact v3.5.0 release source, local deterministic gates, published GitHub Release artifacts, and fresh Logic Pro 12.2 strict live E2E evidence captured on the release tree.
 
 ## Claim Boundary
 
@@ -50,7 +50,7 @@ Published metadata:
 
 ## Remaining Non-Claimed Surface
 
-- Multi-version Logic matrix remains future verification work; current live evidence is Logic Pro 12.2 on this host plus GitHub Actions macOS 14/15 installer validation.
+- Multi-version Logic matrix remains future verification work; v3.5.0 live evidence is Logic Pro 12.2 on this host plus GitHub Actions macOS 14/15 installer validation.
 - `record_sequence` still reports through its documented pre-Honest-Contract response shape (custom JSON success dict, descriptive text errors); extending the HC envelope to the remaining mutating ops is tracked backlog from v3.1.x.
 - Full per-parameter plugin value readback and arbitrary `set_plugin_param insert:N` routing remain future work; v3.5.0 ships provenance-gated catalog truth states, plugin-slot snapshots, and the guarded insert path.
 - Workflow `live_verified` claims are gated on in-repo evidence-file existence; semantic re-verification of each recipe per release remains follow-up.

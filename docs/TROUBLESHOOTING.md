@@ -215,7 +215,7 @@ Use it to confirm whether Logic echoes a host write (see the `echo_timeout` entr
 
 **Cause:** the AX poller could not locate Logic's Arrange-window track-header rail, so it cached an empty live track list. The resource layer then fell back to safe placeholder synthesis from the saved project track count. The known Logic 12.2 + macOS 26 drift was the rail description changing from older `Track Headers` to `Tracks header`.
 
-**Resolution:** current builds use one shared matcher for Arrange-window selection and `getTrackHeaders()`. It accepts `Track Headers`, `Track Header`, `Tracks Header(s)`, and `트랙 헤더`, so the poller reads the real visible headers instead of falling through to placeholders. After upgrading, bring the main Arrange/Tracks window frontmost, dismiss modal dialogs, then run:
+**Resolution:** current builds use one shared matcher for Arrange-window selection and `getTrackHeaders()`. It prefers the language-neutral AX structure of the track-header rail (`AXSelectedChildren` pointing at direct `AXLayoutItem` rows), with known `Track Headers`, `Track Header`, `Tracks Header(s)`, and `트랙 헤더` descriptions retained only as explicit compatibility signals. This lets the poller read the real visible headers instead of falling through to placeholders. After upgrading, bring the main Arrange/Tracks window frontmost, dismiss modal dialogs, then run:
 
 ```bash
 logic_system refresh_cache
@@ -226,6 +226,30 @@ A healthy read should show `source: "ax_live"` and real track names with no `pla
 ### `logic://tracks` has real names but some `type` values are `unknown`
 
 This is separate from placeholder mode. Current builds scan both the track-header element and its descendants for type hints (`Audio`, `Software Instrument`, `External MIDI`, `Aux`, `Bus`, `Master`, plus localized signals). If the value still remains `unknown`, Logic did not expose a trustworthy type signal in the visible header AX subtree for that row. Treat `unknown` as an explicit absence of type metadata, not as a failed track-name read.
+
+---
+
+## Verified Plugin Apply-Back (`logic_plugins`, v3.6.0)
+
+### `logic_plugins.get_inventory` returns State B `readback_unavailable`
+
+**Symptom:** the response has `state:"B"`, `reason:"readback_unavailable"`, `safe_to_retry:true`, and no usable `plugins` array.
+
+**Cause:** Logic's mixer/insert AX subtree was not locatable at read time. Common causes are the Mixer not visible, Logic still animating after a window change, a modal dialog over the main window, or a stale Accessibility session.
+
+**Resolution:** bring Logic's main window and Mixer to the front, dismiss modal/plugin/search dialogs, wait briefly, then call `logic_system refresh_cache` and retry `get_inventory`. Do not proceed with `insert_verified` or `set_param_verified` unless `get_inventory` returns State A and `complete:true`.
+
+### `insert_verified` fails with `insert_setup_failed`
+
+`insert_setup_failed` means the write was stopped before selecting a plugin leaf. Check the `setup_stage`/`what_was_observed` fields. Typical stages are target slot not found, target slot not clickable, popup not found, popup not anchored to the requested slot, or exact plugin leaf not found. These are hard stop conditions; retry only after restoring a clean Logic UI state.
+
+### `insert_verified` fails with `insert_landed_at_different_slot`
+
+This is a correctness guard, not a partial success. Logic showed evidence that a plugin mounted somewhere other than the requested physical insert slot. The response reports `observed_slot` and rollback fields. Treat the operation as failed unless `rollback_succeeded:true` and a follow-up `get_inventory` confirms the unintended plugin was removed.
+
+### `set_param_verified` fails with `window_open_failed`
+
+The parameter write path needs the target plugin window already open. Open the Compressor window for the target track/insert in Logic Pro, keep the project in front, then retry. The current verified write target is Compressor `threshold` only; other parameters return State C `unsupported_param_readback` before any write.
 
 ---
 

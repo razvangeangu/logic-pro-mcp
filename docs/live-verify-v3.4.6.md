@@ -1,13 +1,13 @@
 # Live Verification — v3.4.6
 
-> Historical record (2026-06-12 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.5.0.md`; this file remains preserved release evidence for v3.4.6.
+> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved release evidence for v3.4.6.
 
 Date: 2026-06-09 KST
-Scope: stable `v3.4.6` release tag, current mainline source, local deterministic gates, published GitHub Release artifacts, and carried Logic Pro 12.2 live evidence from the final current-main mixer attestation.
+Scope: stable `v3.4.6` release tag, then-current mainline source, local deterministic gates, published GitHub Release artifacts, and carried Logic Pro 12.2 live evidence from the final v3.4.6-cycle mixer attestation.
 
 ## Claim Boundary
 
-This verifies v3.4.6 on the current macOS host, local deterministic test environment, and GitHub Actions release surface. The Logic Pro 12.2 live behavior claim is carried from the final current-main attestation because v3.4.6 is a version, packaging, and documentation alignment release only. It does not claim coverage for every Logic Pro version, locale, project shape, parent-app TCC context, clean host, or future macOS update.
+This verifies v3.4.6 on the macOS host and local deterministic test environment used on 2026-06-09, plus the GitHub Actions release surface. The Logic Pro 12.2 live behavior claim is carried from the final v3.4.6-cycle attestation because v3.4.6 is a version, packaging, and documentation alignment release only. It does not claim coverage for every Logic Pro version, locale, project shape, parent-app TCC context, clean host, or future macOS update.
 
 Published release metadata, SHA256 values, and workflow evidence are recorded in `docs/releases/v3.4.6.md`.
 
@@ -26,7 +26,7 @@ Published release metadata, SHA256 values, and workflow evidence are recorded in
 
 ## Live Logic Pro 12.2 Evidence
 
-v3.4.6 does not change the Logic runtime implementation from the final v3.4.5 current-main verification. The current live evidence remains:
+v3.4.6 does not change the Logic runtime implementation from the final v3.4.5 verification. The carried live evidence is:
 
 | Gate | Result | Evidence |
 |---|---:|---|

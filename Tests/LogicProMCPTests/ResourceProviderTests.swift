@@ -106,7 +106,7 @@ struct ResourceProviderTests {
     @Test("resource annotations use the current public-surface timestamp")
     func resourceAnnotationsUseCurrentSurfaceTimestamp() {
         let timestamps = Set(ResourceProvider.resources.compactMap { $0.annotations?.lastModified })
-        #expect(timestamps == ["2026-06-11T00:00:00Z"])
+        #expect(timestamps == ["2026-06-19T00:00:00Z"])
     }
 
     // MARK: - Dynamic MCU filtering

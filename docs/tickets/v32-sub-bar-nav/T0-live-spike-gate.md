@@ -1,6 +1,6 @@
 # T0 — Live Spike: 4-Component Dialog + 3 IME Scenarios (Release Gate)
 
-> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.6.md`; this file remains preserved implementation context.
+> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
 
 **Status**: Blocked — requires Isaac + Logic Pro 12.2 on a real device
 **Size**: S (manual)

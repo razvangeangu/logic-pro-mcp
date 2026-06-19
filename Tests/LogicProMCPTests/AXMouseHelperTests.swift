@@ -45,6 +45,20 @@ private final class AXMouseHelperRecorder: @unchecked Sendable {
     #expect(recorder.sleeps == [40_000])
 }
 
+@Test func axMouseHelperClickUsesSingleDownUpPairWithoutPostingRealEvents() {
+    let recorder = AXMouseHelperRecorder()
+    let point = CGPoint(x: 56, y: 78)
+
+    let posted = AXMouseHelper.click(at: point, runtime: recorder.runtime())
+
+    #expect(posted)
+    #expect(recorder.mouseEvents.count == 2)
+    #expect(recorder.mouseEvents.map(\.type) == [.leftMouseDown, .leftMouseUp])
+    #expect(recorder.mouseEvents.map(\.clickCount) == [1, 1])
+    #expect(recorder.mouseEvents.allSatisfy { $0.point == point })
+    #expect(recorder.sleeps == [20_000])
+}
+
 @Test func axMouseHelperNumericTypingSkipsUnsupportedCharactersAndPostsReturnEscape() {
     let recorder = AXMouseHelperRecorder()
     let runtime = recorder.runtime()

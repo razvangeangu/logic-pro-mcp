@@ -1,6 +1,6 @@
 # T7: Issue7IntegrationTests — cross-tier scenarios
 
-> Historical record (2026-06-09 docs refresh): latest production-readiness and live E2E evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.4.6.md`; this file remains preserved implementation context.
+> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue7-logic12-read-paths > §8.2
 **Priority**: P1 (High)

@@ -382,17 +382,6 @@ import Testing
     #expect(AXLogicProElements.findPanKnob(trackIndex: 0, runtime: runtime) == nil)
 }
 
-/// Logic 12.2 on macOS 26 exposes the track-header rail as an `AXGroup` whose
-/// description lowercases to `"tracks header"` — singular "Tracks", lowercase
-/// "header" — instead of the older `"Track Headers"` (plural/plural) form.
-/// Strategy 3 of `getTrackHeaders` must accept both spellings (plus the Korean
-/// `"트랙 헤더"` already covered elsewhere) so a one-letter-plus-word-order
-/// change in Logic's accessibility metadata doesn't silently send the resource
-/// to Tier 2 placeholder synthesis.
-///
-/// Strategies 1 (AXList id "Track Headers"), 2 (AXScrollArea id "Tracks"), and
-/// 4 (AXOutline/AXTable with AXLayoutItem children) are deliberately absent
-/// here so only the description-based match can satisfy the lookup.
 @Test func testGetTrackHeadersAcceptsLogic122TracksHeaderDescription() {
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(640)
@@ -403,7 +392,6 @@ import Testing
     builder.setAttribute(app, kAXMainWindowAttribute as String, window)
     builder.setChildren(window, [scrollArea])
     builder.setAttribute(scrollArea, kAXRoleAttribute as String, kAXScrollAreaRole as String)
-    // Intentionally no kAXIdentifierAttribute — disqualifies Strategies 1+2.
     builder.setChildren(scrollArea, [headerGroup])
     builder.setAttribute(headerGroup, kAXRoleAttribute as String, kAXGroupRole as String)
     builder.setAttribute(headerGroup, kAXDescriptionAttribute as String, "Tracks header")
@@ -413,11 +401,31 @@ import Testing
     #expect(AXLogicProElements.getTrackHeaders(runtime: runtime) == headerGroup)
 }
 
-/// Belt-and-braces coverage: the legacy `"Track Headers"` and Korean
-/// `"트랙 헤더"` description spellings must still resolve via Strategy 3,
-/// so the expanded matcher doesn't regress older Logic builds.
-@Test func testGetTrackHeadersAcceptsLegacyAndKoreanDescriptions() {
-    for desc in ["Track Headers", "Track Header", "Tracks Headers", "트랙 헤더"] {
+@Test func testGetTrackHeadersUsesLanguageNeutralSelectionStructure() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(660)
+    let window = builder.element(661)
+    let scrollArea = builder.element(662)
+    let headerGroup = builder.element(663)
+    let trackHeader = builder.element(664)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [scrollArea])
+    builder.setAttribute(scrollArea, kAXRoleAttribute as String, kAXScrollAreaRole as String)
+    builder.setChildren(scrollArea, [headerGroup])
+    builder.setAttribute(headerGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(headerGroup, kAXDescriptionAttribute as String, "Localized track rail")
+    builder.setChildren(headerGroup, [trackHeader])
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(headerGroup, kAXSelectedChildrenAttribute as String, [trackHeader])
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+
+    #expect(AXLogicProElements.getTrackHeaders(runtime: runtime) == headerGroup)
+}
+
+@Test func testGetTrackHeadersAcceptsTrackHeaderDescriptionVariants() {
+    for desc in ["Track Headers", "Track Header", "Tracks Headers", "Tracks header", "트랙 헤더"] {
         let builder = FakeAXRuntimeBuilder()
         let app = builder.element(650)
         let window = builder.element(651)

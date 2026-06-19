@@ -9,7 +9,7 @@ Complete installation, Logic Pro integration, and verification. Should take ~10 
 - GitHub Actions/Homebrew release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts may still be arm64-only, so audit a specific tag via `RELEASE-METADATA.json` when needed
 - Claude Code or Claude Desktop
 
-2026-06-12 release note: `v3.5.0` is the current stable GitHub Release. It publishes ADHOC-signed universal artifacts when Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for pinned installer verification.
+2026-06-19 release note: `v3.6.0` is the current published stable GitHub Release. It includes PR #24 verified plugin apply-back and the Logic 12.2 AX readback fixes. Copy pins from the `v3.6.0` release's `SHA256SUMS.txt` and `RELEASE-METADATA.json` for the fail-closed installer path.
 
 ---
 
@@ -30,7 +30,7 @@ Homebrew pins both the release tarball URL and its SHA256 in the formula, and Ho
 The installer is **fail-closed by default**: it refuses to run without explicit SHA256 + Team ID pins. Inspect the script first, verify the hash from the release's `SHA256SUMS.txt`, then execute:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.5.0/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.6.0/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<hex from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=<team_id from RELEASE-METADATA.json> \
@@ -41,7 +41,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.5.0/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.6.0/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](../SECURITY.md#installer-trust-model) for the threat model.
@@ -79,7 +79,7 @@ LogicProMCP --check-permissions
 
 The MCP server controls Logic Pro's mixer via the Mackie Control Universal (MCU) protocol over a virtual MIDI port.
 
-> ⚠️ **MCU registration is the single most failure-prone setup step** — if you skip it, mixer writes fail before sending with structured State C `{ "success": false, "error": "channels_exhausted", "operation": "mixer.set_volume", … }`. If MCU is connected but Logic does not echo a host write, the wire shape is State B `{ "success": true, "verified": false, "reason": "echo_timeout_500ms", "mcu_connected": true, … }`; v3.5.0 can still verify `set_volume` via AX readback when the mixer is readable.
+> ⚠️ **MCU registration is the single most failure-prone setup step** — if you skip it, mixer writes fail before sending with structured State C `{ "success": false, "error": "channels_exhausted", "operation": "mixer.set_volume", … }`. If MCU is connected but Logic does not echo a host write, the wire shape is State B `{ "success": true, "verified": false, "reason": "echo_timeout_500ms", "mcu_connected": true, … }`; current builds can still verify `set_volume` via AX readback when the mixer is readable.
 
 1. Launch **Logic Pro**. The MCP server auto-starts when Claude Code connects.
 2. Menu: **Logic Pro → Control Surfaces → Setup…** (KR: `컨트롤 서피스 → 설정…`)
@@ -222,9 +222,31 @@ These can be MIDI-Learned but no `logic_*` tool dispatches to them today. Tracke
 
 ---
 
-## 5. Install Scripter Insert (optional — for plugin parameter control)
+## 5. Verified Plugin Apply-Back (`logic_plugins`, v3.6.0)
 
-Enables `set_plugin_param` for fine-grained plugin automation via CC 102-119.
+`logic_plugins` is the verified plugin surface for duplicate-project apply-back workflows. It does **not** replace the MCU setup above, but it is the go-forward path for verified stock plugin insert and Compressor threshold write/readback.
+
+Use this flow from your MCP client:
+
+1. Read `logic://project/info` and capture the front document `filePath`.
+2. Call `logic_plugins.get_inventory { track }` and use the returned physical `insert` index.
+3. For plugin insertion, call `logic_plugins.insert_verified` with `mode:"duplicate_applyback"` and `project_expected_path`.
+4. For Compressor threshold write/readback, open the target Compressor plugin window in Logic Pro, then call `logic_plugins.set_param_verified`.
+
+State A means the write was independently read back from Logic. State B/C must be handled as non-success. Full call shapes and failure codes are documented in [API.md §logic_plugins](API.md#logic_plugins) and [Verified Apply-Back Guide](guides/verified-apply-back.md).
+
+Important setup notes:
+
+- `insert_verified` supports the allowlisted stock effects `Gain`, `Channel EQ`, and `Compressor`.
+- `set_param_verified` currently supports only Compressor `threshold`, reported as normalized `0..100` / `"X %"`, not dB.
+- `project_expected_path` is mandatory for mutating `logic_plugins` calls so a write cannot land on the wrong front project.
+- `get_inventory` reads physical insert slots directly; do not reuse indexes from `logic://mixer` for apply-back writes.
+
+---
+
+## 6. Install Scripter Insert (optional — legacy plugin parameter path)
+
+Enables `logic_mixer.set_plugin_param` via CC 102-119. This path is **legacy unverified State B**: Scripter can send the value but cannot confirm the plugin parameter changed. Prefer `logic_plugins.set_param_verified` where supported.
 
 1. In Logic Pro, select a Software Instrument track
 2. Click the **MIDI FX** slot on the channel strip → select **Scripter**
@@ -240,7 +262,7 @@ LogicProMCP --approve-channel Scripter --approval-note "Validated insertion on t
 
 ---
 
-## 6. Verify Everything
+## 7. Verify Everything
 
 Ask Claude:
 
@@ -260,9 +282,9 @@ Expected — all 7 channels `ready`:
 
 If any channel is `manual_validation_required`, return to step 4 or 5 and complete the approval.
 
-### 6.1 Production-readiness smoke checks
+### 7.1 Production-readiness smoke checks
 
-For release-candidate validation, run a release build and then exercise one readback-sensitive write in each risky family:
+For release validation, run a release build and then exercise one readback-sensitive write in each risky family:
 
 ```bash
 swift test
@@ -275,6 +297,9 @@ In a live Logic Pro 12.2 project, verify:
 - `logic_midi import_file` uses a real `.mid` under `/tmp/LogicProMCP/` and waits for `verified:true` before the next import.
 - `logic_project save_as` returns `verified:true` and includes `observed` / `observed_mtime` for the `.logicx` package.
 - `logic://project/info` reports live/cache/project-file/default provenance honestly; visible track rows are not a whole-project track-count substitute.
+- `logic_plugins.get_inventory` returns `state:"A"` and `complete:true` before any verified plugin write.
+- `logic_plugins.insert_verified` returns State A only when the requested plugin appears at the requested physical insert slot; any wrong-slot or unreadable inventory path must be State C.
+- `logic_plugins.set_param_verified` returns State A only for supported Compressor `threshold` writes with matching readback; unsupported parameters must fail closed before writing.
 
 ---
 

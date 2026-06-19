@@ -12,8 +12,8 @@
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14+-000000.svg?style=flat-square&logo=apple" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
-  <img src="https://img.shields.io/badge/tests-1276_passing-brightgreen.svg?style=flat-square" />
-  <img src="https://img.shields.io/badge/stable-v3.5.0-blue.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-1396_passing-brightgreen.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/stable-v3.6.0-blue.svg?style=flat-square" />
   <a href="https://github.com/MongLong0214/logic-pro-mcp/stargazers"><img src="https://img.shields.io/github/stars/MongLong0214/logic-pro-mcp?style=flat-square&label=stars" /></a>
 </p>
 
@@ -57,8 +57,8 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 | Read resources | 14 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, library inventory, stock plugin intelligence, and workflow skills |
 | Resource templates | 7 templates for track, region, mixer-strip, stock plugin detail/search, and workflow detail/search lookup |
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
-| Verification line | Current main: `1276` Swift tests + strict Logic Pro 12.2 live E2E `313 passed / 0 skipped / 0 failed`; published release backed by [v3.5.0 evidence](docs/live-verify-v3.5.0.md) |
-| Published release | `v3.5.0`, ADHOC universal artifacts, SHA256 metadata, macOS 14/15 install validation |
+| Verification line | v3.6.0 release tree: `1396` Swift tests, release build, targeted Logic Pro 12.2 exact-slot plugin insert proof, strict live E2E, and live tracks-resource readback |
+| Release state | Published stable `v3.6.0`; previous stable `v3.5.0` remains available for pinned installs |
 
 If this project helps you make music with Claude, Cursor, or any MCP client, star the repo. It helps the project reach more Logic Pro users and maintainers.
 
@@ -86,7 +86,7 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 
 ## Agent-Grade Surfaces
 
-**Tools are for actions.** The public write surface is intentionally small: `logic_transport`, `logic_tracks`, `logic_mixer`, `logic_midi`, `logic_edit`, `logic_navigate`, `logic_project`, and `logic_system`.
+**Tools are for actions.** The public write surface is intentionally small: `logic_transport`, `logic_tracks`, `logic_mixer`, `logic_plugins`, `logic_midi`, `logic_edit`, `logic_navigate`, `logic_project`, and `logic_system`.
 
 **Resources are for state.** Clients should read `logic://transport/state`, `logic://tracks`, `logic://mixer`, `logic://project/info`, `logic://midi/ports`, and related resources instead of burning tool calls on polling.
 
@@ -95,11 +95,12 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 ## Trust Model
 
 - **Honest Contract envelopes**: mutating operations return State A confirmed, State B uncertain with a reason, or State C failure with an error.
+- **Verified plugin apply-back**: `logic_plugins.*` uses HC v2 (`hc_schema: 2`) and returns State A only after project identity, target track, physical insert slot, plugin identity, and readback all agree.
 - **Fail-closed targets**: dangerous mixer, marker, track, MIDI import, and plugin operations require explicit targets and validation.
 - **Confirmation levels**: destructive/project and plugin insertion flows require explicit confirmation metadata before execution.
 - **Provenance labels**: read surfaces expose source, freshness, and evidence labels instead of forcing clients to guess.
 - **Installer hardening**: Homebrew pins SHA256; the shell installer refuses to run without explicit hash/team pins unless same-origin provenance is explicitly allowed.
-- **Release honesty**: published `v3.5.0` is the stable install line; README claims stay tied to shipped artifacts, current-main tests, or explicitly linked live evidence.
+- **Release honesty**: published `v3.6.0` is the current stable install line, and README claims stay tied to shipped artifacts, release-tree tests, or explicitly linked live evidence.
 
 ## Quick Start
 
@@ -107,7 +108,7 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 
 The package manifest uses Swift tools 6.0 for compatibility. Current source verification uses Xcode 16.4 / Swift 6.2 in CI.
 
-The current published stable release is `v3.5.0` (2026-06-12 KST). It ships ADHOC-signed universal artifacts when Apple Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for pinned installs.
+The current published stable release is `v3.6.0` (2026-06-19 KST). It ships ADHOC-signed universal artifacts when Apple Developer ID credentials are absent, plus `SHA256SUMS.txt` and `RELEASE-METADATA.json` for pinned installs. It includes the PR #24 verified plugin apply-back surface and the Logic 12.2 track/transport AX readback fixes.
 
 ### 1. Install
 
@@ -177,7 +178,7 @@ Expected: all 7 channels `ready` after full setup, or 5 if you intentionally ski
 The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.5.0/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.6.0/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=<paste team_id from RELEASE-METADATA.json> \
@@ -188,7 +189,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.5.0/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.6.0/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
@@ -207,36 +208,44 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 |----------|----------|---------|
 | [Setup Guide](docs/SETUP.md) | End users | One-page install + Logic Pro integration, ~10 min |
 | [API Reference](docs/API.md) | End users, MCP clients | All 9 tools, 14 resources, 7 templates, 130+ operations |
+| [Verified Apply-Back Guide](docs/guides/verified-apply-back.md) | Agent workflow authors | `logic_plugins` inventory, exact-slot insertion, Compressor threshold write/readback, HC v2 failure handling |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |
 | [Maintainer Guide](docs/MAINTAINERS.md) | Maintainers | Release, approvals, E2E checklist |
-| [Live Verify v3.5.0](docs/live-verify-v3.5.0.md) | Maintainers, QA | Latest deterministic, coverage, release-build, packaging, and fresh Logic Pro 12.2 strict live E2E evidence |
+| [Live Verify v3.6.0](docs/live-verify-v3.6.0.md) | Maintainers, QA | Release-tree evidence for PR #24 + Logic 12.2 AX readback fixes |
+| [Live Verify v3.5.0](docs/live-verify-v3.5.0.md) | Maintainers, QA | Previous stable deterministic, coverage, release-build, packaging, and fresh Logic Pro 12.2 strict live E2E evidence |
 | [Security Policy](SECURITY.md) | Security reviewers | Threat model, reporting, hardening |
 | [Changelog](CHANGELOG.md) | Everyone | Per-release changes |
 | [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, PR workflow |
 
 ## Status
 
-**Published stable**: `v3.5.0` is available as a GitHub Release and Homebrew install. It ships the Issue #14 verified stock plugin intelligence catalog, the Issue #15 workflow skills pack, and the fail-closed dispatcher validation sweep from PR #21 (BREAKING — see [CHANGELOG](CHANGELOG.md)). Release workflow `27421259014` passed build plus macOS 14/15 install validation; published metadata is `team_id:"ADHOC"`, `signing:"adhoc"`, `architectures:["x86_64","arm64"]`.
+**Published stable**: `v3.6.0` is available as a GitHub Release and Homebrew install. It ships PR #24 (`logic_plugins` verified plugin apply-back) plus the PR #54 / issue #59 Logic 12.2 AX readback hardening. Published metadata remains `team_id:"ADHOC"` / `signing:"adhoc"` when Developer ID credentials are absent, with universal `x86_64` + `arm64` artifacts produced by GitHub Actions.
+
+**Previous stable**: `v3.5.0` remains available as a pinned GitHub Release for clients that need the Issue #14/#15 stock-plugin intelligence and workflow-skills surface without the new `logic_plugins` apply-back tool.
 
 ## Verification
 
 | Gate | Current evidence |
 |------|------------------|
-| Full deterministic suite | Current main: `swift test --no-parallel` -> `1276` passed, `0` failed |
-| Release build | Current main: `swift build -c release` passed |
-| Python E2E syntax | Current main: `python3 -m py_compile Scripts/live-e2e-test.py` passed |
-| Coverage gate | Current main: `swift test --enable-code-coverage --no-parallel` -> `1276` passed, coverage `74.49%` region / `81.76%` line |
-| Strict live Logic Pro 12.2 | v3.5.0 release-tree attestation -> `313` passed, `0` skipped, `0` failed (2026-06-12); see [v3.5.0 evidence](docs/live-verify-v3.5.0.md) |
+| Full deterministic suite | v3.6.0 release tree: `swift test --no-parallel` -> `1396` passed, `0` failed |
+| Release build | v3.6.0 release tree: `swift build -c release` passed |
+| Python E2E syntax | PR #24 verification: `python3 -m py_compile Scripts/live-e2e-test.py` passed |
+| Targeted live plugin proof | Logic Pro 12.2: `logic_plugins.insert_verified track=6 insert=6 plugin=Gain` returned State A with `observed_slot:6`, `write_source:"ax_exact_slot_popup"`, and independent `get_inventory` readback |
+| Track/transport readback proof | Logic Pro 12.2: `logic://tracks` returned `source:"ax_live"`, real names, `placeholder_count:0`, `unknown_type_count:0`; cycle toggle/resource roundtrip reflected live UI state |
+| Strict live Logic Pro 12.2 | v3.6.0 release tree: `314` passed, `0` skipped, `0` failed; see [docs/live-verify-v3.6.0.md](docs/live-verify-v3.6.0.md) |
 | README media evidence | Actual Logic Pro 12.2 capture derivatives regenerate from `docs/media/logic-pro-mcp-demo.mp4`; `docs/media/render-demo.py` contains no synthetic DAW renderer |
-| v3.5.0 release evidence | [docs/live-verify-v3.5.0.md](docs/live-verify-v3.5.0.md) |
+| v3.6.0 release evidence | [docs/live-verify-v3.6.0.md](docs/live-verify-v3.6.0.md) |
+| v3.5.0 previous release evidence | [docs/live-verify-v3.5.0.md](docs/live-verify-v3.5.0.md) |
 
 Live E2E defaults to the release binary. Protocol/security assertions run on any host; Logic/CoreMIDI-dependent checks skip unless a real Logic Pro session is visible. Strict mode converts live-gated skips to failures, treats missing project state as a failed cycle roundtrip precondition, and launches the MCP server under a trusted shell/tmux parent so macOS TCC evaluates the same parent context used by live client flows.
 
 ## API Contracts That Matter
 
 - **Honest Contract envelope** — every mutating op returns State A confirmed, State B uncertain with `reason`, or State C hard failure with `error`. See [docs/HONEST-CONTRACT.md](docs/HONEST-CONTRACT.md).
+- **HC v2 plugin apply-back** — `logic_plugins.get_inventory`, `set_param_verified`, and `insert_verified` add `state` + `hc_schema: 2`; State C always carries `verified:false`, `write_attempted`, retry safety, and target identity where relevant.
 - **Fail-closed mutation targets** — mixer faders, plugin params, marker delete/rename, track delete/duplicate, and MIDI imports require explicit target parameters.
+- **Exact-slot plugin insertion** — `logic_plugins.insert_verified` targets the physical insert index returned by `get_inventory`, verifies the popup is anchored to that slot, and confirms success only by post-write inventory diff.
 - **Target-faithful navigation** — `goto_marker` returns `element_not_found` on a cold cache instead of advancing to the next marker.
 - **1-based MIDI channel** — `send_note`, `send_cc`, and `record_sequence` `ch` values accept 1..16 to match Logic's UI.
 - **Audit phase split** — audit logs distinguish rejected calls, confirmation prompts, and executed route invocations.
@@ -256,7 +265,8 @@ Per-release detail lives in [CHANGELOG.md](CHANGELOG.md). Security and installer
 - **MIDI region padding**: `record_sequence` regions start at bar 1 and extend to the target bar using inaudible padding; note timing inside the region is exact, but the region can look longer than the phrase.
 - **MIDI Key Commands**: Logic 12.2 does not accept the legacy `.plist` Key Commands import; manual MIDI Learn remains required for keycmd-only operations.
 - **Markers**: `logic://markers` returns `[]` honestly when the Marker List window is closed on Logic 12.2; auto-opening that window is not shipped because it changes focus.
-- **Plugin parameter readback**: guarded stock plugin insertion is live-verified, but arbitrary per-parameter plugin readback remains future work.
+- **Plugin parameter readback**: `logic_plugins.set_param_verified` live-verifies Compressor `threshold` through the open plugin window; arbitrary plugin parameters remain future work and fail closed with `unsupported_param_readback`.
+- **Plugin window opening**: parameter apply-back still needs the target plugin window already open in Logic Pro; exact-slot plugin insertion itself does not require a pre-opened plugin window.
 
 ## Development
 

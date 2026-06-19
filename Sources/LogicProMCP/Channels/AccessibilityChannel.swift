@@ -162,6 +162,7 @@ actor AccessibilityChannel: Channel {
             isLogicProRunning: @escaping @Sendable () -> Bool = { ProcessUtils.isLogicProRunning },
             hasVisibleWindow: @escaping @Sendable () -> Bool = { ProcessUtils.hasVisibleWindow() },
             logicRuntime: AXLogicProElements.Runtime = .production,
+            controlBarMouseRuntime: AXMouseHelper.Runtime = .production,
             runTempoFallback: @escaping @Sendable (String) -> Bool = { tempo in
                 AccessibilityChannel.runTempoFallbackScript(tempo: tempo)
             }
@@ -172,7 +173,13 @@ actor AccessibilityChannel: Channel {
                 hasVisibleWindow: hasVisibleWindow,
                 appRoot: { AXLogicProElements.appRoot(runtime: logicRuntime) },
                 transportState: { AccessibilityChannel.defaultGetTransportState(runtime: logicRuntime) },
-                toggleTransportButton: { AccessibilityChannel.defaultToggleTransportButton(named: $0, runtime: logicRuntime) },
+                toggleTransportButton: {
+                    AccessibilityChannel.defaultToggleTransportButton(
+                        named: $0,
+                        runtime: logicRuntime,
+                        mouseRuntime: controlBarMouseRuntime
+                    )
+                },
                 setTempo: { AccessibilityChannel.defaultSetTempo(params: $0, runtime: logicRuntime, runFallback: runTempoFallback) },
                 setCycleRange: { AccessibilityChannel.defaultSetCycleRange(params: $0, runtime: logicRuntime) },
                 tracks: { AccessibilityChannel.defaultGetTracks(runtime: logicRuntime) },
@@ -520,36 +527,37 @@ actor AccessibilityChannel: Channel {
 
     private static func defaultGetTransportState(runtime: AXLogicProElements.Runtime = .production) -> ChannelResult {
         guard let transport = AXLogicProElements.getControlBar(runtime: runtime)
-            ?? AXLogicProElements.getTransportBar(runtime: runtime) else {
+                ?? AXLogicProElements.getTransportBar(runtime: runtime) else {
             return .error("Cannot locate transport bar")
         }
         var state = AXValueExtractors.extractTransportState(from: transport, runtime: runtime.ax)
-        if let cycle = AXLogicProElements.readControlBarCheckboxValue(
-            named: "사이클", englishName: "Cycle", runtime: runtime
-        ) {
-            state.isCycleEnabled = cycle
-        }
-        if let metronome = AXLogicProElements.readControlBarCheckboxValue(
-            named: "메트로놈 클릭", englishName: "Metronome", runtime: runtime
-        ) {
-            state.isMetronomeEnabled = metronome
-        }
-        if let play = AXLogicProElements.readControlBarCheckboxValue(
+        if let isPlaying = AXLogicProElements.readControlBarCheckboxValue(
             named: "재생", englishName: "Play", runtime: runtime
         ) {
-            state.isPlaying = play
+            state.isPlaying = isPlaying
         }
-        if let record = AXLogicProElements.readControlBarCheckboxValue(
+        if let isRecording = AXLogicProElements.readControlBarCheckboxValue(
             named: "녹음", englishName: "Record", runtime: runtime
         ) {
-            state.isRecording = record
+            state.isRecording = isRecording
+        }
+        if let isCycleEnabled = AXLogicProElements.readControlBarCheckboxValue(
+            named: "사이클", englishName: "Cycle", runtime: runtime
+        ) {
+            state.isCycleEnabled = isCycleEnabled
+        }
+        if let isMetronomeEnabled = AXLogicProElements.readControlBarCheckboxValue(
+            named: "메트로놈 클릭", englishName: "Metronome", runtime: runtime
+        ) {
+            state.isMetronomeEnabled = isMetronomeEnabled
         }
         return encodeResult(state)
     }
 
     private static func defaultToggleTransportButton(
         named name: String,
-        runtime: AXLogicProElements.Runtime = .production
+        runtime: AXLogicProElements.Runtime = .production,
+        mouseRuntime: AXMouseHelper.Runtime = .production
     ) -> ChannelResult {
         // Try the Logic Pro 12 control-bar checkbox first (Korean + English UI).
         // Falls back to legacy toolbar button search.
@@ -565,21 +573,32 @@ actor AccessibilityChannel: Channel {
         // Avoids regression where stop() during recording leaves track in armed-record loop.
         if name == "Stop" {
             _ = AccessibilityChannel.setControlBarCheckboxValue(
-                korean: "녹음", english: "Record", desired: false, runtime: runtime
+                korean: "녹음",
+                english: "Record",
+                desired: false,
+                runtime: runtime,
+                mouseRuntime: mouseRuntime
             )
         }
         if let mapping = controlBarMapping[name] {
             if let desired = mapping.desired {
                 // Conditional toggle: only click if current != desired
                 if let result = AccessibilityChannel.setControlBarCheckboxValue(
-                    korean: mapping.korean, english: mapping.english, desired: desired, runtime: runtime
+                    korean: mapping.korean,
+                    english: mapping.english,
+                    desired: desired,
+                    runtime: runtime,
+                    mouseRuntime: mouseRuntime
                 ) {
                     return result
                 }
             } else {
                 // Unconditional toggle
                 if let result = AccessibilityChannel.clickControlBarCheckbox(
-                    korean: mapping.korean, english: mapping.english, runtime: runtime
+                    korean: mapping.korean,
+                    english: mapping.english,
+                    runtime: runtime,
+                    mouseRuntime: mouseRuntime
                 ) {
                     return result
                 }
@@ -2716,64 +2735,78 @@ actor AccessibilityChannel: Channel {
     private static func clickControlBarCheckbox(
         korean: String,
         english: String,
-        runtime: AXLogicProElements.Runtime = .production
+        runtime: AXLogicProElements.Runtime = .production,
+        mouseRuntime: AXMouseHelper.Runtime = .production
     ) -> ChannelResult? {
         guard let cb = AXLogicProElements.findControlBarCheckbox(
             named: korean, englishName: english, runtime: runtime
         ) else {
             return nil
         }
-        let before = AXLogicProElements.readControlBarCheckboxValue(
-            named: korean, englishName: english, runtime: runtime
-        )
-        guard AXHelpers.performAction(cb, kAXPressAction, runtime: runtime.ax) else {
-            return .error("Failed to click control-bar checkbox: \(korean)")
+        let before = controlBarCheckboxValue(cb, runtime: runtime)
+        var attempts: [String] = []
+
+        for strategy in controlBarClickStrategies(
+            element: cb,
+            runtime: runtime,
+            mouseRuntime: mouseRuntime
+        ) {
+            guard strategy.action() else {
+                attempts.append("\(strategy.name):failed")
+                continue
+            }
+            attempts.append(strategy.name)
+            if let before {
+                if let after = waitForControlBarCheckboxValue(
+                    cb,
+                    runtime: runtime,
+                    matching: { $0 != before }
+                ) {
+                    return .success(HonestContract.encodeStateA(
+                        extras: [
+                            "button": english,
+                            "control": korean,
+                            "observed": after,
+                            "previous": before,
+                            "action": strategy.name,
+                            "attempts": attempts
+                        ]
+                    ))
+                }
+            } else {
+                return .success(HonestContract.encodeStateB(
+                    reason: .readbackUnavailable,
+                    extras: [
+                        "button": english,
+                        "control": korean,
+                        "action": strategy.name,
+                        "attempts": attempts
+                    ]
+                ))
+            }
         }
+
         if let before {
-            usleep(120_000)
-            if let after = AXLogicProElements.readControlBarCheckboxValue(
-                named: korean, englishName: english, runtime: runtime
-            ), after != before {
-                return .success(HonestContract.encodeStateA(extras: [
-                    "button": english,
-                    "via": "control_bar_axpress",
-                    "requested": "toggle",
-                    "observed": after
-                ]))
-            }
-
-            // Logic can report AXPress success without committing the toggle.
-            // Use the same real-click fallback as track checkboxes, then verify
-            // the value changed before claiming the action worked.
-            postMouseClickAt(element: cb, runtime: runtime.ax)
-            usleep(160_000)
-            if let afterClick = AXLogicProElements.readControlBarCheckboxValue(
-                named: korean, englishName: english, runtime: runtime
-            ), afterClick != before {
-                return .success(HonestContract.encodeStateA(extras: [
-                    "button": english,
-                    "via": "control_bar_mouse_click",
-                    "requested": "toggle",
-                    "observed": afterClick
-                ]))
-            }
-
             return .error(HonestContract.encodeStateC(
-                error: .axWriteFailed,
-                hint: "control-bar checkbox '\(english)' did not change after AXPress or mouse-click",
+                error: .readbackMismatch,
+                hint: "control-bar checkbox '\(english)' did not change after real click / AXPress attempts",
                 extras: [
                     "button": english,
-                    "before": before,
+                    "control": korean,
+                    "observed": before,
+                    "attempts": attempts,
                     "safe_to_retry": true
                 ]
             ))
         }
-        return .success(HonestContract.encodeStateB(
-            reason: .readbackUnavailable,
+        return .error(HonestContract.encodeStateC(
+            error: .axWriteFailed,
+            hint: "control-bar checkbox '\(english)' had no readable value and no click strategy succeeded",
             extras: [
                 "button": english,
-                "via": "control_bar_axpress",
-                "requested": "toggle"
+                "control": korean,
+                "attempts": attempts,
+                "safe_to_retry": true
             ]
         ))
     }
@@ -2785,77 +2818,144 @@ actor AccessibilityChannel: Channel {
         korean: String,
         english: String,
         desired: Bool,
-        runtime: AXLogicProElements.Runtime = .production
+        runtime: AXLogicProElements.Runtime = .production,
+        mouseRuntime: AXMouseHelper.Runtime = .production
     ) -> ChannelResult? {
         guard let cb = AXLogicProElements.findControlBarCheckbox(
             named: korean, englishName: english, runtime: runtime
         ) else {
             return nil
         }
-        let current = AXLogicProElements.readControlBarCheckboxValue(
-            named: korean, englishName: english, runtime: runtime
-        )
-        if current == desired {
-            return .success(HonestContract.encodeStateA(extras: [
-                "button": english,
-                "via": "control_bar_readback",
-                "requested": desired,
-                "observed": desired,
-                "unchanged": true
-            ]))
-        }
-        guard AXHelpers.performAction(cb, kAXPressAction, runtime: runtime.ax) else {
-            return .error("Failed to click control-bar checkbox: \(korean)")
-        }
-        usleep(120_000)
-        if let after = AXLogicProElements.readControlBarCheckboxValue(
-            named: korean, englishName: english, runtime: runtime
-        ), after == desired {
-            return .success(HonestContract.encodeStateA(extras: [
-                "button": english,
-                "via": "control_bar_axpress",
-                "requested": desired,
-                "observed": after
-            ]))
-        }
-
-        postMouseClickAt(element: cb, runtime: runtime.ax)
-        usleep(160_000)
-        if let afterClick = AXLogicProElements.readControlBarCheckboxValue(
-            named: korean, englishName: english, runtime: runtime
-        ), afterClick == desired {
-            return .success(HonestContract.encodeStateA(extras: [
-                "button": english,
-                "via": "control_bar_mouse_click",
-                "requested": desired,
-                "observed": afterClick
-            ]))
-        }
-
-        if current == nil {
-            return .success(HonestContract.encodeStateB(
-                reason: .readbackUnavailable,
+        guard let current = controlBarCheckboxValue(cb, runtime: runtime) else {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "control-bar checkbox '\(english)' current value is unreadable; refusing unsafe toggle-click for desired=\(desired)",
                 extras: [
                     "button": english,
-                    "via": "control_bar_axpress",
+                    "control": korean,
                     "requested": desired,
-                    "observed": NSNull()
+                    "safe_to_retry": true
                 ]
             ))
         }
+        let baseExtras: [String: Any] = [
+            "button": english,
+            "control": korean,
+            "requested": desired
+        ]
+        if current == desired {
+            return .success(HonestContract.encodeStateA(
+                extras: baseExtras.merging([
+                    "observed": desired,
+                    "action": "no-op"
+                ]) { _, new in new }
+            ))
+        }
 
+        var attempts: [String] = []
+        for strategy in controlBarClickStrategies(
+            element: cb,
+            runtime: runtime,
+            mouseRuntime: mouseRuntime
+        ) {
+            guard strategy.action() else {
+                attempts.append("\(strategy.name):failed")
+                continue
+            }
+            attempts.append(strategy.name)
+            if let observed = waitForControlBarCheckboxValue(
+                cb,
+                runtime: runtime,
+                matching: { $0 == desired }
+            ) {
+                return .success(HonestContract.encodeStateA(
+                    extras: baseExtras.merging([
+                        "observed": observed,
+                        "action": strategy.name,
+                        "attempts": attempts
+                    ]) { _, new in new }
+                ))
+            }
+        }
+
+        let observed = controlBarCheckboxValue(cb, runtime: runtime) as Any
         return .error(HonestContract.encodeStateC(
-            error: .axWriteFailed,
-            hint: "control-bar checkbox '\(english)' did not reach requested state \(desired) after AXPress or mouse-click",
-            extras: [
-                "button": english,
-                "requested": desired,
-                "observed": AXLogicProElements.readControlBarCheckboxValue(
-                    named: korean, englishName: english, runtime: runtime
-                ) as Any? ?? NSNull(),
+            error: .readbackMismatch,
+            hint: "control-bar checkbox '\(english)' did not reach desired=\(desired) after real click / AXPress attempts",
+            extras: baseExtras.merging([
+                "observed": observed,
+                "attempts": attempts,
                 "safe_to_retry": true
-            ]
+            ]) { _, new in new }
         ))
+    }
+
+    private struct ControlBarClickStrategy {
+        let name: String
+        let action: () -> Bool
+    }
+
+    private static func controlBarClickStrategies(
+        element: AXUIElement,
+        runtime: AXLogicProElements.Runtime,
+        mouseRuntime: AXMouseHelper.Runtime
+    ) -> [ControlBarClickStrategy] {
+        [
+            ControlBarClickStrategy(name: "mouse-click", action: {
+                guard let position = AXHelpers.getPosition(element, runtime: runtime.ax),
+                      let size = AXHelpers.getSize(element, runtime: runtime.ax),
+                      position.x.isFinite,
+                      position.y.isFinite,
+                      size.width.isFinite,
+                      size.height.isFinite,
+                      size.width > 0,
+                      size.height > 0 else {
+                    return false
+                }
+                let center = CGPoint(
+                    x: position.x + size.width / 2,
+                    y: position.y + size.height / 2
+                )
+                return AXMouseHelper.click(at: center, runtime: mouseRuntime)
+            }),
+            ControlBarClickStrategy(name: "axpress", action: {
+                AXHelpers.performAction(element, kAXPressAction, runtime: runtime.ax)
+            }),
+            ControlBarClickStrategy(name: "axconfirm", action: {
+                AXHelpers.performAction(element, kAXConfirmAction, runtime: runtime.ax)
+            }),
+        ]
+    }
+
+    private static func controlBarCheckboxValue(
+        _ element: AXUIElement,
+        runtime: AXLogicProElements.Runtime
+    ) -> Bool? {
+        guard let raw = AXHelpers.getValue(element, runtime: runtime.ax) else { return nil }
+        if let n = raw as? NSNumber { return n.boolValue }
+        if let b = raw as? Bool { return b }
+        if let i = raw as? Int { return i != 0 }
+        if let s = raw as? String {
+            let normalized = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if ["1", "true", "yes", "on"].contains(normalized) { return true }
+            if ["0", "false", "no", "off"].contains(normalized) { return false }
+        }
+        return nil
+    }
+
+    private static func waitForControlBarCheckboxValue(
+        _ element: AXUIElement,
+        runtime: AXLogicProElements.Runtime,
+        matching predicate: (Bool) -> Bool
+    ) -> Bool? {
+        for _ in 0..<12 {
+            usleep(50_000)
+            if let value = controlBarCheckboxValue(element, runtime: runtime),
+               predicate(value) {
+                return value
+            }
+        }
+        return nil
     }
 
     private static func defaultSetMixerValue(

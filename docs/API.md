@@ -80,7 +80,7 @@ The production census can only produce `inferred` and `manifested` (see `product
 
 `known_presets` stays empty unless preset names have provenance. For `manifested` entries it lists factory preset filenames harvested from the probed settings folder (capped at `preset_name_cap`, currently 12; the full set remains on disk at the provenance `source_path`).
 
-Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Insert paths are menu hints unless their own state says otherwise. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced. Entries with `safe_write_capabilities: "insert_only"` (Gain, Compressor, Channel EQ) match the `logic_mixer insert_plugin` allowlist; everything else is discovery-only.
+Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Insert paths are menu hints unless their own state says otherwise. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced. Entries with `safe_write_capabilities: "insert_only"` (Gain, Compressor, Channel EQ) match the `logic_plugins.insert_verified` allowlist for the v3.6.0 release line; everything else is discovery-only.
 
 ### Workflow Skills
 
@@ -328,13 +328,13 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 {"command": "insert_plugin", "params": {"track": 0, "slot": 2, "plugin_name": "Gain", "confirmed": true}}
 ```
 
-> **Deprecation notice:** `logic_mixer.insert_plugin` is superseded by `logic_plugins.insert_verified` for the allowlisted stock plugins (Gain / Channel EQ / Compressor). `insert_plugin` remains available in the current release cycle but will be removed in a future version.
+> **Deprecation notice:** `logic_mixer.insert_plugin` is superseded by `logic_plugins.insert_verified` for the allowlisted stock plugins (Gain / Channel EQ / Compressor). Use `insert_verified` when the caller needs physical-slot targeting, project identity gating, HC v2 failure codes, and independent post-write inventory readback. `insert_plugin` remains available for backward compatibility in the v3.x line but should not be used for new apply-back workflows.
 
 ---
 
 ## logic_plugins
 
-Verified plugin apply-back surface. All three commands use **HC v2** (`hc_schema: 2`) — every response carries `state` (`"A"` / `"B"` / `"C"`), `hc_schema: 2`, and (for State C) `verified: false`. This tool routes exclusively through the Accessibility channel; there is no fallback chain. All HC v2 error codes are terminal.
+Verified plugin apply-back surface, added in `v3.6.0`. All three commands use **HC v2** (`hc_schema: 2`) — every response carries `state` (`"A"` / `"B"` / `"C"`), `hc_schema: 2`, and (for State C) `verified: false`. This tool routes exclusively through the Accessibility channel; there is no fallback chain. All HC v2 error codes are terminal.
 
 ### Commands
 
@@ -516,7 +516,7 @@ All other plugin/parameter combinations return State C `unsupported_param_readba
 | `project_identity_mismatch` | Front document path does not match `project_expected_path`. | `false` |
 | `unknown_plugin_identity` | Plugin alias or parameter key not in the allowlist. | `false` |
 | `unsupported_param_readback` | Parameter exists but has no verified write/readback method. | `false` |
-| `incomplete_inventory` | Insert chain is not fully readable, or target slot is empty. | `false` |
+| `incomplete_inventory` | Insert chain is not fully readable, or the target slot cannot satisfy the command's precondition (occupied plugin required for `set_param_verified`, empty slot required for `insert_verified`). | `false` |
 | `track_selection_failed` | AX track selection write or readback confirmation failed. | `false` |
 | `window_open_failed` | No open plugin window matched; programmatic open also failed. | `false` |
 | `param_control_not_found` | No `AXSlider` with the expected `AXDescription` in the plugin window. | `false` |

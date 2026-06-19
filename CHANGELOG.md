@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [3.6.0] — 2026-06-19
+
+**PR #24 — verified plugin apply-back with exact-slot insert verification, plus Logic 12.2 AX readback hardening.** This release grows the public write surface from 8 tools to 9 by adding `logic_plugins`, an HC v2 surface for duplicate-project plugin apply-back workflows. It also carries the Logic 12.2 track-header/type-readback hardening needed for live `logic://tracks` evidence on current macOS/Logic combinations.
+
 ### Added
 
 - **`logic_plugins` verified plugin apply-back surface (v3.6.0, additive — 9 tools total)** — a new `logic_plugins` tool exposes three commands backed by the HC v2 (`hc_schema: 2`) envelope for the verified plugin path. Every `logic_plugins.*` response carries `state` (`"A"` / `"B"` / `"C"`) and `hc_schema: 2`; the existing 8-tool surface is byte-identical.
@@ -19,12 +25,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **Compressor `threshold` in `StockPluginCatalog`** — `writeMethod: "ax_slider_axvalue"`, `readbackMethod: "ax_slider_axvalue"`, `unit: "normalized"`, `valueRange: 0–100`, `tolerance: 1.0`, `axDescription: "Threshold"` (T0 live spike 2026-06-14, `docs/spikes/compressor-t0-evidence.md`).
 - **`logic_mixer.insert_plugin` deprecated** — go-forward path is `logic_plugins.insert_verified`. `insert_plugin` remains in the 8-tool surface for the current release cycle but is superseded by the verified surface for the allowlisted stock plugins (Gain / Channel EQ / Compressor).
 
+### Changed
+
+- **Release and packaging surfaces synchronized for the v3.6.0 line** — `ServerConfig`, manifest, installer default, Formula version, startup-banner tests, README, API, SETUP, SECURITY, ARCHITECTURE, HONEST-CONTRACT, MAINTAINERS, CONTRIBUTING, release notes, and live verification docs now point at the v3.6.0 release line. The Formula SHA is updated post-publish from the released `SHA256SUMS.txt`.
+- **Plugin write guidance moved from legacy Scripter to HC v2** — docs now treat `logic_mixer.set_plugin_param` as the legacy send-only State B path and direct verified apply-back workflows to `logic_plugins.get_inventory`, `insert_verified`, and `set_param_verified`.
+
 ### Fixed
 
-- **`logic://tracks` placeholder mode on Logic Pro 12.2 + macOS 26** — the track-header rail matcher now treats `Track Headers`, `Track Header`, `Tracks Header(s)`, and Korean `트랙 헤더` as the same known Logic arrange-window surface. The fix is centralized and used by both `mainWindow()` arrange-window selection and `getTrackHeaders()`, so window disambiguation cannot still fall back to an auxiliary non-dialog pane after the header lookup itself was fixed. This prevents the `StatePoller` from caching an empty track list and the resource layer from synthesizing placeholder rows (`source:"ax_live_with_file_count"`, `placeholder:true`, generic `Track N` names) when the real arrange track headers are visible. Track type inference also now scans header descendants for AX description/title/identifier/help/value signals, so type metadata exposed on Logic 12.2 header icons is no longer reported as `unknown`.
+- **`logic://tracks` placeholder mode on Logic Pro 12.2 + macOS 26** — the track-header rail matcher now prefers Logic's language-neutral AX structure (`AXSelectedChildren` pointing at direct `AXLayoutItem` rows), while still treating `Track Headers`, `Track Header`, `Tracks Header(s)`, and Korean `트랙 헤더` as explicit compatibility signals. The fix is centralized and used by both `mainWindow()` arrange-window selection and `getTrackHeaders()`, so window disambiguation cannot still fall back to an auxiliary non-dialog pane after the header lookup itself was fixed. This prevents the `StatePoller` from caching an empty track list and the resource layer from synthesizing placeholder rows (`source:"ax_live_with_file_count"`, `placeholder:true`, generic `Track N` names) when the real arrange track headers are visible. Track type inference also now scans header descendants for AX description/title/identifier/help/value signals, so type metadata exposed on Logic 12.2 header icons is no longer reported as `unknown`.
 - **Logic 12 transport readback drift** — `transport.get_state` now prefers the Logic 12 control bar before the older Transport group and overlays direct control-bar checkbox readback for Cycle, Metronome, Play, and Record. Control-bar toggles now verify the checkbox state changed after AXPress or a real mouse-click fallback before reporting State A. This keeps `logic://transport/state` consistent with visible control-bar writes and prevents stale legacy transport subtrees from making cycle/metronome roundtrips look failed after a successful UI toggle.
 - **`brew install` regression (Issue #22, thomas-doesburg)** — the Formula installed its five helper assets from the tarball root, while the published v3.4.6/v3.5.0 tarballs stage them under `docs/` and `Scripts/` (the inverse of the v3.1.x mismatch fixed in PR #2), so the Homebrew install step failed. `pkgshare.install` paths now match the staged layout. Two guards now block both drift directions: a PR-time test (`VersionConsistencyTests.testFormulaInstallPathsMatchRepoAndReleaseStaging`) asserts every Formula install path exists in the repo and is staged by `release.yml`, and a tag-time release-workflow gate asserts every install path against the actual built tarball (`tar -tzf`) before anything is published. Because the Homebrew tap serves the Formula from `main`, the fix applies to the already-published v3.4.6/v3.5.0 artifacts on `brew update` — the tarballs themselves were always correct; only the install paths were wrong.
 - **Install docs cover the Homebrew 6.0 tap trust model** — README/SETUP now include the `brew trust monglong0214/logic-pro-mcp` step required before `brew install` on Homebrew 6.0+, and TROUBLESHOOTING gained an Install section for the untrusted-tap refusal and the issue #22 `Errno::ENOENT` symptom. MAINTAINERS documents the two-layer Formula/tarball gate.
+
+### Tests
+
+- PR #24 exact-slot plugin branch: focused Swift suites `63/63`, full `swift test --no-parallel` `1384/1384`, release build, Python live-E2E syntax, stale Search-and-Add grep `0`, targeted live exact-slot insert proof, cleanup readback, and strict live E2E `314/314` passed.
+- PR #54 / issue #59 readback hardening: focused AX tests passed, `swift build -c release` passed, full `swift test --no-parallel` `1388/1388` passed, live `logic://tracks` probe returned `source:"ax_live"` with `placeholder_count:0` and `unknown_type_count:0`, and manual cycle toggle/resource roundtrip reflected live UI state.
+- v3.6.0 release-tree gates: packaging version bump, `git diff --check`, `ruby -c Formula/logic-pro-mcp.rb`, `python3 -m py_compile Scripts/live-e2e-test.py`, full deterministic suite `1396/1396`, release build, strict live E2E `314/314`, release workflow macOS 14/15 install validation, and Formula SHA sync from `SHA256SUMS.txt`.
 
 ## [3.5.0] — 2026-06-12
 

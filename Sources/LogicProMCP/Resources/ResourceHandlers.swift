@@ -142,7 +142,7 @@ extension ResourceHandlers {
 
         switch uri {
         case "logic://transport/state":
-            return try await readTransportState(cache: cache, uri: uri)
+            return try await readTransportState(cache: cache, router: router, uri: uri)
 
         case "logic://tracks":
             return try await readTracks(cache: cache, uri: uri, fileReader: fileReader)
@@ -172,7 +172,11 @@ extension ResourceHandlers {
 
     // MARK: - Individual resource handlers
 
-    private static func readTransportState(cache: StateCache, uri: String) async throws -> ReadResource.Result {
+    private static func readTransportState(cache: StateCache, router: ChannelRouter, uri: String) async throws -> ReadResource.Result {
+        if let liveState = await readLiveTransportState(router: router) {
+            await cache.updateTransport(liveState)
+        }
+
         let state = await cache.getTransport()
         let hasDocument = await cache.getHasDocument()
         let axOccluded = await cache.getAXOccluded()
@@ -188,6 +192,41 @@ extension ResourceHandlers {
         return ReadResource.Result(
             contents: [.text(json, uri: uri, mimeType: "application/json")]
         )
+    }
+
+    private static func readLiveTransportState(router: ChannelRouter) async -> TransportState? {
+        guard case .success(let json) = await router.route(operation: "transport.get_state") else {
+            return nil
+        }
+
+        return decodeTransportState(json)
+    }
+
+    private static func decodeTransportState(_ json: String) -> TransportState? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: value) {
+                return date
+            }
+
+            let wholeSeconds = ISO8601DateFormatter()
+            wholeSeconds.formatOptions = [.withInternetDateTime]
+            if let date = wholeSeconds.date(from: value) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid transport lastUpdated timestamp: \(value)"
+            )
+        }
+        return try? decoder.decode(TransportState.self, from: data)
     }
 
     /// Stock plugin discovery routing. Parsed with `URLComponents` so path and

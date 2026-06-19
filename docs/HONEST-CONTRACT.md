@@ -73,6 +73,31 @@ Decision table for harnesses on State B `echo_timeout_<ms>ms`:
 | `true` | high (e.g. > 5000) | MCU pairing went stale mid-session. |
 | `true` | low (sub-second) | Connection healthy, but this specific fader/V-Pot echo didn't land — points at a Logic-build regression or bank-offset mismatch. |
 
+## HC v2 (`logic_plugins.*`, v3.6.0)
+
+The verified plugin apply-back surface uses a stricter envelope so clients can distinguish legacy best-effort plugin writes from readback-gated apply-back operations.
+
+All `logic_plugins.*` responses carry:
+
+```json
+{
+  "success": true,
+  "verified": true,
+  "state": "A",
+  "hc_schema": 2
+}
+```
+
+State C always includes `verified:false`, and mutating failures include `write_attempted` whenever the implementation can know whether Logic was touched.
+
+| Command | State A condition | Non-success rule |
+|---------|-------------------|------------------|
+| `logic_plugins.get_inventory` | AX inventory was read and every exposed slot is classified. | Mixer/AX subtree unavailable returns State B `readback_unavailable`; any unreadable occupied slot makes `complete:false`, and callers must not write. |
+| `logic_plugins.insert_verified` | The requested stock plugin is observed by post-write inventory diff at the requested physical insert slot. | Track selection, incomplete inventory, occupied slot, unanchored popup, exact leaf miss, wrong-slot mount, rollback failure, or timeout returns State C. |
+| `logic_plugins.set_param_verified` | The target AX slider is written and read back within tolerance. | Unsupported params fail before writing; post-write mismatch attempts rollback and returns State C `readback_mismatch`. |
+
+HC v2 is currently scoped to the `logic_plugins` tool only. The existing 8-tool surface keeps HC v1 wire shapes so legacy clients do not see a surprise schema change.
+
 ## Which operations return the 3-state contract
 
 As of v3.1.0 (envelope) + v3.4.5-rc5 (mixer extras):
@@ -83,12 +108,16 @@ As of v3.1.0 (envelope) + v3.4.5-rc5 (mixer extras):
 - `transport.set_tempo` — State C `readback_unavailable` when fallback execution cannot be verified
 - `project.save_as` — State A only after the target `.logicx` package exists and existing-package mtime advances; State C `readback_mismatch` otherwise
 - `midi.import_file` — State A only after Logic imports a `/tmp/LogicProMCP/*.mid` file and a new live AX track appears; State C `readback_mismatch` otherwise
+- `logic_plugins.get_inventory` — HC v2 State A when the physical insert chain is readable; State B when the AX mixer subtree is unavailable
+- `logic_plugins.insert_verified` — HC v2 State A only after exact-slot plugin readback
+- `logic_plugins.set_param_verified` — HC v2 State A only after parameter write/readback tolerance check
 
 Router-level (v3.4.5-rc5+):
 - Any operation whose channel chain is fully exhausted returns State C `channels_exhausted` instead of a free-form error string.
 
 Planned for future releases:
-- All remaining `track.*`, `mixer.*`, `transport.*` mutating operations.
+- HC v2 expansion beyond `logic_plugins.*` after client compatibility review.
+- All remaining `track.*`, `mixer.*`, `transport.*` mutating operations that still use legacy text or partial HC shapes.
 
 ## State resource (query)
 
@@ -146,3 +175,4 @@ Violations:
 
 - **v3.1.0** — Initial Honest Contract introduced. T2–T8 tickets completed.
 - **v3.1.0 Ralph-2 fix** — MCU `pollFaderEcho` stale-cache false-positive blocked (send-time freshness stamp introduced); `track.select` mismatch reclassified as `readback_mismatch` (previously `retry_exhausted`); `scan_library {mode:both}` also updates `lastPanelScan`; `track.set_instrument` / `transport.set_cycle_range` State C `.error(...)` wrapping unified; resource envelope (`{cache_age_sec, fetched_at, data}` / `{source, root}`) correctly declared as a breaking change in CHANGELOG.
+- **v3.6.0** — `logic_plugins.*` introduces HC v2 for verified plugin apply-back: physical insert inventory, exact-slot stock plugin insertion, and Compressor threshold write/readback.

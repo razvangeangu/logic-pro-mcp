@@ -35,8 +35,8 @@ enum AXLogicProElements {
     ///   1. Read every window via `kAXWindowsAttribute`.
     ///   2. Skip windows whose `AXSubrole` is `AXDialog` / `AXSystemDialog`
     ///      (modal sheets/panels).
-    ///   3. Prefer a non-dialog window that contains the "트랙 헤더" /
-    ///      "Track Headers" group (the real arrange window).
+    ///   3. Prefer a non-dialog window that contains the track-header rail
+    ///      (the real arrange window).
     ///   4. Fall back to the first non-dialog window.
     ///   5. Only fall back to `kAXMainWindowAttribute` if no windows are
     ///      enumerable — preserves test-double behavior that builds a minimal
@@ -99,10 +99,9 @@ enum AXLogicProElements {
             || subrole == (kAXSystemDialogSubrole as String)
     }
 
-    /// True when `window` contains an AXGroup whose description matches
-    /// Logic's track-header rail. Used by `mainWindow()` to disambiguate the
-    /// arrange window from auxiliary non-dialog windows (Library, Mixer
-    /// detached pane, plugin windows).
+    /// True when `window` contains Logic's track-header rail. Used by
+    /// `mainWindow()` to disambiguate the arrange window from auxiliary
+    /// non-dialog windows (Library, Mixer detached pane, plugin windows).
     private static func hasTrackHeadersGroup(
         _ window: AXUIElement,
         runtime: AXHelpers.Runtime
@@ -111,13 +110,49 @@ enum AXLogicProElements {
             of: window, role: kAXGroupRole, maxDepth: 8, runtime: runtime
         )
         return groups.contains { group in
-            isTrackHeadersDescription(AXHelpers.getDescription(group, runtime: runtime))
+            isTrackHeadersGroup(group, runtime: runtime)
+        }
+    }
+
+    /// Logic exposes the arrange track-header rail as an AXGroup with writable
+    /// `AXSelectedChildren` pointing at its direct `AXLayoutItem` row children.
+    /// Prefer that structure over localized text so new Logic languages do not
+    /// need a code change just to locate the arrange window.
+    private static func isTrackHeadersGroup(
+        _ group: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        if hasTrackHeaderSelectionStructure(group, runtime: runtime) {
+            return true
+        }
+        return isTrackHeadersDescription(AXHelpers.getDescription(group, runtime: runtime))
+    }
+
+    private static func hasTrackHeaderSelectionStructure(
+        _ group: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        let layoutChildren = AXHelpers.getChildren(group, runtime: runtime).filter {
+            AXHelpers.getRole($0, runtime: runtime) == (kAXLayoutItemRole as String)
+        }
+        guard !layoutChildren.isEmpty,
+              let selectedChildren: [AXUIElement] = AXHelpers.getAttribute(
+                group,
+                kAXSelectedChildrenAttribute,
+                runtime: runtime
+              ),
+              !selectedChildren.isEmpty
+        else {
+            return false
+        }
+        return selectedChildren.contains { selected in
+            layoutChildren.contains { $0 == selected }
         }
     }
 
     /// Matcher for Logic's track-header rail description. Logic has shipped
-    /// both `Track Headers` and `Tracks header`; keep this in one place so
-    /// window disambiguation and the actual header lookup cannot drift apart.
+    /// both `Track Headers` and `Tracks header`. This stays as an explicit
+    /// compatibility path, but structural detection above is preferred.
     private static func isTrackHeadersDescription(_ description: String?) -> Bool {
         guard let description else { return false }
         let normalized = description
@@ -335,21 +370,12 @@ enum AXLogicProElements {
         }
 
         // Live Logic 12 commonly exposes the track header rail as an AXGroup
-        // whose description names the headers area, inside the left scroll area
-        // rather than as an AXList/AXOutline identifier.
-        //
-        // Description strings observed in the wild:
-        //   - "Track Headers" — earlier Logic 12 builds (US English)
-        //   - "트랙 헤더"      — Korean
-        //   - "Tracks header"  — Logic 12.2 on macOS 26 (singular "Tracks",
-        //                       lowercase "header"; one-letter-and-word-order
-        //                       drift from the older form)
-        //
-        // We accept anything that lowercases to a "track(s) header(s)" variant
-        // so a future minor pluralization tweak in Logic doesn't break us again.
+        // inside the left scroll area rather than as an AXList/AXOutline.
+        // Prefer the language-neutral selected-children structure, with
+        // known ko/en descriptions retained as an explicit compatibility path.
         let groups = AXHelpers.findAllDescendants(of: window, role: kAXGroupRole, maxDepth: 8, runtime: runtime.ax)
         if let headerGroup = groups.first(where: {
-            isTrackHeadersDescription(AXHelpers.getDescription($0, runtime: runtime.ax))
+            isTrackHeadersGroup($0, runtime: runtime.ax)
         }) {
             return headerGroup
         }

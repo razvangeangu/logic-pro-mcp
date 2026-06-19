@@ -30,6 +30,37 @@ private func toolText(_ result: CallTool.Result) -> String {
     return "{}"
 }
 
+private actor LiveTransportStateChannel: Channel {
+    nonisolated let id: ChannelID = .accessibility
+    private let json: String
+    private var operations: [String] = []
+
+    init(isPlaying: Bool = false, tempo: Double = 90.5, isCycleEnabled: Bool) {
+        self.json = """
+            {"isPlaying":\(isPlaying),"isRecording":false,"isPaused":false,"tempo":\(tempo),"position":"1.1.1.1","timePosition":"00:00:00.000","sampleRate":44100,"isCycleEnabled":\(isCycleEnabled),"isMetronomeEnabled":true,"lastUpdated":"2026-06-19T02:17:42.000Z"}
+            """
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params _: [String: String]) async -> ChannelResult {
+        operations.append(operation)
+        if operation == "transport.get_state" {
+            return .success(json)
+        }
+        return .error("unexpected operation: \(operation)")
+    }
+
+    func executedOperations() -> [String] {
+        operations
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "live transport test channel")
+    }
+}
+
 private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     var json = try sharedParseJSON(text) as! [String: Any]
 
@@ -103,6 +134,34 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     #expect(state["position"] as? String == "9.1.1.1")
     #expect(state["timePosition"] as? String == "00:01:23.456")
     #expect(json["has_document"] as? Bool == true)
+}
+
+@Test func testTransportStateResourceRefreshesLiveStateBeforeServingCache() async {
+    let cache = StateCache()
+    var staleTransport = TransportState()
+    staleTransport.isPlaying = true
+    staleTransport.tempo = 128.0
+    staleTransport.isCycleEnabled = false
+    await cache.updateTransport(staleTransport)
+    await cache.updateDocumentState(true)
+
+    let router = ChannelRouter()
+    let channel = LiveTransportStateChannel(isPlaying: false, tempo: 90.5, isCycleEnabled: true)
+    await router.register(channel)
+
+    let result = try! await ResourceHandlers.read(uri: "logic://transport/state", cache: cache, router: router)
+    let envelope = try! sharedParseJSON(resourceText(result)) as! [String: Any]
+    let json = envelope["data"] as! [String: Any]
+    let state = json["state"] as! [String: Any]
+
+    #expect(await channel.executedOperations() == ["transport.get_state"])
+    #expect(state["isPlaying"] as? Bool == false)
+    #expect(state["tempo"] as? Double == 90.5)
+    #expect(state["isCycleEnabled"] as? Bool == true)
+    let cached = await cache.getTransport()
+    #expect(cached.isPlaying == false)
+    #expect(cached.tempo == 90.5)
+    #expect(cached.isCycleEnabled == true)
 }
 
 @Test func testTransportStateResourceSignalsStaleAfterClose() async {
