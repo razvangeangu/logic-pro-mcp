@@ -282,10 +282,10 @@ Or use Scripter for deterministic plugin parameter control (no track routing nee
 
 ### `logic_midi import_file` rejects the path
 
-**Cause:** `import_file` intentionally accepts only Standard MIDI Files generated or staged under `/tmp/LogicProMCP/`. The server resolves symlinks and standardized paths before checking the boundary, so traversal tricks and symlink escapes are rejected.
+**Cause:** `import_file` intentionally accepts only Standard MIDI Files generated or staged under the managed temp directory. The accepted boundary is `/tmp/LogicProMCP/*.mid` plus its macOS alias `/private/tmp/LogicProMCP/*.mid`. The server resolves symlinks and standardized paths before checking the boundary, so traversal tricks and symlink escapes are still rejected.
 
 **Fix:**
-1. Copy or generate the `.mid` file under `/tmp/LogicProMCP/`.
+1. Copy or generate the `.mid` file under `/tmp/LogicProMCP/` or `/private/tmp/LogicProMCP/`.
 2. Ensure the path has a `.mid` extension and is a regular file, not a directory.
 3. Send imports sequentially and wait for `verified:true` before sending the next file.
 

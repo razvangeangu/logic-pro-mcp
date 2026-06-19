@@ -64,6 +64,29 @@ actor AccessibilityChannel: Channel {
         return ScanMode(rawValue: raw) ?? .ax
     }
 
+    static func managedMIDIImportDirectoryPrefixes() -> [String] {
+        let rawRoots = [
+            "/tmp/LogicProMCP",
+            "/private/tmp/LogicProMCP",
+        ]
+
+        return Array(
+            Set(
+                rawRoots.flatMap { root in
+                    [
+                        root,
+                        URL(fileURLWithPath: root, isDirectory: true)
+                            .resolvingSymlinksInPath()
+                            .standardizedFileURL
+                            .path,
+                    ]
+                }
+            )
+        )
+        .map { $0.hasSuffix("/") ? $0 : $0 + "/" }
+        .sorted()
+    }
+
     static func validatedMIDIImportPath(_ path: String) -> String? {
         guard path.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
 
@@ -72,13 +95,7 @@ actor AccessibilityChannel: Channel {
             .standardizedFileURL
         guard requestedURL.pathExtension.lowercased() == "mid" else { return nil }
 
-        let allowedDirectoryURL = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-        let allowedDirectoryPath = allowedDirectoryURL.path.hasSuffix("/")
-            ? allowedDirectoryURL.path
-            : allowedDirectoryURL.path + "/"
-        guard requestedURL.path.hasPrefix(allowedDirectoryPath) else { return nil }
+        guard managedMIDIImportDirectoryPrefixes().contains(where: requestedURL.path.hasPrefix) else { return nil }
 
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: requestedURL.path, isDirectory: &isDirectory),

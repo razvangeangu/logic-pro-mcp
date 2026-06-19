@@ -738,6 +738,23 @@ private func makeAXBackedAccessibilityChannel(
     #expect(validated?.hasSuffix("/LogicProMCP/\(file.lastPathComponent)") == true)
 }
 
+@Test func testAccessibilityChannelValidatedMIDIImportPathAcceptsPrivateTmpRepresentation() throws {
+    let managedDirectory = URL(fileURLWithPath: "/private/tmp/LogicProMCP", isDirectory: true)
+    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+    let file = managedDirectory.appendingPathComponent("private-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: file)
+    defer { try? FileManager.default.removeItem(at: file) }
+
+    let validated = AccessibilityChannel.validatedMIDIImportPath(file.path)
+
+    #expect(validated?.hasSuffix("/LogicProMCP/\(file.lastPathComponent)") == true)
+    #expect(
+        AccessibilityChannel.managedMIDIImportDirectoryPrefixes().contains { prefix in
+            validated?.hasPrefix(prefix) == true
+        }
+    )
+}
+
 @Test func testAccessibilityChannelValidatedMIDIImportPathRejectsSymlinkEscape() throws {
     let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
     try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)

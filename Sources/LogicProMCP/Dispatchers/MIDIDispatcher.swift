@@ -581,8 +581,13 @@ struct MIDIDispatcher {
             return .failure(ValidationFailure("import_file 'path' must not contain control characters"))
         }
 
-        let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
-        guard normalized.hasPrefix("/tmp/LogicProMCP/"),
+        let normalized = URL(fileURLWithPath: path)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+            .path
+        let allowedPrefixes = AccessibilityChannel.managedMIDIImportDirectoryPrefixes()
+
+        guard allowedPrefixes.contains(where: normalized.hasPrefix),
               normalized.lowercased().hasSuffix(".mid") else {
             return .failure(ValidationFailure("import_file 'path' must be /tmp/LogicProMCP/*.mid"))
         }
