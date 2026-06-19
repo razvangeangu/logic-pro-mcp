@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **8 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **9 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -15,6 +15,7 @@ Every tool call returns a `CallTool.Result` with `content: [{ type: "text", text
 | [`logic_transport`](#logic_transport) | Play, stop, record, tempo, position | Write |
 | [`logic_tracks`](#logic_tracks) | Track create/delete/mute/solo/arm/rename/automation | Write |
 | [`logic_mixer`](#logic_mixer) | Fader, pan, send, plugin parameters | Write |
+| [`logic_plugins`](#logic_plugins) | Verified plugin inventory + parameter write/readback | Write (HC v2) |
 | [`logic_midi`](#logic_midi) | Raw MIDI + MMC + step input | Write |
 | [`logic_edit`](#logic_edit) | Undo/redo/cut/copy/paste/quantize | Write |
 | [`logic_navigate`](#logic_navigate) | Bar navigation, markers, zoom, view toggles | Write |
@@ -325,6 +326,263 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 {"command": "set_pan", "params": {"track": 2, "value": -0.3}}
 {"command": "set_plugin_param", "params": {"track": 1, "insert": 0, "param": 3, "value": 0.65}}
 {"command": "insert_plugin", "params": {"track": 0, "slot": 2, "plugin_name": "Gain", "confirmed": true}}
+```
+
+> **Deprecation notice:** `logic_mixer.insert_plugin` is superseded by `logic_plugins.insert_verified` for the allowlisted stock plugins (Gain / Channel EQ / Compressor). `insert_plugin` remains available in the current release cycle but will be removed in a future version.
+
+---
+
+## logic_plugins
+
+Verified plugin apply-back surface. All three commands use **HC v2** (`hc_schema: 2`) — every response carries `state` (`"A"` / `"B"` / `"C"`), `hc_schema: 2`, and (for State C) `verified: false`. This tool routes exclusively through the Accessibility channel; there is no fallback chain. All HC v2 error codes are terminal.
+
+### Commands
+
+| Command | Params | Returns | Channel |
+|---------|--------|---------|---------|
+| `get_inventory` | `{ track: int }` | HC v2 inventory envelope (State B when AX mixer unreachable) | Accessibility (read-only) |
+| `set_param_verified` | `{ track: int, insert: int, plugin: string, param: string, value: number, mode: "duplicate_applyback", project_expected_path: string, unit?: string }` | HC v2 State A on confirmed write, State C on any failure | Accessibility (AX plugin window) |
+| `insert_verified` | `{ track: int, insert: int, plugin: string, mode: "duplicate_applyback", project_expected_path: string }` | HC v2 State A on readback-confirmed exact-slot insert; State C `insert_landed_at_different_slot` if readback observes a different slot (rolled back); State C on any other failure | Accessibility (exact slot popup + CGEvent menu click) |
+
+### get_inventory
+
+Reads the physical AX insert chain for one track. Never mutates state. Every slot item always carries all six fields — no field is omitted; missing values are explicit `null`.
+
+**Input**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `track` | `int >= 0` | 0-based track index in the visible mixer. |
+
+**Output — success (State B shape when AX mixer unreachable)**
+
+```json
+{
+  "success": true,
+  "verified": false,
+  "state": "B",
+  "hc_schema": 2,
+  "reason": "readback_unavailable",
+  "operation": "logic_plugins.get_inventory",
+  "track": 3,
+  "plugins_source": "ax",
+  "plugins_fetched_at": "2026-06-14T12:00:00Z",
+  "plugins_unknown_reason": "ax_subtree_unreadable",
+  "what_was_attempted": "read insert chain inventory for track 3",
+  "what_was_observed": "mixer area was not locatable in the AX tree",
+  "safe_to_retry": true
+}
+```
+
+**Output — success (readable)**
+
+```json
+{
+  "success": true,
+  "verified": true,
+  "state": "A",
+  "hc_schema": 2,
+  "operation": "logic_plugins.get_inventory",
+  "track": 5,
+  "plugins_source": "ax",
+  "plugins_fetched_at": "2026-06-14T12:00:00Z",
+  "plugins_unknown_reason": null,
+  "complete": true,
+  "plugins": [
+    {
+      "insert": 0,
+      "read_status": "empty",
+      "occupied": false,
+      "name": null,
+      "plugin_id": null,
+      "bypassed": null
+    },
+    {
+      "insert": 6,
+      "read_status": "ok",
+      "occupied": true,
+      "name": "Compressor",
+      "plugin_id": "logic.stock.effect.compressor",
+      "bypassed": false
+    }
+  ]
+}
+```
+
+**`read_status` values**
+
+| Value | Meaning |
+|-------|---------|
+| `"empty"` | Slot is unoccupied. |
+| `"ok"` | Slot is occupied and the plugin name was read successfully. |
+| `"unreadable"` | Slot appears occupied but the name could not be read; `name` / `plugin_id` / `bypassed` are `null`. When any slot is `unreadable`, `complete` is `false`. |
+
+**`plugin_id`** is set only when the observed name matches an allowlisted stock plugin (`logic.stock.effect.*`). Third-party plugins return `null` for `plugin_id` even when `read_status` is `"ok"`.
+
+> **Physical index vs mixer-cache index:** `insert` reflects the physical AX slot position, which may differ from the `logic://mixer` legacy index (D1 drift). Always use the `insert` value from `get_inventory` when targeting a slot for `set_param_verified` or `insert_verified`.
+
+### set_param_verified
+
+Writes a parameter on an already-open plugin window and reads the value back. Returns State A only when the write **and** readback both succeed within tolerance. Any failure before or during the write returns State C; a readback mismatch triggers rollback to the pre-write value and returns State C `readback_mismatch`.
+
+**Supported parameters (as of this build)**
+
+| Plugin identity | Param key | Unit | Range | Tolerance | AX control |
+|-----------------|-----------|------|-------|-----------|------------|
+| `logic.stock.effect.compressor` | `threshold` | `normalized` (display: `"X %"`) | 0–100 | 1.0 | `AXSlider` with `AXDescription: "Threshold"` |
+
+All other plugin/parameter combinations return State C `unsupported_param_readback` at the capability preflight step; no write is attempted.
+
+**라이브 E2E 검증 완료 (Compressor threshold State A, 2026-06-14).** Logic Pro 12.2 + 복제본 `acid-track-applyback-test.logicx`, track 5 Compressor(물리 insert 6)에서 `requested_normalized 60 → observed_normalized 60, observed_display "60 %"` State A 확인. 독립 osascript readback으로 실제 AX write 입증. Evidence: `docs/spikes/compressor-t0-evidence.md`.
+
+`insert_verified`는 요청 slot의 자체 popup을 CGEvent로 열고, 그 popup이 target slot에 anchored 되었는지 먼저 검증한 뒤, popup 안에서 stock plugin의 exact leaf title을 실제 mouse hover/click으로 선택하고 pre/post 인벤토리 readback diff로 검증한다. 이 경로는 `Utility` 같은 localized category name에 의존하지 않는다. Logic Pro 12.2가 노출하는 9px짜리 bottom "Audio Plug-in" stub는 실제 주소 가능한 insert row가 아니라 append affordance라서 `get_inventory`에서 제외한다. State A는 post-insert readback이 요청 `insert`에 요청 plugin을 새로 관측할 때만 반환한다.
+
+**Plugin identity aliases (case-insensitive)**
+
+| Accepted alias | Canonical ID |
+|----------------|--------------|
+| `"compressor"`, `"logic.stock.effect.compressor"` | `logic.stock.effect.compressor` |
+| `"gain"`, `"logic.stock.effect.gain"` | `logic.stock.effect.gain` |
+| `"channel eq"`, `"channeleq"`, `"logic.stock.effect.channel_eq"` | `logic.stock.effect.channel_eq` |
+| `"noise gate"`, `"noisegate"`, `"logic.stock.effect.noise_gate"` | `logic.stock.effect.noise_gate` |
+
+**Input**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `track` | `int >= 0` | 0-based track index. |
+| `insert` | `int >= 0` | Physical insert slot index from `get_inventory`. |
+| `plugin` | `string` | Plugin identity alias (see table above). |
+| `param` | `string` | Parameter key (`"threshold"` for Compressor). |
+| `value` | `number` | Target value in the parameter's unit (normalized % for `threshold`). |
+| `mode` | `string` | Must be `"duplicate_applyback"` (only supported mode in Release 1). |
+| `project_expected_path` | `string` | Absolute path of the front Logic project. The project path gate reads the live front document and rejects any mismatch before writing. |
+| `unit` | `string?` | Optional. When supplied, must match the declared unit (`"normalized"` for `threshold`); mismatch → State C `invalid_params`. |
+
+**Output — State A (confirmed write)**
+
+```json
+{
+  "success": true,
+  "verified": true,
+  "state": "A",
+  "hc_schema": 2,
+  "operation": "logic_plugins.set_param_verified",
+  "target_identity": {
+    "track_index": 5,
+    "insert": 6,
+    "plugin_id": "logic.stock.effect.compressor"
+  },
+  "param": "threshold",
+  "requested_normalized": 60.0,
+  "observed_normalized": 60.0,
+  "observed_display": "60 %",
+  "display_unit": "%",
+  "tolerance": 1.0,
+  "write_source": "ax_plugin_window",
+  "verify_source": "ax_plugin_window"
+}
+```
+
+**Output — State C (failure, example: window not open)**
+
+```json
+{
+  "success": false,
+  "verified": false,
+  "state": "C",
+  "hc_schema": 2,
+  "error": "window_open_failed",
+  "operation": "logic_plugins.set_param_verified",
+  "target_identity": {
+    "track_index": 5,
+    "insert": 6,
+    "plugin_id": "logic.stock.effect.compressor"
+  },
+  "what_was_attempted": "acquire the plugin window before writing",
+  "what_was_observed": "no open plugin window titled 'Acid Wash Bass' exposes the 'Threshold' control, and one could not be opened",
+  "safe_to_retry": true,
+  "write_attempted": false
+}
+```
+
+**State C error codes (`logic_plugins.*` only)**
+
+| Code | Meaning | `write_attempted` |
+|------|---------|-------------------|
+| `invalid_params` | Missing / out-of-range / wrong-unit parameter. | `false` |
+| `unsupported_mode` | `mode` is not `"duplicate_applyback"`. | `false` |
+| `project_path_required` | `project_expected_path` not supplied for a mutating op. | `false` |
+| `project_identity_mismatch` | Front document path does not match `project_expected_path`. | `false` |
+| `unknown_plugin_identity` | Plugin alias or parameter key not in the allowlist. | `false` |
+| `unsupported_param_readback` | Parameter exists but has no verified write/readback method. | `false` |
+| `incomplete_inventory` | Insert chain is not fully readable, or target slot is empty. | `false` |
+| `track_selection_failed` | AX track selection write or readback confirmation failed. | `false` |
+| `window_open_failed` | No open plugin window matched; programmatic open also failed. | `false` |
+| `param_control_not_found` | No `AXSlider` with the expected `AXDescription` in the plugin window. | `false` |
+| `ax_write_failed` | `AXUIElementSetAttributeValue` was rejected. | `true` |
+| `readback_lost_after_write` | Could not read the slider value after writing. | `true` |
+| `readback_mismatch` | Observed value differs from requested beyond tolerance; rollback attempted. | `true` |
+| `insert_landed_at_different_slot` | `insert_verified` mounted the plugin, but readback observed it at a slot other than the requested `insert`. Reports `observed_slot`; the stray mount is rolled back. | `true` |
+| `insert_not_ax_automatable` | `insert_verified` drove the exact-slot popup path but the requested plugin never appeared in the readback inventory (Logic-build UI limitation). | `true` |
+| `insert_setup_failed` | `insert_verified` could not complete a transient pre-mount setup step (target slot not found/clickable, slot popup not found, popup not anchored to the target slot, exact plugin leaf not found). No write attempted; carries `setup_stage`. | `false` |
+| `rollback_failed` | A stray mutation could not be automatically rolled back, so the operation aborted instead of continuing with unresolved residue. | `true` |
+| `operation_timeout` | The anchored popup exact-leaf selection appeared to commit, but readback never confirmed the requested mount before timeout. | `true` |
+
+All `logic_plugins.*` State C codes are **terminal** — the router never falls back to Scripter or MCU after any of these.
+
+### insert_verified
+
+Performs a live, readback-verified plugin insert through the requested insert slot's own popup. Runs all pre-insert gates (schema → mode → project path → identity → inventory complete → slot empty), selects and verifies the target track, clicks the target slot center with CGEvent, verifies the resulting popup is spatially anchored to that slot, chooses the stock plugin by exact leaf title from that anchored popup (direct/root item, popup search result, then recursive hover discovery), then diffs the pre/post insert inventory. The production path does not depend on localized category names. **State A is returned only when the post-insert readback observes the requested plugin newly mounted at the requested slot** — the readback diff is the sole State A path, so a false verified insert is structurally impossible. Live-E2E verified 2026-06-17 for Gain on track 6 insert 6 (`write_source: ax_exact_slot_popup`, `slot_popup_anchor_verified: true`, `observed_slot: 6`).
+
+**Slot model:** Use `get_inventory` immediately before insertion and pass the `insert` value it returns. `get_inventory` filters Logic Pro 12.2's short bottom "Audio Plug-in" append stub because live E2E showed it is not an addressable insert row. For exposed empty insert rows, the exact-slot popup path preserves the target slot context by proving the popup anchor before any plugin leaf is clicked. Known wrong-slot causes are blocked before the write boundary: phantom append rows, stale plugin/search dialogs, unverified track selection, unanchored popup menus, and localized category lookup misses. If unknown Logic UI drift ever places the plugin elsewhere, the op fails closed with State C `insert_landed_at_different_slot` (reporting `observed_slot`) and rolls the stray mount back via Undo (confirmed by readback; `rollback_succeeded` reflects verified removal).
+
+**Input** — same as `set_param_verified` except `param` / `value` / `unit` are replaced by no additional parameters (the target slot must be empty).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `track` | `int >= 0` | 0-based track index. |
+| `insert` | `int >= 0` | Physical insert slot index (must be empty). |
+| `plugin` | `string` | Insertable plugin alias: `"gain"`, `"channel eq"`, or `"compressor"`. `"noise gate"` is identity-only and not insertable. |
+| `mode` | `string` | Must be `"duplicate_applyback"`. |
+| `project_expected_path` | `string` | Front document path gate. |
+
+### HC v2 vs HC v1
+
+`logic_plugins.*` uses the HC v2 envelope; all other tools use HC v1. The two are distinguished by `hc_schema`.
+
+| Field | HC v1 (`logic_mixer.*`, etc.) | HC v2 (`logic_plugins.*`) |
+|-------|-------------------------------|---------------------------|
+| `success` | `true` / `false` | `true` / `false` |
+| `verified` | `true` (State A) / `false` (State B/C) | `true` (State A) / `false` (State B/C) |
+| `state` | absent | `"A"` / `"B"` / `"C"` |
+| `hc_schema` | absent | `2` |
+| State C `verified` field | absent | `false` (explicit) |
+
+> **Scripter `set_plugin_param` is legacy unverified State B.** `logic_mixer.set_plugin_param` routes through the Scripter MIDI FX channel, which is send-only and cannot confirm the write landed. It always returns State B `readback_unavailable`. Use `logic_plugins.set_param_verified` for Compressor `threshold` instead, which returns State A when the write is confirmed.
+
+### Examples
+
+```json
+{"command": "get_inventory", "params": {"track": 5}}
+
+{"command": "set_param_verified", "params": {
+  "track": 5,
+  "insert": 6,
+  "plugin": "compressor",
+  "param": "threshold",
+  "value": 60,
+  "mode": "duplicate_applyback",
+  "project_expected_path": "/Users/isaac/Music/acid-track-applyback-test.logicx"
+}}
+
+{"command": "insert_verified", "params": {
+  "track": 2,
+  "insert": 0,
+  "plugin": "gain",
+  "mode": "duplicate_applyback",
+  "project_expected_path": "/Users/isaac/Music/acid-track-applyback-test.logicx"
+}}
 ```
 
 ---

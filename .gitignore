@@ -28,3 +28,11 @@ Resources/*-inventory-*.json
 artifacts/*
 !artifacts/acid-track-composition-v4/
 !artifacts/acid-track-composition-v4/**
+
+# Logic Pro per-session autosave folders are transient live-session data — the
+# v4 whitelist above re-includes everything under the package, so re-ignore any
+# Autosave/ dir (no tracked file lives under one; verified with git ls-files).
+artifacts/**/Autosave/
+
+# Live-test duplicate created via save_as during live T0/E2E — not shipped
+artifacts/acid-track-composition-v4/acid-track-applyback-test.logicx/

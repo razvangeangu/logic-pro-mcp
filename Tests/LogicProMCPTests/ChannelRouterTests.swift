@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import LogicProMCP
 
@@ -285,6 +286,173 @@ actor TerminalStateCChannel: Channel {
     #expect(result.isSuccess, "non-terminal State C should advance to MCU fallback")
     let mcuOps = await mcu.executedOps
     #expect(mcuOps.count == 1, "MCU fallback should fire on ax_write_failed")
+}
+
+// MARK: - P2 (verified-plugin envelope fidelity): single-channel non-terminal
+// State C must surface VERBATIM (not wrapped in channels_exhausted).
+//
+// `ax_write_failed` / `readback_mismatch` are deliberately non-terminal (so a
+// MULTI-channel chain can still fall back — guarded by
+// testNonTerminalStateCStillFallsThrough above). But the verified-plugin ops
+// (`plugin.set_param_verified` / `insert_verified`) route through a SINGLE
+// `[.accessibility]` chain. Before the fix, those non-terminal envelopes fell
+// through the loop and got wrapped in `channels_exhausted`, stripping AC8's
+// post-write fidelity (write_attempted, rollback_*, target_identity, hc_schema,
+// state). The router must instead return the channel's State C verbatim because
+// a single-channel chain has no fallback target to mask it.
+
+/// Build the exact `readback_mismatch` envelope `performVerifiedParamWrite`
+/// emits on a tolerance miss (AccessibilityChannel+VerifiedPlugins.swift
+/// step 13 rollback path), so this test pins the real wire shape rather than a
+/// stand-in.
+private func verifiedReadbackMismatchEnvelope() -> String {
+    HonestContract.encodeV2StateC(
+        error: .readbackMismatch,
+        extras: [
+            "operation": "logic_plugins.set_param_verified",
+            "target_identity": [
+                "plugin_id": "logic.stock.effect.compressor",
+                "track_index": 0,
+                "insert": 6,
+            ],
+            "param": "threshold",
+            "requested_normalized": 60,
+            "observed_normalized": 40,
+            "observed_display": "40 %",
+            "display_unit": "%",
+            "tolerance": 1.0,
+            "rollback_attempted": true,
+            "rollback_succeeded": false,
+            "rollback_to": 51,
+            "what_was_attempted": "verify the 'Threshold' write within tolerance 1.0",
+            "what_was_observed": "observed 40.0 differs from requested 60.0 beyond tolerance",
+            "safe_to_retry": false,
+            "write_attempted": true,
+        ]
+    )
+}
+
+@Test func testVerifiedSetParamReadbackMismatchSurfacesVerbatimNotChannelsExhausted() async {
+    let router = ChannelRouter()
+    let envelope = verifiedReadbackMismatchEnvelope()
+    let ax = TerminalStateCChannel(id: .accessibility, envelope: envelope)
+    await router.register(ax)
+
+    let result = await router.route(
+        operation: "plugin.set_param_verified",
+        params: ["track": "0", "insert": "6"]
+    )
+
+    #expect(!result.isSuccess, "a verified readback_mismatch must remain a failure")
+    #expect(
+        result.message == envelope,
+        "single-channel verified State C must be returned byte-for-byte, got: \(result.message)"
+    )
+
+    // Field-level fidelity: prove the AC8 / §4 payload survived the router
+    // instead of being buried inside a channels_exhausted `hint` string.
+    guard let obj = try? JSONSerialization.jsonObject(
+        with: Data(result.message.utf8)
+    ) as? [String: Any] else {
+        Issue.record("router output must be a structured HC envelope, got: \(result.message)")
+        return
+    }
+    #expect(obj["error"] as? String == "readback_mismatch", "must NOT be rewritten to channels_exhausted")
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["hc_schema"] as? Int == 2)
+    #expect(obj["verified"] as? Bool == false)
+    #expect(obj["write_attempted"] as? Bool == true)
+    #expect(obj["rollback_attempted"] as? Bool == true)
+    #expect(obj["rollback_succeeded"] as? Bool == false)
+    #expect(obj["rollback_to"] as? Double == 51)
+    #expect(obj["requested_normalized"] as? Double == 60)
+    #expect(obj["observed_normalized"] as? Double == 40)
+    #expect(obj["safe_to_retry"] as? Bool == false)
+    #expect(obj["target_identity"] is [String: Any], "target_identity must be preserved")
+    // The exhaustion-only fields must be absent — confirms no wrapping occurred.
+    #expect(obj["last_error"] == nil, "channels_exhausted wrapper must not be applied")
+}
+
+@Test func testVerifiedSetParamAxWriteFailedSurfacesVerbatimNotChannelsExhausted() async {
+    // The other non-terminal verified post-write failure: the AXValue write was
+    // rejected (step 11). Same single-channel verbatim contract.
+    let router = ChannelRouter()
+    let envelope = HonestContract.encodeV2StateC(
+        error: .axWriteFailed,
+        extras: [
+            "operation": "logic_plugins.set_param_verified",
+            "target_identity": ["plugin_id": "logic.stock.effect.compressor", "track_index": 0, "insert": 6],
+            "param": "threshold",
+            "requested_normalized": 60,
+            "what_was_attempted": "set AXValue 60.0 on the 'Threshold' slider",
+            "what_was_observed": "the AX value write was rejected",
+            "safe_to_retry": true,
+            "write_attempted": true,
+        ]
+    )
+    let ax = TerminalStateCChannel(id: .accessibility, envelope: envelope)
+    await router.register(ax)
+
+    let result = await router.route(operation: "plugin.set_param_verified", params: ["track": "0"])
+
+    #expect(!result.isSuccess)
+    #expect(result.message == envelope, "ax_write_failed on a single-channel verified op must surface verbatim")
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(result.message.utf8)) as? [String: Any] else {
+        Issue.record("expected structured envelope, got: \(result.message)")
+        return
+    }
+    #expect(obj["error"] as? String == "ax_write_failed")
+    #expect(obj["write_attempted"] as? Bool == true)
+    #expect(obj["hc_schema"] as? Int == 2)
+    #expect(obj["last_error"] == nil)
+}
+
+@Test func testVerifiedInsertReadbackMismatchSurfacesVerbatim() async {
+    // insert_verified shares the same single-channel `[.accessibility]` chain
+    // and the same non-terminal post-write codes, so it gets the same fix.
+    let router = ChannelRouter()
+    let envelope = HonestContract.encodeV2StateC(
+        error: .readbackMismatch,
+        extras: [
+            "operation": "logic_plugins.insert_verified",
+            "target_identity": ["plugin_id": "logic.stock.effect.compressor", "track_index": 0, "insert": 6],
+            "write_attempted": true,
+            "safe_to_retry": false,
+        ]
+    )
+    let ax = TerminalStateCChannel(id: .accessibility, envelope: envelope)
+    await router.register(ax)
+
+    let result = await router.route(operation: "plugin.insert_verified", params: ["track": "0"])
+    #expect(result.message == envelope, "insert_verified single-channel State C must surface verbatim")
+    let obj = try? JSONSerialization.jsonObject(with: Data(result.message.utf8)) as? [String: Any]
+    #expect(obj?["error"] as? String == "readback_mismatch")
+    #expect(obj?["last_error"] == nil)
+}
+
+@Test func testSingleChannelFreeFormErrorStillWrapsAsChannelsExhausted() async {
+    // Companion guard for the fix's `stateCErrorCode != nil` scope clause: a
+    // single-channel op whose only channel produces a FREE-FORM (non-State-C)
+    // error — or never executes — must still fall through to the structured
+    // channels_exhausted envelope. This is the MCU/no-channel exhaustion
+    // contract (EndToEndTests / IntegrationTests) and must not regress.
+    let router = ChannelRouter()
+    let ax = TerminalStateCChannel(id: .accessibility, envelope: "free-form: AX subsystem hiccup")
+    await router.register(ax)
+
+    // transport.set_tempo is single-channel [.accessibility].
+    let result = await router.route(operation: "transport.set_tempo", params: ["bpm": "120"])
+    #expect(!result.isSuccess)
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(result.message.utf8)) as? [String: Any] else {
+        Issue.record("expected structured channels_exhausted envelope, got: \(result.message)")
+        return
+    }
+    #expect(
+        obj["error"] as? String == "channels_exhausted",
+        "free-form single-channel error must still be wrapped (no valid State C to surface)"
+    )
+    #expect(obj["operation"] as? String == "transport.set_tempo")
+    #expect(obj["last_error"] as? String == "free-form: AX subsystem hiccup")
 }
 
 @Test func testFreeFormErrorStillFallsThrough() async {

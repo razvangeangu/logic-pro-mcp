@@ -92,7 +92,7 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     let readme = try readRepoFile("README.md")
     #expect(readme.contains("| Read resources | 14 static resources"))
     #expect(readme.contains("| Resource templates | 7 templates"))
-    #expect(readme.contains("All 8 tools, 14 resources, 7 templates"))
+    #expect(readme.contains("All 9 tools, 14 resources, 7 templates"))
 
     let api = try readRepoFile("docs/API.md")
     #expect(api.contains("| `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |"))
@@ -148,4 +148,49 @@ private func readRepoFile(_ relativePath: String) throws -> String {
             "Formula installs '\(path)' but release.yml does not stage it into the tarball (issue #22)"
         )
     }
+}
+
+// MARK: - R12 / AC1 / AC14 doc-lint
+// The verified-apply-back contract must stay stated in the shipped docs so it
+// cannot silently drift (the CI enforcement guardian flagged as missing).
+
+@Test func testScripterSetParamDocumentedAsLegacyStateB() throws {
+    // AC1 / R12: Scripter set_plugin_param is legacy unverified State B and must
+    // NOT be presented as the verified apply-back solution.
+    let api = try readRepoFile("docs/API.md")
+    #expect(
+        api.contains("legacy unverified State B"),
+        "API.md must mark Scripter set_plugin_param as legacy unverified State B (R12/AC1)"
+    )
+    #expect(
+        api.contains("logic_plugins.set_param_verified"),
+        "API.md must point to logic_plugins.set_param_verified as the verified path (R12/AC1)"
+    )
+}
+
+@Test func testInsertPluginDeprecationDocumented() throws {
+    // AC14 / R12: logic_mixer.insert_plugin deprecated in favour of insert_verified.
+    let changelog = try readRepoFile("CHANGELOG.md")
+    #expect(
+        changelog.lowercased().contains("insert_plugin` deprecated")
+            || changelog.lowercased().contains("insert_plugin deprecated"),
+        "CHANGELOG must note logic_mixer.insert_plugin deprecation (R12/AC14)"
+    )
+    #expect(
+        changelog.contains("insert_verified"),
+        "CHANGELOG must name logic_plugins.insert_verified as the go-forward path (R12/AC14)"
+    )
+}
+
+@Test func testVerifiedApplyBackGuideExists() throws {
+    // R12: the Thomas apply_moves guide must exist and document the gate + targeting.
+    let guide = try readRepoFile("docs/guides/verified-apply-back.md")
+    #expect(
+        guide.contains("duplicate_applyback"),
+        "verified-apply-back guide must document the duplicate_applyback gate (R12)"
+    )
+    #expect(
+        guide.contains("get_inventory"),
+        "verified-apply-back guide must document get_inventory targeting (R12)"
+    )
 }

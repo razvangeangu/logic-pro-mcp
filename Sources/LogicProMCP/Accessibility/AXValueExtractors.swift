@@ -19,6 +19,28 @@ enum AXValueExtractors {
         return nil
     }
 
+    /// Read an AX slider's `AXValueDescription` — the human-readable, unit-bearing
+    /// rendering of its value (e.g. Logic plugin-window Threshold reads "60 %").
+    /// Returns nil when the attribute is absent. Verified-plugin readback (R6
+    /// step 12) surfaces this verbatim as `observed_display`.
+    static func extractValueDescription(_ element: AXUIElement, runtime: AXHelpers.Runtime = .production) -> String? {
+        AXHelpers.getAttribute(element, kAXValueDescriptionAttribute, runtime: runtime)
+    }
+
+    /// Set an AX slider's `AXValue` to `value`. Logic plugin-window parameter
+    /// sliders accept a numeric `AXValue` write (T0 spike: `set AXValue 60`
+    /// lands and reads back). Returns true on a successful AX write. The value is
+    /// bridged to `NSNumber` so it crosses the `CFTypeRef` boundary the same way
+    /// the live AX API expects.
+    @discardableResult
+    static func setSliderValue(
+        _ element: AXUIElement,
+        _ value: Double,
+        runtime: AXHelpers.Runtime = .production
+    ) -> Bool {
+        AXHelpers.setAttribute(element, kAXValueAttribute, NSNumber(value: value), runtime: runtime)
+    }
+
     /// Extract a text value from a static text or text field element.
     /// Used for tempo display, position readout, track names, etc.
     static func extractTextValue(_ element: AXUIElement, runtime: AXHelpers.Runtime = .production) -> String? {
