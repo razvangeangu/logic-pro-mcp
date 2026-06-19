@@ -597,6 +597,45 @@ def main():
             time.sleep(0.2)
         return last
 
+    def safe_get_transport_state(client):
+        r = read_resource(client, "logic://transport/state")
+        envelope = safe_json(resource_text(r))
+        if not isinstance(envelope, dict):
+            return None
+        data = envelope.get("data", {})
+        if not isinstance(data, dict):
+            return None
+        state = data.get("state")
+        return state if isinstance(state, dict) else None
+
+    def safe_get_tracks(client):
+        r = read_resource(client, "logic://tracks")
+        envelope = safe_json(resource_text(r))
+        if not isinstance(envelope, dict):
+            return None
+        data = envelope.get("data")
+        return data if isinstance(data, list) else None
+
+    def approx_equal(value, expected, tolerance=0.01):
+        try:
+            return abs(float(value) - expected) <= tolerance
+        except (TypeError, ValueError):
+            return False
+
+    def has_tempo_landmarks(payload):
+        return (
+            isinstance(payload, dict)
+            and isinstance(payload.get("hint"), str)
+            and len(payload.get("hint", "")) > 0
+            and isinstance(payload.get("dialog_present"), bool)
+            and isinstance(payload.get("control_bar_found"), bool)
+            and isinstance(payload.get("transport_bar_found"), bool)
+            and isinstance(payload.get("track_header_count"), int)
+            and isinstance(payload.get("control_bar_slider_descriptions"), list)
+            and isinstance(payload.get("transport_slider_descriptions"), list)
+            and isinstance(payload.get("control_bar_checkbox_labels"), list)
+        )
+
     before = safe_get_cycle(client)
     call_tool(client, "logic_transport", "toggle_cycle")
     after = wait_for_cycle_change(client, before)
@@ -618,9 +657,62 @@ def main():
     r = call_tool(client, "logic_transport", "toggle_count_in")
     T("transport.toggle_count_in dispatches", r, lambda _: len(tool_text(r)) > 0)
 
+    fresh_tracks = safe_get_tracks(client)
+    if live_logic_ready and has_document and isinstance(fresh_tracks, list) and len(fresh_tracks) == 0:
+        r = call_tool(client, "logic_tracks", "create_instrument")
+        create_instrument_text = tool_text(r)
+        create_instrument_json = safe_json(create_instrument_text)
+        T_LIVE(
+            "transport.fresh_project bootstrap creates instrument track or returns explicit failure",
+            r,
+            lambda _: (
+                isinstance(create_instrument_json, dict)
+                and create_instrument_json.get("success") is True
+                and create_instrument_json.get("verified") is True
+                and create_instrument_json.get("observed_delta") == 1
+                and isinstance(create_instrument_json.get("track_count_after"), int)
+                and create_instrument_json.get("track_count_after", 0) >= 1
+            ) or (
+                is_error(r)
+                and isinstance(create_instrument_json, dict)
+                and isinstance(create_instrument_json.get("hint"), str)
+                and len(create_instrument_json.get("hint", "")) > 0
+            ),
+            live_logic_ready,
+            "Logic Pro + Accessibility are required",
+        )
+        time.sleep(0.4)
+
     # Set tempo
     r = call_tool(client, "logic_transport", "set_tempo", {"tempo": 128})
-    T("transport.set_tempo(128) dispatches", r, lambda _: len(tool_text(r)) > 0)
+    set_tempo_128_text = tool_text(r)
+    set_tempo_128_json = safe_json(set_tempo_128_text)
+    transport_after_128 = safe_get_transport_state(client) if live_logic_ready else None
+    T("transport.set_tempo(128) dispatches", r, lambda _: len(set_tempo_128_text) > 0)
+    T_LIVE(
+        "transport.set_tempo(128) verifies exact readback or fails closed with landmarks",
+        r,
+        lambda _: (
+            isinstance(set_tempo_128_json, dict)
+            and set_tempo_128_json.get("success") is True
+            and set_tempo_128_json.get("verified") is True
+            and approx_equal(set_tempo_128_json.get("observed"), 128.0)
+            and approx_equal(transport_after_128.get("tempo"), 128.0)
+        ) or (
+            isinstance(set_tempo_128_json, dict)
+            and set_tempo_128_json.get("success") is True
+            and set_tempo_128_json.get("verified") is False
+            and set_tempo_128_json.get("reason") in ("readback_unavailable", "unsupported", "ui_drift")
+            and has_tempo_landmarks(set_tempo_128_json)
+        ) or (
+            isinstance(set_tempo_128_json, dict)
+            and set_tempo_128_json.get("success") is False
+            and set_tempo_128_json.get("error") in ("element_not_found", "readback_unavailable")
+            and has_tempo_landmarks(set_tempo_128_json)
+        ),
+        live_logic_ready,
+        "Logic Pro + Accessibility are required",
+    )
 
     r = call_tool(client, "logic_transport", "set_tempo", {"tempo": 90.5})
     T("transport.set_tempo(90.5) handles decimal", r, lambda _: len(tool_text(r)) > 0)
