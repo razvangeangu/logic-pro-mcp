@@ -28,10 +28,6 @@
 - name: wontfix
   color: ffffff
   description: Intentionally not planned.
-- name: help wanted
-  color: 008672
-  description: Maintainer-approved work where external help is useful.
-
 - name: epic
   color: 5319e7
   description: Cross-cutting parent issue that groups multiple deliverables.

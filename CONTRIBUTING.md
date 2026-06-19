@@ -6,7 +6,7 @@ You do not need a full Logic Pro setup for many contributions. Docs, examples, i
 
 Start here:
 
-- Use [`help wanted`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22) for maintainer-approved work where outside help is useful.
+- Review the [open issues](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen) and choose a narrow, already-scoped change.
 - Comment on the issue before starting if the issue has ambiguity about scope or acceptance criteria.
 - Keep each PR narrow. One issue, one behavioral change, one verification story.
 
