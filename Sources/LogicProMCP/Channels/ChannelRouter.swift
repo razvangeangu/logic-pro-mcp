@@ -34,7 +34,13 @@ actor ChannelRouter {
         // Transport — AX control-bar click primary (works without MCU / MIDI Learn),
         // MCU / CoreMIDI / CGEvent / AppleScript as fallbacks.
         "transport.play":             [.accessibility, .mcu, .coreMIDI, .cgEvent],
-        "transport.stop":             [.accessibility, .mcu, .coreMIDI, .cgEvent, .appleScript],
+        // Stop differs from Play/Record: in live 12.2 sessions the AX Play
+        // checkbox can refuse to clear while playback is active, and MMC /
+        // AppleScript "stop" can still leave transport running. The
+        // spacebar-equivalent CGEvent path proved to be the first reliable
+        // non-AX fallback, so prefer it before MIDI/AppleScript fallbacks and
+        // let the dispatcher's live readback gate decide success.
+        "transport.stop":             [.accessibility, .cgEvent, .mcu, .coreMIDI, .appleScript],
         "transport.record":           [.accessibility, .mcu, .coreMIDI, .cgEvent, .appleScript],
         "transport.pause":            [.coreMIDI, .cgEvent],
         "transport.rewind":           [.mcu, .coreMIDI, .cgEvent],
