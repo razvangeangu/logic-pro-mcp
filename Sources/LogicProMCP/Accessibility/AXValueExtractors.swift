@@ -41,6 +41,23 @@ enum AXValueExtractors {
         AXHelpers.setAttribute(element, kAXValueAttribute, NSNumber(value: value), runtime: runtime)
     }
 
+    /// Set a normalized 0.0...1.0 slider value by converting it into the
+    /// element's live AX range when one is exposed.
+    @discardableResult
+    static func setNormalizedSliderValue(
+        _ element: AXUIElement,
+        _ normalized: Double,
+        runtime: AXHelpers.Runtime = .production
+    ) -> Bool {
+        let clamped = min(max(normalized, 0.0), 1.0)
+        guard let range = extractSliderRange(element, runtime: runtime),
+              range.max > range.min else {
+            return setSliderValue(element, clamped, runtime: runtime)
+        }
+        let raw = range.min + clamped * (range.max - range.min)
+        return setSliderValue(element, raw, runtime: runtime)
+    }
+
     /// Extract a text value from a static text or text field element.
     /// Used for tempo display, position readout, track names, etc.
     static func extractTextValue(_ element: AXUIElement, runtime: AXHelpers.Runtime = .production) -> String? {
@@ -143,6 +160,31 @@ enum AXValueExtractors {
         range.min == 0.0 && range.max > 2.0
     }
 
+    /// Convert the public `mixer.set_volume` contract value back into the live
+    /// Logic 12 raw fader position so AX writes land at the intended level.
+    static func logicMixerFaderContractToPosition(_ contract: Double) -> Double {
+        let clamped = min(max(contract, 0.0), 1.0)
+        let points: [(contract: Double, position: Double)] = [
+            (0.0, 0.0),
+            (0.2, 0.1072961373390558),
+            (0.4, 70.0 / 233.0),
+            (0.5, 0.4206008583690987),
+            (0.6, 0.48497854077253216),
+            (0.8, 0.8111587982832618),
+            (1.0, 1.0),
+        ]
+        for index in 1..<points.count {
+            let lower = points[index - 1]
+            let upper = points[index]
+            guard clamped <= upper.contract else { continue }
+            let span = upper.contract - lower.contract
+            guard span > 0 else { return upper.position }
+            let ratio = (clamped - lower.contract) / span
+            return lower.position + ratio * (upper.position - lower.position)
+        }
+        return 1.0
+    }
+
     static func logicMixerFaderPositionToContract(_ position: Double) -> Double {
         let clamped = min(max(position, 0.0), 1.0)
         let points: [(position: Double, contract: Double)] = [
@@ -166,6 +208,27 @@ enum AXValueExtractors {
         return 1.0
     }
 
+    /// Set a Logic mixer fader using the public 0.0...1.0 contract value. When
+    /// Logic exposes the raw 0...233 AX range, interpolate through the observed
+    /// taper first so write and readback use the same contract space.
+    @discardableResult
+    static func setLogicMixerFaderValue(
+        _ element: AXUIElement,
+        _ value: Double,
+        runtime: AXHelpers.Runtime = .production
+    ) -> Bool {
+        let clamped = min(max(value, 0.0), 1.0)
+        guard let range = extractSliderRange(element, runtime: runtime),
+              range.max > range.min else {
+            return setSliderValue(element, clamped, runtime: runtime)
+        }
+        let position = isLogicMixerRawFaderRange(range)
+            ? logicMixerFaderContractToPosition(clamped)
+            : clamped
+        let raw = range.min + position * (range.max - range.min)
+        return setSliderValue(element, raw, runtime: runtime)
+    }
+
     /// Normalize a bipolar Logic AX slider to -1.0...1.0. Pan knobs in Logic
     /// 12.2 expose asymmetric integer ranges (-64...63); treating zero as
     /// the electrical center avoids surfacing a small false right-pan offset.
@@ -184,6 +247,32 @@ enum AXValueExtractors {
             return max(value / abs(range.min), -1.0)
         }
         return min(value / range.max, 1.0)
+    }
+
+    /// Set a centered slider using the public -1.0...1.0 contract. Logic 12.2
+    /// pan knobs expose an asymmetric integer AX range (-64...63), so map the
+    /// negative and positive sides independently to preserve true center.
+    @discardableResult
+    static func setCenteredSliderValue(
+        _ element: AXUIElement,
+        _ value: Double,
+        runtime: AXHelpers.Runtime = .production
+    ) -> Bool {
+        let clamped = min(max(value, -1.0), 1.0)
+        guard let range = extractSliderRange(element, runtime: runtime),
+              range.min < 0.0,
+              range.max > 0.0 else {
+            return setSliderValue(element, clamped, runtime: runtime)
+        }
+        let raw: Double
+        if clamped < 0.0 {
+            raw = clamped * abs(range.min)
+        } else if clamped > 0.0 {
+            raw = clamped * range.max
+        } else {
+            raw = 0.0
+        }
+        return setSliderValue(element, raw, runtime: runtime)
     }
 
     /// Read a track header and extract its basic state.

@@ -364,6 +364,24 @@ def safe_json(text):
     except: return None
 
 
+def mixer_write_result_ok(resp, operation, control, track, expected):
+    env = safe_json(tool_text(resp))
+    identity = env.get("target_identity") if isinstance(env, dict) else None
+    observed_after = env.get("observed_after") if isinstance(env, dict) else None
+    return (
+        isinstance(env, dict)
+        and env.get("success") is True
+        and env.get("verified") is True
+        and env.get("operation") == operation
+        and env.get("verify_source") == "ax_slider"
+        and isinstance(identity, dict)
+        and identity.get("track_index") == track
+        and identity.get("control") == control
+        and isinstance(observed_after, (int, float))
+        and abs(float(observed_after) - float(expected)) <= 0.05
+    )
+
+
 def is_library_root_json(value):
     return (
         isinstance(value, dict)
@@ -781,6 +799,13 @@ def main():
     # P1-4 (D2): mixer reads moved to logic://mixer (envelope { ..., strips: [...] }).
     r = read_resource(client, "logic://mixer")
     mix_text = resource_text(r)
+    mix_json = safe_json(mix_text)
+    if isinstance(mix_json, dict) and mix_json.get("data_source") == "mixer_not_visible":
+        _ = call_tool(client, "logic_navigate", "toggle_view", {"view": "mixer"})
+        time.sleep(1)
+        r = read_resource(client, "logic://mixer")
+        mix_text = resource_text(r)
+        mix_json = safe_json(mix_text)
     T("logic://mixer returns content", r, lambda _: len(mix_text) > 0)
     T("logic://mixer carries strips + mcu_connected", r,
       lambda _: ("strips" in mix_text and "mcu_connected" in mix_text)
@@ -788,6 +813,31 @@ def main():
     # B1 (#11): provenance — data_source present on the new build's envelope.
     T("logic://mixer carries data_source provenance (B1/#11)", r,
       lambda _: "data_source" in mix_text or "No Logic Pro document is open" in response_dump(r))
+    live_mixer_ready = (
+        live_logic_ready
+        and isinstance(mix_json, dict)
+        and mix_json.get("data_source") != "mixer_not_visible"
+        and isinstance(mix_json.get("strips"), list)
+        and len(mix_json.get("strips", [])) > 0
+    )
+
+    r = call_tool(client, "logic_mixer", "set_volume", {"track": 0, "volume": 0.5})
+    T_LIVE(
+        "logic_mixer.set_volume(track=0) returns verified AX mixer write",
+        r,
+        lambda resp: mixer_write_result_ok(resp, "mixer.set_volume", "volume", 0, 0.5),
+        live_mixer_ready,
+        "Logic Pro + Accessibility + a visible mixer strip are required",
+    )
+
+    r = call_tool(client, "logic_mixer", "set_pan", {"track": 0, "value": 0.0})
+    T_LIVE(
+        "logic_mixer.set_pan(track=0) returns verified AX mixer write",
+        r,
+        lambda resp: mixer_write_result_ok(resp, "mixer.set_pan", "pan", 0, 0.0),
+        live_mixer_ready,
+        "Logic Pro + Accessibility + a visible mixer strip are required",
+    )
 
     # Volume range testing
     for vol in [0.0, 0.25, 0.5, 0.75, 1.0]:

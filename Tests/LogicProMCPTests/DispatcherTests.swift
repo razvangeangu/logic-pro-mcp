@@ -241,8 +241,8 @@ private actor FailingExecuteChannel: Channel {
 
 @Test func testMixerDispatcherSetVolume() async {
     let router = ChannelRouter()
-    let mcu = MockChannel(id: .mcu)
-    await router.register(mcu)
+    let accessibility = MockChannel(id: .accessibility)
+    await router.register(accessibility)
     let cache = StateCache()
 
     let result = await MixerDispatcher.handle(
@@ -252,7 +252,7 @@ private actor FailingExecuteChannel: Channel {
     )
     #expect(!result.isError!)
 
-    let ops = await mcu.executedOps
+    let ops = await accessibility.executedOps
     #expect(ops[0].0 == "mixer.set_volume")
     #expect(ops[0].1["index"] == "2")
     #expect(ops[0].1["volume"] == "0.7")
@@ -469,14 +469,15 @@ private actor FailingExecuteChannel: Channel {
     #expect(eqResult.isError!)
     #expect(resetResult.isError!)
 
-    let mcuOps = await mcu.executedOps
-    expectExecutedOps(mcuOps, equals: [
+    let axOps = await ax.executedOps
+    expectExecutedOps(axOps, equals: [
         ("mixer.set_pan", ["index": "4", "pan": "-0.25"]),
-        ("mixer.set_master_volume", ["volume": "0.82"]),
     ])
 
-    let axOps = await ax.executedOps
-    #expect(axOps.isEmpty)
+    let mcuOps = await mcu.executedOps
+    expectExecutedOps(mcuOps, equals: [
+        ("mixer.set_master_volume", ["volume": "0.82"]),
+    ])
 }
 
 @Test func testMixerDispatcherInsertPluginRequiresConfirmation() async {

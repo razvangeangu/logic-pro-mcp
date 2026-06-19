@@ -84,10 +84,13 @@ actor ChannelRouter {
         "library.scan_all":           [.accessibility],
         "library.resolve_path":       [.accessibility],
 
-        // Mixer — MCU primary, NO fallback (PRD §4.3)
+        // Mixer — public volume/pan writes are AX-only so the wire can carry
+        // visible-strip identity plus same-surface readback. MCU echo remains
+        // useful internally, but it cannot prove the targeted strip when the
+        // visible mixer path is unavailable.
         "mixer.get_state":            [.mcu, .accessibility],
-        "mixer.set_volume":           [.mcu],
-        "mixer.set_pan":              [.mcu],
+        "mixer.set_volume":           [.accessibility],
+        "mixer.set_pan":              [.accessibility],
         "mixer.set_send":             [.mcu],
         "mixer.set_output":           [.accessibility],
         "mixer.set_input":            [.accessibility],

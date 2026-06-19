@@ -110,12 +110,12 @@ struct AdversarialDispatcherValidationTests {
     @Test("mixer malformed numeric params fail closed")
     func testMixerMalformedParamsRejectBeforeRouting() async {
         let cases: [AdversarialDispatcherCase] = [
-            .init(label: "mixer.set_volume missing value", tool: "logic_mixer", command: "set_volume", params: ["track": .int(0)], channelIDs: [.mcu]),
-            .init(label: "mixer.set_volume string garbage", tool: "logic_mixer", command: "set_volume", params: ["track": .int(0), "value": .string("abc")], channelIDs: [.mcu]),
-            .init(label: "mixer.set_volume bool garbage", tool: "logic_mixer", command: "set_volume", params: ["track": .int(0), "value": .bool(true)], channelIDs: [.mcu]),
-            .init(label: "mixer.set_pan missing value", tool: "logic_mixer", command: "set_pan", params: ["track": .int(0)], channelIDs: [.mcu]),
-            .init(label: "mixer.set_pan string garbage", tool: "logic_mixer", command: "set_pan", params: ["track": .int(0), "value": .string("abc")], channelIDs: [.mcu]),
-            .init(label: "mixer.set_pan bool garbage", tool: "logic_mixer", command: "set_pan", params: ["track": .int(0), "value": .bool(false)], channelIDs: [.mcu]),
+            .init(label: "mixer.set_volume missing value", tool: "logic_mixer", command: "set_volume", params: ["track": .int(0)], channelIDs: [.accessibility]),
+            .init(label: "mixer.set_volume string garbage", tool: "logic_mixer", command: "set_volume", params: ["track": .int(0), "value": .string("abc")], channelIDs: [.accessibility]),
+            .init(label: "mixer.set_volume bool garbage", tool: "logic_mixer", command: "set_volume", params: ["track": .int(0), "value": .bool(true)], channelIDs: [.accessibility]),
+            .init(label: "mixer.set_pan missing value", tool: "logic_mixer", command: "set_pan", params: ["track": .int(0)], channelIDs: [.accessibility]),
+            .init(label: "mixer.set_pan string garbage", tool: "logic_mixer", command: "set_pan", params: ["track": .int(0), "value": .string("abc")], channelIDs: [.accessibility]),
+            .init(label: "mixer.set_pan bool garbage", tool: "logic_mixer", command: "set_pan", params: ["track": .int(0), "value": .bool(false)], channelIDs: [.accessibility]),
             .init(label: "mixer.set_master_volume missing value", tool: "logic_mixer", command: "set_master_volume", params: [:], channelIDs: [.mcu]),
             .init(label: "mixer.set_master_volume string garbage", tool: "logic_mixer", command: "set_master_volume", params: ["value": .string("abc")], channelIDs: [.mcu]),
             .init(label: "mixer.set_master_volume bool garbage", tool: "logic_mixer", command: "set_master_volume", params: ["value": .bool(true)], channelIDs: [.mcu]),

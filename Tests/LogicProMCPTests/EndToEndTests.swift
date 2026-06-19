@@ -242,11 +242,10 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 //   State B with the connection diagnostic triplet. Covered by
 //   MCUMixerWriteDiagnosticsTests at the unit level.
 //
-// These E2E tests pin Shape A — the floor a safety harness sees on a
-// fresh install where Logic isn't running. They prove that the wire is
-// structured JSON (not the legacy "All channels exhausted" free-form
-// string) so harnesses can branch on `error: "channels_exhausted"`.
-@Test func testE2EMixerSetVolumeShapeAIsStateCChannelsExhausted() async {
+// Issue #39 — public mixer writes now use AX-local target verification when a
+// visible mixer path exists. Environments without live AX access may still
+// surface structured fail-closed State C envelopes instead of a verified write.
+@Test func testE2EMixerSetVolumeReturnsVerifiedAXOrStructuredFailClosed() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(
         h, tool: "logic_mixer", command: "set_volume",
@@ -256,20 +255,23 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(!text.isEmpty)
     guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8))
             as? [String: Any] else {
-        Issue.record("set_volume Shape A must be structured HC State C JSON, got: \(text)")
+        Issue.record("set_volume must be structured HC JSON, got: \(text)")
         return
     }
-    #expect(obj["success"] as? Bool == false)
-    #expect(
-        obj["error"] as? String == "channels_exhausted",
-        "MCU chain exhaustion must surface as channels_exhausted on the wire"
-    )
     #expect(obj["operation"] as? String == "mixer.set_volume")
-    #expect(obj["hint"] != nil, "hint must carry the upstream healthCheck detail")
-    #expect(obj["last_error"] != nil)
+    if obj["success"] as? Bool == true {
+        #expect(obj["verified"] as? Bool == true)
+        #expect(obj["verify_source"] as? String == "ax_slider")
+        #expect(obj["target_identity"] is [String: Any])
+        #expect(obj["observed_before"] != nil)
+        #expect(obj["observed_after"] != nil)
+    } else {
+        #expect(obj["error"] != nil)
+        #expect(obj["hint"] != nil)
+    }
 }
 
-@Test func testE2EMixerSetPanShapeAIsStateCChannelsExhausted() async {
+@Test func testE2EMixerSetPanReturnsVerifiedAXOrStructuredFailClosed() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(
         h, tool: "logic_mixer", command: "set_pan",
@@ -281,14 +283,17 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         Issue.record("set_pan Shape A must be structured HC JSON, got: \(text)")
         return
     }
-    #expect(obj["success"] as? Bool == false)
-    #expect(obj["error"] as? String == "channels_exhausted")
     #expect(obj["operation"] as? String == "mixer.set_pan")
-    // Tester P2-3 (rc5 review) — all three Shape A tests must validate the
-    // same diagnostic contract: hint + last_error must not be silently
-    // dropped when a new dispatcher is added.
-    #expect(obj["hint"] != nil)
-    #expect(obj["last_error"] != nil)
+    if obj["success"] as? Bool == true {
+        #expect(obj["verified"] as? Bool == true)
+        #expect(obj["verify_source"] as? String == "ax_slider")
+        #expect(obj["target_identity"] is [String: Any])
+        #expect(obj["observed_before"] != nil)
+        #expect(obj["observed_after"] != nil)
+    } else {
+        #expect(obj["error"] != nil)
+        #expect(obj["hint"] != nil)
+    }
 }
 
 @Test func testE2EMixerSetMasterVolumeShapeAIsStateCChannelsExhausted() async {

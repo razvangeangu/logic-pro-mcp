@@ -2973,37 +2973,153 @@ actor AccessibilityChannel: Channel {
               let value = Double(valueStr) else {
             return .error("Missing 'value' or '\(label)' parameter")
         }
-        let element: AXUIElement?
-        switch target {
-        case .volume:
-            element = AXLogicProElements.findFader(trackIndex: index, runtime: runtime)
-        case .pan:
-            element = AXLogicProElements.findPanKnob(trackIndex: index, runtime: runtime)
-        }
-        guard let slider = element else {
+        let operation = target == .volume ? "mixer.set_volume" : "mixer.set_pan"
+        let targetIdentity: [String: Any] = [
+            "track_index": index,
+            "control": label,
+        ]
+        guard let mixer = AXLogicProElements.getMixerArea(runtime: runtime) else {
             return .error(HonestContract.encodeStateC(
                 error: .elementNotFound,
-                hint: "AC-fallback could not find \(label) control for track \(index)",
-                extras: ["track": index, "control": label, "requested": value]
+                hint: "Cannot locate visible mixer for \(operation)",
+                extras: [
+                    "operation": operation,
+                    "track": index,
+                    "requested": value,
+                    "target_identity": targetIdentity,
+                    "recovery_hint": "Open View > Show Mixer in Logic Pro and retry the mixer write.",
+                ]
             ))
         }
-        AXHelpers.setAttribute(slider, kAXValueAttribute, NSNumber(value: value), runtime: runtime.ax)
-        let readBack: Double? = AXValueExtractors.extractSliderValue(slider, runtime: runtime.ax)
+        let strips = AXLogicProElements.mixerChannelStrips(in: mixer, runtime: runtime.ax)
+        guard index >= 0 && index < strips.count else {
+            return .error(HonestContract.encodeStateC(
+                error: .elementNotFound,
+                hint: "track index \(index) is not present in the visible mixer",
+                extras: [
+                    "operation": operation,
+                    "track": index,
+                    "requested": value,
+                    "target_identity": targetIdentity,
+                    "visible_strips": strips.count,
+                ]
+            ))
+        }
+        let strip = strips[index]
+        let slider: AXUIElement?
+        switch target {
+        case .volume:
+            slider = AXLogicProElements.findVolumeFader(in: strip, runtime: runtime.ax)
+        case .pan:
+            slider = AXLogicProElements.findPanControl(in: strip, runtime: runtime.ax)
+        }
+        guard let slider else {
+            return .error(HonestContract.encodeStateC(
+                error: .elementNotFound,
+                hint: "Cannot locate \(label) control for visible mixer track \(index)",
+                extras: [
+                    "operation": operation,
+                    "track": index,
+                    "requested": value,
+                    "target_identity": targetIdentity,
+                    "visible_strips": strips.count,
+                ]
+            ))
+        }
+
+        let tolerance = 0.01
+        let observedBefore = mixerControlValue(from: slider, target: target, runtime: runtime.ax)
+        var observedAfter = observedBefore
+        var writeAttempts = 0
+        var stagnantSteps = 0
+        let maxWriteAttempts = 128
+        while writeAttempts < maxWriteAttempts {
+            guard setMixerControlValue(slider, target: target, requested: value, runtime: runtime.ax) else {
+                if writeAttempts == 0 {
+                    return .error(HonestContract.encodeStateC(
+                        error: .axWriteFailed,
+                        hint: "AX write failed for \(label) on visible mixer track \(index)",
+                        extras: [
+                            "operation": operation,
+                            "track": index,
+                            "requested": value,
+                            "target_identity": targetIdentity,
+                            "observed_before": observedBefore ?? NSNull(),
+                            "verify_source": "ax_slider",
+                        ]
+                    ))
+                }
+                break
+            }
+            writeAttempts += 1
+            usleep(10_000)
+            let nextObserved = mixerControlValue(from: slider, target: target, runtime: runtime.ax)
+            if let nextObserved, abs(nextObserved - value) < tolerance {
+                observedAfter = nextObserved
+                break
+            }
+            if nextObserved == observedAfter {
+                stagnantSteps += 1
+                if stagnantSteps >= 5 {
+                    observedAfter = nextObserved
+                    break
+                }
+            } else {
+                stagnantSteps = 0
+            }
+            observedAfter = nextObserved
+        }
+
         let baseExtras: [String: Any] = [
+            "operation": operation,
             "track": index,
             "control": label,
             "requested": value,
-            "via": "ac-fallback"
+            "target_identity": targetIdentity,
+            "visible_strips": strips.count,
+            "observed_before": observedBefore ?? NSNull(),
+            "observed_after": observedAfter ?? NSNull(),
+            "observed": observedAfter ?? NSNull(),
+            "verify_source": "ax_slider",
+            "write_attempted": true,
+            "write_attempts": writeAttempts,
         ]
-        if let actual = readBack, abs(actual - value) < 0.01 {
+        if let actual = observedAfter, abs(actual - value) < tolerance {
             return .success(HonestContract.encodeStateA(
                 extras: baseExtras.merging(["observed": actual]) { _, new in new }
             ))
         }
         return .success(HonestContract.encodeStateB(
-            reason: .readbackMismatch,
-            extras: baseExtras.merging(["observed": readBack ?? NSNull()]) { _, new in new }
+            reason: observedAfter == nil ? .readbackUnavailable : .readbackMismatch,
+            extras: baseExtras
         ))
+    }
+
+    private static func mixerControlValue(
+        from slider: AXUIElement,
+        target: MixerTarget,
+        runtime: AXHelpers.Runtime
+    ) -> Double? {
+        switch target {
+        case .volume:
+            return AXValueExtractors.extractLogicMixerFaderValue(slider, runtime: runtime)
+        case .pan:
+            return AXValueExtractors.extractCenteredSliderValue(slider, runtime: runtime)
+        }
+    }
+
+    private static func setMixerControlValue(
+        _ slider: AXUIElement,
+        target: MixerTarget,
+        requested: Double,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        switch target {
+        case .volume:
+            return AXValueExtractors.setLogicMixerFaderValue(slider, requested, runtime: runtime)
+        case .pan:
+            return AXValueExtractors.setCenteredSliderValue(slider, requested, runtime: runtime)
+        }
     }
 
     // MARK: - Regions

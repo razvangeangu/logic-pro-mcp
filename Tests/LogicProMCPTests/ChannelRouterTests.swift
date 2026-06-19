@@ -59,17 +59,21 @@ actor FailingStartChannel: Channel {
     }
 }
 
-@Test func testRouterMixerGoesToMCU() async {
+@Test func testRouterMixerWritePrefersAccessibilityForVerifiedReadback() async {
     let router = ChannelRouter()
+    let accessibility = MockChannel(id: .accessibility)
     let mcu = MockChannel(id: .mcu)
+    await router.register(accessibility)
     await router.register(mcu)
 
     let result = await router.route(operation: "mixer.set_volume", params: ["index": "0", "volume": "0.7"])
     #expect(result.isSuccess)
 
-    let ops = await mcu.executedOps
-    #expect(ops.count == 1)
-    #expect(ops[0].0 == "mixer.set_volume")
+    let axOps = await accessibility.executedOps
+    let mcuOps = await mcu.executedOps
+    #expect(axOps.count == 1)
+    #expect(axOps[0].0 == "mixer.set_volume")
+    #expect(mcuOps.isEmpty)
 }
 
 @Test func testRouterEditGoesToKeyCmd() async {
