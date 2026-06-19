@@ -3050,6 +3050,72 @@ actor AccessibilityChannel: Channel {
         init(_ message: String) { self.message = message }
     }
 
+    private static func normalizeRegionGroupDescription(_ description: String) -> String {
+        description
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split { $0.isWhitespace }
+            .joined(separator: " ")
+    }
+
+    private static func isExplicitTrackContentDescription(_ description: String) -> Bool {
+        let normalized = normalizeRegionGroupDescription(description)
+        return normalized == "트랙 콘텐츠"
+            || normalized == "track content"
+            || normalized == "track contents"
+            || normalized == "tracks content"
+            || normalized == "tracks contents"
+    }
+
+    private static func isGenericContentDescription(_ description: String) -> Bool {
+        let normalized = normalizeRegionGroupDescription(description)
+        return normalized == "콘텐츠"
+            || normalized == "content"
+            || normalized == "contents"
+    }
+
+    private static func frame(
+        of element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> CGRect? {
+        guard let position = AXHelpers.getPosition(element, runtime: runtime),
+              let size = AXHelpers.getSize(element, runtime: runtime) else {
+            return nil
+        }
+        return CGRect(origin: position, size: size)
+    }
+
+    private static func isVisibleArrangeRegion(
+        _ item: AXUIElement,
+        within window: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        guard let windowFrame = frame(of: window, runtime: runtime),
+              let itemFrame = frame(of: item, runtime: runtime),
+              !windowFrame.isEmpty,
+              !itemFrame.isEmpty else {
+            return true
+        }
+        return itemFrame.intersects(windowFrame)
+    }
+
+    private static func classifyRegionKind(name: String, help: String) -> String {
+        let searchable = "\(name) \(help)".lowercased()
+        if searchable.contains("drummer")
+            || searchable.contains("session player")
+            || searchable.contains("드러머")
+            || searchable.contains("세션 플레이어") {
+            return "drummer"
+        }
+        if searchable.contains("midi") {
+            return "midi"
+        }
+        if searchable.contains("audio") || searchable.contains("오디오") {
+            return "audio"
+        }
+        return "unknown"
+    }
+
     /// Walk the arrange area's "Track Content" group, collect every
     /// AXLayoutItem region with parsed bar positions and its underlying AX
     /// element handle. Shared across `defaultGetRegions`,
@@ -3064,23 +3130,30 @@ actor AccessibilityChannel: Channel {
             of: window, role: kAXGroupRole, maxDepth: 14, runtime: runtime.ax
         )
         var contentGroup: AXUIElement? = nil
+        var genericContentGroup: AXUIElement? = nil
         var groupDescSamples: [String] = []
         for g in candidates {
             let desc = AXHelpers.getDescription(g, runtime: runtime.ax) ?? ""
             if !desc.isEmpty { groupDescSamples.append(desc) }
-            let lower = desc.lowercased()
-            if desc.contains("트랙 콘텐츠") || desc == "콘텐츠"
-                || lower == "track content" || lower == "content" {
+            if isExplicitTrackContentDescription(desc) {
                 contentGroup = g
                 break
             }
+            if genericContentGroup == nil, isGenericContentDescription(desc) {
+                genericContentGroup = g
+            }
+        }
+        if contentGroup == nil {
+            contentGroup = genericContentGroup
         }
         guard let content = contentGroup else {
             let detailed = groupDescSamples.prefix(20).map { s -> String in
                 let bytes = s.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: ",")
                 return "'\(s)'(\(s.unicodeScalars.count)=\(bytes))"
             }.joined(separator: " | ")
-            return .failure(RegionEnumerationError("Track Content group not found (scanned \(candidates.count) AXGroups; samples: \(detailed))"))
+            return .failure(RegionEnumerationError(
+                "Track Content group not found (scanned \(candidates.count) AXGroups; landmarks: \(detailed)). Recovery hint: ensure the Tracks arrange area is visible and not replaced by a modal, editor, or plugin window."
+            ))
         }
 
         let headers = AXLogicProElements.allTrackHeaders(runtime: runtime)
@@ -3099,19 +3172,13 @@ actor AccessibilityChannel: Channel {
             let help = AXHelpers.getHelp(item, runtime: runtime.ax) ?? ""
             let isRegion = help.contains("리전") || help.lowercased().contains("region")
             guard isRegion else { nonRegionCount += 1; continue }
+            guard isVisibleArrangeRegion(item, within: window, runtime: runtime.ax) else {
+                continue
+            }
 
             let name = AXHelpers.getDescription(item, runtime: runtime.ax) ?? ""
             let (startBar, endBar) = parseRegionBars(from: help)
-
-            let lower = help.lowercased()
-            let kind: String
-            if help.contains("MIDI") || lower.contains("midi") {
-                kind = "midi"
-            } else if help.contains("오디오") || lower.contains("audio") {
-                kind = "audio"
-            } else {
-                kind = "unknown"
-            }
+            let kind = classifyRegionKind(name: name, help: help)
 
             var trackIndex = -1
             if let pos = AXHelpers.getPosition(item, runtime: runtime.ax),
@@ -3195,10 +3262,10 @@ actor AccessibilityChannel: Channel {
     /// Returns (-1, -1) if neither pattern matches — callers should inspect rawHelp.
     private static func parseRegionBars(from help: String) -> (Int, Int) {
         // Korean: "리전은 1 마디 에서 시작하여 2 마디 에서 끝납니다."
-        // English (guessed, pending real-world sample): "Region starts at bar 1 and ends at bar 2"
+        // English: "Region starts at 128 bars and ends at 129 bars, MIDI region."
         let patterns = [
             #"리전은\s*(\d+)\s*마디.*?시작.*?(\d+)\s*마디.*?끝"#,
-            #"(?i)region\s+starts\s+at\s+bar\s+(\d+).*?ends\s+at\s+bar\s+(\d+)"#,
+            #"(?i)region\s+starts\s+at\s+(?:bar\s+)?(\d+)(?:\s*bars?)?.*?ends\s+at\s+(?:bar\s+)?(\d+)(?:\s*bars?)?"#,
         ]
         for pat in patterns {
             guard let rx = try? NSRegularExpression(pattern: pat, options: [.dotMatchesLineSeparators]) else { continue }
