@@ -1,13 +1,13 @@
 # Live Verification — v3.6.0
 
 Date: 2026-06-19 KST
-Scope: release-tree evidence for PR #24 (`logic_plugins` verified plugin apply-back) plus PR #54 / issue #59 Logic 12.2 AX readback hardening. Published artifact hashes and workflow IDs are filled after the `v3.6.0` release workflow completes.
+Scope: release-tree evidence for PR #24 (`logic_plugins` verified plugin apply-back) plus PR #54 / issue #59 Logic 12.2 AX readback hardening. Published artifact hashes and workflow IDs are recorded in `docs/releases/v3.6.0.md`.
 
 ## Claim Boundary
 
 This document verifies the v3.6.0 release-tree behavior on the local macOS/Logic Pro 12.2 environment and the PR #24 review evidence. It is not a notarization/signing claim and not coverage for every Logic Pro version, locale, project shape, parent-app TCC context, clean host, or future macOS update.
 
-Published release metadata and SHA256 values are recorded in `docs/releases/v3.6.0.md` after the GitHub Actions release workflow publishes artifacts. Previous stable evidence remains in `docs/live-verify-v3.5.0.md`.
+Published release metadata and SHA256 values are recorded in `docs/releases/v3.6.0.md`. Previous stable evidence remains in `docs/live-verify-v3.5.0.md`.
 
 ## Deterministic Gates
 
@@ -26,6 +26,7 @@ Published release metadata and SHA256 values are recorded in `docs/releases/v3.6
 | v3.6.0 live E2E syntax | PASS | `python3 -m py_compile Scripts/live-e2e-test.py` passed. |
 | v3.6.0 full suite | PASS | `swift test --no-parallel` -> `1396/1396` passed on the release tree. |
 | v3.6.0 release build | PASS | `swift build -c release` passed on the release tree. |
+| v3.6.0 GitHub Release workflow | PASS | Run `27803756103` passed: build, ADHOC codesign verification, packaging, Formula/tarball layout gate, GitHub Release creation, and macOS 14/15 install validation. |
 
 ## Live Logic Pro 12.2 Evidence
 
@@ -49,7 +50,6 @@ Published release metadata and SHA256 values are recorded in `docs/releases/v3.6
 
 ## Remaining Non-Claimed Surface
 
-- Published `v3.6.0` artifact SHA256 values, Formula SHA sync, and GitHub Release workflow IDs are filled after the workflow publishes artifacts.
 - `set_param_verified` currently verifies only Compressor `threshold`; arbitrary plugin parameter readback remains future work.
 - `set_param_verified` still requires the target plugin window to already be open.
 - Multi-version Logic matrix remains future verification work.
