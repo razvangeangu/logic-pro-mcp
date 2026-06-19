@@ -2,14 +2,13 @@
 
 Thanks for your interest. Logic Pro MCP is a Swift 6 actor-based macOS binary that bridges Logic Pro to the Model Context Protocol.
 
-You do not need a full Logic Pro setup for most first contributions. Docs, examples, issue reproduction notes, parser tests, validation tests, and CLI message improvements can usually be completed with Swift and the normal unit test suite.
+You do not need a full Logic Pro setup for many contributions. Docs, examples, issue reproduction notes, parser tests, validation tests, and CLI message improvements can usually be completed with Swift and the normal unit test suite.
 
 Start here:
 
-- Browse [`good first issue`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) for small, scoped work.
 - Use [`help wanted`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22) for maintainer-approved work where outside help is useful.
 - Comment on the issue before starting if the issue has ambiguity about scope or acceptance criteria.
-- Keep the first PR narrow. One issue, one behavioral change, one verification story.
+- Keep each PR narrow. One issue, one behavioral change, one verification story.
 
 ## Prerequisites
 
@@ -17,9 +16,9 @@ Start here:
 - Swift 6.0+ (Xcode 16 or Command Line Tools)
 - Logic Pro 12.0.1+ (only for live E2E testing — unit tests run without it)
 
-## Good First PRs
+## Low-Risk PRs
 
-Good first PRs are intentionally low-risk and reviewable:
+Low-risk PRs are intentionally narrow and reviewable:
 
 - Documentation examples in `README.md`, `docs/SETUP.md`, `docs/API.md`, or `docs/TROUBLESHOOTING.md`
 - New unit tests around validation, JSON envelopes, parser edge cases, permission summaries, or resource schemas
@@ -27,7 +26,7 @@ Good first PRs are intentionally low-risk and reviewable:
 - Reproduction notes for an existing issue, especially with exact Logic Pro/macOS versions
 - Small refactors that remove duplication without changing routing, safety, or fallback behavior
 
-Avoid these for a first PR unless the issue explicitly asks for them:
+Avoid these unless the issue explicitly asks for them:
 
 - New automation fallbacks
 - Logic-facing write behavior

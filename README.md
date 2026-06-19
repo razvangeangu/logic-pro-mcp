@@ -62,7 +62,7 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 
 If this project helps you make music with Claude, Cursor, or any MCP client, star the repo. It helps the project reach more Logic Pro users and maintainers.
 
-Want to contribute? Start with [`good first issue`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22), [`help wanted`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22), and the [Contributing Guide](CONTRIBUTING.md). Most first PRs do not require Logic Pro; docs, examples, validation tests, and CLI-message improvements are welcome.
+Want to contribute? Start with [`help wanted`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22) and the [Contributing Guide](CONTRIBUTING.md). Many docs, examples, validation tests, and CLI-message improvements do not require Logic Pro.
 
 ## Why It Exists
 
@@ -292,6 +292,6 @@ MIT. See [LICENSE](LICENSE).
 
 ## Contributing
 
-Bug reports, PRs, and feature discussions are welcome. The best starting points are [`good first issue`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22), [`help wanted`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22), and [CONTRIBUTING.md](CONTRIBUTING.md).
+Bug reports, PRs, and feature discussions are welcome. The best starting points are [`help wanted`](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Security vulnerabilities: please do **not** open a public issue. See [SECURITY.md](SECURITY.md) for the private disclosure process.

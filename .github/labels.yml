@@ -31,9 +31,6 @@
 - name: help wanted
   color: 008672
   description: Maintainer-approved work where external help is useful.
-- name: good first issue
-  color: 7057ff
-  description: Small, well-scoped issue suitable for new contributors.
 
 - name: epic
   color: 5319e7
