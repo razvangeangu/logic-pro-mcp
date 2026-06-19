@@ -1,0 +1,63 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MongLong0214/logic-pro-mcp",
+  "title": "Logic Pro MCP",
+  "description": "Local MCP server for stateful, fail-closed Logic Pro control and live project readback.",
+  "websiteUrl": "https://github.com/MongLong0214/logic-pro-mcp#readme",
+  "repository": {
+    "url": "https://github.com/MongLong0214/logic-pro-mcp",
+    "source": "github"
+  },
+  "version": "3.6.0",
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "distribution": {
+        "status": "metadata-only",
+        "homebrew": {
+          "tap": "MongLong0214/logic-pro-mcp",
+          "formula": "logic-pro-mcp",
+          "install": [
+            "brew tap MongLong0214/logic-pro-mcp https://github.com/MongLong0214/logic-pro-mcp",
+            "brew trust monglong0214/logic-pro-mcp",
+            "brew install logic-pro-mcp"
+          ]
+        },
+        "release": "https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.6.0"
+      },
+      "runtime": {
+        "transport": "stdio",
+        "command": "LogicProMCP",
+        "clientConfig": {
+          "mcpServers": {
+            "logic-pro": {
+              "command": "LogicProMCP"
+            }
+          }
+        }
+      },
+      "requirements": {
+        "platform": "macOS 14+",
+        "logicPro": "12.0.1+",
+        "permissions": [
+          "Accessibility",
+          "Automation"
+        ]
+      },
+      "capabilities": {
+        "tools": 9,
+        "resources": 14,
+        "resourceTemplates": 7,
+        "controlChannels": [
+          "MCU",
+          "Accessibility",
+          "AppleScript",
+          "CoreMIDI",
+          "CGEvent",
+          "Scripter",
+          "MIDI Key Commands"
+        ]
+      },
+      "registryFit": "Official package types do not currently include Homebrew formulas or GitHub release tarballs, so this record intentionally relies on websiteUrl plus publisher metadata."
+    }
+  }
+}
