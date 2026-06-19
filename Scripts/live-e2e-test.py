@@ -364,6 +364,32 @@ def safe_json(text):
     except: return None
 
 
+def cycle_range_result_ok(resp):
+    env = safe_json(tool_text(resp))
+    if not isinstance(env, dict):
+        return False
+    if env.get("success") is True:
+        requested = env.get("requested")
+        observed = env.get("observed")
+        return (
+            env.get("verified") is True
+            and isinstance(requested, dict)
+            and isinstance(observed, dict)
+            and requested.get("start") == observed.get("start")
+            and requested.get("end") == observed.get("end")
+        )
+    if env.get("success") is False:
+        return (
+            env.get("error") in ("not_implemented", "readback_unavailable")
+            and env.get("error") != "channels_exhausted"
+            and isinstance(env.get("requested"), dict)
+            and isinstance(env.get("observed"), dict)
+            and env.get("method") is not None
+            and isinstance(env.get("scanned_landmarks"), dict)
+        )
+    return False
+
+
 def is_library_root_json(value):
     return (
         isinstance(value, dict)
@@ -634,7 +660,7 @@ def main():
 
     # Set cycle range
     r = call_tool(client, "logic_transport", "set_cycle_range", {"start": 1, "end": 4})
-    T("transport.set_cycle_range dispatches", r, lambda _: len(tool_text(r)) > 0)
+    T("transport.set_cycle_range is verified or returns structured blocked state", r, cycle_range_result_ok)
 
     # ═══════════════════════════════════════════════════════════════
     # §4 Track Live Operations (25 tests)
