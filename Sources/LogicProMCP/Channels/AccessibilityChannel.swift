@@ -3070,7 +3070,9 @@ actor AccessibilityChannel: Channel {
             if !desc.isEmpty { groupDescSamples.append(desc) }
             let lower = desc.lowercased()
             if desc.contains("트랙 콘텐츠") || desc == "콘텐츠"
-                || lower == "track content" || lower == "content" {
+                || lower == "track content" || lower == "track contents"
+                || lower == "tracks content" || lower == "tracks contents"
+                || lower == "content" {
                 contentGroup = g
                 break
             }
@@ -3195,10 +3197,13 @@ actor AccessibilityChannel: Channel {
     /// Returns (-1, -1) if neither pattern matches — callers should inspect rawHelp.
     private static func parseRegionBars(from help: String) -> (Int, Int) {
         // Korean: "리전은 1 마디 에서 시작하여 2 마디 에서 끝납니다."
-        // English (guessed, pending real-world sample): "Region starts at bar 1 and ends at bar 2"
+        // English samples observed in Logic 12.x:
+        // - "Region starts at bar 1 and ends at bar 2"
+        // - "Region starts at 1 bar and ends at 2 bars"
         let patterns = [
             #"리전은\s*(\d+)\s*마디.*?시작.*?(\d+)\s*마디.*?끝"#,
             #"(?i)region\s+starts\s+at\s+bar\s+(\d+).*?ends\s+at\s+bar\s+(\d+)"#,
+            #"(?i)region\s+starts\s+at\s+(\d+)\s+bars?.*?ends\s+at\s+(\d+)\s+bars?"#,
         ]
         for pat in patterns {
             guard let rx = try? NSRegularExpression(pattern: pat, options: [.dotMatchesLineSeparators]) else { continue }

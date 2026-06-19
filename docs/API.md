@@ -175,7 +175,7 @@ Clients can detect stale snapshots without cross-referencing `logic://system/hea
 | `solo` | `{ index: int, enabled?: bool }` | text | MCU → AX → CGEvent |
 | `arm` | `{ index: int, enabled?: bool }` | text | MCU → AX → CGEvent |
 | `arm_only` | `{ index: int }` | text on full success; **error** when target arm fails or any disarm fails | composite (disarm-all + arm target) |
-| `record_sequence` | `{ bar?: int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: float }` (`ch` 1..16, SMF end ≤ 3,600,000 ms) | JSON on success; **error** when goto fails OR no new track is observed via live AX within 500 ms | **v2.3 rewrite**: SMF generation + AX `File → Import → MIDI File…` — byte-exact timing |
+| `record_sequence` | `{ bar?: int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: float }` (`ch` 1..16, SMF end ≤ 3,600,000 ms) | Verified JSON on success (`created_track`, `target_track_index`, `region_name`, `start_bar`, `end_bar`, `note_count`, `verify_source`); structured JSON **error** on import/readback failure | **v2.3 rewrite**: SMF generation + AX `File → Import → MIDI File…` + AX region readback verification |
 | `set_automation` | `{ index: int, mode: "off"\|"read"\|"touch"\|"latch"\|"trim"\|"write" }` | text | MCU |
 | `set_instrument` | `{ index: int, path: string }` OR `{ index: int, category: string, preset: string }` — at least one path OR (category + preset) is required | text | Accessibility |
 | `list_library` | — | text | Accessibility |
@@ -230,7 +230,8 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 2. Generates a Type 0 Standard MIDI File with `SMFWriter` — tempo and time-signature meta events + byte-exact note positions computed from `ms` offsets via round-half-up tick conversion.
 3. Writes to `/tmp/LogicProMCP/{uuid}.mid` (cleaned up via `defer` on return and via server-startup sweep for crash recovery).
 4. Routes `midi.import_file` → `AccessibilityChannel` which validates the `.mid` file after symlink/path cleanup, drives `파일 → 가져오기 → MIDI 파일… (File → Import → MIDI File…)` via AppleScript, dismisses the `템포 가져오기 (Import Tempo)` sub-dialog with `아니요 (No)`, and waits for a new live AX track before returning success.
-5. Reads the live AX track-header tree for up to 500 ms until a new track appears. Returns `{ recorded_to_track, created_track, bar, note_count, method: "smf_import" }`. If the new track never appears within the readback window, the command returns an error instead of lying about `created_track`. `recorded_to_track` is a legacy alias for `created_track`; new clients should prefer `created_track`.
+5. Reads the live AX track-header tree for up to 500 ms until a new track appears.
+6. Reads the arrange-area regions through AX and verifies that a MIDI region exists on the newly-created track with the expected bar envelope. Success returns `{ recorded_to_track, created_track, target_track_index, target_track_name, region_name, start_bar, end_bar, note_count, verify_source, method: "smf_import" }`. `recorded_to_track` is a legacy alias for `created_track`; new clients should prefer `created_track`.
 
 **Error conditions for `record_sequence`**:
 
@@ -238,14 +239,18 @@ The old real-time `goto → record → sleep → play_sequence → stop` pipelin
 - `notes` is empty, or no valid events parsed
 - `notes` exceeds the SMF safety cap (encoded sequence end > 3,600,000 ms)
 - Playhead reset (`transport.goto_position` with `bar=1`) fails — treated as a hard precondition because Logic's MIDI File Import anchors the region at playhead; without the reset, notes would land at the wrong bar
-- `midi.import_file` fails, rejects the path, or completes without a new live AX track
-- No new track is observed via live AX within 500 ms of import (v3.1.2+ switched from 2s cache polling to live `AXLogicProElements.allTrackHeaders` after the cache-poll race documented in CHANGELOG §3.1.2)
+- `midi.import_file` fails, rejects the path, or completes without a new live AX track (`error: "import_failure"`)
+- No new track is observed via live AX within 500 ms of import (still `error: "import_failure"` with `failure_stage: "track_creation"`)
+- A new region appears, but AX places it on a different track than the newly-created one (`error: "wrong_track_import"`)
+- The created-track region is readable, but its observed start/end bars do not match the expected SMF envelope (`error: "timing_mismatch"`)
+- The created-track region cannot be read back from AX at all, or its bar bounds are unreadable (`error: "unreadable_readback"`)
 
 **Strategy D — tick-0 padding CC**: Logic Pro's MIDI File import strips leading empty delta before the first MIDI channel event, which would silently place every imported region at bar 1 regardless of the caller's `bar` parameter. SMFWriter counters this by emitting `CC#110 value 0` on channel 0 at tick 0 whenever `bar > 1`. Logic preserves the full tick timeline because a MIDI channel event now exists at tick 0. The resulting region spans bar 1 through the target bar; the caller's notes land at exactly the encoded positions inside the region. Verified on Logic Pro 12 — a `bar=50` request produces a region that Logic describes as starting at bar 1 and ending at bar 51, with the note at the trailing edge.
 
 **Response caveats**:
 - The region's start is always bar 1 (cosmetic trade-off of the padding strategy). If you need the region itself trimmed, the caller can run `편집 → 이동 → 재생헤드로 (Edit → Move → To Playhead)` on the selected region after positioning the playhead.
 - `created_track` is always the 0-based index of the newly-created track (Logic always creates a new MIDI track per import). The v2.3.0 `track_index_confirmed` fallback was removed in v3.0.0; v3.1.2 then replaced the original 2-second cache-poll loop with a 500 ms live-AX read against `AXLogicProElements.allTrackHeaders` (cache-poll race fix). On success the field would always be `true` so it was dropped from the response.
+- `verify_source` is `ax_region_delta` when a pre-import region snapshot was readable and `ax_region_readback` when the dispatcher had to rely on post-import region enumeration alone.
 
 **`arm_only` behavior (v3.0.0+)**:
 

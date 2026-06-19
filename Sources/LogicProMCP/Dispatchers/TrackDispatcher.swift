@@ -4,9 +4,14 @@ import MCP
 struct TrackDispatcher {
     static let tool = Tool(
         name: "logic_tracks",
-        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment; SMF end <= 3,600,000 ms), tempo?: Float } v3.0.8 SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`. The new track keeps Logic's default Software Instrument (Studio Grand piano on a fresh project); callers that want a specific patch must follow up with an explicit `set_instrument` AFTER ensuring the intended track is selected. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
+        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment; SMF end <= 3,600,000 ms), tempo?: Float } v3.0.8 SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call, then verifies the imported region by AX readback. Successful responses include `created_track`, `target_track_index`, `target_track_name`, `region_name`, `start_bar`, `end_bar`, `note_count`, and `verify_source`; structured error JSON distinguishes `import_failure`, `wrong_track_import`, `timing_mismatch`, and `unreadable_readback`. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`. The new track keeps Logic's default Software Instrument (Studio Grand piano on a fresh project); callers that want a specific patch must follow up with an explicit `set_instrument` AFTER ensuring the intended track is selected. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
         inputSchema: commandParamsToolSchema(commandDescription: "Track command to execute")
     )
+
+    enum RecordSequenceRegionReadback {
+        case success([RegionInfo])
+        case failure(String)
+    }
 
     static func handle(
         command: String,
@@ -366,7 +371,18 @@ struct TrackDispatcher {
     static func handleRecordSequenceSMF(
         params: [String: MCP.Value],
         router: ChannelRouter,
-        cache: StateCache
+        cache: StateCache,
+        trackHeaderCount: @escaping @Sendable () -> Int = { AXLogicProElements.allTrackHeaders().count },
+        trackNameAt: @escaping @Sendable (Int) -> String? = { AXLogicProElements.trackName(at: $0) },
+        readRegions: @escaping @Sendable () -> RecordSequenceRegionReadback = {
+            switch AccessibilityChannel.enumerateRegionItems() {
+            case .success(let result):
+                return .success(result.regions.map { $0.info })
+            case .failure(let error):
+                return .failure(error.message)
+            }
+        },
+        settleReadback: @escaping @Sendable () async -> Void = { try? await Task.sleep(nanoseconds: 150_000_000) }
     ) async -> CallTool.Result {
         // T5 — record_sequence does not support `port` (no keycmd alternative
         // for SMF-import + AX menu navigation). Reject up-front rather than
@@ -503,6 +519,14 @@ struct TrackDispatcher {
             )
         }
 
+        let preImportRegions: [RegionInfo]?
+        switch readRegions() {
+        case .success(let regions):
+            preImportRegions = regions
+        case .failure:
+            preImportRegions = nil
+        }
+
         // v3.1.2 (P0-2) — verify track creation against LIVE AX, not the
         // 3-second StatePoller cache. The previous cache-poll loop (2s
         // window, 100ms granularity) was strictly shorter than the poller
@@ -514,38 +538,52 @@ struct TrackDispatcher {
         //
         // The downstream import handler (AccessibilityChannel
         // `defaultImportMIDIFile`) already validates the count delta against
-        // `AXLogicProElements.allTrackHeaders()` before returning success,
-        // so an `importResult.isSuccess` is itself a proof of new-track
-        // creation. We re-read the same live AX surface here only to
-        // discover the track index for the response payload — and we still
-        // ask the poller to refresh so the next cache read is fresh too.
-        let tracksBefore = AXLogicProElements.allTrackHeaders().count
+        // live AX before returning success, so an `importResult.isSuccess`
+        // proves a new track was created. We still re-read live track headers
+        // here to discover the new track index and then verify the imported
+        // region on that specific track.
+        let tracksBefore = trackHeaderCount()
         let importResult = await router.route(
             operation: "midi.import_file",
             params: ["path": path]
         )
         guard importResult.isSuccess else {
-            return toolTextResult(
-                "record_sequence failed at midi.import_file: \(importResult.message)",
-                isError: true
-            )
+            return jsonToolTextResult([
+                "success": false,
+                "verified": false,
+                "error": "import_failure",
+                "failure_stage": "midi.import_file",
+                "bar": bar,
+                "note_count": events.count,
+                "method": "smf_import",
+                "detail": importResult.message,
+                "hint": "record_sequence failed at midi.import_file: \(importResult.message)",
+            ], isError: true)
         }
 
         // Re-read live AX to confirm the new track index. Import handler has
         // already verified the delta, so we expect tracksAfter > tracksBefore
         // immediately; the small retry loop is purely defensive against AX
         // tree settle latency on slow machines (≤500ms total).
-        var tracksAfter = AXLogicProElements.allTrackHeaders().count
+        var tracksAfter = trackHeaderCount()
         for _ in 0..<5 {
             if tracksAfter > tracksBefore { break }
             try? await Task.sleep(nanoseconds: 100_000_000)
-            tracksAfter = AXLogicProElements.allTrackHeaders().count
+            tracksAfter = trackHeaderCount()
         }
         guard tracksAfter > tracksBefore else {
-            return toolTextResult(
-                "record_sequence: import handler reported success but live AX still shows \(tracksBefore) tracks (no delta within 500ms). Check Logic Pro UI and retry.",
-                isError: true
-            )
+            return jsonToolTextResult([
+                "success": false,
+                "verified": false,
+                "error": "import_failure",
+                "failure_stage": "track_creation",
+                "bar": bar,
+                "note_count": events.count,
+                "method": "smf_import",
+                "track_count_before": tracksBefore,
+                "track_count_after": tracksAfter,
+                "hint": "record_sequence: import handler reported success but live AX still shows \(tracksBefore) tracks (no delta within 500ms). Check Logic Pro UI and retry.",
+            ], isError: true)
         }
 
         let createdTrack = tracksAfter - 1
@@ -597,34 +635,264 @@ struct TrackDispatcher {
             instrumentStatus = "ignored:\(instrumentPath) (v3.0.8: internal auto-load removed to prevent corrupting a pre-existing track — call set_instrument explicitly; see CHANGELOG v3.0.8 for the selectTrackViaAX limitation on fresh SMF-created tracks)"
         }
 
-        return toolTextResult(.success(
-            "{\"recorded_to_track\":\(createdTrack),\"created_track\":\(createdTrack),\"bar\":\(bar),\"note_count\":\(events.count),\"method\":\"smf_import\",\"instrument\":\"\(escapeJSONString(instrumentStatus))\"}"
-        ))
+        return await verifyRecordSequenceImport(
+            createdTrack: createdTrack,
+            targetTrackName: trackNameAt(createdTrack),
+            requestedBar: bar,
+            noteCount: events.count,
+            instrumentStatus: instrumentStatus,
+            events: events,
+            preImportRegions: preImportRegions,
+            readRegions: readRegions,
+            settleReadback: settleReadback
+        )
     }
 
-    /// Minimal JSON string escape for the one field we embed verbatim. The
-    /// `instrumentStatus` text can legitimately contain `"`, `\\`, or
-    /// newlines (when it carries a forwarded error message), so we escape
-    /// rather than trust the source.
-    private static func escapeJSONString(_ s: String) -> String {
-        var out = ""
-        out.reserveCapacity(s.count)
-        for ch in s {
-            switch ch {
-            case "\\": out += "\\\\"
-            case "\"": out += "\\\""
-            case "\n": out += "\\n"
-            case "\r": out += "\\r"
-            case "\t": out += "\\t"
-            default:
-                if ch.asciiValue.map({ $0 < 0x20 }) == true {
-                    out += String(format: "\\u%04x", ch.asciiValue!)
-                } else {
-                    out.append(ch)
+    private enum RecordSequenceReadbackStatus {
+        case verified([String: Any])
+        case failed([String: Any])
+        case pending
+    }
+
+    private static func jsonToolTextResult(_ object: [String: Any], isError: Bool = false) -> CallTool.Result {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: []),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolTextResult("record_sequence: failed to encode JSON response", isError: true)
+        }
+        return toolTextResult(text, isError: isError)
+    }
+
+    private static func verifyRecordSequenceImport(
+        createdTrack: Int,
+        targetTrackName: String?,
+        requestedBar: Int,
+        noteCount: Int,
+        instrumentStatus: String,
+        events: [SMFWriter.NoteEvent],
+        preImportRegions: [RegionInfo]?,
+        readRegions: @escaping @Sendable () -> RecordSequenceRegionReadback,
+        settleReadback: @escaping @Sendable () async -> Void
+    ) async -> CallTool.Result {
+        let expectedStartBar = 1
+        let expectedEndBar = recordSequenceExpectedEndBar(for: events, requestedBar: requestedBar)
+        let base: [String: Any] = [
+            "bar": requestedBar,
+            "created_track": createdTrack,
+            "recorded_to_track": createdTrack,
+            "target_track_index": createdTrack,
+            "target_track_name": targetTrackName ?? "",
+            "note_count": noteCount,
+            "method": "smf_import",
+            "instrument": instrumentStatus,
+            "expected_start_bar": expectedStartBar,
+            "expected_end_bar": expectedEndBar,
+        ]
+        let preRegionKeys = Set((preImportRegions ?? []).map(recordSequenceRegionKey))
+        let hasPreImportSnapshot = preImportRegions != nil
+        let verifySource = hasPreImportSnapshot ? "ax_region_delta" : "ax_region_readback"
+
+        var bestFailure: [String: Any]?
+        var lastReadbackError: String?
+        var lastRegionCount = 0
+        var lastNewRegionCount = 0
+
+        for attempt in 0..<10 {
+            switch readRegions() {
+            case .failure(let error):
+                lastReadbackError = error
+            case .success(let regions):
+                lastRegionCount = regions.count
+                lastNewRegionCount = hasPreImportSnapshot
+                    ? regions.filter { !preRegionKeys.contains(recordSequenceRegionKey($0)) }.count
+                    : 0
+
+                switch diagnoseRecordSequenceReadback(
+                    postImportRegions: regions,
+                    hasPreImportSnapshot: hasPreImportSnapshot,
+                    preImportRegionKeys: preRegionKeys,
+                    createdTrack: createdTrack,
+                    expectedStartBar: expectedStartBar,
+                    expectedEndBar: expectedEndBar,
+                    base: base,
+                    verifySource: verifySource
+                ) {
+                case .verified(let payload):
+                    return jsonToolTextResult(payload)
+                case .failed(let payload):
+                    if shouldPreferRecordSequenceFailure(candidate: payload, over: bestFailure) {
+                        bestFailure = payload
+                    }
+                case .pending:
+                    break
                 }
             }
+
+            if attempt < 9 {
+                await settleReadback()
+            }
         }
-        return out
+
+        if var bestFailure {
+            bestFailure["region_count"] = lastRegionCount
+            bestFailure["new_region_count"] = lastNewRegionCount
+            if let lastReadbackError {
+                bestFailure["readback_error"] = lastReadbackError
+            }
+            return jsonToolTextResult(bestFailure, isError: true)
+        }
+
+        var payload = base
+        payload["success"] = false
+        payload["verified"] = false
+        payload["error"] = "unreadable_readback"
+        payload["verify_source"] = verifySource
+        payload["region_count"] = lastRegionCount
+        payload["new_region_count"] = lastNewRegionCount
+        payload["hint"] = lastReadbackError.map {
+            "record_sequence region readback failed: \($0)"
+        } ?? "record_sequence imported a new track but no MIDI region could be verified from AX readback"
+        if let lastReadbackError {
+            payload["readback_error"] = lastReadbackError
+        }
+        return jsonToolTextResult(payload, isError: true)
+    }
+
+    private static func diagnoseRecordSequenceReadback(
+        postImportRegions: [RegionInfo],
+        hasPreImportSnapshot: Bool,
+        preImportRegionKeys: Set<String>,
+        createdTrack: Int,
+        expectedStartBar: Int,
+        expectedEndBar: Int,
+        base: [String: Any],
+        verifySource: String
+    ) -> RecordSequenceReadbackStatus {
+        let newRegions = hasPreImportSnapshot
+            ? postImportRegions.filter { !preImportRegionKeys.contains(recordSequenceRegionKey($0)) }
+            : []
+        let targetRegions = postImportRegions.filter { $0.trackIndex == createdTrack }
+
+        if let targetRegion = preferredRecordSequenceRegion(from: targetRegions) {
+            var payload = base
+            payload["verify_source"] = verifySource
+            for (key, value) in recordSequenceRegionFields(targetRegion) {
+                payload[key] = value
+            }
+            if targetRegion.startBar < 0 || targetRegion.endBar < 0 {
+                payload["success"] = false
+                payload["verified"] = false
+                payload["error"] = "unreadable_readback"
+                payload["hint"] = "record_sequence found a region on the created track, but AX did not expose readable start/end bars"
+                return .failed(payload)
+            }
+            if targetRegion.startBar == expectedStartBar && targetRegion.endBar == expectedEndBar {
+                payload["success"] = true
+                payload["verified"] = true
+                return .verified(payload)
+            }
+            payload["success"] = false
+            payload["verified"] = false
+            payload["error"] = "timing_mismatch"
+            payload["hint"] = "record_sequence region readback did not match the expected bar envelope"
+            return .failed(payload)
+        }
+
+        if let wrongTrackRegion = preferredRecordSequenceRegion(from: newRegions.filter { $0.trackIndex >= 0 && $0.trackIndex != createdTrack }) {
+            var payload = base
+            payload["success"] = false
+            payload["verified"] = false
+            payload["error"] = "wrong_track_import"
+            payload["verify_source"] = verifySource
+            payload["hint"] = "record_sequence imported a region, but AX readback placed it on track \(wrongTrackRegion.trackIndex) instead of the newly created track \(createdTrack)"
+            for (key, value) in recordSequenceRegionFields(wrongTrackRegion, prefix: "observed_") {
+                payload[key] = value
+            }
+            return .failed(payload)
+        }
+
+        if postImportRegions.isEmpty {
+            return .pending
+        }
+
+        var payload = base
+        payload["success"] = false
+        payload["verified"] = false
+        payload["error"] = "unreadable_readback"
+        payload["verify_source"] = verifySource
+        payload["hint"] = "record_sequence imported a new track but no MIDI region could be verified on the created track"
+        return .failed(payload)
+    }
+
+    private static func shouldPreferRecordSequenceFailure(
+        candidate: [String: Any],
+        over current: [String: Any]?
+    ) -> Bool {
+        guard let current else { return true }
+        return recordSequenceFailurePriority(candidate) > recordSequenceFailurePriority(current)
+    }
+
+    private static func recordSequenceFailurePriority(_ payload: [String: Any]) -> Int {
+        switch payload["error"] as? String {
+        case "wrong_track_import":
+            return 3
+        case "timing_mismatch":
+            return 2
+        case "unreadable_readback":
+            return 1
+        default:
+            return 0
+        }
+    }
+
+    private static func recordSequenceExpectedEndBar(
+        for events: [SMFWriter.NoteEvent],
+        requestedBar: Int,
+        timeSignatureNumerator: Int = 4,
+        ticksPerQuarter: Int = 480
+    ) -> Int {
+        let ticksPerBar = timeSignatureNumerator * ticksPerQuarter
+        let maxEndTicks = events.map { $0.offsetTicks + $0.durationTicks }.max() ?? 0
+        let absoluteEndTicks = maxEndTicks + max(0, requestedBar - 1) * ticksPerBar
+        return max(2, (absoluteEndTicks / ticksPerBar) + 2)
+    }
+
+    private static func recordSequenceRegionKey(_ region: RegionInfo) -> String {
+        [
+            region.name,
+            String(region.trackIndex),
+            String(region.startBar),
+            String(region.endBar),
+            region.kind,
+        ].joined(separator: "|")
+    }
+
+    private static func preferredRecordSequenceRegion(from regions: [RegionInfo]) -> RegionInfo? {
+        regions.max { lhs, rhs in
+            if lhs.trackIndex != rhs.trackIndex { return lhs.trackIndex < rhs.trackIndex }
+            if lhs.endBar != rhs.endBar { return lhs.endBar < rhs.endBar }
+            if lhs.startBar != rhs.startBar { return lhs.startBar < rhs.startBar }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private static func recordSequenceRegionFields(
+        _ region: RegionInfo,
+        prefix: String = ""
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "\(prefix)region_name": region.name,
+            "\(prefix)start_bar": region.startBar,
+            "\(prefix)end_bar": region.endBar,
+            "\(prefix)region_kind": region.kind,
+        ]
+        if !prefix.isEmpty {
+            payload["\(prefix)track_index"] = region.trackIndex
+        }
+        if let rawHelp = region.rawHelp, !rawHelp.isEmpty {
+            payload["\(prefix)raw_help"] = rawHelp
+        }
+        return payload
     }
 
     private static func parseNotesToSMFEvents(
