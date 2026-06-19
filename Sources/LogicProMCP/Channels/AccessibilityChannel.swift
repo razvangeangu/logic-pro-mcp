@@ -2495,6 +2495,25 @@ actor AccessibilityChannel: Channel {
         }
         let category = pathSegments[0]
         let preset = pathSegments[pathSegments.count - 1]
+        let requestedTrackIndex: Int?
+        if let indexStr = params["index"] {
+            guard let index = Int(indexStr), index >= 0 else {
+                return .error(HonestContract.encodeStateC(
+                    error: .invalidParams,
+                    hint: "track.set_instrument 'index' must be a non-negative integer",
+                    extras: setInstrumentBaseExtras(
+                        requestedPath: resolvedPath,
+                        category: category,
+                        preset: preset,
+                        targetTrackIndex: NSNull(),
+                        targetTrackName: NSNull()
+                    )
+                ))
+            }
+            requestedTrackIndex = index
+        } else {
+            requestedTrackIndex = nil
+        }
 
         // v3.0.3+ — select target track via the Apple-public AX-first
         // selection ladder (AXPress → AXSelected → child AXPress → coord
@@ -2504,15 +2523,102 @@ actor AccessibilityChannel: Channel {
         _ = ProcessUtils.Runtime.production.activateLogicPro()
         try? await Task.sleep(nanoseconds: 150_000_000)   // window raise settle
 
-        if let indexStr = params["index"], let index = Int(indexStr) {
+        var targetTrackIndex = requestedTrackIndex
+        var targetTrackName: Any = NSNull()
+
+        if let index = requestedTrackIndex {
             guard AXLogicProElements.findTrackHeader(at: index, runtime: runtime) != nil else {
-                return .error("Track at index \(index) not found")
+                return .error(HonestContract.encodeStateC(
+                    error: .elementNotFound,
+                    hint: "Track at index \(index) not found",
+                    extras: setInstrumentBaseExtras(
+                        requestedPath: resolvedPath,
+                        category: category,
+                        preset: preset,
+                        targetTrackIndex: index,
+                        targetTrackName: NSNull()
+                    )
+                ))
+            }
+            if let name = AXLogicProElements.trackName(at: index, runtime: runtime) {
+                targetTrackName = name
             }
             if !CGPreflightPostEventAccess() {
                 return .error("Event-post permission required (Accessibility → Input Monitoring). Grant in System Settings.")
             }
-            _ = AXLogicProElements.selectTrackViaAX(at: index, runtime: runtime)
+            guard AXLogicProElements.selectTrackViaAX(at: index, runtime: runtime) else {
+                return .error(HonestContract.encodeStateC(
+                    error: .axWriteFailed,
+                    hint: "Failed to select track \(index) before instrument load",
+                    extras: setInstrumentBaseExtras(
+                        requestedPath: resolvedPath,
+                        category: category,
+                        preset: preset,
+                        targetTrackIndex: index,
+                        targetTrackName: targetTrackName
+                    )
+                ))
+            }
+
+            let selectionVerification = await verifyTrackSelection(index: index, runtime: runtime)
+            if let refreshedName = AXLogicProElements.trackName(at: index, runtime: runtime) {
+                targetTrackName = refreshedName
+            }
+            let selectionBase = setInstrumentBaseExtras(
+                requestedPath: resolvedPath,
+                category: category,
+                preset: preset,
+                targetTrackIndex: index,
+                targetTrackName: targetTrackName
+            )
+            switch selectionVerification {
+            case .verified:
+                break
+            case .selectionMetadataUnavailable:
+                return .error(HonestContract.encodeStateC(
+                    error: .trackSelectionFailed,
+                    hint: "Track \(index) selection could not be verified before instrument load",
+                    extras: selectionBase.merging([
+                        "observed": NSNull(),
+                        "observed_patch_name": NSNull(),
+                        "target_track_selection_verified": false,
+                        "target_track_selection_reason": HonestContract.UncertainReason.retryExhausted.rawValue,
+                        "target_track_selection_observed_index": NSNull(),
+                        "target_track_selection_verify_source": "ax_selected"
+                    ]) { _, new in new }
+                ))
+            case .mismatch(let selectedIndex):
+                return .error(HonestContract.encodeStateC(
+                    error: .trackSelectionFailed,
+                    hint: "Track \(index) selection settled on a different track before instrument load",
+                    extras: selectionBase.merging([
+                        "observed": NSNull(),
+                        "observed_patch_name": NSNull(),
+                        "target_track_selection_verified": false,
+                        "target_track_selection_reason": HonestContract.UncertainReason.readbackMismatch.rawValue,
+                        "target_track_selection_observed_index": selectedIndex as Any? ?? NSNull(),
+                        "target_track_selection_verify_source": "ax_selected"
+                    ]) { _, new in new }
+                ))
+            case .trackDisappeared:
+                return .error(HonestContract.encodeStateC(
+                    error: .elementNotFound,
+                    hint: "Track at index \(index) disappeared during selection verification",
+                    extras: selectionBase.merging([
+                        "observed": NSNull(),
+                        "observed_patch_name": NSNull(),
+                        "target_track_selection_verified": false,
+                        "target_track_selection_reason": HonestContract.UncertainReason.readbackUnavailable.rawValue,
+                        "target_track_selection_observed_index": NSNull(),
+                        "target_track_selection_verify_source": "ax_selected"
+                    ]) { _, new in new }
+                ))
+            }
+
             try? await Task.sleep(nanoseconds: 300_000_000)   // Library rebind to new track
+        } else if let selectedTrack = selectedTrackIdentity(runtime: runtime) {
+            targetTrackIndex = selectedTrack.index
+            targetTrackName = selectedTrack.name ?? NSNull()
         }
 
         // v3.0.4 — walk every segment in order. For 2-segment paths this
@@ -2533,12 +2639,13 @@ actor AccessibilityChannel: Channel {
             return .error(HonestContract.encodeStateC(
                 error: .axWriteFailed,
                 hint: "Library path not fully resolvable: \(resolvedPath)",
-                extras: [
-                    "requested": resolvedPath,
-                    "category": category,
-                    "preset": preset,
-                    "path": resolvedPath
-                ]
+                extras: setInstrumentBaseExtras(
+                    requestedPath: resolvedPath,
+                    category: category,
+                    preset: preset,
+                    targetTrackIndex: targetTrackIndex as Any? ?? NSNull(),
+                    targetTrackName: targetTrackName
+                )
             ))
         }
         try? await Task.sleep(nanoseconds: 800_000_000) // let Logic load the instrument
@@ -2550,24 +2657,76 @@ actor AccessibilityChannel: Channel {
         // B with `readback_mismatch`. When not exposed at all (Logic build
         // dependent), State B with `readback_unavailable`.
         let observed = AccessibilityChannel.readBackLibraryPreset(runtime: runtime)
-        let base: [String: Any] = [
-            "requested": preset,
-            "observed": observed ?? NSNull(),
-            "category": category,
-            "preset": preset,
-            "path": resolvedPath
-        ]
+        var base = setInstrumentBaseExtras(
+            requestedPath: resolvedPath,
+            category: category,
+            preset: preset,
+            targetTrackIndex: targetTrackIndex as Any? ?? NSNull(),
+            targetTrackName: targetTrackName
+        )
+        base["observed"] = observed ?? NSNull()
+        base["observed_patch_name"] = observed ?? NSNull()
+        base["verify_source"] = "library_selected_children"
+        if requestedTrackIndex != nil {
+            base["target_track_selection_verified"] = true
+            base["target_track_selection_reason"] = "verified"
+            base["target_track_selection_observed_index"] = targetTrackIndex as Any? ?? NSNull()
+            base["target_track_selection_verify_source"] = "ax_selected"
+        }
         if let observed {
             if observed == preset {
-                return .success(HonestContract.encodeStateA(extras: base))
+                return .success(HonestContract.encodeStateA(
+                    extras: base.merging(["readback_state": "verified"]) { _, new in new }
+                ))
             }
             return .success(HonestContract.encodeStateB(
-                reason: .readbackMismatch, extras: base
+                reason: .readbackMismatch,
+                extras: base.merging([
+                    "readback_state": HonestContract.UncertainReason.readbackMismatch.rawValue
+                ]) { _, new in new }
             ))
         }
         return .success(HonestContract.encodeStateB(
-            reason: .readbackUnavailable, extras: base
+            reason: .readbackUnavailable,
+            extras: base.merging([
+                "readback_state": HonestContract.UncertainReason.readbackUnavailable.rawValue
+            ]) { _, new in new }
         ))
+    }
+
+    private static func setInstrumentBaseExtras(
+        requestedPath: String,
+        category: String,
+        preset: String,
+        targetTrackIndex: Any,
+        targetTrackName: Any
+    ) -> [String: Any] {
+        [
+            "requested": preset,
+            "requested_patch_name": preset,
+            "requested_category": category,
+            "requested_path": requestedPath,
+            "category": category,
+            "preset": preset,
+            "path": requestedPath,
+            "target_track_index": targetTrackIndex,
+            "target_track_name": targetTrackName
+        ]
+    }
+
+    private static func selectedTrackIdentity(
+        runtime: AXLogicProElements.Runtime
+    ) -> (index: Int, name: String?)? {
+        let headers = AXLogicProElements.allTrackHeaders(runtime: runtime)
+        for (index, header) in headers.enumerated() {
+            guard AXValueExtractors.extractSelectedState(header, runtime: runtime.ax) == true else {
+                continue
+            }
+            let state = AXValueExtractors.extractTrackState(from: header, index: index, runtime: runtime.ax)
+            let trimmed = state.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (index, trimmed.isEmpty ? nil : trimmed)
+        }
+        return nil
     }
 
     // MARK: - Control-bar playhead position helper

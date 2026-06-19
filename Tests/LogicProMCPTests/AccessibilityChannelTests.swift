@@ -137,6 +137,76 @@ private func makeAXBackedAccessibilityChannel(
     return AccessibilityChannel(runtime: runtime)
 }
 
+private func makeSetInstrumentFixture() -> (
+    builder: FakeAXRuntimeBuilder,
+    app: AXUIElement,
+    firstHeader: AXUIElement,
+    secondHeader: AXUIElement,
+    category: AXUIElement,
+    preset: AXUIElement
+) {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(20_000)
+    let window = builder.element(20_001)
+    let trackList = builder.element(20_002)
+    let firstHeader = builder.element(20_003)
+    let firstName = builder.element(20_004)
+    let secondHeader = builder.element(20_005)
+    let secondName = builder.element(20_006)
+    let browser = builder.element(20_007)
+    let categoryList = builder.element(20_008)
+    let presetList = builder.element(20_009)
+    let category = builder.element(20_010)
+    let preset = builder.element(20_011)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [trackList, browser])
+
+    builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
+    builder.setChildren(trackList, [firstHeader, secondHeader])
+
+    builder.setAttribute(firstHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(firstHeader, kAXTitleAttribute as String, "Kick")
+    builder.setAttribute(firstHeader, kAXSelectedAttribute as String, true)
+    builder.setChildren(firstHeader, [firstName])
+    builder.setAttribute(firstName, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(firstName, kAXValueAttribute as String, "Kick")
+
+    builder.setAttribute(secondHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(secondHeader, kAXTitleAttribute as String, "Bass Track")
+    builder.setAttribute(secondHeader, kAXSelectedAttribute as String, false)
+    builder.setChildren(secondHeader, [secondName])
+    builder.setAttribute(secondName, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(secondName, kAXValueAttribute as String, "Bass Track")
+
+    builder.setAttribute(browser, kAXRoleAttribute as String, kAXBrowserRole as String)
+    builder.setAttribute(browser, kAXDescriptionAttribute as String, "Library")
+    builder.setChildren(browser, [categoryList, presetList])
+
+    builder.setAttribute(categoryList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setChildren(categoryList, [category])
+    builder.setAttribute(presetList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setChildren(presetList, [preset])
+
+    builder.setAttribute(category, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(category, kAXValueAttribute as String, "Bass")
+    builder.setAttribute(category, kAXPositionAttribute as String, axPoint(120, 120))
+    builder.setAttribute(category, kAXSizeAttribute as String, axSize(90, 22))
+    builder.setAttribute(category, kAXParentAttribute as String, categoryList)
+
+    builder.setAttribute(preset, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(preset, kAXValueAttribute as String, "Sub Bass")
+    builder.setAttribute(preset, kAXPositionAttribute as String, axPoint(300, 120))
+    builder.setAttribute(preset, kAXSizeAttribute as String, axSize(120, 22))
+    builder.setAttribute(preset, kAXParentAttribute as String, presetList)
+
+    builder.setAttribute(categoryList, kAXSelectedChildrenAttribute as String, [category])
+    builder.setAttribute(presetList, kAXSelectedChildrenAttribute as String, [preset])
+
+    return (builder, app, firstHeader, secondHeader, category, preset)
+}
+
 @Test func testAccessibilityChannelStartRequiresTrustAndAllowsMissingLogic() async throws {
     let untrusted = AccessibilityChannel(runtime: makeAccessibilityRuntime(isTrusted: false))
     await #expect(throws: AccessibilityError.notTrusted) {
@@ -1029,6 +1099,71 @@ private func makeAXBackedAccessibilityChannel(
     #expect(obj["reason"] as? String == "readback_mismatch")
     #expect(obj["requested"] as? Int == 1)
     #expect(obj["observed"] as? Int == 0)
+}
+
+@Test func testAccessibilityChannelSetInstrumentReturnsTargetAndPatchVerificationMetadata() async {
+    let fixture = makeSetInstrumentFixture()
+    let logicRuntime = fixture.builder.makeLogicRuntime(
+        appElement: fixture.app,
+        setAttributeHandler: nil,
+        performActionHandler: { element, action in
+            guard action == kAXPressAction as String else { return true }
+            if element == fixture.secondHeader {
+                fixture.builder.setAttribute(fixture.firstHeader, kAXSelectedAttribute as String, false)
+                fixture.builder.setAttribute(fixture.secondHeader, kAXSelectedAttribute as String, true)
+            }
+            return true
+        }
+    )
+    let channel = makeAXBackedAccessibilityChannel(
+        builder: fixture.builder,
+        app: fixture.app,
+        logicRuntime: logicRuntime
+    )
+
+    let result = await channel.execute(
+        operation: "track.set_instrument",
+        params: ["index": "1", "path": "Bass/Sub Bass"]
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["verified"] as? Bool == true)
+    #expect(obj["requested_patch_name"] as? String == "Sub Bass")
+    #expect(obj["requested_path"] as? String == "Bass/Sub Bass")
+    #expect(obj["observed_patch_name"] as? String == "Sub Bass")
+    #expect(obj["target_track_index"] as? Int == 1)
+    #expect(obj["target_track_name"] as? String == "Bass Track")
+    #expect(obj["target_track_selection_verified"] as? Bool == true)
+    #expect(obj["target_track_selection_reason"] as? String == "verified")
+    #expect(obj["target_track_selection_observed_index"] as? Int == 1)
+    #expect(obj["target_track_selection_verify_source"] as? String == "ax_selected")
+    #expect(obj["verify_source"] as? String == "library_selected_children")
+    #expect(obj["readback_state"] as? String == "verified")
+}
+
+@Test func testAccessibilityChannelSetInstrumentFailsClosedWhenTrackSelectionIsUnverified() async {
+    let fixture = makeSetInstrumentFixture()
+    let channel = makeAXBackedAccessibilityChannel(builder: fixture.builder, app: fixture.app)
+
+    let result = await channel.execute(
+        operation: "track.set_instrument",
+        params: ["index": "1", "path": "Bass/Sub Bass"]
+    )
+
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["error"] as? String == "track_selection_failed")
+    #expect(obj["requested_patch_name"] as? String == "Sub Bass")
+    #expect(obj["requested_path"] as? String == "Bass/Sub Bass")
+    #expect(obj["target_track_index"] as? Int == 1)
+    #expect(obj["target_track_name"] as? String == "Bass Track")
+    #expect(obj["target_track_selection_verified"] as? Bool == false)
+    #expect(obj["target_track_selection_reason"] as? String == "readback_mismatch")
+    #expect(obj["target_track_selection_observed_index"] as? Int == 0)
+    #expect(obj["target_track_selection_verify_source"] as? String == "ax_selected")
+    #expect(!fixture.builder.actionCalls.map(\.elementID).contains(fixture.builder.elementID(fixture.category)))
+    #expect(!fixture.builder.actionCalls.map(\.elementID).contains(fixture.builder.elementID(fixture.preset)))
 }
 
 @Test func testAccessibilityChannelAXBackedTrackErrorPaths() async {
