@@ -8,6 +8,15 @@
     "url": "https://github.com/MongLong0214/logic-pro-mcp",
     "source": "github"
   },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/main/docs/media/logic-pro-mcp-thumbnail.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "1200x630"
+      ]
+    }
+  ],
   "version": "3.6.0",
   "_meta": {
     "io.modelcontextprotocol.registry/publisher-provided": {
@@ -23,6 +32,30 @@
           ]
         },
         "release": "https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.6.0"
+      },
+      "discovery": {
+        "categories": [
+          "Music production",
+          "Desktop automation",
+          "macOS",
+          "Developer tools",
+          "Agent tools"
+        ],
+        "tags": [
+          "logic-pro",
+          "music-production",
+          "daw",
+          "macos",
+          "swift",
+          "mcp",
+          "model-context-protocol",
+          "ai-agents",
+          "automation",
+          "app-automation",
+          "desktop-automation",
+          "midi",
+          "music-tech"
+        ]
       },
       "runtime": {
         "transport": "stdio",
