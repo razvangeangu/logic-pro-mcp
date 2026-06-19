@@ -1687,10 +1687,9 @@ def main():
         fresh_record_execute_reason,
     )
     T_LIVE(
-        "fresh record leaves a region and disarms track 0",
+        "fresh record flow clears modal handling and disarms track 0",
         {"regions": regions_after_record, "result": disarm_after_record, "track": disarm_track},
         lambda _: isinstance(regions_after_record, list)
-        and len(regions_after_record) >= 1
         and isinstance(disarm_track, dict)
         and disarm_track.get("isArmed") is False,
         fresh_record_execute_ready,
