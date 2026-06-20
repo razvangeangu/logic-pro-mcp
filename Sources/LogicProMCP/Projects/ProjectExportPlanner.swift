@@ -4,6 +4,7 @@ import MCP
 struct ProjectExportPlan: Codable, Sendable, Equatable {
     let schema: String
     let runID: String
+    let generatedAt: String
     let status: String
     let executionMode: String
     let outputRoot: String
@@ -20,6 +21,7 @@ struct ProjectExportPlan: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schema
         case runID = "run_id"
+        case generatedAt = "generated_at"
         case status
         case executionMode = "execution_mode"
         case outputRoot = "output_root"
@@ -163,8 +165,17 @@ enum ProjectExportPlanner {
             )
         }
 
+        // PR99-C1 / PR99-edge-2 / PR99-edge-3: aggregate every resolved artifact
+        // path across ALL projects and flag any path produced by 2+ artifacts so
+        // batch exports cannot silently overwrite each other (defeating
+        // no_silent_overwrite). Comparison is case-insensitive because the default
+        // macOS volumes (APFS/HFS+) are case-insensitive, so 'Song' and 'song'
+        // collide on disk too. Each colliding artifact gets a forced issue, which
+        // flips the plan to "degraded" via the existing non-empty-issues predicate.
+        let resolvedProjectPlans = flagIntraPlanCollisions(projectPlans)
+
         let blocked = blockedSteps()
-        let status = projectPlans.contains { project in
+        let status = resolvedProjectPlans.contains { project in
             project.validationStatus != "valid" ||
                 project.expectedArtifacts.contains { !$0.verification.issues.isEmpty }
         }
@@ -174,18 +185,28 @@ enum ProjectExportPlanner {
         return ProjectExportPlan(
             schema: schema,
             runID: deterministicRunID(projects: projects, outputRoot: outputRoot, artifacts: artifacts),
+            // C3: real run-window anchor so the advertised mtime_within_run_window
+            // gate is evaluable — an executor bounds post-export mtime to >= this.
+            generatedAt: ISO8601DateFormatter.cacheFormatter.string(from: Date()),
             status: status,
             executionMode: "dry_run_only",
             outputRoot: outputRoot,
             collisionPolicy: collisionPolicy,
             namingPolicy: namingPolicy,
-            projectCount: projectPlans.count,
-            projects: projectPlans,
+            projectCount: resolvedProjectPlans.count,
+            projects: resolvedProjectPlans,
             requiredConfirmations: [
                 ProjectExportConfirmation(
                     level: "L2",
-                    requiredFor: ["open", "bounce", "close"],
-                    message: "Batch export execution must confirm every project open, export/bounce, and close boundary before mutation."
+                    requiredFor: ["open", "bounce"],
+                    message: "Batch export execution must confirm every project open and export/bounce boundary before mutation."
+                ),
+                // C1: close is canonically gated at L3 by DestructivePolicy; the
+                // manifest must declare the SAME boundary a future executor enforces.
+                ProjectExportConfirmation(
+                    level: confirmationLabel(for: "close"),
+                    requiredFor: ["close"],
+                    message: "Closing a project may discard unsaved changes; confirm the close/save-prompt boundary before mutation."
                 ),
             ],
             unsupportedOrBlockedSteps: blocked,
@@ -250,6 +271,14 @@ enum ProjectExportPlanner {
         collisionPolicy: String,
         fileManager: FileManager
     ) -> ProjectExportPlanArtifact {
+        // PR99-C2: validate containment against the PRE-sanitization candidate so
+        // the check is non-vacuous. A raw displayName containing ".." or a path
+        // separator can resolve outside outputRoot once standardized; the sanitized
+        // url below can never express that, so it alone could only ever be true.
+        let rawComponent = "\(displayName)-\(kind).wav"
+        let candidate = outputRoot.appendingPathComponent(rawComponent).standardizedFileURL
+        let underRoot = candidate.path == outputRoot.path || candidate.path.hasPrefix(outputRoot.path + "/")
+
         let safeProject = sanitizeFileComponent(displayName)
         let url = outputRoot.appendingPathComponent("\(safeProject)-\(kind).wav").standardizedFileURL
         let exists = fileManager.fileExists(atPath: url.path)
@@ -258,7 +287,6 @@ enum ProjectExportPlanner {
         let mtime = (attrs?[.modificationDate] as? Date).map {
             ISO8601DateFormatter.cacheFormatter.string(from: $0)
         }
-        let underRoot = url.path == outputRoot.path || url.path.hasPrefix(outputRoot.path + "/")
         var issues: [String] = []
         if !underRoot {
             issues.append("artifact_path_outside_output_root")
@@ -266,8 +294,14 @@ enum ProjectExportPlanner {
         if exists && collisionPolicy == "fail_if_exists" {
             issues.append("artifact_would_overwrite")
         }
-        if exists && (size ?? 0) == 0 {
+        // PR99-C3: only assert a definite zero-byte artifact when the size is a
+        // concrete value. A vanished/unreadable file (TOCTOU, permissions, or a
+        // directory/special file at the path) yields a nil size — that is
+        // "unknown", not "zero", so emit a distinct token instead of lying.
+        if exists, let size, size == 0 {
             issues.append("artifact_zero_bytes")
+        } else if exists, size == nil {
+            issues.append("artifact_size_unreadable")
         }
 
         return ProjectExportPlanArtifact(
@@ -295,7 +329,7 @@ enum ProjectExportPlanner {
                 command: "open",
                 mutates: true,
                 executed: false,
-                requiresConfirmationLevel: "L2",
+                requiresConfirmationLevel: confirmationLabel(for: "open"),
                 stopConditions: ["wrong_project_observed", "open_failed", "ambiguous_save_state"]
             ),
             ProjectExportWorkflowStep(
@@ -305,7 +339,7 @@ enum ProjectExportPlanner {
                 command: "bounce",
                 mutates: true,
                 executed: false,
-                requiresConfirmationLevel: "L2",
+                requiresConfirmationLevel: confirmationLabel(for: "bounce"),
                 stopConditions: ["missing_output", "stale_output", "overwrite_risk"]
             ),
             ProjectExportWorkflowStep(
@@ -315,10 +349,70 @@ enum ProjectExportPlanner {
                 command: "close",
                 mutates: true,
                 executed: false,
-                requiresConfirmationLevel: "L2",
+                // C1: drive from the canonical policy (close == L3) instead of
+                // hardcoding L2, so the contract matches the enforced boundary.
+                requiresConfirmationLevel: confirmationLabel(for: "close"),
                 stopConditions: ["ambiguous_close_state", "save_prompt_unresolved"]
             ),
         ]
+    }
+
+    /// Map a lifecycle command to its manifest confirmation label using the
+    /// canonical DestructivePolicy as the single source of truth (close/quit ==
+    /// L3, open/bounce/save_as == L2). Keeps the dry-run contract in lockstep
+    /// with the boundary the live dispatcher actually enforces.
+    private static func confirmationLabel(for command: String) -> String {
+        DestructivePolicy.level(for: command) == .l3 ? "L3" : "L2"
+    }
+
+    /// PR99-C1 / PR99-edge-2 / PR99-edge-3: detect artifact paths that two or
+    /// more planned artifacts resolve to (across all projects in the batch) and
+    /// append a collision issue to each, forcing the plan to "degraded". Path
+    /// comparison is case-insensitive to match the case-insensitive default
+    /// macOS volume, so distinct-cased slugs that map to the same on-disk file
+    /// are caught. Artifacts are immutable value types, so this is a rebuild pass.
+    private static func flagIntraPlanCollisions(
+        _ plans: [ProjectExportPlanProject]
+    ) -> [ProjectExportPlanProject] {
+        var pathCounts: [String: Int] = [:]
+        for project in plans {
+            for art in project.expectedArtifacts {
+                pathCounts[art.path.lowercased(), default: 0] += 1
+            }
+        }
+        let collidingPaths = Set(pathCounts.filter { $0.value > 1 }.keys)
+        guard !collidingPaths.isEmpty else { return plans }
+
+        return plans.map { project in
+            let arts = project.expectedArtifacts.map { art -> ProjectExportPlanArtifact in
+                guard collidingPaths.contains(art.path.lowercased()) else { return art }
+                let v = art.verification
+                return ProjectExportPlanArtifact(
+                    kind: art.kind,
+                    path: art.path,
+                    status: art.status,
+                    verification: ProjectExportArtifactVerification(
+                        exists: v.exists,
+                        fileSizeBytes: v.fileSizeBytes,
+                        mtime: v.mtime,
+                        pathUnderOutputRoot: v.pathUnderOutputRoot,
+                        wouldOverwrite: v.wouldOverwrite,
+                        issues: v.issues + ["artifact_path_collides_in_plan"]
+                    ),
+                    analysis: art.analysis
+                )
+            }
+            return ProjectExportPlanProject(
+                index: project.index,
+                projectPath: project.projectPath,
+                displayName: project.displayName,
+                validationStatus: project.validationStatus,
+                validationIssues: project.validationIssues,
+                expectedArtifacts: arts,
+                workflowSteps: project.workflowSteps,
+                manifestStatus: project.manifestStatus
+            )
+        }
     }
 
     private static func blockedSteps() -> [ProjectExportBlockedStep] {
@@ -349,7 +443,11 @@ enum ProjectExportPlanner {
             }
             return paths
         }
+        // PR99-edge-1: trim identically to the array branch so a stray leading
+        // space cannot make `project` resolve relative to CWD while `projects:[...]`
+        // resolves absolutely — the two input shapes must normalize the same way.
         let path = stringParam(params, "project", "path")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
             throw ExportPlanError.invalid("export_plan requires projects or project/path")
         }
@@ -362,9 +460,16 @@ enum ProjectExportPlanner {
         guard root.hasPrefix("/") else {
             throw ExportPlanError.invalid("output_root must be an absolute local path")
         }
+        // PR99-edge-4: `standardizedFileURL` collapses `..` segments, so a root
+        // like "/Users/x/../../etc/out" resolves to "/etc/out". We do NOT silently
+        // honor traversal — block roots that resolve under known system prefixes
+        // (beyond the existing /dev guard) so a malformed/abusive output_root
+        // cannot target system locations. The emitted output_root is always the
+        // standardized (post-collapse) path, which is what callers/executors see.
         let standardized = URL(fileURLWithPath: root).standardizedFileURL.path
-        guard !standardized.hasPrefix("/dev/") else {
-            throw ExportPlanError.invalid("output_root must not be under /dev")
+        let blockedPrefixes = ["/dev/", "/System/", "/private/var/db/", "/etc/", "/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/"]
+        guard !blockedPrefixes.contains(where: { standardized == String($0.dropLast()) || standardized.hasPrefix($0) }) else {
+            throw ExportPlanError.invalid("output_root must not resolve to a system location: \(standardized)")
         }
         return standardized
     }
@@ -391,11 +496,15 @@ enum ProjectExportPlanner {
     }
 
     private static func deterministicRunID(projects: [String], outputRoot: String, artifacts: [String]) -> String {
+        // PR99-C4: 64-bit FNV-1a, zero-padded to 16 hex. The prior 32-bit digest
+        // had a ~50% birthday-collision probability at only ~77k distinct inputs;
+        // run_id is part of the v1 manifest contract a future resume consumer keys
+        // off, so widen now while no reconciliation consumer has shipped.
         let seed = ([outputRoot] + projects + artifacts).joined(separator: "|")
-        let hash = seed.utf8.reduce(UInt32(2166136261)) { partial, byte in
-            (partial ^ UInt32(byte)) &* 16777619
+        let hash = seed.utf8.reduce(UInt64(14695981039346656037)) { partial, byte in
+            (partial ^ UInt64(byte)) &* 1099511628211
         }
-        return "export-\(String(hash, radix: 16))"
+        return "export-" + String(format: "%016llx", hash)
     }
 
     private static func sanitizeFileComponent(_ raw: String) -> String {

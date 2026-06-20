@@ -73,7 +73,10 @@ struct ProjectDispatcher {
         case "export_plan":
             do {
                 let plan = try ProjectExportPlanner.plan(params: params)
-                return toolTextResult(encodeJSON(plan, compact: true))
+                // PR99-C5 / C2-nit (HC): use the throwing encoder so an encode
+                // failure fails closed (isError=true) via the catch below instead
+                // of returning an error-shaped, non-manifest body as a success.
+                return toolTextResult(try encodeJSONStrict(plan, compact: true))
             } catch {
                 audit(command, phase: .rejected, reason: "invalid export plan")
                 return toolTextResult("export_plan invalid_params: \(error)", isError: true)
