@@ -1,0 +1,39 @@
+name: Publish MCP Registry Metadata
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync server.json version from release tag
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          jq --arg version "$VERSION" '.version = $version' server.json > server.json.tmp
+          mv server.json.tmp server.json
+
+      - name: Download MCP Publisher
+        run: |
+          set -euo pipefail
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/latest/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Validate metadata
+        run: ./mcp-publisher validate
+
+      - name: Login with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish metadata
+        run: ./mcp-publisher publish
