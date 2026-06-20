@@ -1,7 +1,7 @@
 {
   "name": "logic-pro-mcp",
   "display_name": "Logic Pro MCP Server",
-  "description": "Bidirectional, stateful control of Logic Pro from AI assistants. 9 tools + 14 resources + 7 templates across 7 native macOS channels (MCU, MIDI Key Commands, CoreMIDI, Scripter, Accessibility, CGEvent, AppleScript). GitHub Actions release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts should be audited via RELEASE-METADATA.json.",
+  "description": "Bidirectional, stateful control of Logic Pro from AI assistants. 9 tools + 16 resources + 10 templates across 7 native macOS channels (MCU, MIDI Key Commands, CoreMIDI, Scripter, Accessibility, CGEvent, AppleScript). GitHub Actions release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts should be audited via RELEASE-METADATA.json.",
   "version": "3.6.0",
   "author": "Isaac (MongLong0214)",
   "license": "MIT",
@@ -47,6 +47,8 @@
     "logic://stock-plugins",
     "logic://stock-plugins/census",
     "logic://stock-plugins/capabilities",
+    "logic://stock-instruments",
+    "logic://session-players",
     "logic://workflow-skills",
     "logic://workflow-skills/schema"
   ],
@@ -56,6 +58,9 @@
     "logic://mixer/{strip}",
     "logic://stock-plugins/{id}",
     "logic://stock-plugins/search?query={query}",
+    "logic://stock-instruments/{id}",
+    "logic://stock-instruments/search?query={query}",
+    "logic://session-players/{id}",
     "logic://workflow-skills/{id}",
     "logic://workflow-skills/search?query={query}"
   ]

@@ -107,6 +107,14 @@ extension ResourceHandlers {
             return try readStockPluginResource(uri: uri)
         }
 
+        if uri == "logic://stock-instruments" || uri.hasPrefix("logic://stock-instruments/") || uri.hasPrefix("logic://stock-instruments?") {
+            return try readStockInstrumentResource(uri: uri)
+        }
+
+        if uri == "logic://session-players" || uri.hasPrefix("logic://session-players/") || uri.hasPrefix("logic://session-players?") {
+            return try readSessionPlayerResource(uri: uri)
+        }
+
         if uri == "logic://workflow-skills" || uri.hasPrefix("logic://workflow-skills/") || uri.hasPrefix("logic://workflow-skills?") {
             return try readWorkflowSkillResource(uri: uri)
         }
@@ -327,6 +335,92 @@ extension ResourceHandlers {
         return try readStockPluginDetail(uri: uri, id: segment)
     }
 
+    /// Stock instrument intelligence routing. The search endpoint is scoped to
+    /// stock instruments only; Session Players have their own root/detail
+    /// namespace because the MCP write surface differs.
+    private static func readStockInstrumentResource(uri: String) throws -> ReadResource.Result {
+        try validateRawCatalogURIEncoding(uri, host: "stock-instruments")
+        guard let components = URLComponents(string: uri),
+              components.scheme == "logic",
+              components.host == "stock-instruments" else {
+            throw MCPError.invalidParams("Malformed stock instrument resource URI: \(uri)")
+        }
+        guard components.fragment == nil else {
+            throw MCPError.invalidParams("logic://stock-instruments resources do not accept URI fragments")
+        }
+        try validateCanonicalCatalogPath(components, host: "stock-instruments")
+        try validateCatalogSearchQuery(components, baseURI: "logic://stock-instruments")
+        let segments = components.path.split(separator: "/").map(String.init)
+        let canonicalPath = segments.isEmpty ? "" : "/" + segments.joined(separator: "/")
+        guard components.path == canonicalPath else {
+            throw MCPError.invalidParams("Malformed stock instrument resource path: \(components.path)")
+        }
+        let queryItems = components.queryItems ?? []
+        let unknownParams = queryItems.map(\.name).filter { $0 != "query" }
+
+        if segments.isEmpty {
+            guard queryItems.isEmpty else {
+                throw MCPError.invalidParams("logic://stock-instruments does not accept query parameters")
+            }
+            return readStockInstruments(uri: uri)
+        }
+        guard segments.count == 1 else {
+            throw MCPError.invalidParams("Unknown stock instrument resource path: \(components.path)")
+        }
+        let segment = segments[0]
+
+        if segment == "search" {
+            guard unknownParams.isEmpty else {
+                throw MCPError.invalidParams("Unsupported search parameters: \(unknownParams.joined(separator: ", "))")
+            }
+            let queries = queryItems.filter { $0.name == "query" }
+            guard queries.count <= 1 else {
+                throw MCPError.invalidParams("logic://stock-instruments/search accepts at most one query parameter")
+            }
+            return readStockInstrumentSearch(uri: uri, query: queries.first?.value ?? "")
+        }
+        guard queryItems.isEmpty else {
+            throw MCPError.invalidParams("logic://stock-instruments/\(segment) does not accept query parameters")
+        }
+        return try readStockInstrumentDetail(uri: uri, id: segment)
+    }
+
+    /// Session Player intelligence routing. No search endpoint is advertised
+    /// for this small category catalog; callers read root or a single ID.
+    private static func readSessionPlayerResource(uri: String) throws -> ReadResource.Result {
+        try validateRawCatalogURIEncoding(uri, host: "session-players")
+        guard let components = URLComponents(string: uri),
+              components.scheme == "logic",
+              components.host == "session-players" else {
+            throw MCPError.invalidParams("Malformed session player resource URI: \(uri)")
+        }
+        guard components.fragment == nil else {
+            throw MCPError.invalidParams("logic://session-players resources do not accept URI fragments")
+        }
+        try validateCanonicalCatalogPath(components, host: "session-players")
+        let segments = components.path.split(separator: "/").map(String.init)
+        let canonicalPath = segments.isEmpty ? "" : "/" + segments.joined(separator: "/")
+        guard components.path == canonicalPath else {
+            throw MCPError.invalidParams("Malformed session player resource path: \(components.path)")
+        }
+        let queryItems = components.queryItems ?? []
+
+        if segments.isEmpty {
+            guard queryItems.isEmpty else {
+                throw MCPError.invalidParams("logic://session-players does not accept query parameters")
+            }
+            return readSessionPlayers(uri: uri)
+        }
+        guard segments.count == 1 else {
+            throw MCPError.invalidParams("Unknown session player resource path: \(components.path)")
+        }
+        let segment = segments[0]
+        guard queryItems.isEmpty else {
+            throw MCPError.invalidParams("logic://session-players/\(segment) does not accept query parameters")
+        }
+        return try readSessionPlayerDetail(uri: uri, id: segment)
+    }
+
     /// Workflow skill routing. Parsed with `URLComponents` so path and query
     /// are matched exactly: unknown subpaths, nested segments, and stray query
     /// parameters fail closed instead of silently degrading to a search or a
@@ -456,6 +550,61 @@ extension ResourceHandlers {
             "generated_at": snapshot.generatedAt,
             "logic_version": snapshot.logicVersion ?? NSNull(),
             "catalog_source": snapshot.catalogSource,
+            "entry": jsonObject(entry),
+            "validation": jsonObject(snapshot.validation),
+        ])
+        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+    }
+
+    private static func readStockInstruments(uri: String) -> ReadResource.Result {
+        let json = encodeJSON(StockInstrumentCatalog.stockInstrumentSnapshot, compact: true)
+        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+    }
+
+    private static func readStockInstrumentDetail(uri: String, id: String) throws -> ReadResource.Result {
+        let snapshot = StockInstrumentCatalog.stockInstrumentSnapshot
+        guard let entry = StockInstrumentCatalog.entry(id: id, snapshot: snapshot) else {
+            throw MCPError.invalidParams("Unknown stock instrument id: \(id)")
+        }
+        let json = encodeJSONObject([
+            "schema_version": snapshot.schemaVersion,
+            "generated_at": snapshot.generatedAt,
+            "catalog_kind": snapshot.catalogKind,
+            "entry": jsonObject(entry),
+            "validation": jsonObject(snapshot.validation),
+        ])
+        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+    }
+
+    private static func readStockInstrumentSearch(uri: String, query: String) -> ReadResource.Result {
+        let snapshot = StockInstrumentCatalog.stockInstrumentSnapshot
+        let entries = StockInstrumentCatalog.search(query: query, snapshot: snapshot).map(jsonObject)
+        let json = encodeJSONObject([
+            "schema_version": snapshot.schemaVersion,
+            "generated_at": snapshot.generatedAt,
+            "catalog_kind": snapshot.catalogKind,
+            "query": query,
+            "entries": entries,
+            "result_count": entries.count,
+            "validation": jsonObject(snapshot.validation),
+        ])
+        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+    }
+
+    private static func readSessionPlayers(uri: String) -> ReadResource.Result {
+        let json = encodeJSON(StockInstrumentCatalog.sessionPlayerSnapshot, compact: true)
+        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+    }
+
+    private static func readSessionPlayerDetail(uri: String, id: String) throws -> ReadResource.Result {
+        let snapshot = StockInstrumentCatalog.sessionPlayerSnapshot
+        guard let entry = StockInstrumentCatalog.entry(id: id, snapshot: snapshot) else {
+            throw MCPError.invalidParams("Unknown session player id: \(id)")
+        }
+        let json = encodeJSONObject([
+            "schema_version": snapshot.schemaVersion,
+            "generated_at": snapshot.generatedAt,
+            "catalog_kind": snapshot.catalogKind,
             "entry": jsonObject(entry),
             "validation": jsonObject(snapshot.validation),
         ])

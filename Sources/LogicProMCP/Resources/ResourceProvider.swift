@@ -132,6 +132,20 @@ struct ResourceProvider {
             annotations: annotations(priority: 0.35)
         ),
         Resource(
+            name: "Stock Instrument Intelligence",
+            uri: "logic://stock-instruments",
+            description: "Read-only Logic stock instrument catalog with provenance, roles, and explicit limitations",
+            mimeType: "application/json",
+            annotations: annotations(priority: 0.42)
+        ),
+        Resource(
+            name: "Session Player Intelligence",
+            uri: "logic://session-players",
+            description: "Read-only Logic Session Player and Drummer catalog with documented provenance and unsupported actions",
+            mimeType: "application/json",
+            annotations: annotations(priority: 0.41)
+        ),
+        Resource(
             name: "Workflow Skills",
             uri: "logic://workflow-skills",
             description: "Validated read-only Logic Pro MCP workflow skill pack",
@@ -176,6 +190,24 @@ struct ResourceProvider {
             uriTemplate: "logic://stock-plugins/search?query={query}",
             name: "Stock Plugin Search",
             description: "Search stock plugin catalog entries by query",
+            mimeType: "application/json"
+        ),
+        Resource.Template(
+            uriTemplate: "logic://stock-instruments/{id}",
+            name: "Stock Instrument Detail",
+            description: "Single stock instrument catalog entry by stable ID",
+            mimeType: "application/json"
+        ),
+        Resource.Template(
+            uriTemplate: "logic://stock-instruments/search?query={query}",
+            name: "Stock Instrument Search",
+            description: "Search stock instrument catalog entries by query",
+            mimeType: "application/json"
+        ),
+        Resource.Template(
+            uriTemplate: "logic://session-players/{id}",
+            name: "Session Player Detail",
+            description: "Single Session Player or Drummer catalog entry by stable ID",
             mimeType: "application/json"
         ),
         Resource.Template(

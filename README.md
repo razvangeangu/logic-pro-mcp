@@ -56,8 +56,8 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 | Surface | Current source tree |
 |---------|---------------------|
 | MCP tools | 9 tools covering transport, tracks, mixer, MIDI, edit, navigation, project lifecycle, system health, and verified plugin apply-back |
-| Read resources | 14 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, library inventory, stock plugin intelligence, and workflow skills |
-| Resource templates | 7 templates for track, region, mixer-strip, stock plugin detail/search, and workflow detail/search lookup |
+| Read resources | 16 static resources for health, transport, tracks, mixer, markers, project metadata, MIDI ports, MCU state, library inventory, stock plugin/instrument intelligence, Session Players, and workflow skills |
+| Resource templates | 10 templates for track, region, mixer-strip, stock plugin detail/search, stock instrument detail/search, Session Player detail, and workflow detail/search lookup |
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
 | Verification line | v3.6.0 release tree: `1396` Swift tests, release build, targeted Logic Pro 12.2 exact-slot plugin insert proof, strict live E2E, and live tracks-resource readback |
 | Release state | Published stable `v3.6.0`; previous stable `v3.5.0` remains available for pinned installs |
@@ -211,7 +211,7 @@ See [Architecture](docs/ARCHITECTURE.md) for channel priorities, state flow, cac
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [Setup Guide](docs/SETUP.md) | End users | One-page install + Logic Pro integration, ~10 min |
-| [API Reference](docs/API.md) | End users, MCP clients | All 9 tools, 14 resources, 7 templates, 130+ operations |
+| [API Reference](docs/API.md) | End users, MCP clients | All 9 tools, 16 resources, 10 templates, 130+ operations |
 | [Verified Apply-Back Guide](docs/guides/verified-apply-back.md) | Agent workflow authors | `logic_plugins` inventory, exact-slot insertion, Compressor threshold write/readback, HC v2 failure handling |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | End users | Common failures and fixes |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Channel design, state flow, testing strategy |

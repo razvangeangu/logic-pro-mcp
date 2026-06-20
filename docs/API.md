@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **9 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **9 tools**, **16 resources**, and **10 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -31,7 +31,7 @@ All tool invocations use:
 
 ## Resource Catalog (Read-only)
 
-**14 static resources + 7 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
+**16 static resources + 10 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
 
 | URI | Content | Source |
 |-----|---------|--------|
@@ -47,6 +47,8 @@ All tool invocations use:
 | `logic://stock-plugins` | `{ schema_version, generated_at, logic_version, catalog_source, validation, entries[] }` — conservative Logic stock plugin catalog with per-entry truth labels | Static catalog + local Logic app census |
 | `logic://stock-plugins/census` | Catalog census metadata, state counts, validation state | Static catalog + local Logic app census |
 | `logic://stock-plugins/capabilities` | Truth labels, safe write capability labels, and read-only catalog contract | Static |
+| `logic://stock-instruments` | `{ schema_version, generated_at, catalog_kind, validation, entries[] }` — read-only Logic stock instrument catalog with roles, provenance, related stock plugin IDs, supported actions, and unsupported actions | Static documented/inferred catalog |
+| `logic://session-players` | `{ schema_version, generated_at, catalog_kind, validation, entries[] }` — read-only Session Player and Drummer category catalog with documented provenance and MCP limitations | Static documented catalog |
 | `logic://workflow-skills` | `{ schema_version, workflow_count, validation, workflows[] }` — validated workflow skill pack | Static validated pack |
 | `logic://workflow-skills/schema` | Workflow schema fields, evidence levels, mutation kinds, and resource names | Static |
 | `logic://tracks/{index}` | Single `TrackState` JSON | Cache — template |
@@ -54,6 +56,9 @@ All tool invocations use:
 | `logic://mixer/{strip}` | `{ cache_age_sec, fetched_at, data_source, strip: ChannelStripState }` | Cache — template |
 | `logic://stock-plugins/{id}` | Single stock plugin catalog entry by stable ID | Static catalog + local Logic app census — template |
 | `logic://stock-plugins/search?query={query}` | Search stock plugin catalog entries | Static catalog + local Logic app census — template |
+| `logic://stock-instruments/{id}` | Single stock instrument catalog entry by stable ID | Static documented/inferred catalog — template |
+| `logic://stock-instruments/search?query={query}` | Search stock instrument catalog entries by name, role, genre, kind, or notes | Static documented/inferred catalog — template |
+| `logic://session-players/{id}` | Single Session Player or Drummer category entry by stable ID | Static documented catalog — template |
 | `logic://workflow-skills/{id}` | Single workflow skill by stable ID | Static validated pack — template |
 | `logic://workflow-skills/search?query={query}` | Search workflow skills | Static validated pack — template |
 
@@ -81,6 +86,14 @@ The production census can only produce `inferred` and `manifested` (see `product
 `known_presets` stays empty unless preset names have provenance. For `manifested` entries it lists factory preset filenames harvested from the probed settings folder (capped at `preset_name_cap`, currently 12; the full set remains on disk at the provenance `source_path`).
 
 Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Insert paths are menu hints unless their own state says otherwise. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced. Entries with `safe_write_capabilities: "insert_only"` (Gain, Compressor, Channel EQ) match the `logic_plugins.insert_verified` allowlist for the v3.6.0 release line; everything else is discovery-only.
+
+### Stock Instrument and Session Player Intelligence
+
+`logic://stock-instruments` and `logic://session-players` are read-only planning catalogs. They do not create tracks, load patches, edit Session Player performance controls, or broaden the current write gates. Each entry uses schema `logic_pro_mcp_instrument_catalog.v1` and carries stable `id`, `kind`, `logic_track_type`, musical `roles`, `genre_tags`, `related_stock_plugin_ids`, `supported_actions`, `unsupported_actions`, `provenance`, and `notes`.
+
+Provenance sources are explicit: `verified_live`, `filesystem_scanned`, `documented`, or `inferred`, each with `confidence: high|medium|low` and evidence when the source is not inferred. The first catalog version is intentionally conservative: stock instruments are inferred from the stock plugin catalog unless separately documented; Session Player categories are documented from Apple Support pages for Session Players and Synth Player styles.
+
+Supported actions are planning or existing MCP operations such as `logic_tracks.create_instrument`, `logic_tracks.create_drummer`, `logic_tracks.set_instrument_after_track_selection`, and `logic_tracks.resolve_path`. Unsupported actions are explicit so clients do not infer hidden capabilities: direct stock-instrument parameter writes, automatic preset loading without a verified path, direct Session Player performance control, direct Chord Track editing, style forcing, and Session Player MIDI conversion are not provided by this surface.
 
 ### Workflow Skills
 
