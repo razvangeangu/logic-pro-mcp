@@ -171,7 +171,8 @@ import Foundation
 }
 
 @Test func testDegradedModeNoAXPermission() async {
-    // When AX channel is unavailable, MCU + KeyCmd should still work
+    // When AX channel is unavailable, mixer writes now fail closed while
+    // unrelated KeyCmd surfaces continue to work.
     let router = ChannelRouter()
     let ax = MockChannel(id: .accessibility, available: false)
     let mcu = MockChannel(id: .mcu)
@@ -180,9 +181,10 @@ import Foundation
     await router.register(mcu)
     await router.register(keyCmd)
 
-    // Mixer (MCU) should work
+    // Mixer write should fail closed because public volume writes now require
+    // AX strip-local verification.
     let mixResult = await router.route(operation: "mixer.set_volume")
-    #expect(mixResult.isSuccess)
+    #expect(!mixResult.isSuccess)
 
     // Edit (KeyCmd) should work
     let editResult = await router.route(operation: "edit.undo")

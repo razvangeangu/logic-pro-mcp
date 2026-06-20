@@ -1509,10 +1509,26 @@ private func makeAXBackedAccessibilityChannel(
 
     let volumeResult = await channel.execute(operation: "mixer.set_volume", params: ["index": "0", "value": "0.5"])
     #expect(volumeResult.isSuccess)
+    let volumeObj = decodeAccessibilityJSON(volumeResult.message)
+    #expect(volumeObj["success"] as? Bool == true)
+    #expect(volumeObj["verified"] as? Bool == true)
+    #expect(volumeObj["operation"] as? String == "mixer.set_volume")
+    #expect(volumeObj["verify_source"] as? String == "ax_slider")
+    #expect(volumeObj["observed_before"] as? Double == 0.8)
+    #expect(volumeObj["observed_after"] as? Double == 0.5)
+    #expect((volumeObj["target_identity"] as? [String: Any])?["track_index"] as? Int == 0)
     #expect((builder.attributeValue(fader, kAXValueAttribute as String) as? NSNumber)?.doubleValue == 0.5)
 
     let panResult = await channel.execute(operation: "mixer.set_pan", params: ["index": "0", "value": "-0.1"])
     #expect(panResult.isSuccess)
+    let panObj = decodeAccessibilityJSON(panResult.message)
+    #expect(panObj["success"] as? Bool == true)
+    #expect(panObj["verified"] as? Bool == true)
+    #expect(panObj["operation"] as? String == "mixer.set_pan")
+    #expect(panObj["verify_source"] as? String == "ax_slider")
+    #expect(panObj["observed_before"] as? Double == -0.25)
+    #expect(panObj["observed_after"] as? Double == -0.1)
+    #expect((panObj["target_identity"] as? [String: Any])?["control"] as? String == "pan")
     #expect((builder.attributeValue(pan, kAXValueAttribute as String) as? NSNumber)?.doubleValue == -0.1)
 
     let projectResult = await channel.execute(operation: "project.get_info", params: [:])
@@ -1566,6 +1582,54 @@ private func makeAXBackedAccessibilityChannel(
     let stripState = try decoder.decode(ChannelStripState.self, from: Data(stripResult.message.utf8))
     #expect(abs(stripState.volume - 0.4) < 0.002)
     #expect(stripState.pan == 0.0)
+}
+
+@Test func testAccessibilityChannelMixerWritesUseLogic12RawSliderRanges() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(396)
+    let window = builder.element(397)
+    let mixer = builder.element(398)
+    let strip = builder.element(399)
+    let fader = builder.element(400)
+    let pan = builder.element(401)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [mixer])
+    builder.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
+    builder.setAttribute(mixer, kAXDescriptionAttribute as String, "Mixer")
+    builder.setChildren(mixer, [strip])
+    builder.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setChildren(strip, [fader, pan])
+
+    builder.setAttribute(fader, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(fader, kAXDescriptionAttribute as String, "Volume Fader")
+    builder.setAttribute(fader, kAXValueAttribute as String, 70)
+    builder.setAttribute(fader, kAXMinValueAttribute as String, 0)
+    builder.setAttribute(fader, kAXMaxValueAttribute as String, 233)
+
+    builder.setAttribute(pan, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(pan, kAXDescriptionAttribute as String, "Pan")
+    builder.setAttribute(pan, kAXValueAttribute as String, 0)
+    builder.setAttribute(pan, kAXMinValueAttribute as String, -64)
+    builder.setAttribute(pan, kAXMaxValueAttribute as String, 63)
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+
+    let volumeResult = await channel.execute(operation: "mixer.set_volume", params: ["index": "0", "value": "0.5"])
+    #expect(volumeResult.isSuccess)
+    let volumeObj = decodeAccessibilityJSON(volumeResult.message)
+    #expect(volumeObj["verified"] as? Bool == true)
+    #expect(abs((volumeObj["observed_before"] as? Double ?? 0.0) - 0.4) < 0.01)
+    #expect(abs((volumeObj["observed_after"] as? Double ?? 0.0) - 0.5) < 0.01)
+    #expect(abs(((builder.attributeValue(fader, kAXValueAttribute as String) as? NSNumber)?.doubleValue ?? 0.0) - 98.0) < 0.01)
+
+    let panResult = await channel.execute(operation: "mixer.set_pan", params: ["index": "0", "value": "-0.5"])
+    #expect(panResult.isSuccess)
+    let panObj = decodeAccessibilityJSON(panResult.message)
+    #expect(panObj["verified"] as? Bool == true)
+    #expect(panObj["observed_before"] as? Double == 0.0)
+    #expect(abs((panObj["observed_after"] as? Double ?? 0.0) - (-0.5)) < 0.01)
+    #expect(abs(((builder.attributeValue(pan, kAXValueAttribute as String) as? NSNumber)?.doubleValue ?? 0.0) - (-32.0)) < 0.01)
 }
 
 @Test func testAccessibilityChannelMixerPopulatesAXPluginSlotsAndSource() async throws {
@@ -1796,10 +1860,16 @@ private func makeAXBackedAccessibilityChannel(
     #expect(!stripOutOfRange.isSuccess)
     #expect(stripOutOfRange.message.contains("out of range"))
 
+    let wrongTrackWrite = await channel.execute(operation: "mixer.set_volume", params: ["index": "2", "value": "0.5"])
+    #expect(!wrongTrackWrite.isSuccess)
+    #expect(wrongTrackWrite.message.contains("\"error\":\"element_not_found\""))
+    #expect(wrongTrackWrite.message.contains("\"track\":2"))
+    #expect((builder.attributeValue(fader, kAXValueAttribute as String) as? NSNumber)?.doubleValue == 0.9)
+
     let missingPan = await channel.execute(operation: "mixer.set_pan", params: ["index": "0", "value": "-0.2"])
     #expect(!missingPan.isSuccess)
     #expect(missingPan.message.contains("\"error\":\"element_not_found\""))
-    #expect(missingPan.message.contains("could not find pan control"))
+    #expect(missingPan.message.contains("Cannot locate pan control"))
 
     let projectBuilder = FakeAXRuntimeBuilder()
     let projectApp = projectBuilder.element(330)
