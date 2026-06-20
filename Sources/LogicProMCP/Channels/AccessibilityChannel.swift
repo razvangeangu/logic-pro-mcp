@@ -1705,8 +1705,7 @@ actor AccessibilityChannel: Channel {
         func dismissDialog() {
             let cancelButtons = AXHelpers.findAllDescendants(of: saveSheet, role: "AXButton", runtime: runtime.ax)
             for btn in cancelButtons {
-                let title = AXHelpers.getTitle(btn, runtime: runtime.ax) ?? ""
-                if title.contains("취소") || title.contains("Cancel") {
+                if AXLocalePolicy.elementMatches(btn, AXLocalePolicy.cancelButton, runtime: runtime.ax) {
                     AXHelpers.performAction(btn, kAXPressAction, runtime: runtime.ax)
                     return
                 }
@@ -1729,8 +1728,7 @@ actor AccessibilityChannel: Channel {
         let buttons = AXHelpers.findAllDescendants(of: saveSheet, role: "AXButton", runtime: runtime.ax)
         var saveClicked = false
         for button in buttons {
-            let title = AXHelpers.getTitle(button, runtime: runtime.ax) ?? ""
-            if title.contains("저장") || title.contains("Save") || title == "확인" || title == "OK" {
+            if AXLocalePolicy.elementMatches(button, AXLocalePolicy.saveConfirmationButton, runtime: runtime.ax) {
                 AXHelpers.performAction(button, kAXPressAction, runtime: runtime.ax)
                 saveClicked = true
                 break

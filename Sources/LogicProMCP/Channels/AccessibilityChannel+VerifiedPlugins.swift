@@ -49,11 +49,6 @@ extension AccessibilityChannel {
         _ runtime: AXLogicProElements.Runtime
     ) async -> (mixer: AXUIElement?, result: MixerRevealResult)
 
-    private static let showMixerMenuCandidates: [(bar: String, item: String)] = [
-        ("View", "Show Mixer"),
-        ("보기", "믹서 보기"),
-    ]
-
     /// Build the `plugins[]` array for one strip from its drift-safe slot
     /// enumeration. Pure + deterministic so it can be unit-tested against a
     /// strip element without a full mixer fixture.
@@ -196,7 +191,7 @@ extension AccessibilityChannel {
         _ = ProcessUtils.Runtime.production.activateLogicPro()
 
         let menuAttempt = await clickTopLevelMenuItemViaAXMenuClick(
-            candidates: showMixerMenuCandidates,
+            candidates: [AXLocalePolicy.showMixerMenuPath],
             runtime: runtime,
             maxEnabledRetries: 1,
             focusBetweenAttempts: false
@@ -1187,12 +1182,6 @@ extension AccessibilityChannel {
 
     // MARK: - insert_verified live drivers
 
-    /// Window-menu "hide all plug-in windows" (menu-bar, menu-item) pairs.
-    private static let hidePluginWindowsMenuCandidates: [(bar: String, item: String)] = [
-        ("윈도우", "모든 플러그인 윈도우 가리기"),
-        ("Window", "Hide All Plug-in Windows"),
-    ]
-
     /// Production exact-slot popup insert driver. Drives the target insert slot's
     /// own popup menu and returns a structured outcome plus a `select_trace`
     /// diagnostic dict. This is the default path that issues real slot/menu
@@ -1375,7 +1364,7 @@ extension AccessibilityChannel {
     @discardableResult
     private static func hideAllPluginWindows(runtime: AXLogicProElements.Runtime) async -> Bool {
         let result = await clickTopLevelMenuItemViaAXMenuClick(
-            candidates: hidePluginWindowsMenuCandidates,
+            candidates: [AXLocalePolicy.hidePluginWindowsMenuPath],
             runtime: runtime,
             maxEnabledRetries: 1,
             focusBetweenAttempts: false
@@ -1384,7 +1373,7 @@ extension AccessibilityChannel {
     }
 
     private static func clickTopLevelMenuItemViaAXMenuClick(
-        candidates: [(bar: String, item: String)],
+        candidates: [AXLocalePolicy.MenuPath],
         runtime: AXLogicProElements.Runtime,
         maxEnabledRetries: Int,
         focusBetweenAttempts: Bool
@@ -1393,7 +1382,7 @@ extension AccessibilityChannel {
         for attempt in 0..<maxEnabledRetries {
             _ = ProcessUtils.Runtime.production.activateLogicPro()
             for candidate in candidates {
-                guard let barItem = menuBarItem(titled: candidate.bar, runtime: runtime) else {
+                guard let barItem = menuBarItem(matching: candidate.bar, runtime: runtime) else {
                     continue
                 }
 
@@ -1402,7 +1391,12 @@ extension AccessibilityChannel {
                 }
                 try? await Task.sleep(for: .milliseconds(120))
 
-                guard let item = menuItem(titled: candidate.item, under: barItem, runtime: runtime.ax) else {
+                guard let item = menuItem(
+                    matching: candidate.item,
+                    mode: candidate.itemMode,
+                    under: barItem,
+                    runtime: runtime.ax
+                ) else {
                     AXMouseHelper.pressEscape()
                     continue
                 }
@@ -1429,13 +1423,11 @@ extension AccessibilityChannel {
     }
 
     private static func menuBarItem(
-        titled title: String,
+        matching labels: AXLocalePolicy.LabelSet,
         runtime: AXLogicProElements.Runtime
     ) -> AXUIElement? {
         guard let menuBar = AXLogicProElements.getMenuBar(runtime: runtime) else { return nil }
-        return AXHelpers.getChildren(menuBar, runtime: runtime.ax).first {
-            AXHelpers.getTitle($0, runtime: runtime.ax) == title
-        }
+        return AXLocalePolicy.findMenuBarItem(in: menuBar, matching: labels, runtime: runtime.ax)
     }
 
     private static func openMenuBarItem(
@@ -1449,44 +1441,12 @@ extension AccessibilityChannel {
     }
 
     private static func menuItem(
-        titled title: String,
+        matching labels: AXLocalePolicy.LabelSet,
+        mode: AXLocalePolicy.MatchMode = .exact,
         under menuBarItem: AXUIElement,
         runtime: AXHelpers.Runtime
     ) -> AXUIElement? {
-        if let direct = AXHelpers.findDescendant(
-            of: menuBarItem,
-            role: kAXMenuItemRole as String,
-            title: title,
-            maxDepth: 5,
-            runtime: runtime
-        ) {
-            return direct
-        }
-        return AXHelpers.findAllDescendants(
-            of: menuBarItem,
-            role: kAXMenuItemRole as String,
-            maxDepth: 5,
-            runtime: runtime
-        ).first { item in
-            AXHelpers.getTitle(item, runtime: runtime) == title
-                || AXHelpers.getDescription(item, runtime: runtime) == title
-        }
-    }
-
-    private static func menuItem(
-        titleStartingWith prefix: String,
-        under menuBarItem: AXUIElement,
-        runtime: AXHelpers.Runtime
-    ) -> AXUIElement? {
-        AXHelpers.findAllDescendants(
-            of: menuBarItem,
-            role: kAXMenuItemRole as String,
-            maxDepth: 5,
-            runtime: runtime
-        ).first { item in
-            (AXHelpers.getTitle(item, runtime: runtime) ?? "").hasPrefix(prefix)
-                || (AXHelpers.getDescription(item, runtime: runtime) ?? "").hasPrefix(prefix)
-        }
+        AXLocalePolicy.findMenuItem(under: menuBarItem, matching: labels, mode: mode, runtime: runtime)
     }
 
     /// Outcome of a menu-item probe/click.
@@ -1500,32 +1460,33 @@ extension AccessibilityChannel {
         runtime: AXLogicProElements.Runtime = .production
     ) async -> MenuItemScriptResult {
         _ = ProcessUtils.Runtime.production.activateLogicPro()
-        for bar in ["편집", "Edit"] {
-            guard let barItem = menuBarItem(titled: bar, runtime: runtime) else {
+        for candidate in [AXLocalePolicy.editUndoMenuPath] {
+            guard let barItem = menuBarItem(matching: candidate.bar, runtime: runtime) else {
                 continue
             }
-            for prefix in ["실행 취소", "Undo"] {
-                if !openMenuBarItem(barItem, runtime: runtime.ax) {
-                    continue
-                }
-                try? await Task.sleep(for: .milliseconds(120))
-                guard let item = menuItem(
-                    titleStartingWith: prefix, under: barItem, runtime: runtime.ax
-                ) else {
-                    AXMouseHelper.pressEscape()
-                    continue
-                }
-                if let enabled: Bool = AXHelpers.getAttribute(
-                    item, kAXEnabledAttribute, runtime: runtime.ax
-                ), enabled == false {
-                    AXMouseHelper.pressEscape()
-                    return .disabled
-                }
-                if clickElementCenter(item, runtime: runtime.ax) {
-                    return .ok
-                }
-                AXMouseHelper.pressEscape()
+            if !openMenuBarItem(barItem, runtime: runtime.ax) {
+                continue
             }
+            try? await Task.sleep(for: .milliseconds(120))
+            guard let item = menuItem(
+                matching: candidate.item,
+                mode: candidate.itemMode,
+                under: barItem,
+                runtime: runtime.ax
+            ) else {
+                AXMouseHelper.pressEscape()
+                continue
+            }
+            if let enabled: Bool = AXHelpers.getAttribute(
+                item, kAXEnabledAttribute, runtime: runtime.ax
+            ), enabled == false {
+                AXMouseHelper.pressEscape()
+                return .disabled
+            }
+            if clickElementCenter(item, runtime: runtime.ax) {
+                return .ok
+            }
+            AXMouseHelper.pressEscape()
         }
         return .missing
     }
@@ -1897,16 +1858,9 @@ extension AccessibilityChannel {
             (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXMenuItemRole as String)
                 && elementCenter($0, runtime: runtime) != nil
         }
-        let preferredTitles = [
-            "스테레오", "Stereo",
-            "모노", "Mono",
-            "모노->스테레오", "Mono->Stereo",
-            "듀얼 모노", "Dual Mono",
-        ]
-        for title in preferredTitles {
+        for labels in AXLocalePolicy.pluginFormatLeafPriority {
             if let match = items.first(where: {
-                AXHelpers.getTitle($0, runtime: runtime) == title
-                    || AXHelpers.getDescription($0, runtime: runtime) == title
+                AXLocalePolicy.elementMatches($0, labels, runtime: runtime)
             }) {
                 return match
             }
@@ -2086,16 +2040,16 @@ extension AccessibilityChannel {
         var found = false
         for window in windows {
             let title = AXHelpers.getTitle(window, runtime: runtime.ax) ?? ""
-            guard title.contains("위치") || title.localizedCaseInsensitiveContains("Go to Position") else {
+            guard AXLocalePolicy.goToPositionDialogTitle.matches(title, mode: .contains) else {
                 continue
             }
             found = true
-            if let cancel = AXHelpers.findDescendant(
-                of: window, role: kAXButtonRole as String, title: "취소",
-                maxDepth: 4, runtime: runtime.ax
-            ) ?? AXHelpers.findDescendant(
-                of: window, role: kAXButtonRole as String, title: "Cancel",
-                maxDepth: 4, runtime: runtime.ax
+            if let cancel = AXLocalePolicy.findDescendant(
+                of: window,
+                role: kAXButtonRole as String,
+                matching: AXLocalePolicy.cancelButton,
+                maxDepth: 4,
+                runtime: runtime.ax
             ) {
                 if AXHelpers.performAction(cancel, kAXPressAction as String, runtime: runtime.ax)
                     || clickElementCenter(cancel, runtime: runtime.ax) {
