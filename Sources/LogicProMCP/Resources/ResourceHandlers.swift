@@ -115,6 +115,10 @@ extension ResourceHandlers {
             return try readSessionPlayerResource(uri: uri)
         }
 
+        if uri == "logic://workflow-plans" || uri.hasPrefix("logic://workflow-plans/") || uri.hasPrefix("logic://workflow-plans?") {
+            return try readWorkflowPlanResource(uri: uri)
+        }
+
         if uri == "logic://workflow-skills" || uri.hasPrefix("logic://workflow-skills/") || uri.hasPrefix("logic://workflow-skills?") {
             return try readWorkflowSkillResource(uri: uri)
         }
@@ -427,6 +431,41 @@ extension ResourceHandlers {
         return try readSessionPlayerDetail(uri: uri, id: segment)
     }
 
+    /// Workflow plan routing. These resources are dry-run only: they parse a
+    /// prompt into a JSON plan and never call tools, channels, or router.
+    private static func readWorkflowPlanResource(uri: String) throws -> ReadResource.Result {
+        try validateRawCatalogURIEncoding(uri, host: "workflow-plans")
+        guard let components = URLComponents(string: uri),
+              components.scheme == "logic",
+              components.host == "workflow-plans" else {
+            throw MCPError.invalidParams("Malformed workflow plan resource URI: \(uri)")
+        }
+        guard components.fragment == nil else {
+            throw MCPError.invalidParams("logic://workflow-plans resources do not accept URI fragments")
+        }
+        try validateCanonicalCatalogPath(components, host: "workflow-plans")
+        try validateWorkflowPlanPromptQuery(components, baseURI: "logic://workflow-plans/session")
+
+        let segments = components.path.split(separator: "/").map(String.init)
+        let canonicalPath = segments.isEmpty ? "" : "/" + segments.joined(separator: "/")
+        guard components.path == canonicalPath else {
+            throw MCPError.invalidParams("Malformed workflow plan resource path: \(components.path)")
+        }
+        guard segments == ["session"] else {
+            throw MCPError.invalidParams("Unknown workflow plan resource path: \(components.path)")
+        }
+
+        let prompts = (components.queryItems ?? []).filter { $0.name == "prompt" }
+        guard prompts.count == 1 else {
+            throw MCPError.invalidParams("logic://workflow-plans/session requires exactly one prompt query parameter")
+        }
+        let prompt = prompts[0].value ?? ""
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw MCPError.invalidParams("logic://workflow-plans/session prompt must be non-empty")
+        }
+        return readSessionPlan(uri: uri, prompt: prompt)
+    }
+
     /// Workflow skill routing. Parsed with `URLComponents` so path and query
     /// are matched exactly: unknown subpaths, nested segments, and stray query
     /// parameters fail closed instead of silently degrading to a search or a
@@ -524,6 +563,21 @@ extension ResourceHandlers {
         }
     }
 
+    private static func validateWorkflowPlanPromptQuery(_ components: URLComponents, baseURI: String) throws {
+        guard let rawQuery = components.percentEncodedQuery else {
+            throw MCPError.invalidParams("\(baseURI) requires a prompt query parameter")
+        }
+        guard percentEscapesAreWellFormed(rawQuery) else {
+            throw MCPError.invalidParams("Malformed prompt query encoding: \(rawQuery)")
+        }
+        for rawPair in rawQuery.split(separator: "&", omittingEmptySubsequences: false) {
+            let parts = rawPair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.first.map(String.init) == "prompt" else {
+                throw MCPError.invalidParams("Unsupported workflow plan parameters in \(baseURI): \(rawPair)")
+            }
+        }
+    }
+
     private static func percentEscapesAreWellFormed(_ raw: String) -> Bool {
         var index = raw.startIndex
         while index < raw.endIndex {
@@ -539,6 +593,11 @@ extension ResourceHandlers {
             index = raw.index(after: second)
         }
         return true
+    }
+
+    private static func readSessionPlan(uri: String, prompt: String) -> ReadResource.Result {
+        let json = encodeJSON(SessionPlanGenerator.plan(prompt: prompt), compact: true)
+        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
     }
 
     private static func readStockPlugins(uri: String) -> ReadResource.Result {

@@ -47,6 +47,8 @@ struct ResourceProviderTests {
         #expect(uris.contains("logic://stock-instruments/{id}"))
         #expect(uris.contains("logic://stock-instruments/search?query={query}"))
         #expect(uris.contains("logic://session-players/{id}"))
+        #expect(uris.contains("logic://workflow-plans/session?prompt={prompt}"))
+
         #expect(uris.contains("logic://workflow-skills/{id}"))
         #expect(uris.contains("logic://workflow-skills/search?query={query}"))
     }
@@ -85,6 +87,8 @@ struct ResourceProviderTests {
             "logic://session-players/logic.session_player.drummer",
             "logic://workflow-skills/logic.workflow.plugins.stock_chain_plan",
             "logic://workflow-skills/search?query=plugin",
+            "logic://workflow-plans/session?prompt=16-bar%20funk%20in%20E%20minor%20at%20110%20BPM",
+
         ]
         for uri in probes {
             do {

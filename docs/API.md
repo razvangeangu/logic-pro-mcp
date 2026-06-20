@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **10 tools**, **18 resources**, and **10 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **10 tools**, **18 resources**, and **11 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -32,7 +32,7 @@ All tool invocations use:
 
 ## Resource Catalog (Read-only)
 
-**18 static resources + 10 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
+**18 static resources + 11 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
 
 | URI | Content | Source |
 |-----|---------|--------|
@@ -62,6 +62,8 @@ All tool invocations use:
 | `logic://stock-instruments/{id}` | Single stock instrument catalog entry by stable ID | Static documented/inferred catalog — template |
 | `logic://stock-instruments/search?query={query}` | Search stock instrument catalog entries by name, role, genre, kind, or notes | Static documented/inferred catalog — template |
 | `logic://session-players/{id}` | Single Session Player or Drummer category entry by stable ID | Static documented catalog — template |
+| `logic://workflow-plans/session?prompt={prompt}` | Planning-only composition/session dry-run plan from a natural-language musical prompt | Static parser + public command census — template |
+
 | `logic://workflow-skills/{id}` | Single workflow skill by stable ID | Static validated pack — template |
 | `logic://workflow-skills/search?query={query}` | Search workflow skills | Static validated pack — template |
 
@@ -97,6 +99,18 @@ Clients should prefer stable `id` values and treat `display_name` as user-facing
 Provenance sources are explicit: `verified_live`, `filesystem_scanned`, `documented`, or `inferred`, each with `confidence: high|medium|low` and evidence when the source is not inferred. The first catalog version is intentionally conservative: stock instruments are inferred from the stock plugin catalog unless separately documented; Session Player categories are documented from Apple Support pages for Session Players and Synth Player styles.
 
 Supported actions are planning or existing MCP operations such as `logic_tracks.create_instrument`, `logic_tracks.create_drummer`, `logic_tracks.set_instrument_after_track_selection`, and `logic_tracks.resolve_path`. Unsupported actions are explicit so clients do not infer hidden capabilities: direct stock-instrument parameter writes, automatic preset loading without a verified path, direct Session Player performance control, direct Chord Track editing, style forcing, and Session Player MIDI conversion are not provided by this surface.
+### Planning-Only Session Plans
+
+`logic://workflow-plans/session?prompt={prompt}` converts a musical prompt into a structured dry-run plan. It never calls tools, creates projects, creates tracks, imports MIDI, or mutates Logic. Every proposed tool step carries `executed:false`, `mutates`, expected readback fields, and confirmation metadata when mutation would be required later.
+
+Returned fields include `schema: "logic_pro_mcp_session_plan.v1"`, `parsed_intent`, `sections`, `chord_plan`, `track_plan`, `workflow_steps`, `unsupported_or_risky_steps`, `required_confirmations`, `tool_surface_validation`, and `next_safe_action: "review_plan"`. Musical decisions are prompt-derived or heuristic and are not verified truth.
+
+Examples:
+
+- `logic://workflow-plans/session?prompt=16-bar%20funk%20in%20E%20minor%20at%20110%20BPM%20with%20drums%2C%20bass%2C%20guitar%2C%20and%20keys`
+- `logic://workflow-plans/session?prompt=32-bar%20cinematic%20cue%20in%20D%20minor%20with%20strings%2C%20brass%2C%20and%20percussion`
+- `logic://workflow-plans/session?prompt=8-bar%20lo-fi%20loop%20at%2075%20BPM%20in%20Bb%20major`
+
 
 ### Workflow Skills
 

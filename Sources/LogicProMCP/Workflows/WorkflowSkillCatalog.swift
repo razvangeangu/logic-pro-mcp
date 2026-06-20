@@ -424,6 +424,7 @@ enum WorkflowSkillCatalog {
             midiIdeaSketch(),
             arrangementMarkerPlan(),
             gainStagingPrep(),
+            compositionSessionPlan(),
             stockPluginChainPlan(),
             stockPluginGuardedInsert(),
             bounceReadiness(),
@@ -794,6 +795,46 @@ enum WorkflowSkillCatalog {
                 "set_pan is a relative V-Pot write on the MCU path (pan_write_mode: relative_vpot); do not treat it as an absolute target setter.",
             ],
             mutationKind: .guardedMutation
+        )
+    }
+
+    private static func compositionSessionPlan() -> WorkflowSkill {
+        makeWorkflow(
+            id: "logic.workflow.composition.session_plan",
+            title: "Planning-Only Composition Session Plan",
+            intent: "Turn a natural-language musical prompt into a structured, non-mutating Logic session plan.",
+            scope: "Dry-run resource read only; proposes later MCP steps but never executes tools.",
+            prerequisites: ["Natural-language musical prompt", "Client reviews plan before any mutation"],
+            allowedTools: [],
+            allowedResources: ["logic://workflow-plans/session?prompt={prompt}"],
+            requiredConfirmations: [],
+            stateChecks: [
+                stateCheck("session_plan", "logic://workflow-plans/session?prompt={prompt}", ["schema", "parsed_intent", "workflow_steps"], true),
+            ],
+            steps: [
+                readStep(
+                    "read_session_plan",
+                    "Generate dry-run session plan from prompt",
+                    "logic://workflow-plans/session?prompt={prompt}",
+                    ["schema", "parsed_intent", "sections", "chord_plan", "track_plan", "workflow_steps"]
+                ),
+            ],
+            verification: WorkflowVerification(
+                evidence: ["resource_json", "tool_surface_validation", "executed_false_on_all_steps"],
+                successFields: ["schema", "status", "tool_surface_validation", "next_safe_action"],
+                liveEvidenceFile: nil
+            ),
+            failureModes: ["empty prompt", "unsupported prompt request", "degraded instrument catalog dependency", "invalid proposed command census"],
+            rollbackOrRecovery: "No rollback required; planning resource is read-only and reports proposed steps with executed:false.",
+            evidenceLevel: .deterministic,
+            productionReady: true,
+            dependsOn: [],
+            limitations: [
+                "Does not create projects, tracks, regions, MIDI files, or audio.",
+                "Instrument suggestions degrade to heuristics until Issue #31 catalog resources are served.",
+                "Musical choices are heuristic planning aids, not verified musical truth.",
+            ],
+            mutationKind: .readOnly
         )
     }
 

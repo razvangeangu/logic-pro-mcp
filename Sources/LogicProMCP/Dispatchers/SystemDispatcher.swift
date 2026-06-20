@@ -424,6 +424,7 @@ struct SystemDispatcher {
                   logic://mixer/{strip}           — Single channel strip
                   logic://stock-plugins/{id}      — Stock plugin detail
                   logic://stock-plugins/search?query={query} — Stock plugin search
+                  logic://workflow-plans/session?prompt={prompt} — Dry-run session plan
                   logic://workflow-skills/{id}    — Workflow skill detail
                   logic://workflow-skills/search?query={query} — Workflow skill search
 

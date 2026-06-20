@@ -61,6 +61,8 @@ private let serverResourceText = sharedResourceText
         "logic://stock-instruments/{id}",
         "logic://stock-instruments/search?query={query}",
         "logic://session-players/{id}",
+        "logic://workflow-plans/session?prompt={prompt}",
+
         "logic://workflow-skills/{id}",
         "logic://workflow-skills/search?query={query}",
     ]

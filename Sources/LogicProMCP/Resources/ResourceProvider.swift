@@ -225,6 +225,12 @@ struct ResourceProvider {
             mimeType: "application/json"
         ),
         Resource.Template(
+            uriTemplate: "logic://workflow-plans/session?prompt={prompt}",
+            name: "Session Plan Dry Run",
+            description: "Planning-only composition/session workflow plan from a natural-language musical prompt",
+            mimeType: "application/json"
+        ),
+        Resource.Template(
             uriTemplate: "logic://workflow-skills/{id}",
             name: "Workflow Skill Detail",
             description: "Single workflow skill by stable ID",
