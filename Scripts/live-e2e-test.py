@@ -17,9 +17,12 @@ import threading
 import time
 import uuid
 
+from logic_session_bootstrap import bootstrap_fresh_logic_session
+
 BINARY = os.environ.get("LOGIC_PRO_MCP_BINARY", ".build/release/LogicProMCP")
 STRICT_LIVE = os.environ.get("LOGIC_PRO_MCP_STRICT_LIVE", "0") == "1"
 TRANSPORT = os.environ.get("LOGIC_PRO_MCP_E2E_TRANSPORT", "tmux" if STRICT_LIVE else "popen")
+FRESH_BOOTSTRAP = os.environ.get("LOGIC_PRO_MCP_BOOTSTRAP_FRESH", "1" if STRICT_LIVE else "0") == "1"
 TIMEOUT = 10
 
 
@@ -514,6 +517,7 @@ def main():
     print("══════════════════════════════════════════════════════")
     print(f" Binary: {BINARY}")
     print(f" Strict live mode: {'on' if STRICT_LIVE else 'off'}")
+    print(f" Fresh bootstrap: {'on' if FRESH_BOOTSTRAP else 'off'}")
     print(f" Transport: {TRANSPORT}")
 
     try:
@@ -533,6 +537,31 @@ def main():
         client.close()
         sys.exit(1)
     print("  \033[0;32m✔\033[0m MCP initialized")
+
+    if FRESH_BOOTSTRAP:
+        section("§0.5 Fresh Session Bootstrap")
+        bootstrap = bootstrap_fresh_logic_session(
+            call_tool=lambda tool, command, params=None, timeout=None: call_tool(
+                client, tool, command, params, timeout=timeout
+            ),
+            read_resource=lambda uri: read_resource(client, uri),
+            tool_text=tool_text,
+            resource_text=resource_text,
+            strict_live=STRICT_LIVE,
+        )
+        if bootstrap.ok:
+            summary = bootstrap.as_dict()
+            language = summary["ui"].get("detected_language") or "unknown"
+            track_count = summary["tracks"].get("count", 0)
+            print(
+                f"  \033[0;32m✔\033[0m Fresh session ready "
+                f"({language} UI, track_count={track_count})"
+            )
+        else:
+            print("  \033[0;31m✘\033[0m Fresh session bootstrap blocked")
+            print(f"    {json.dumps(bootstrap.as_dict(), ensure_ascii=False)}")
+            client.close()
+            sys.exit(2)
 
     # ═══════════════════════════════════════════════════════════════
     # §1 Protocol Contract (10 tests)
