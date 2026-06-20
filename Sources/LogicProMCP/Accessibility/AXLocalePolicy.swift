@@ -12,6 +12,12 @@ enum AXLocalePolicy {
         case exact
         case prefix
         case contains
+        /// Whole-string equality WITHOUT whitespace trimming, case-insensitive.
+        /// Preserves the raw `desc == label` / `desc.lowercased() == label`
+        /// semantics used by structural control-bar / track-header locators that
+        /// historically compared the AX description verbatim. Distinct from
+        /// `.exact`, which trims surrounding whitespace.
+        case exactStrict
     }
 
     struct LabelSet: Sendable, Equatable {
@@ -38,6 +44,16 @@ enum AXLocalePolicy {
 
         func matches(_ text: String?, mode: MatchMode = .exact) -> Bool {
             guard let text else { return false }
+
+            // `.exactStrict` compares the verbatim string (no trim) so it
+            // preserves the historical `desc == label` semantics exactly. All
+            // other modes trim surrounding whitespace, matching the existing
+            // migrated policy behavior.
+            if mode == .exactStrict {
+                guard !text.isEmpty else { return false }
+                return labels.contains { text.caseInsensitiveCompare($0) == .orderedSame }
+            }
+
             let candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !candidate.isEmpty else { return false }
 
@@ -55,7 +71,20 @@ enum AXLocalePolicy {
                         of: label,
                         options: [.caseInsensitive, .diacriticInsensitive]
                     ) != nil
+                case .exactStrict:
+                    candidate.caseInsensitiveCompare(label) == .orderedSame
                 }
+            }
+        }
+
+        /// True if `haystack` contains ANY label as a case-insensitive substring.
+        /// Preserves the existing `combined.contains(token)` control flow where a
+        /// pre-built, already-lowercased aggregate string is scanned for any of a
+        /// set of localized tokens. The caller keeps its own AX traversal and
+        /// structural ordering; only the token list moves into policy.
+        func containsAny(in haystack: String) -> Bool {
+            labels.contains { label in
+                haystack.range(of: label, options: [.caseInsensitive, .diacriticInsensitive]) != nil
             }
         }
     }
@@ -132,6 +161,134 @@ enum AXLocalePolicy {
         LabelSet(canonical: "Mono->Stereo", variants: ["모노->스테레오"], rationale: "Plugin format leaf after exact plugin selection."),
         LabelSet(canonical: "Dual Mono", variants: ["듀얼 모노"], rationale: "Plugin format leaf after exact plugin selection."),
     ]
+
+    // MARK: - Read-only locator labels (Phase 2, issue #60)
+    //
+    // The label sets below back read-only AX locators / state extractors. None
+    // of them gate a State-A success: they identify which control to read, or
+    // classify a description string. Mutating callers still verify via
+    // independent readback. They are centralized here so the EN/KO token pairs
+    // live in one audited place; each preserves the EXACT match mode and token
+    // order of its original call site.
+
+    // --- Transport control identification (read-only, `.contains` semantics) ---
+
+    static let transportPlayControl = LabelSet(
+        canonical: "play",
+        variants: ["재생"],
+        rationale: "Identifies the Play transport control when reading TransportState; read-only."
+    )
+
+    static let transportRecordControl = LabelSet(
+        canonical: "record",
+        variants: ["녹음"],
+        rationale: "Identifies the Record transport control; excluded by arm-tokens at the call site; read-only."
+    )
+
+    static let transportCycleControl = LabelSet(
+        canonical: "cycle",
+        variants: ["loop", "사이클"],
+        rationale: "Identifies the Cycle/Loop transport control; read-only."
+    )
+
+    static let transportMetronomeControl = LabelSet(
+        canonical: "metronome",
+        variants: ["click", "메트로놈", "클릭"],
+        rationale: "Identifies the Metronome/Click transport control; read-only."
+    )
+
+    /// Record-arm disambiguation tokens. Their PRESENCE on a Record control
+    /// EXCLUDES it from being treated as the transport Record button.
+    static let transportRecordArmExclusion = LabelSet(
+        canonical: "arm",
+        variants: ["활성화"],
+        rationale: "Negative guard: distinguishes per-track record-arm from transport Record; read-only."
+    )
+
+    static let tempoFieldLabel = LabelSet(
+        canonical: "tempo",
+        variants: ["bpm", "템포"],
+        rationale: "Identifies a tempo text field/slider description; read-only."
+    )
+
+    static let playheadPositionFieldLabel = LabelSet(
+        canonical: "position",
+        variants: ["재생헤드 위치"],
+        rationale: "Identifies the playhead position text field description; read-only."
+    )
+
+    // --- Control-bar slider locators (read-only, verbatim `.exactStrict`) ---
+
+    static let controlBarGroupLabel = LabelSet(
+        canonical: "control bar",
+        variants: ["컨트롤 막대"],
+        rationale: "Identifies the control-bar AXGroup by description; read-only locator."
+    )
+
+    static let barSliderLabel = LabelSet(
+        canonical: "bar",
+        variants: ["마디"],
+        rationale: "Identifies the bar slider in the control bar; verbatim description match; read-only."
+    )
+
+    static let beatSliderLabel = LabelSet(
+        canonical: "beat",
+        variants: ["비트"],
+        rationale: "Identifies the beat slider in the control bar; verbatim description match; read-only."
+    )
+
+    /// Tempo slider description for `findTempoSlider` (verbatim `.exactStrict`).
+    /// Includes `bpm` because that locator explicitly accepts `desc == "bpm"`.
+    static let tempoSliderLabel = LabelSet(
+        canonical: "tempo",
+        variants: ["bpm", "템포"],
+        rationale: "Identifies the tempo slider; verbatim (lowercased) description match; read-only."
+    )
+
+    /// Tempo slider description for the read-only `extractTransportState` slider
+    /// loop, which historically matched ONLY `tempo`/`템포` via `.contains`
+    /// (NOT `bpm`). Kept distinct from `tempoSliderLabel` to preserve behavior.
+    static let tempoSliderContainsLabel = LabelSet(
+        canonical: "tempo",
+        variants: ["템포"],
+        rationale: "Identifies the tempo slider in TransportState extraction; substring match without bpm; read-only."
+    )
+
+    // --- Track-header read-only locators ---
+
+    static let trackMuteButton = LabelSet(
+        canonical: "Mute",
+        variants: ["음소거"],
+        rationale: "Identifies the track Mute button by description substring; read-only state extraction."
+    )
+
+    static let trackSoloButton = LabelSet(
+        canonical: "Solo",
+        variants: ["솔로"],
+        rationale: "Identifies the track Solo button by description substring; read-only state extraction."
+    )
+
+    static let trackRecordButton = LabelSet(
+        canonical: "Record",
+        variants: ["Rec", "녹음 활성화", "레코드 활성화"],
+        rationale: "Identifies the track Record/arm button by description substring; read-only state extraction."
+    )
+
+    /// Per-track record-enable AXCheckBox description. Verbatim match preserves
+    /// the original `desc == "녹음 활성화" || ...` locator semantics.
+    static let trackRecordEnableCheckbox = LabelSet(
+        canonical: "녹음 활성화",
+        variants: ["Record Enable", "Record"],
+        rationale: "Locates the per-track record-enable AXCheckBox; verbatim description match; read-only locator."
+    )
+
+    // --- Plugin Setting popup locator (read-only, `.contains`) ---
+
+    static let settingPopupValue = LabelSet(
+        canonical: "Preset",
+        variants: ["프리셋", "Default", "기본"],
+        rationale: "Identifies the plugin Setting AXPopUpButton by its value substring; read-only locator."
+    )
 
     static let showMixerMenuPath = MenuPath(bar: viewMenuBar, item: showMixerMenuItem)
     static let hidePluginWindowsMenuPath = MenuPath(bar: windowMenuBar, item: hideAllPluginWindowsMenuItem)

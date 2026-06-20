@@ -320,13 +320,14 @@ enum AXValueExtractors {
             let pressed = extractButtonState(control, runtime: runtime) ?? false
             let descLower = desc.lowercased()
 
-            if descLower.contains("play") || descLower.contains("재생") {
+            if AXLocalePolicy.transportPlayControl.containsAny(in: descLower) {
                 state.isPlaying = pressed
-            } else if (descLower.contains("record") || descLower.contains("녹음")) && !descLower.contains("arm") && !descLower.contains("활성화") {
+            } else if AXLocalePolicy.transportRecordControl.containsAny(in: descLower)
+                && !AXLocalePolicy.transportRecordArmExclusion.containsAny(in: descLower) {
                 state.isRecording = pressed
-            } else if descLower.contains("cycle") || descLower.contains("loop") || descLower.contains("사이클") {
+            } else if AXLocalePolicy.transportCycleControl.containsAny(in: descLower) {
                 state.isCycleEnabled = pressed
-            } else if descLower.contains("metronome") || descLower.contains("click") || descLower.contains("메트로놈") || descLower.contains("클릭") {
+            } else if AXLocalePolicy.transportMetronomeControl.containsAny(in: descLower) {
                 state.isMetronomeEnabled = pressed
             }
         }
@@ -339,11 +340,11 @@ enum AXValueExtractors {
             let desc = AXHelpers.getDescription(text, runtime: runtime) ?? ""
             let descLower = desc.lowercased()
 
-            if descLower.contains("tempo") || descLower.contains("bpm") || descLower.contains("템포") {
+            if AXLocalePolicy.tempoFieldLabel.containsAny(in: descLower) {
                 if let tempo = Double(value.replacingOccurrences(of: " BPM", with: "")) {
                     state.tempo = tempo
                 }
-            } else if descLower.contains("position") || descLower.contains("재생헤드 위치") || value.contains(".") && value.contains(":") == false {
+            } else if AXLocalePolicy.playheadPositionFieldLabel.containsAny(in: descLower) || value.contains(".") && value.contains(":") == false {
                 // Bar.Beat.Division.Tick format
                 if value.filter({ $0 == "." }).count >= 2 {
                     state.position = value
@@ -359,11 +360,11 @@ enum AXValueExtractors {
         var beatValue: Int?
         for slider in sliders {
             let desc = (AXHelpers.getDescription(slider, runtime: runtime) ?? "").lowercased()
-            if (desc.contains("tempo") || desc.contains("템포")), let tempo = extractSliderValue(slider, runtime: runtime) {
+            if AXLocalePolicy.tempoSliderContainsLabel.containsAny(in: desc), let tempo = extractSliderValue(slider, runtime: runtime) {
                 state.tempo = tempo
-            } else if desc.contains("마디") || desc.contains("bar") {
+            } else if AXLocalePolicy.barSliderLabel.containsAny(in: desc) {
                 barValue = Int(extractSliderValue(slider, runtime: runtime) ?? 0)
-            } else if desc.contains("비트") || desc.contains("beat") {
+            } else if AXLocalePolicy.beatSliderLabel.containsAny(in: desc) {
                 beatValue = Int(extractSliderValue(slider, runtime: runtime) ?? 0)
             }
         }
@@ -424,12 +425,12 @@ enum AXValueExtractors {
         prefix: String,
         runtime: AXHelpers.Runtime
     ) -> Bool? {
-        let localizedKeywords: [String: [String]] = [
-            "Mute": ["Mute", "음소거"],
-            "Solo": ["Solo", "솔로"],
-            "Record": ["Record", "Rec", "녹음 활성화", "레코드 활성화"]
+        let localizedKeywords: [String: AXLocalePolicy.LabelSet] = [
+            "Mute": AXLocalePolicy.trackMuteButton,
+            "Solo": AXLocalePolicy.trackSoloButton,
+            "Record": AXLocalePolicy.trackRecordButton
         ]
-        let keywords = localizedKeywords[prefix] ?? [prefix]
+        let labels = localizedKeywords[prefix]
         let controls = AXHelpers.findAllDescendants(of: header, role: kAXButtonRole, maxDepth: 4, runtime: runtime)
             + AXHelpers.findAllDescendants(of: header, role: kAXCheckBoxRole, maxDepth: 4, runtime: runtime)
         for control in controls {
@@ -438,7 +439,8 @@ enum AXValueExtractors {
                     ?? AXHelpers.getTitle(control, runtime: runtime)
                     ?? ""
             ).lowercased()
-            if keywords.contains(where: { desc.contains($0.lowercased()) }) {
+            let matched = labels?.containsAny(in: desc) ?? desc.contains(prefix.lowercased())
+            if matched {
                 return extractButtonState(control, runtime: runtime)
             }
         }

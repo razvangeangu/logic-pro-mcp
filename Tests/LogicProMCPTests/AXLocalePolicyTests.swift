@@ -429,6 +429,161 @@ struct AXLocalePolicyTests {
         )
         #expect(shallow == nil)
     }
+
+    // MARK: - Phase 2 (#60) read-only locator label sets
+
+    /// `.exactStrict` mode preserves verbatim (no-trim) equality used by the
+    /// control-bar / track-header structural locators. A title with surrounding
+    /// whitespace must NOT match under `.exactStrict` (whereas `.exact` would).
+    @Test("exactStrict matches verbatim and does not trim whitespace")
+    func exactStrictNoTrim() {
+        #expect(AXLocalePolicy.barSliderLabel.matches("bar", mode: .exactStrict))
+        #expect(AXLocalePolicy.barSliderLabel.matches("마디", mode: .exactStrict))
+        // Case-insensitive (the EN locator lowercased before comparing).
+        #expect(AXLocalePolicy.barSliderLabel.matches("BAR", mode: .exactStrict))
+        // No trimming: padded titles are rejected, preserving raw `==` behavior.
+        #expect(!AXLocalePolicy.barSliderLabel.matches(" bar ", mode: .exactStrict))
+        #expect(!AXLocalePolicy.barSliderLabel.matches("마디 ", mode: .exactStrict))
+        // Empty / nil fail closed.
+        #expect(!AXLocalePolicy.barSliderLabel.matches("", mode: .exactStrict))
+        #expect(!AXLocalePolicy.barSliderLabel.matches(nil, mode: .exactStrict))
+        // Unrelated token rejected.
+        #expect(!AXLocalePolicy.barSliderLabel.matches("beat", mode: .exactStrict))
+    }
+
+    /// Transport control identification label sets (read-only) resolve EN+KO and
+    /// reject unrelated descriptions. `containsAny` mirrors the original
+    /// lowercased-substring control flow.
+    @Test("transport control labels resolve English and Korean via containsAny")
+    func transportControlLabels() {
+        #expect(AXLocalePolicy.transportPlayControl.containsAny(in: "play"))
+        #expect(AXLocalePolicy.transportPlayControl.containsAny(in: "재생"))
+        #expect(!AXLocalePolicy.transportPlayControl.containsAny(in: "record"))
+
+        #expect(AXLocalePolicy.transportRecordControl.containsAny(in: "record"))
+        #expect(AXLocalePolicy.transportRecordControl.containsAny(in: "녹음"))
+        #expect(!AXLocalePolicy.transportRecordControl.containsAny(in: "play"))
+
+        #expect(AXLocalePolicy.transportCycleControl.containsAny(in: "cycle"))
+        #expect(AXLocalePolicy.transportCycleControl.containsAny(in: "loop"))
+        #expect(AXLocalePolicy.transportCycleControl.containsAny(in: "사이클"))
+        #expect(!AXLocalePolicy.transportCycleControl.containsAny(in: "metronome"))
+
+        #expect(AXLocalePolicy.transportMetronomeControl.containsAny(in: "metronome"))
+        #expect(AXLocalePolicy.transportMetronomeControl.containsAny(in: "click"))
+        #expect(AXLocalePolicy.transportMetronomeControl.containsAny(in: "메트로놈"))
+        #expect(AXLocalePolicy.transportMetronomeControl.containsAny(in: "클릭"))
+        #expect(!AXLocalePolicy.transportMetronomeControl.containsAny(in: "cycle"))
+    }
+
+    /// The record-arm exclusion tokens distinguish a per-track record-arm control
+    /// from the transport Record button. Their presence must be detectable in
+    /// both EN and KO so the negative guard fires.
+    @Test("record-arm exclusion tokens resolve English and Korean")
+    func recordArmExclusionLabels() {
+        #expect(AXLocalePolicy.transportRecordArmExclusion.containsAny(in: "record arm"))
+        #expect(AXLocalePolicy.transportRecordArmExclusion.containsAny(in: "녹음 활성화"))
+        // A plain transport Record description does not trip the exclusion.
+        #expect(!AXLocalePolicy.transportRecordArmExclusion.containsAny(in: "record"))
+        #expect(!AXLocalePolicy.transportRecordArmExclusion.containsAny(in: "녹음"))
+    }
+
+    /// Tempo/position field labels (read-only text fields). The tempo FIELD set
+    /// includes `bpm`; pin EN+KO resolution and a clean rejection.
+    @Test("tempo and position field labels resolve English and Korean")
+    func tempoAndPositionFieldLabels() {
+        #expect(AXLocalePolicy.tempoFieldLabel.containsAny(in: "tempo"))
+        #expect(AXLocalePolicy.tempoFieldLabel.containsAny(in: "bpm"))
+        #expect(AXLocalePolicy.tempoFieldLabel.containsAny(in: "템포"))
+        #expect(!AXLocalePolicy.tempoFieldLabel.containsAny(in: "position"))
+
+        #expect(AXLocalePolicy.playheadPositionFieldLabel.containsAny(in: "position"))
+        #expect(AXLocalePolicy.playheadPositionFieldLabel.containsAny(in: "재생헤드 위치"))
+        #expect(!AXLocalePolicy.playheadPositionFieldLabel.containsAny(in: "tempo"))
+    }
+
+    /// The transport-extraction tempo SLIDER set must NOT include `bpm` (the
+    /// historical `.contains` loop matched only tempo/템포). This pins the
+    /// deliberate distinction from `tempoSliderLabel` (the exact slider locator,
+    /// which DOES accept bpm). Mixing them up would widen the extraction loop.
+    @Test("tempo slider contains-label excludes bpm but exact slider label keeps it")
+    func tempoSliderLabelSplit() {
+        // Read-only extraction loop: tempo/템포 only.
+        #expect(AXLocalePolicy.tempoSliderContainsLabel.containsAny(in: "tempo"))
+        #expect(AXLocalePolicy.tempoSliderContainsLabel.containsAny(in: "템포"))
+        #expect(!AXLocalePolicy.tempoSliderContainsLabel.containsAny(in: "bpm"))
+
+        // Exact locator (findTempoSlider): tempo/템포/bpm all match verbatim.
+        #expect(AXLocalePolicy.tempoSliderLabel.matches("tempo", mode: .exactStrict))
+        #expect(AXLocalePolicy.tempoSliderLabel.matches("템포", mode: .exactStrict))
+        #expect(AXLocalePolicy.tempoSliderLabel.matches("bpm", mode: .exactStrict))
+        #expect(!AXLocalePolicy.tempoSliderLabel.matches("position", mode: .exactStrict))
+    }
+
+    /// Control-bar / bar / beat slider locators resolve EN+KO verbatim and
+    /// reject unrelated descriptions.
+    @Test("control-bar and bar/beat slider labels resolve English and Korean")
+    func controlBarAndSliderLabels() {
+        #expect(AXLocalePolicy.controlBarGroupLabel.matches("control bar", mode: .exactStrict))
+        #expect(AXLocalePolicy.controlBarGroupLabel.matches("컨트롤 막대", mode: .exactStrict))
+        #expect(!AXLocalePolicy.controlBarGroupLabel.matches("transport", mode: .exactStrict))
+
+        #expect(AXLocalePolicy.barSliderLabel.matches("bar", mode: .exactStrict))
+        #expect(AXLocalePolicy.barSliderLabel.matches("마디", mode: .exactStrict))
+
+        #expect(AXLocalePolicy.beatSliderLabel.matches("beat", mode: .exactStrict))
+        #expect(AXLocalePolicy.beatSliderLabel.matches("비트", mode: .exactStrict))
+        #expect(!AXLocalePolicy.beatSliderLabel.matches("bar", mode: .exactStrict))
+    }
+
+    /// Track-header Mute/Solo/Record button labels (read-only state extraction)
+    /// resolve EN+KO via substring and reject the wrong control.
+    @Test("track mute/solo/record button labels resolve English and Korean")
+    func trackButtonLabels() {
+        #expect(AXLocalePolicy.trackMuteButton.containsAny(in: "mute channel strip"))
+        #expect(AXLocalePolicy.trackMuteButton.containsAny(in: "음소거"))
+        #expect(!AXLocalePolicy.trackMuteButton.containsAny(in: "solo"))
+
+        #expect(AXLocalePolicy.trackSoloButton.containsAny(in: "solo"))
+        #expect(AXLocalePolicy.trackSoloButton.containsAny(in: "솔로"))
+        #expect(!AXLocalePolicy.trackSoloButton.containsAny(in: "mute"))
+
+        #expect(AXLocalePolicy.trackRecordButton.containsAny(in: "record"))
+        #expect(AXLocalePolicy.trackRecordButton.containsAny(in: "rec"))
+        #expect(AXLocalePolicy.trackRecordButton.containsAny(in: "녹음 활성화"))
+        #expect(AXLocalePolicy.trackRecordButton.containsAny(in: "레코드 활성화"))
+        #expect(!AXLocalePolicy.trackRecordButton.containsAny(in: "mute"))
+    }
+
+    /// The per-track record-enable AXCheckBox label set is matched VERBATIM
+    /// (case-sensitive) at the call site via `labels.contains(desc)`. Pin the
+    /// exact label tokens and ordering so the locator can never silently drift.
+    @Test("record-enable checkbox labels are verbatim and ordered")
+    func recordEnableCheckboxLabels() {
+        let labels = AXLocalePolicy.trackRecordEnableCheckbox.labels
+        #expect(labels == ["녹음 활성화", "Record Enable", "Record"])
+        // Verbatim contains (the production call site uses `labels.contains(desc)`).
+        #expect(labels.contains("녹음 활성화"))
+        #expect(labels.contains("Record Enable"))
+        #expect(labels.contains("Record"))
+        // Case-sensitive: a lowercased English variant is NOT in the set.
+        #expect(!labels.contains("record"))
+        #expect(!labels.contains("record enable"))
+    }
+
+    /// The plugin Setting popup value label set is matched VERBATIM
+    /// (case-sensitive substring) at the call site. Pin EN+KO tokens and order.
+    @Test("setting popup value labels are verbatim and ordered")
+    func settingPopupValueLabels() {
+        let labels = AXLocalePolicy.settingPopupValue.labels
+        #expect(labels == ["Preset", "프리셋", "Default", "기본"])
+        #expect(labels.contains(where: { "#0 Preset 1".contains($0) }))
+        #expect(labels.contains(where: { "프리셋 없음".contains($0) }))
+        #expect(labels.contains(where: { "Default Setting".contains($0) }))
+        #expect(labels.contains(where: { "기본 설정".contains($0) }))
+        // Case-sensitive substring: lowercased English must not match.
+        #expect(!labels.contains(where: { "preset".contains($0) }))
+    }
 }
 
 /// Replicates the first-match priority loop from
