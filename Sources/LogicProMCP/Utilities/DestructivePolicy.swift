@@ -17,7 +17,13 @@ enum DestructivePolicy {
         switch command {
         case "quit", "close":
             return .l3
-        case "save_as", "bounce", "open":
+        case "save_as", "bounce", "open", "export_run", "export_resume":
+            // #27 Phase 2 — guarded export execution opens projects and fires
+            // bounces, so it carries the same L2 destructive weight as the
+            // individual open/bounce ops it composes. (The per-run `confirmed`
+            // gate is enforced inside ProjectExportExecutor, not via the
+            // dispatcher confirmation prompt, so a confirmed:false run returns a
+            // State-C `confirmation_required` envelope rather than the L2 prompt.)
             return .l2
         case "save", "new", "launch", "cleanup_apply":
             // cleanup_apply mutates the project (executes a confirmed cleanup

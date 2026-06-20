@@ -11,7 +11,7 @@ struct ProjectDispatcher {
 
     static let tool = commandTool(
         name: "logic_project",
-        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions, export_plan, audit, cleanup_plan, cleanup_apply. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); export_plan -> { projects: [absolute .logicx], output_root: String, artifacts?: [bounce|stem|preview|variant], collision_policy?: fail_if_exists|skip_existing } dry-run only; audit -> read-only project/session audit JSON; cleanup_plan -> read-only serializable cleanup plan JSON; cleanup_apply -> { step_id: String, confirmed: Bool, names?: \"newA,newB\" (CSV aligned to the step's target track indices) | new_name?: String (single target) } executes ONE supported mutating cleanup-plan step (currently rename_* only) through the existing track.rename path so it inherits AX readback + Honest Contract State A/B/C. Fails closed (State C) when confirmed!=true, the step is unknown/unsupported/non-mutating, the audit shows stale/occluded inventory or a track readback gap, or rename names are missing/mismatched. Deletion steps are unsupported by construction and are always refused; others -> {}.",
+        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions, export_plan, export_run, export_resume, audit, cleanup_plan, cleanup_apply. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); export_plan -> { projects: [absolute .logicx], output_root: String, artifacts?: [bounce|stem|preview|variant], collision_policy?: fail_if_exists|skip_existing } dry-run only; export_run -> { ...same as export_plan, confirmed: Bool } GUARDED execution (re-plans, opens, verifies project identity by readback, bounces, verifies each artifact on disk via logic_audio, records logic_pro_mcp_export_run.v1 with HC State A/B/C; never overwrites under fail_if_exists); export_resume -> { ...same as export_run } idempotent resume (skips already-present+verified artifacts, produces the rest); audit -> read-only project/session audit JSON; cleanup_plan -> read-only serializable cleanup plan JSON; cleanup_apply -> { step_id: String, confirmed: Bool, names?: \"newA,newB\" (CSV aligned to the step's target track indices) | new_name?: String (single target) } executes ONE supported mutating cleanup-plan step (currently rename_* only) through the existing track.rename path so it inherits AX readback + Honest Contract State A/B/C. Fails closed (State C) when confirmed!=true, the step is unknown/unsupported/non-mutating, the audit shows stale/occluded inventory or a track readback gap, or rename names are missing/mismatched. Deletion steps are unsupported by construction and are always refused; others -> {}.",
         commandDescription: "Project command to execute"
     )
 
@@ -29,7 +29,11 @@ struct ProjectDispatcher {
         executeLifecycleScript: (String) async -> LifecycleExecution = { script in
             await executeAppleScript(script)
         },
-        sleep: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }
+        sleep: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) },
+        // #27 Phase 2 — injectable export-execution seams (identity readback,
+        // audio analysis, file polling). Defaults to the live wiring; tests
+        // inject fakes so the guarded state machine is unit-testable headless.
+        exportOptions: ProjectExportExecutor.Options = .live()
     ) async -> CallTool.Result {
         func destructiveConfirmation(for command: String) -> (confirmed: Bool, error: CallTool.Result?) {
             switch strictBoolParam(params, "confirmed") {
@@ -80,6 +84,50 @@ struct ProjectDispatcher {
             } catch {
                 audit(command, phase: .rejected, reason: "invalid export plan")
                 return toolTextResult("export_plan invalid_params: \(error)", isError: true)
+            }
+
+        case "export_run", "export_resume":
+            // #27 Phase 2 — GUARDED EXECUTION. Validate the plan inputs first so
+            // a malformed request fails closed with `invalid_params` (rejected,
+            // no mutation) exactly like export_plan, instead of reaching the
+            // executor. The executor then re-runs the planner itself for the
+            // authoritative manifest — the dispatcher's call is purely the
+            // caller-input gate.
+            do {
+                _ = try ProjectExportPlanner.plan(params: params)
+            } catch {
+                audit(command, phase: .rejected, reason: "invalid export plan")
+                return toolTextResult("\(command) invalid_params: \(error)", isError: true)
+            }
+            // The destructive confirmation is enforced INSIDE the executor (it
+            // must be checked per-run before any open/bounce). Audit the
+            // execution intent here; the executor's confirmed:false path returns
+            // a State-C-shaped `confirmation_required` run with no side effects.
+            audit(command, phase: .executed)
+            let run = await ProjectExportExecutor.run(
+                params: params,
+                router: router,
+                resume: command == "export_resume",
+                options: exportOptions
+            )
+            // Lifecycle cache invalidation: a guarded run opens projects, so the
+            // cache may now reflect the LAST opened project. Clear it on any run
+            // that actually opened something, matching open/close semantics.
+            if run.projects.contains(where: { $0.opened }) {
+                await cache.clearProjectState()
+            }
+            do {
+                // HC truthfulness: a run that produced ZERO verified artifacts and
+                // had failures (or the confirmation gate) is isError=true on the
+                // wire so a client never reads a failed/blocked run as success.
+                let body = try encodeJSONStrict(run, compact: true)
+                let isError = run.status == "failed" || run.status == "confirmation_required"
+                return toolTextResult(body, isError: isError)
+            } catch {
+                return toolTextResult(
+                    "{\"success\":false,\"error\":\"\(command) encode failed: \(jsonStringEscape(error.localizedDescription))\"}",
+                    isError: true
+                )
             }
 
         case "new":
@@ -266,7 +314,7 @@ struct ProjectDispatcher {
 
         default:
             return toolTextResult(
-                "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions, export_plan, audit, cleanup_plan, cleanup_apply",
+                "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions, export_plan, export_run, export_resume, audit, cleanup_plan, cleanup_apply",
                 isError: true
             )
         }

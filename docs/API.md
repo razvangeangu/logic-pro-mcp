@@ -802,6 +802,8 @@ Example:
 | `is_running` | — | `"true"` or `"false"` | (direct) | L0 |
 | `get_regions` | — | JSON `RegionInfo[]` | Accessibility (read-only arrange area scan) | L0 |
 | `export_plan` | `{ projects?: string[], project?: string, output_root: string, artifacts?: string[], collision_policy?: "fail_if_exists"\|"skip_existing" }` | JSON `logic_pro_mcp_export_manifest.v1` dry-run plan | (direct, read-only filesystem checks) | L0 |
+| `export_run` | `{ ...same as export_plan, confirmed: bool }` | JSON `logic_pro_mcp_export_run.v1` guarded-execution result; per-artifact HC State A/B/C | AppleScript (open) + MIDIKeyCommands (bounce) + AudioAnalyzer (on-disk verify) | L2 |
+| `export_resume` | `{ ...same as export_run }` | JSON `logic_pro_mcp_export_run.v1` (`mode:"resume"`); idempotent — skips already present+verified artifacts | AppleScript + MIDIKeyCommands + AudioAnalyzer | L2 |
 | `audit` | — | `logic_pro_mcp_project_audit.v1` JSON | Cache/resource provenance synthesis | L0 |
 | `cleanup_plan` | — | `logic_pro_mcp_project_cleanup_plan.v1` JSON | Derived from audit; no mutation | L0 |
 | `cleanup_apply` | `{ step_id: string, confirmed: bool, names?: "newA,newB" \| new_name?: string }` | HC JSON; State A only after the underlying `track.rename` AX readback confirms | Re-derives audit → routes one supported mutating step through `track.rename` | L1 |
@@ -833,6 +835,21 @@ Example:
 Use `logic://project/audit` or `logic_project audit` to inspect a messy session without mutation. The audit reports `schema: "logic_pro_mcp_project_audit.v1"`, `status`, `read_only: true`, evidence/provenance sections, deterministic findings, and an embedded `cleanup_plan`.
 
 Use `logic://project/cleanup-plan` or `logic_project cleanup_plan` when a client only needs the serializable plan. Each step includes `target_identifier`, `proposed_operation`, `risk_level`, `required_confirmation`, `expected_readback`, `rollback_or_recovery`, `stop_condition`, `supported_by_current_tools`, and `mutates_project`.
+
+### Guarded export execution (`export_run` / `export_resume`)
+
+`export_plan` only describes a dry run. `export_run` performs the GUARDED execution of that same plan; `export_resume` is the idempotent re-entry of the identical state machine. Both return `schema: "logic_pro_mcp_export_run.v1"`.
+
+State machine, per project, per artifact:
+
+1. The planner is re-run so the contract you reviewed in `export_plan` is the contract that executes.
+2. `confirmed: true` is mandatory. Without it the run does nothing and returns `status: "confirmation_required"` (a State-C-shaped `confirmed:false` envelope, `isError:true`).
+3. Artifacts the plan reports as already present **and** independently re-verifiable on disk are **skipped** (this is what makes `export_resume` resumable). A leftover that is present but silent/zero/short is downgraded to State B, not skipped as a false success.
+4. For every artifact that still needs producing: the project is opened (existing open path), the **observed** front-document identity is read back and must match the planned project path (fail closed on mismatch — the wrong project is never bounced), the bounce is triggered (existing bounce path), the artifact file is polled for (bounded), then verified with `logic_audio` / `AudioAnalyzer` (exists + non-zero + non-silent + sane duration).
+5. Honest Contract per artifact: **State A** = bounce fired and on-disk verification passed (`verified:true`); **State B** = bounce fired but the artifact could not be verified (never appeared, or analysis warned/failed) — success uncertain; **State C** = a hard failure (confirmation gate, open/identity/bounce error, or collision-policy block).
+6. The plan's collision policy is honoured: under `fail_if_exists` an artifact that already exists is **never** overwritten — it fails closed (State C `overwrite_blocked`) instead of bouncing over the existing file.
+
+Run-level `status` is `completed` (all artifacts State A), `partial` (some State A, some uncertain/failed), `failed` (nothing reached State A), or `confirmation_required`. Each artifact carries `evidence` (size, duration, sample-rate, channels, silence-ratio, peak, verification status/reasons) so a client can audit exactly why State A was (or was not) granted.
 
 The first milestone is intentionally read-only: it can propose rename, mute/solo/arm reset, marker planning, or mixer-refresh steps, but it never executes them. Unsupported or unsafe cleanup actions are labelled `supported_by_current_tools:false`; deletion is never proposed by default.
 
