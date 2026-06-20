@@ -137,19 +137,6 @@ enum AXLocalePolicy {
     static let hidePluginWindowsMenuPath = MenuPath(bar: windowMenuBar, item: hideAllPluginWindowsMenuItem)
     static let editUndoMenuPath = MenuPath(bar: editMenuBar, item: undoMenuItemPrefix, itemMode: .prefix)
 
-    static func elementLabel(_ element: AXUIElement, runtime: AXHelpers.Runtime) -> String? {
-        for text in [
-            AXHelpers.getTitle(element, runtime: runtime),
-            AXHelpers.getDescription(element, runtime: runtime),
-        ] {
-            if let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !trimmed.isEmpty {
-                return trimmed
-            }
-        }
-        return nil
-    }
-
     static func elementMatches(
         _ element: AXUIElement,
         _ labels: LabelSet,
