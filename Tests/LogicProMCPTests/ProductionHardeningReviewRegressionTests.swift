@@ -9,7 +9,7 @@ private func expectInvalidParamsWithoutRouting(
     label: String
 ) async {
     let text = sharedToolText(result)
-    #expect(result.isError == true, "\(label) must reject before routing; got: \(text)")
+    #expect(result.isError!, "\(label) must reject before routing; got: \(text)")
     #expect(text.contains("invalid_params"), "\(label) must return invalid_params; got: \(text)")
     for channel in channels {
         #expect(await channel.executedOps.isEmpty, "\(label) must not route on invalid input")
@@ -302,7 +302,7 @@ struct ProductionHardeningReviewRegressionTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == false, "numeric string value should remain compatible")
+        #expect(!(result.isError!), "numeric string value should remain compatible")
         #expect(await mcu.executedOps.map(\.0) == ["track.select"])
         let scripterOps = await scripter.executedOps
         #expect(scripterOps.count == 1)

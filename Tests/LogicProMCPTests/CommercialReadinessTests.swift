@@ -17,7 +17,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let ops = await mcu.executedOps
     #expect(ops.first?.0 == "transport.goto_position")
     #expect(ops.first?.1["position"] == "9.1.1.1")
@@ -35,7 +35,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let ops = await ax.executedOps
     #expect(ops.first?.0 == "transport.set_cycle_range")
     #expect(ops.first?.1["start"] == "2.1.1.1")
@@ -49,7 +49,7 @@ private let toolText = sharedToolText
         router: ChannelRouter(),
         cache: StateCache()
     )
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(toolText(result).contains("Unknown transport command"))
 }
 
@@ -73,7 +73,7 @@ private let toolText = sharedToolText
         cache: cache
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let ops = await ax.executedOps
     #expect(ops.first?.0 == "transport.goto_position")
     #expect(ops.first?.1["position"] == "7.1.1.1")
@@ -99,7 +99,7 @@ private let toolText = sharedToolText
         cache: cache
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let ops = await ax.executedOps
     #expect(ops.first?.0 == "transport.goto_position")
     #expect(ops.first?.1["position"] == "9.1.1.1")
@@ -125,7 +125,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let text = toolText(result)
     #expect(text.contains("\"error\":\"element_not_found\""))
     #expect(text.contains("not found in cached marker list"))
@@ -150,7 +150,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let text = toolText(result)
     #expect(text.contains("\"error\":\"element_not_found\""))
     #expect(text.contains("no marker matching name 'Verse'"))
@@ -169,7 +169,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let ops = await ax.executedOps
     #expect(ops.first?.0 == "nav.rename_marker")
     #expect(ops.first?.1["index"] == "3")
@@ -183,7 +183,7 @@ private let toolText = sharedToolText
         router: ChannelRouter(),
         cache: StateCache()
     )
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(toolText(result).contains("Unknown view"))
 }
 
@@ -204,7 +204,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let ops = await coreMIDI.executedOps
     #expect(ops.first?.0 == "midi.send_chord")
     #expect(ops.first?.1["notes"] == "60,64,67")
@@ -223,7 +223,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let ops = await coreMIDI.executedOps
     #expect(ops.first?.0 == "mmc.locate")
     #expect(ops.first?.1["time"] == "01:02:03:04")
@@ -241,7 +241,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let ops = await mcu.executedOps
     #expect(ops.first?.0 == "transport.goto_position")
     #expect(ops.first?.1["position"] == "11.1.1.1")
@@ -254,7 +254,7 @@ private let toolText = sharedToolText
         router: ChannelRouter(),
         cache: StateCache()
     )
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(toolText(result).contains("Unknown MIDI command"))
 }
 
@@ -265,7 +265,7 @@ private let toolText = sharedToolText
         router: ChannelRouter(),
         cache: StateCache()
     )
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(toolText(result).contains("existing absolute .logicx"))
 }
 
@@ -276,7 +276,7 @@ private let toolText = sharedToolText
         router: ChannelRouter(),
         cache: StateCache()
     )
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(toolText(result).contains("absolute .logicx"))
 }
 
@@ -287,7 +287,7 @@ private let toolText = sharedToolText
         router: ChannelRouter(),
         cache: StateCache()
     )
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     #expect(toolText(result).contains("logic_transport commands"))
 }
 
@@ -311,7 +311,7 @@ private let toolText = sharedToolText
             cache: StateCache()
         )
 
-        #expect(result.isError == false, "Expected help(\(testCase.category)) to succeed")
+        #expect(!(result.isError!), "Expected help(\(testCase.category)) to succeed")
         #expect(toolText(result).contains(testCase.expected))
     }
 }
@@ -327,7 +327,7 @@ private let toolText = sharedToolText
         router: ChannelRouter(),
         cache: StateCache()
     )
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let text = toolText(result)
     for uri in ResourceProvider.resources.map(\.uri) {
         #expect(text.contains(uri), "logic_system help overview omits registered resource \(uri)")
@@ -345,7 +345,7 @@ private let toolText = sharedToolText
         cache: StateCache()
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let text = toolText(result)
     #expect(text.contains("Accessibility:"))
     #expect(text.contains("Automation (Logic Pro):"))
@@ -361,7 +361,7 @@ private let toolText = sharedToolText
         cache: cache
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     #expect(toolText(result).contains("State refresh triggered"))
     #expect(await cache.timeSinceLastToolAccess() < 1.0)
 }
@@ -373,7 +373,7 @@ private let toolText = sharedToolText
         router: ChannelRouter(),
         cache: StateCache()
     )
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(toolText(result).contains("Unknown system command"))
 }
 

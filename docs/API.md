@@ -304,14 +304,14 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 
 ## logic_mixer
 
-⚠️ **All mixer write operations require MCU registration.** See [SETUP.md §3](SETUP.md#3-register-mcu-control-surface-mandatory-for-mixer-control). Writes have **no fallback**.
+⚠️ **Mixer writes split by channel (since #83):** `set_volume`, `set_pan`, `set_output`, `set_input` are **AX-only** — visible-strip identity + same-surface readback, fail-closed when the strip/control isn't locatable (no MCU needed). `set_send`, `set_master_volume`, `set_output_volume` require **MCU registration** (see [SETUP.md §3](SETUP.md#3-register-mcu-control-surface-mandatory-for-mixer-control)) and verify via MCU echo. Neither path has a silent fallback — both fail closed when their verification surface is missing.
 
 ### Commands (write only)
 
 | Command | Params | Returns | Channel |
 |---------|--------|---------|---------|
-| `set_volume` | `{ track: int, value: number }` (0.0–1.0) | HC State A/B (`observed`, `observed_mcu`, `observed_ax`, `verify_source`, `mcu_connected`, `mcu_last_feedback_age_ms`) | MCU write + MCU/AX readback |
-| `set_pan` | `{ track: int, value: number }` (-1.0–1.0) | HC State A/B (+ `pan_write_mode:"relative_vpot"` — relative V-Pot nudge, not idempotent) | **MCU only** |
+| `set_volume` | `{ track: int, value: number }` (0.0–1.0) | HC State A/B (`observed`, `observed_ax`, `verify_source:"ax_slider"`, `target_identity`) | AX write + same-surface readback (#83); fail-closed when the strip/control isn't locatable |
+| `set_pan` | `{ track: int, value: number }` (-1.0–1.0) | HC State A/B (`observed_ax`, `verify_source:"ax_slider"`, `target_identity`) | AX write + same-surface readback (#83); fail-closed when the strip/control isn't locatable |
 | `set_master_volume` | `{ volume: number }` (0.0–1.0) | HC State A/B | **MCU only** |
 | `set_plugin_param` | `{ track: int, insert: 0, param: 0–17, value: 0.0–1.0 }` | Malformed/out-of-range input → `isError` text, rejected **before** any track-select side effect; an unverified selection → `isError` (State B refused); a routed write → HC State B `readback_unavailable` (write-only) | Scripter (selected track) |
 | `insert_plugin` | `{ track: int, slot: int, plugin_name: "Gain" \| "Compressor" \| "Channel EQ", confirmed: true }` | HC State A when AX slot readback confirms the inserted plugin; without `confirmed:true` returns an L2 `confirmation_required` payload; occupied slots fail closed with `slot_occupied` | Accessibility mixer insert menu |
@@ -1024,7 +1024,8 @@ Resource errors throw `MCPError.invalidParams`:
 | `tools/list`, `resources/list` | < 30 ms |
 | `logic_system health` (warm) | 50–150 ms |
 | `logic_system health` (cold — first call) | 200–2000 ms |
-| MCU write (`mixer.set_volume`, `transport.play`) | 2–10 ms |
+| MCU write (`mixer.set_master_volume`, `transport.play`) | 2–10 ms |
+| AX write (`mixer.set_volume`, `mixer.set_pan`) | 30–150 ms (visible-strip locate + readback) |
 | CoreMIDI write (`send_note`, `send_cc`) | 1–5 ms |
 | AX-backed resource read (transport/state, tracks ≤16) | 20–80 ms |
 | AX read on large projects (100+ tracks) | 300–800 ms |

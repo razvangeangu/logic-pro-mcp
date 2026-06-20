@@ -87,7 +87,7 @@ struct ProjectAuditPhaseTests {
             router: ChannelRouter(),
             cache: StateCache()
         )
-        #expect(result.isError == true)
+        #expect(result.isError!)
     }
     let audits = projectAudits(captured)
     #expect(audits.contains { $0.contains("project.open rejected") })
@@ -102,7 +102,7 @@ struct ProjectAuditPhaseTests {
             router: ChannelRouter(),
             cache: StateCache()
         )
-        #expect(result.isError == true)
+        #expect(result.isError!)
     }
     let audits = projectAudits(captured)
     #expect(audits.contains { $0.contains("project.open rejected") })

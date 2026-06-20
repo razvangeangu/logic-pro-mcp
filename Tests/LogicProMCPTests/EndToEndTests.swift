@@ -40,7 +40,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2ETransportGetStateRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_transport", command: "get_state")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
@@ -66,7 +66,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_transport", command: "set_tempo")
     let text = e2eText(r)
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(text.contains("invalid_params"))
     #expect(!text.isEmpty)
 }
@@ -98,7 +98,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2ETransportUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_transport", command: "nonexistent")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
@@ -111,14 +111,14 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2ETracksGetTracksRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_tracks", command: "get_tracks")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2ETracksGetSelectedRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_tracks", command: "get_selected")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
@@ -176,13 +176,13 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2ETracksSetInstrumentRejectsMissingSelector() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_tracks", command: "set_instrument", params: ["index": .int(0)])
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 @Test func testE2ETracksResolvePathRequiresPath() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_tracks", command: "resolve_path")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Missing 'path'"))
 }
 
@@ -204,7 +204,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2ETracksUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_tracks", command: "fly_to_moon")
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -216,7 +216,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EMixerGetStateRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_mixer", command: "get_state")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
@@ -260,7 +260,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     }
     #expect(obj["operation"] as? String == "mixer.set_volume")
     if obj["success"] as? Bool == true {
-        #expect(obj["verified"] as? Bool == true)
+        #expect((obj["verified"] as? Bool)!)
         #expect(obj["verify_source"] as? String == "ax_slider")
         #expect(obj["target_identity"] is [String: Any])
         #expect(obj["observed_before"] != nil)
@@ -285,7 +285,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     }
     #expect(obj["operation"] as? String == "mixer.set_pan")
     if obj["success"] as? Bool == true {
-        #expect(obj["verified"] as? Bool == true)
+        #expect((obj["verified"] as? Bool)!)
         #expect(obj["verify_source"] as? String == "ax_slider")
         #expect(obj["target_identity"] is [String: Any])
         #expect(obj["observed_before"] != nil)
@@ -308,7 +308,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         Issue.record("set_master_volume Shape A must be structured HC JSON, got: \(text)")
         return
     }
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "channels_exhausted")
     #expect(obj["operation"] as? String == "mixer.set_master_volume")
     #expect(obj["hint"] != nil)
@@ -353,7 +353,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EMixerGetChannelStripRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_mixer", command: "get_channel_strip", params: ["index": .string("0")])
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
@@ -378,7 +378,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EMixerUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_mixer", command: "explode")
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -420,7 +420,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EMIDIListPortsRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_midi", command: "list_ports")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
@@ -433,7 +433,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EMIDIUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_midi", command: "send_smoke_signals")
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -473,7 +473,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EEditUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_edit", command: "time_travel")
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -491,7 +491,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2ENavigateGetMarkersRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_navigate", command: "get_markers")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
@@ -510,7 +510,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2ENavigateUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_navigate", command: "teleport")
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -522,26 +522,26 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EProjectGetInfoRejectedAsUnknownCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "get_info")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown"))
 }
 
 @Test func testE2EProjectOpenInvalidPathFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "open", params: ["path": .string("/nonexistent/path.logicx")])
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 @Test func testE2EProjectOpenMissingPathFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "open")
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 @Test func testE2EProjectOpenNonLogicxFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "open", params: ["path": .string("/tmp/file.txt")])
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 @Test func testE2EProjectSaveDispatches() async {
@@ -597,7 +597,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EProjectUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "reformat_hard_drive")
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -667,21 +667,21 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2ESystemRefreshDispatches() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_system", command: "refresh_cache")
-    #expect(r.isError == false)
+    #expect(!(r.isError!))
     #expect(e2eText(r).contains("State refresh"))
 }
 
 @Test func testE2ESystemCacheStateIsNotAPublicCommand() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_system", command: "cache_state")
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown system command"))
 }
 
 @Test func testE2ESystemUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_system", command: "self_destruct")
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -691,14 +691,14 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EUnknownToolNameReturnsError() async {
     let h = await makeE2EHandlers()
     let r = await h.callTool(CallTool.Parameters(name: "logic_nonexistent", arguments: ["command": .string("test")]))
-    #expect(r.isError == true)
+    #expect(r.isError!)
     #expect(e2eText(r).contains("Unknown tool"))
 }
 
 @Test func testE2EEmptyToolNameReturnsError() async {
     let h = await makeE2EHandlers()
     let r = await h.callTool(CallTool.Parameters(name: "", arguments: ["command": .string("test")]))
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 @Test func testE2EAllDispatchersHandleMissingCommandGracefully() async {
@@ -789,7 +789,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     let detailJSON = e2eJSON(e2eResourceText(detail))
     let searchJSON = e2eJSON(e2eResourceText(search))
     #expect(listJSON?["schema_version"] as? Int == 1)
-    #expect((listJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool == true)
+    #expect(((listJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool)!)
     #expect((detailJSON?["entry"] as? [String: Any])?["availability_state"] != nil)
     #expect((searchJSON?["entries"] as? [[String: Any]])?.isEmpty == false)
 }
@@ -804,7 +804,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     let detailJSON = e2eJSON(e2eResourceText(detail))
     let schemaJSON = e2eJSON(e2eResourceText(schema))
     #expect(listJSON?["workflow_count"] as? Int ?? 0 >= 6)
-    #expect((listJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool == true)
+    #expect(((listJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool)!)
     #expect((detailJSON?["workflow"] as? [String: Any])?["mutation_kind"] as? String == "read_only")
     #expect((schemaJSON?["evidence_levels"] as? [String])?.contains("live_verified") == true)
 }
@@ -1110,19 +1110,19 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 @Test func testE2EProjectOpenWithControlCharacterPathFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "open", params: ["path": .string("/tmp/evil\n.logicx")])
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 @Test func testE2EProjectOpenWithRelativePathFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "open", params: ["path": .string("relative/song.logicx")])
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 @Test func testE2EProjectOpenWithDevPathFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "open", params: ["path": .string("/dev/null.logicx")])
-    #expect(r.isError == true)
+    #expect(r.isError!)
 }
 
 @Test func testE2ETracksSelectWithNonNumericIndexHandled() async {

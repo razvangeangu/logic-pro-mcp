@@ -148,7 +148,7 @@ func encodeMarkersWire_parser() throws {
     #expect(item["name"] as? String == "VOCALS")
     #expect(item["position"] as? String == "146.4.4.240")
     #expect(item["position_source"] as? String == "parser")
-    #expect(item["is_canonical"] as? Bool == true)
+    #expect((item["is_canonical"] as? Bool)!)
     // domain camelCase 필드는 wire 에 새지 않아야 한다.
     #expect(item["positionSource"] == nil)
     #expect(item["isCanonical"] == nil)
@@ -162,7 +162,7 @@ func encodeMarkersWire_fallback() throws {
     let decoded = try #require(sharedJSONArray(ResourceHandlers.encodeMarkersWire(markers)))
     let item = decoded[0]
     #expect(item["position_source"] as? String == "fallback")
-    #expect(item["is_canonical"] as? Bool == false)
+    #expect(!((item["is_canonical"] as? Bool)!))
 }
 
 @Test("encodeMarkersWire: unknown(legacy) 마커 → position_source=unknown + is_canonical=false")
@@ -173,7 +173,7 @@ func encodeMarkersWire_unknown() throws {
     let decoded = try #require(sharedJSONArray(ResourceHandlers.encodeMarkersWire(markers)))
     let item = decoded[0]
     #expect(item["position_source"] as? String == "unknown")
-    #expect(item["is_canonical"] as? Bool == false)
+    #expect(!((item["is_canonical"] as? Bool)!))
 }
 
 @Test("encodeMarkersWire: 빈 배열 → []")

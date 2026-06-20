@@ -156,7 +156,7 @@ private func parseEnvelope(_ msg: String) -> [String: Any]? {
         extras: ["operation": "midi.send_cc.keycmd"]
     )
     let parsed = parseEnvelope(expected)
-    #expect(parsed?["success"] as? Bool == false)
+    #expect(!((parsed?["success"] as? Bool)!))
     #expect(parsed?["error"] as? String == "port_unavailable")
     #expect(parsed?["hint"] as? String == "KeyCmd port not yet published")
     #expect(parsed?["operation"] as? String == "midi.send_cc.keycmd")

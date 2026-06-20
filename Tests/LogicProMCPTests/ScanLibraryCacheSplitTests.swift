@@ -20,7 +20,7 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: Data(result.message.utf8)
     ) as! [String: Any]
-    #expect(obj["exists"] as? Bool == false)
+    #expect(!((obj["exists"] as? Bool)!))
     #expect(obj["reason"] as? String == "No cached library scan; call scan_library first")
 }
 
@@ -40,9 +40,9 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: Data(result.message.utf8)
     ) as! [String: Any]
-    #expect(obj["exists"] as? Bool == true)
+    #expect((obj["exists"] as? Bool)!)
     #expect(obj["source"] as? String == "panel")
-    #expect(obj["loadable"] as? Bool == true)
+    #expect((obj["loadable"] as? Bool)!)
     #expect(obj["warning"] == nil)
 }
 
@@ -79,13 +79,13 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: Data(result.message.utf8)
     ) as! [String: Any]
-    #expect(obj["exists"] as? Bool == true)
+    #expect((obj["exists"] as? Bool)!)
     #expect(
         obj["source"] as? String == "panel",
         "mode:both must surface Panel cache so Panel-known entries get source:panel"
     )
     #expect(
-        obj["loadable"] as? Bool == true,
+        (obj["loadable"] as? Bool)!,
         "Panel-known entries must report loadable:true even after mode:both"
     )
     #expect(obj["warning"] == nil, "No disk-only warning for Panel-known entry")
@@ -108,9 +108,9 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: Data(result.message.utf8)
     ) as! [String: Any]
-    #expect(obj["exists"] as? Bool == true)
+    #expect((obj["exists"] as? Bool)!)
     #expect(obj["source"] as? String == "disk-only")
-    #expect(obj["loadable"] as? Bool == false)
+    #expect(!((obj["loadable"] as? Bool)!))
     #expect(obj["warning"] != nil)
 }
 

@@ -36,15 +36,15 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeMixerJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
 
     // Issue #10/#11 diagnostic extras
     #expect(
-        obj["mcu_connected"] as? Bool == false,
+        !((obj["mcu_connected"] as? Bool)!),
         "State B must surface mcu_connected so the harness can identify control-surface registration gaps"
     )
-    #expect(obj["mcu_registered"] as? Bool == false)
+    #expect(!((obj["mcu_registered"] as? Bool)!))
     // No feedback ever → null. JSONSerialization renders nil as NSNull.
     #expect(
         obj["mcu_last_feedback_age_ms"] is NSNull,
@@ -86,8 +86,8 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     let obj = decodeMixerJSON(result.message)
     // Diagnostic fields must appear regardless of State A vs B outcome —
     // that's the contract this test guards.
-    #expect(obj["mcu_connected"] as? Bool == true)
-    #expect(obj["mcu_registered"] as? Bool == true)
+    #expect((obj["mcu_connected"] as? Bool)!)
+    #expect((obj["mcu_registered"] as? Bool)!)
     let ageMs = obj["mcu_last_feedback_age_ms"] as? Int
     #expect(ageMs != nil, "connection had a feedback timestamp → age must be a number")
     if let ageMs {
@@ -107,9 +107,9 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeMixerJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
-    #expect(obj["mcu_connected"] as? Bool == false)
-    #expect(obj["mcu_registered"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
+    #expect(!((obj["mcu_connected"] as? Bool)!))
+    #expect(!((obj["mcu_registered"] as? Bool)!))
     #expect(obj["mcu_last_feedback_age_ms"] is NSNull)
 }
 
@@ -130,7 +130,7 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     let obj = decodeMixerJSON(result.message)
     #expect(obj["pan_write_mode"] as? String == "relative_vpot")
     // No echo from the mock → must not claim verification.
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["observed"] is NSNull)
 }
 
@@ -158,10 +158,10 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeMixerJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["track"] as? String == "master")
-    #expect(obj["mcu_connected"] as? Bool == false)
-    #expect(obj["mcu_registered"] as? Bool == false)
+    #expect(!((obj["mcu_connected"] as? Bool)!))
+    #expect(!((obj["mcu_registered"] as? Bool)!))
     #expect(obj["mcu_last_feedback_age_ms"] is NSNull)
 }
 
@@ -286,11 +286,11 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeMixerJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
     // The smoking-gun shape from the reporter's environment:
-    #expect(obj["mcu_connected"] as? Bool == true)
-    #expect(obj["mcu_registered"] as? Bool == true)
+    #expect((obj["mcu_connected"] as? Bool)!)
+    #expect((obj["mcu_registered"] as? Bool)!)
     if let ageMs = obj["mcu_last_feedback_age_ms"] as? Int {
         // Sub-second: the 500ms poll plus a few ms of test overhead.
         #expect(ageMs < 2000, "fresh feedback case must report sub-2s age, got \(ageMs)")
@@ -318,8 +318,8 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
 
     #expect(result.isSuccess)
     let obj = decodeMixerJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["verify_source"] as? String == "ax_readback")
     #expect(obj["observed"] as? Double == 0.5)
     #expect(obj["observed_ax"] as? Double == 0.5)
@@ -348,8 +348,8 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
 
     #expect(result.isSuccess)
     let obj = decodeMixerJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_mismatch")
     #expect(obj["verify_source"] as? String == "ax_readback")
     #expect(obj["observed"] as? Double == 0.2)
@@ -381,9 +381,9 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
         params: ["index": "0", "volume": "0.5"]
     )
     let obj = decodeMixerJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
-    #expect(obj["mcu_connected"] as? Bool == true)
-    #expect(obj["mcu_registered"] as? Bool == true)
+    #expect(!((obj["verified"] as? Bool)!))
+    #expect((obj["mcu_connected"] as? Bool)!)
+    #expect((obj["mcu_registered"] as? Bool)!)
     if let ageMs = obj["mcu_last_feedback_age_ms"] as? Int {
         #expect(ageMs >= 1500, "stale feedback (~2s ago) should report age >= 1.5s")
     } else {

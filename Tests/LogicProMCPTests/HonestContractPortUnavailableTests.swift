@@ -34,7 +34,7 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "port_unavailable")
     #expect(obj["hint"] as? String == "CoreMIDI virtual port not configured")
     #expect(obj["channel"] as? String == "coremidi")

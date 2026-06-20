@@ -206,10 +206,10 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
         settleReadback: {}
     )
 
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     let object = recordSequenceJSONObject(result)
-    #expect(object["success"] as? Bool == true)
-    #expect(object["verified"] as? Bool == true)
+    #expect((object["success"] as? Bool)!)
+    #expect((object["verified"] as? Bool)!)
     #expect(object["created_track"] as? Int == 1)
     #expect(object["recorded_to_track"] as? Int == 1)
     #expect(object["target_track_index"] as? Int == 1)
@@ -248,7 +248,7 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
         settleReadback: {}
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let object = recordSequenceJSONObject(result)
     #expect(object["error"] as? String == "wrong_track_import")
     #expect(object["target_track_index"] as? Int == 1)
@@ -283,7 +283,7 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
         settleReadback: {}
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let object = recordSequenceJSONObject(result)
     #expect(object["error"] as? String == "timing_mismatch")
     #expect(object["region_name"] as? String == "Imported Idea")
@@ -319,7 +319,7 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
         settleReadback: {}
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let object = recordSequenceJSONObject(result)
     #expect(object["error"] as? String == "unreadable_readback")
     #expect(object["region_name"] as? String == "Imported Idea")

@@ -429,7 +429,7 @@ struct StockPluginResourceTests {
         let list = try await stockPluginResourceObject("logic://stock-plugins")
         #expect(list["schema_version"] as? Int == 1)
         #expect((list["entries"] as? [[String: Any]])?.isEmpty == false)
-        #expect((list["validation"] as? [String: Any])?["is_valid"] as? Bool == true)
+        #expect(((list["validation"] as? [String: Any])?["is_valid"] as? Bool)!)
 
         let detail = try await stockPluginResourceObject("logic://stock-plugins/logic.stock.effect.gain")
         #expect((detail["entry"] as? [String: Any])?["id"] as? String == "logic.stock.effect.gain")

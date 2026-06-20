@@ -11,8 +11,8 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["requested"] as? String == "Piano")
     #expect(obj["observed"] as? String == "Piano")
     #expect(obj["reason"] == nil, "State A must not carry reason")
@@ -27,8 +27,8 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "echo_timeout_500ms")
     #expect(obj["error"] == nil, "State B must not carry error")
 }
@@ -59,7 +59,7 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "ax_write_failed")
     #expect(obj["axCode"] as? Int == -25212)
     #expect(obj["hint"] as? String == "permission?")
@@ -72,7 +72,7 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "element_not_found")
     #expect(obj["axCode"] == nil)
     #expect(obj["hint"] == nil)
@@ -86,7 +86,7 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "readback_unavailable")
     #expect(obj["hint"] as? String == "write executed but could not be verified")
 }
@@ -119,10 +119,10 @@ func testAddExtras_stateA_mergesAtTopLevel() throws {
     let raw = HonestContract.encodeStateA(extras: ["requested": "1.1.1.1"])
     let merged = HonestContract.addExtras(["caller_flag": true], into: raw)
     let obj = try #require(sharedJSONObject(merged))
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["requested"] as? String == "1.1.1.1", "기존 extras 보존")
-    #expect(obj["caller_flag"] as? Bool == true, "신규 caller extras 추가")
+    #expect((obj["caller_flag"] as? Bool)!, "신규 caller extras 추가")
 }
 
 @Test("addExtras: State B 응답에 reason 보존 + extras merge")
@@ -130,10 +130,10 @@ func testAddExtras_stateB_preservesReasonAndMerges() throws {
     let raw = HonestContract.encodeStateB(reason: .readbackUnavailable)
     let merged = HonestContract.addExtras(["caller_flag": true], into: raw)
     let obj = try #require(sharedJSONObject(merged))
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_unavailable", "State B reason 보존")
-    #expect(obj["caller_flag"] as? Bool == true)
+    #expect((obj["caller_flag"] as? Bool)!)
 }
 
 @Test("addExtras: State C (success:false) 는 변경 없이 통과 — error 보존")

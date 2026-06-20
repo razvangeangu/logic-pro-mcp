@@ -65,7 +65,7 @@ private actor StateBSelectMockChannel: Channel {
     )
 
     // Assert — dispatcher returned an error and never routed `track.delete`.
-    #expect(result.isError == true, "delete must error on State B select")
+    #expect(result.isError!, "delete must error on State B select")
     let text = sharedToolText(result)
     #expect(
         text.contains("track.delete refused"),
@@ -100,7 +100,7 @@ private actor StateBSelectMockChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == false, "delete must succeed on State A select")
+    #expect(!(result.isError!), "delete must succeed on State A select")
 
     let mcuOps = await mcu.executedOps
     let keyCmdOps = await keyCmd.executedOps
@@ -131,7 +131,7 @@ private actor StateBSelectMockChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == true, "duplicate must error on State B select")
+    #expect(result.isError!, "duplicate must error on State B select")
     let text = sharedToolText(result)
     #expect(
         text.contains("track.duplicate refused"),
@@ -164,7 +164,7 @@ private actor StateBSelectMockChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == false, "duplicate must succeed on State A select")
+    #expect(!(result.isError!), "duplicate must succeed on State A select")
 
     let mcuOps = await mcu.executedOps
     let keyCmdOps = await keyCmd.executedOps

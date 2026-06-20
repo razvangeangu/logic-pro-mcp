@@ -292,8 +292,8 @@ private func makeAppleScriptRuntime(
     let obj = try JSONSerialization.jsonObject(
         with: Data(result.message.utf8), options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["observed"] as? String == "/tmp/export.logicx")
 }
 
@@ -311,7 +311,7 @@ private func makeAppleScriptRuntime(
     let obj = try JSONSerialization.jsonObject(
         with: Data(result.message.utf8), options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "readback_mismatch")
 }
 
@@ -333,7 +333,7 @@ private func makeAppleScriptRuntime(
     let obj = try JSONSerialization.jsonObject(
         with: Data(result.message.utf8), options: []
     ) as! [String: Any]
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "readback_mismatch")
     #expect((obj["hint"] as? String)?.contains("modification time did not advance") == true)
     #expect(obj["observed"] as? String == "/tmp/export.logicx")

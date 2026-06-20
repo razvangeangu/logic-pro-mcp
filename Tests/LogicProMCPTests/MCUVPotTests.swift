@@ -148,9 +148,9 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
     // Position 8 → pan 0.4 (= (8-6)/5). Within ±0.1 of requested 0.4 → State A.
-    #expect(obj["verified"] as? Bool == true,
+    #expect((obj["verified"] as? Bool)!,
             "matching V-Pot LED-ring echo must promote State B → State A; got \(obj)")
     #expect(obj["track"] as? Int == 0)
     #expect(obj["requested"] as? Double == 0.4)
@@ -169,7 +169,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess, "timeout is State B (success:true, verified:false)")
     let obj = decodeJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     let reason = obj["reason"] as? String ?? ""
     #expect(reason.hasPrefix("echo_timeout_"),
             "expected echo_timeout_<ms>ms after V-Pot wiring, got \(reason)")
@@ -197,7 +197,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["verified"] as? Bool == false,
+    #expect(!((obj["verified"] as? Bool)!),
             "stale pan cache must not be reported as a fresh Logic echo")
     let reason = obj["reason"] as? String ?? ""
     #expect(reason.hasPrefix("echo_timeout_"),

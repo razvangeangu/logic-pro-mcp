@@ -293,8 +293,8 @@ private func decodeMCUJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeMCUJSON(result.message)
-    #expect(obj["success"] as? Bool == true, "envelope must carry success:true")
-    #expect(obj["verified"] as? Bool == false, "MCU button echo is LED-only — never State A")
+    #expect((obj["success"] as? Bool)!, "envelope must carry success:true")
+    #expect(!((obj["verified"] as? Bool)!), "MCU button echo is LED-only — never State A")
     #expect(
         obj["reason"] as? String == "readback_unavailable",
         "MCU button surface has no read-back — must use readback_unavailable"
@@ -303,7 +303,7 @@ private func decodeMCUJSON(_ s: String) -> [String: Any] {
     #expect(obj["function"] as? String == "select")
     // track.select forces enabled:true regardless of the inbound flag (it's
     // not a toggle); the envelope mirrors that decision so callers can audit.
-    #expect(obj["enabled"] as? Bool == true)
+    #expect((obj["enabled"] as? Bool)!)
 
     // Mute / Solo / Arm honor the inbound enabled flag.
     let mute = await channel.execute(
@@ -312,7 +312,7 @@ private func decodeMCUJSON(_ s: String) -> [String: Any] {
     )
     let muteObj = decodeMCUJSON(mute.message)
     #expect(muteObj["function"] as? String == "mute")
-    #expect(muteObj["enabled"] as? Bool == false)
+    #expect(!((muteObj["enabled"] as? Bool)!))
     #expect(muteObj["reason"] as? String == "readback_unavailable")
 }
 
@@ -326,8 +326,8 @@ private func decodeMCUJSON(_ s: String) -> [String: Any] {
         let result = await channel.execute(operation: op, params: [:])
         #expect(result.isSuccess, "\(op) should produce State B envelope")
         let obj = decodeMCUJSON(result.message)
-        #expect(obj["success"] as? Bool == true, "\(op): envelope success:true")
-        #expect(obj["verified"] as? Bool == false, "\(op): MCU transport buttons are press-only")
+        #expect((obj["success"] as? Bool)!, "\(op): envelope success:true")
+        #expect(!((obj["verified"] as? Bool)!), "\(op): MCU transport buttons are press-only")
         #expect(
             obj["reason"] as? String == "readback_unavailable",
             "\(op): expected readback_unavailable, got \(obj["reason"] ?? "nil")"
@@ -346,8 +346,8 @@ private func decodeMCUJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeMCUJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_unavailable")
     #expect(obj["mode"] as? String == "write")
     #expect(obj["function"] as? String == "set_automation")

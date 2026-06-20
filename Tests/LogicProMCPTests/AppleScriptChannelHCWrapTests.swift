@@ -50,8 +50,8 @@ private func makeAppleScriptRuntime(
         Issue.record("response is not valid JSON")
         return
     }
-    #expect(env["success"] as? Bool == true)
-    #expect(env["verified"] as? Bool == false)
+    #expect((env["success"] as? Bool)!)
+    #expect(!((env["verified"] as? Bool)!))
     #expect(env["reason"] as? String == "readback_unavailable")
     #expect(env["operation"] as? String == "project.new")
     #expect(env["method"] as? String == "applescript")
@@ -70,7 +70,7 @@ private func makeAppleScriptRuntime(
     }
     #expect(env["operation"] as? String == "project.close")
     #expect(env["saving"] as? String == "no")
-    #expect(env["verified"] as? Bool == false)
+    #expect(!((env["verified"] as? Bool)!))
 }
 
 @Test func testAppleScriptTransportStopReturnsHCEnvelope() async {
@@ -87,7 +87,7 @@ private func makeAppleScriptRuntime(
     }
     #expect(env["operation"] as? String == "transport.stop")
     #expect(env["method"] as? String == "applescript")
-    #expect(env["verified"] as? Bool == false)
+    #expect(!((env["verified"] as? Bool)!))
 }
 
 @Test func testAppleScriptErrorPathStaysFreeText() async {

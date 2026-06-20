@@ -47,7 +47,7 @@ private actor StateBSelectForPluginMockChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == true, "set_plugin_param must error on State B select")
+    #expect(result.isError!, "set_plugin_param must error on State B select")
     let text = sharedToolText(result)
     #expect(text.contains("set_plugin_param refused"), "expected refusal, got: \(text)")
     #expect(text.contains("select_response="), "expected original select response, got: \(text)")
@@ -78,7 +78,7 @@ private actor StateBSelectForPluginMockChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == false, "verified selection should route to Scripter")
+    #expect(!(result.isError!), "verified selection should route to Scripter")
 
     let mcuOps = await mcu.executedOps
     let scripterOps = await scripter.executedOps
@@ -111,7 +111,7 @@ private actor StateBSelectForPluginMockChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(sharedToolText(result).contains("numeric"))
     let mcuOps = await mcu.executedOps
     let scripterOps = await scripter.executedOps
@@ -134,7 +134,7 @@ private actor StateBSelectForPluginMockChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(sharedToolText(result).contains("0.0...1.0"))
     #expect(await mcu.executedOps.isEmpty, "out-of-range value must be rejected before track.select")
 }
@@ -154,7 +154,7 @@ private actor StateBSelectForPluginMockChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(sharedToolText(result).contains("0...17"))
     #expect(await mcu.executedOps.isEmpty, "out-of-range param must be rejected before track.select")
 }

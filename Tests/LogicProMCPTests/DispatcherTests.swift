@@ -485,11 +485,11 @@ private func liveTransportJSON(
 
     #expect(!result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == true)
+    #expect((object["verified"] as? Bool)!)
     #expect(object["verification_source"] as? String == "transport_state")
-    #expect(object["previous_enabled"] as? Bool == false)
-    #expect(object["requested_enabled"] as? Bool == true)
-    #expect(object["observed_enabled"] as? Bool == true)
+    #expect(!((object["previous_enabled"] as? Bool)!))
+    #expect((object["requested_enabled"] as? Bool)!)
+    #expect((object["observed_enabled"] as? Bool)!)
 }
 
 @Test func testTransportDispatcherGotoPositionReturnsErrorWhenTransportReadbackDoesNotMatch() async throws {
@@ -516,9 +516,9 @@ private func liveTransportJSON(
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == false)
+    #expect(!((object["verified"] as? Bool)!))
     #expect(object["reason"] as? String == "readback_mismatch")
     #expect(object["verification_source"] as? String == "transport_state")
     #expect(object["requested"] as? String == "9.1.1.1")
@@ -549,9 +549,9 @@ private func liveTransportJSON(
         cache: StateCache()
     )
 
-    #expect(gotoResult.isError == true)
-    #expect(tempoResult.isError == true)
-    #expect(cycleResult.isError == true)
+    #expect(gotoResult.isError!)
+    #expect(tempoResult.isError!)
+    #expect(cycleResult.isError!)
     #expect(dispatcherText(gotoResult).contains("invalid_params"))
     #expect(dispatcherText(tempoResult).contains("invalid_params"))
     #expect(dispatcherText(cycleResult).contains("invalid_params"))
@@ -857,7 +857,7 @@ private func liveTransportJSON(
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     if case .text(let text, _, _) = result.content.first {
         #expect(text.contains("unsupported plugin"))
         #expect(text.contains("Gain"))
@@ -910,7 +910,7 @@ private func liveTransportJSON(
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let axOps = await ax.executedOps
     #expect(axOps.isEmpty)
 }
@@ -1021,7 +1021,7 @@ private func liveTransportJSON(
     #expect(!listResult.isError!)
     #expect(!scanResult.isError!)
     #expect(!pluginResult.isError!)
-    #expect(missingPathResult.isError == true)
+    #expect(missingPathResult.isError!)
     #expect(dispatcherText(missingPathResult).contains("Missing 'path'"))
 
     let ops = await ax.executedOps
@@ -1234,7 +1234,7 @@ private func liveTransportJSON(
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(dispatcherText(result).contains("\"verified\":false"))
     let ops = await ax.executedOps
     expectExecutedOps(ops, equals: [("track.rename", ["index": "0", "name": "Bass"])])
@@ -1927,7 +1927,7 @@ private actor SelectiveFailChannel: Channel {
         cache: missingCache
     )
 
-    #expect(missingResult.isError == true)
+    #expect(missingResult.isError!)
     #expect(dispatcherText(missingResult).contains("invalid_params"))
     #expect(await missingKeyCmd.executedOps.isEmpty)
 }
@@ -1963,8 +1963,8 @@ private actor SelectiveFailChannel: Channel {
         cache: cache
     )
 
-    #expect(selectAllResult.isError == true)
-    #expect(quantizeResult.isError == true)
+    #expect(selectAllResult.isError!)
+    #expect(quantizeResult.isError!)
     #expect(dispatcherText(selectAllResult).contains("\"verified\":false"))
     #expect(dispatcherText(quantizeResult).contains("\"verified\":false"))
 }
@@ -2115,7 +2115,7 @@ private actor SelectiveFailChannel: Channel {
         router: router,
         cache: cache
     )
-    #expect(invalidResult.isError == true)
+    #expect(invalidResult.isError!)
 
     let ops = await appleScript.executedOps
     expectExecutedOps(ops, equals: [
@@ -2722,7 +2722,7 @@ private actor SelectiveFailChannel: Channel {
 
     #expect(!result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == true)
+    #expect((object["verified"] as? Bool)!)
     #expect(object["verification_source"] as? String == "transport_state")
     #expect(object["observed"] as? String == "17.1.1.1")
 }
@@ -2758,7 +2758,7 @@ private actor SelectiveFailChannel: Channel {
 
     #expect(!result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == true)
+    #expect((object["verified"] as? Bool)!)
     #expect(object["verification_source"] as? String == "logic://markers")
     #expect(object["marker_count_before"] as? Int == 1)
     #expect(object["marker_count_after"] as? Int == 2)
@@ -2794,9 +2794,9 @@ private actor SelectiveFailChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == false)
+    #expect(!((object["verified"] as? Bool)!))
     #expect(object["reason"] as? String == "readback_mismatch")
     #expect(object["requested_name"] as? String == "Bridge")
     #expect(object["observed_marker_name"] as? String == "Marker 2")
@@ -2833,8 +2833,8 @@ private actor SelectiveFailChannel: Channel {
         cache: cache
     )
 
-    #expect(fitResult.isError == true)
-    #expect(zoomInResult.isError == true)
+    #expect(fitResult.isError!)
+    #expect(zoomInResult.isError!)
     #expect(dispatcherText(fitResult).contains("\"verified\":false"))
     #expect(dispatcherText(zoomInResult).contains("\"verified\":false"))
 }
@@ -2885,8 +2885,8 @@ private actor SelectiveFailChannel: Channel {
         cache: cache
     )
 
-    #expect(zoomResult.isError == true)
-    #expect(viewResult.isError == true)
+    #expect(zoomResult.isError!)
+    #expect(viewResult.isError!)
     #expect(dispatcherText(zoomResult).contains("invalid_params"))
     #expect(dispatcherText(viewResult).contains("invalid_params"))
     #expect(await keyCmd.executedOps.isEmpty)
@@ -3168,7 +3168,7 @@ private actor TransportStateSequenceChannel: Channel {
     )
 
     let text = dispatcherText(result)
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     #expect(text.contains(#""verified":true"#))
     #expect(text.contains(#""operation":"transport.play""#))
     #expect(text.contains(#""write_attempted":true"#))
@@ -3197,7 +3197,7 @@ private actor TransportStateSequenceChannel: Channel {
     )
 
     let text = dispatcherText(result)
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     #expect(text.contains(#""verified":true"#))
     #expect(text.contains(#""write_attempted":false"#))
     #expect(text.contains(#""unchanged":true"#))
@@ -3233,7 +3233,7 @@ private actor TransportStateSequenceChannel: Channel {
     )
 
     let text = dispatcherText(result)
-    #expect(result.isError == false)
+    #expect(!(result.isError!))
     #expect(text.contains(#""verified":false"#))
     #expect(text.contains(#""reason":"readback_mismatch""#))
     #expect(text.contains(#""operation":"transport.record""#))
@@ -3278,11 +3278,11 @@ private actor TransportStateSequenceChannel: Channel {
     )
 
     let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
-    #expect(result.isError == false)
-    #expect(json["verified"] as? Bool == true)
+    #expect(!(result.isError!))
+    #expect((json["verified"] as? Bool)!)
     #expect(json["verify_source"] as? String == "ax_transport_state")
-    #expect(json["observed_isPlaying"] as? Bool == false)
-    #expect(json["observed_isRecording"] as? Bool == false)
+    #expect(!((json["observed_isPlaying"] as? Bool)!))
+    #expect(!((json["observed_isRecording"] as? Bool)!))
     #expect(json["observed_position"] as? String == "9.1.1.1")
     #expect(await ax.executedOps.map(\.0) == ["transport.get_state", "transport.stop", "transport.get_state"])
     #expect(await mcu.executedOps.map(\.0) == ["transport.stop"])
@@ -3322,7 +3322,7 @@ private actor TransportStateSequenceChannel: Channel {
     )
 
     let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(json["error"] as? String == "readback_unavailable")
     #expect(json["refresh_error"] as? String == "element_not_found")
     #expect(json["cached_source"] as? String == "cache")
@@ -3354,12 +3354,12 @@ private actor TransportStateSequenceChannel: Channel {
     )
 
     let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(json["error"] as? String == "readback_mismatch")
-    #expect(json["observed_isPlaying"] as? Bool == true)
-    #expect(json["observed_isRecording"] as? Bool == true)
+    #expect((json["observed_isPlaying"] as? Bool)!)
+    #expect((json["observed_isRecording"] as? Bool)!)
     #expect(json["observed_position"] as? String == "96.1.1.1")
-    #expect(json["safe_to_retry"] as? Bool == true)
+    #expect((json["safe_to_retry"] as? Bool)!)
 
     let cached = await cache.getTransport()
     #expect(cached.isPlaying == true)

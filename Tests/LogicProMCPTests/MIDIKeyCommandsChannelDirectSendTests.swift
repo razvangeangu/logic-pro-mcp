@@ -48,8 +48,8 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     let sent = await transport.sentBytes
     #expect(sent.count == 1)
     let envelope = decodeEnvelope(result.message)
-    #expect(envelope?["success"] as? Bool == true)
-    #expect(envelope?["verified"] as? Bool == false)
+    #expect((envelope?["success"] as? Bool)!)
+    #expect(!((envelope?["verified"] as? Bool)!))
     #expect(envelope?["reason"] as? String == "readback_unavailable")
     #expect(envelope?["via"] as? String == "midi-keycmd-direct-send")
 }
@@ -202,7 +202,7 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
 
     #expect(!result.isSuccess)
     let envelope = decodeEnvelope(result.message)
-    #expect(envelope?["success"] as? Bool == false)
+    #expect(!((envelope?["success"] as? Bool)!))
     #expect(envelope?["error"] as? String == "invalid_params")
 
     // No notes should have been sent.
@@ -223,8 +223,8 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
 
     #expect(result.isSuccess)
     let envelope = decodeEnvelope(result.message)
-    #expect(envelope?["success"] as? Bool == true)
-    #expect(envelope?["verified"] as? Bool == false)
+    #expect((envelope?["success"] as? Bool)!)
+    #expect(!((envelope?["verified"] as? Bool)!))
     #expect(envelope?["reason"] as? String == "readback_unavailable")
     #expect(envelope?["operation"] as? String == "midi.send_cc.keycmd")
     #expect(envelope?["via"] as? String == "midi-keycmd-direct-send")
@@ -276,7 +276,7 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
 
     #expect(!result.isSuccess)
     let envelope = decodeEnvelope(result.message)
-    #expect(envelope?["success"] as? Bool == false)
+    #expect(!((envelope?["success"] as? Bool)!))
     #expect(envelope?["error"] as? String == "invalid_params")
 
     let sent = await transport.sentBytes
@@ -311,7 +311,7 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     #expect(!result.isSuccess, "unstarted KeyCmd channel must surface State C, not silent success")
 
     let envelope = decodeEnvelope(result.message)
-    #expect(envelope?["success"] as? Bool == false)
+    #expect(!((envelope?["success"] as? Bool)!))
     #expect(envelope?["error"] as? String == "port_unavailable")
     #expect(envelope?["operation"] as? String == "midi.send_cc.keycmd")
     // Hint must propagate the channel's health detail so the agent gets an
