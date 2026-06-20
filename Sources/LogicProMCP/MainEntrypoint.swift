@@ -20,11 +20,29 @@ enum MainEntrypoint {
         permissionCheck: () -> PermissionChecker.PermissionStatus = PermissionChecker.check,
         serverFactory: () -> any ServerStarting = { LogicProServer() },
         approvalStoreFactory: () -> any ManualValidationStoring = { ManualValidationStore() },
+        doctorRuntime: SetupDoctor.Runtime = .production,
+        writeStdout: (String) -> Void = { message in
+            FileHandle.standardOutput.write(Data(message.utf8))
+        },
         writeStderr: (String) -> Void = { message in
             FileHandle.standardError.write(Data(message.utf8))
         }
     ) async -> Int {
         let approvalStore = approvalStoreFactory()
+
+        if isDoctorCommand(arguments) {
+            let report = SetupDoctor.generate(
+                arguments: arguments,
+                permissionStatus: permissionCheck(),
+                approvals: await approvalStore.list(),
+                runtime: doctorRuntime
+            )
+            let output = arguments.contains("--json")
+                ? encodeJSON(report)
+                : SetupDoctor.renderHuman(report)
+            writeStdout(output + "\n")
+            return SetupDoctor.shouldExitWithFailure(report) ? 1 : 0
+        }
 
         if arguments.contains("--list-approvals") {
             let approvals = await approvalStore.list()
@@ -122,5 +140,9 @@ enum MainEntrypoint {
             return nil
         }
         return arguments[index + 1]
+    }
+
+    private static func isDoctorCommand(_ arguments: [String]) -> Bool {
+        Array(arguments.dropFirst()).first == "doctor"
     }
 }

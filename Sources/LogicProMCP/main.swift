@@ -6,6 +6,10 @@ enum LogicProMCPMain {
         permissionCheck: () -> PermissionChecker.PermissionStatus = PermissionChecker.check,
         serverFactory: () -> any ServerStarting = { LogicProServer() },
         approvalStoreFactory: () -> any ManualValidationStoring = { ManualValidationStore() },
+        doctorRuntime: SetupDoctor.Runtime = .production,
+        writeStdout: (String) -> Void = { message in
+            FileHandle.standardOutput.write(Data(message.utf8))
+        },
         writeStderr: (String) -> Void = { message in
             FileHandle.standardError.write(Data(message.utf8))
         }
@@ -15,6 +19,8 @@ enum LogicProMCPMain {
             permissionCheck: permissionCheck,
             serverFactory: serverFactory,
             approvalStoreFactory: approvalStoreFactory,
+            doctorRuntime: doctorRuntime,
+            writeStdout: writeStdout,
             writeStderr: writeStderr
         )
     }
