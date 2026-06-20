@@ -11,7 +11,7 @@ struct ProjectDispatcher {
 
     static let tool = commandTool(
         name: "logic_project",
-        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); others -> {}.",
+        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions, export_plan. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); export_plan -> { projects: [absolute .logicx], output_root: String, artifacts?: [bounce|stem|preview|variant], collision_policy?: fail_if_exists|skip_existing } dry-run only; others -> {}.",
         commandDescription: "Project command to execute"
     )
 
@@ -70,6 +70,18 @@ struct ProjectDispatcher {
         // anomaly during review.
 
         switch command {
+        case "export_plan":
+            do {
+                let plan = try ProjectExportPlanner.plan(params: params)
+                // PR99-C5 / C2-nit (HC): use the throwing encoder so an encode
+                // failure fails closed (isError=true) via the catch below instead
+                // of returning an error-shaped, non-manifest body as a success.
+                return toolTextResult(try encodeJSONStrict(plan, compact: true))
+            } catch {
+                audit(command, phase: .rejected, reason: "invalid export plan")
+                return toolTextResult("export_plan invalid_params: \(error)", isError: true)
+            }
+
         case "new":
             audit(command, phase: .executed)
             let result = await router.route(operation: "project.new")
@@ -227,7 +239,7 @@ struct ProjectDispatcher {
 
         default:
             return toolTextResult(
-                "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions",
+                "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions, export_plan",
                 isError: true
             )
         }

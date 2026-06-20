@@ -3103,6 +3103,7 @@ private actor SelectiveFailChannel: Channel {
     #expect(tool.name == "logic_project")
     #expect(description.contains("save_as"))
     #expect(description.contains("launch"))
+    #expect(description.contains("export_plan"))
     _ = tool.inputSchema
 }
 

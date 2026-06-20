@@ -19,7 +19,7 @@ Every tool call returns a `CallTool.Result` with `content: [{ type: "text", text
 | [`logic_midi`](#logic_midi) | Raw MIDI + MMC + step input | Write |
 | [`logic_edit`](#logic_edit) | Undo/redo/cut/copy/paste/quantize | Write |
 | [`logic_navigate`](#logic_navigate) | Bar navigation, markers, zoom, view toggles | Write |
-| [`logic_project`](#logic_project) | Open, save, close, bounce, quit | Write |
+| [`logic_project`](#logic_project) | Open, save, close, bounce, dry-run export plan, quit | Write |
 | [`logic_audio`](#logic_audio) | Read-only exported audio artifact analysis | Read |
 | [`logic_system`](#logic_system) | Health, permissions, help, cache refresh | Mixed |
 
@@ -772,6 +772,7 @@ Example:
 | `bounce` | `{ confirmed?: bool }` | text | MIDIKeyCommands → CGEvent | L2 |
 | `is_running` | — | `"true"` or `"false"` | (direct) | L0 |
 | `get_regions` | — | JSON `RegionInfo[]` | Accessibility (read-only arrange area scan) | L0 |
+| `export_plan` | `{ projects?: string[], project?: string, output_root: string, artifacts?: string[], collision_policy?: "fail_if_exists"\|"skip_existing" }` | JSON `logic_pro_mcp_export_manifest.v1` dry-run plan | (direct, read-only filesystem checks) | L0 |
 | `launch` | — | text | AppleScript | L1 |
 | `quit` | `{ confirmed?: bool }` | text | AppleScript | L3 |
 

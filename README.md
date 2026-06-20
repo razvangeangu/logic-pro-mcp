@@ -86,7 +86,7 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 | Mixer | Volume, pan, plugin snapshots, guarded stock plugin insertion | MCU writes plus AX readback/provenance; occupied plugin slots refuse replacement |
 | Library | Scan Logic's instrument library and load patches by path | Disk/AX inventory is cached and path-allowlisted |
 | Navigation | Bars, markers, zoom, view toggles | Marker navigation is target-faithful; cold-cache misses return failure instead of "next marker" |
-| Project lifecycle | New, open, save, save-as, close, bounce, quit | Destructive operations require confirmation; saves verify package existence/mtime |
+| Project lifecycle | New, open, save, save-as, close, bounce, export plan, quit | Destructive operations require confirmation; dry-run export plans do not open Logic or write artifacts |
 
 ## Agent-Grade Surfaces
 
