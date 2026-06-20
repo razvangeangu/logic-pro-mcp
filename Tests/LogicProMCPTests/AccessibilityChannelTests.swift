@@ -859,12 +859,23 @@ private func makeSetInstrumentFixture() -> (
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(160)
     let window = builder.element(161)
-    let transport = builder.element(162)
+    let controlBar = builder.element(162)
+    let trackList = builder.element(163)
+    let trackHeader = builder.element(164)
+    let barSlider = builder.element(165)
 
     builder.setAttribute(app, kAXMainWindowAttribute as String, window)
-    builder.setChildren(window, [transport])
-    builder.setAttribute(transport, kAXRoleAttribute as String, kAXGroupRole as String)
-    builder.setAttribute(transport, kAXIdentifierAttribute as String, "Transport")
+    builder.setChildren(window, [controlBar, trackList])
+    builder.setAttribute(controlBar, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(controlBar, kAXDescriptionAttribute as String, "Control Bar")
+    builder.setChildren(controlBar, [barSlider])
+    builder.setAttribute(barSlider, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(barSlider, kAXDescriptionAttribute as String, "Bar")
+    builder.setAttribute(trackList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setAttribute(trackList, kAXIdentifierAttribute as String, "Track Headers")
+    builder.setChildren(trackList, [trackHeader])
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(trackHeader, kAXSelectedAttribute as String, true)
 
     let channel = makeAXBackedAccessibilityChannel(
         builder: builder,
@@ -877,6 +888,9 @@ private func makeSetInstrumentFixture() -> (
     #expect(result.message.contains("\"error\":\"readback_unavailable\""))
     #expect(result.message.contains("\"via\":\"keyboard-fallback\""))
     #expect(result.message.contains("\"requested\":126"))
+    #expect(result.message.contains("\"track_header_count\":1"))
+    #expect(result.message.contains("\"control_bar_found\":true"))
+    #expect(result.message.contains("\"control_bar_slider_descriptions\":[\"Bar\"]"))
 }
 
 @Test func testAccessibilityChannelImportMIDIFileReturnsErrorWhenTrackCountDoesNotIncrease() async throws {
@@ -984,6 +998,8 @@ private func makeSetInstrumentFixture() -> (
     let app = builder.element(700)
     let window = builder.element(701)
     let transport = builder.element(702)
+    final class FallbackBox: @unchecked Sendable { var called = false }
+    let fallbackBox = FallbackBox()
     builder.setAttribute(app, kAXMainWindowAttribute as String, window)
     builder.setChildren(window, [transport])
     builder.setAttribute(transport, kAXRoleAttribute as String, kAXGroupRole as String)
@@ -992,13 +1008,25 @@ private func makeSetInstrumentFixture() -> (
     let channel = makeAXBackedAccessibilityChannel(
         builder: builder,
         app: app,
-        runTempoFallback: { _ in false }
+        runTempoFallback: { _ in
+            fallbackBox.called = true
+            return true
+        }
     )
 
     let result = await channel.execute(operation: "transport.set_tempo", params: ["tempo": "126"])
     #expect(!result.isSuccess)
     #expect(result.message.contains("\"error\":\"element_not_found\""))
     #expect(result.message.contains("tempo slider not located"))
+    #expect(result.message.contains("create a software instrument track first"))
+    let object = decodeAccessibilityJSON(result.message)
+    #expect(object["track_header_count"] as? Int == 0)
+    #expect(object["transport_bar_found"] as? Bool == true)
+    #expect(object["control_bar_found"] as? Bool == false)
+    #expect(object["dialog_present"] as? Bool == false)
+    #expect((object["transport_slider_descriptions"] as? [String]) == [])
+    #expect((object["control_bar_checkbox_labels"] as? [String]) == [])
+    #expect(fallbackBox.called == false)
 }
 
 @Test func testAccessibilityChannelCreateInstrumentVerifiesTrackCountIncrease() async {

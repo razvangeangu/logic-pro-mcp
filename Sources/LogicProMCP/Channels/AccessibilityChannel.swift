@@ -729,18 +729,116 @@ actor AccessibilityChannel: Channel {
             }
         }
 
-        if runFallback(tempoStr) {
+        let tempoLandmarks = tempoControlLandmarks(runtime: runtime)
+        let missingHint = tempoControlMissingHint(landmarks: tempoLandmarks)
+        let missingExtras = baseExtras.merging(tempoLandmarks) { _, new in new }
+
+        if shouldAttemptTempoFallback(landmarks: tempoLandmarks) && runFallback(tempoStr) {
             return .error(HonestContract.encodeStateC(
                 error: .readbackUnavailable,
                 hint: "tempo fallback executed but no tempo readback was available",
-                extras: baseExtras.merging(["via": "keyboard-fallback"]) { _, new in new }
+                extras: missingExtras.merging(["via": "keyboard-fallback"]) { _, new in new }
             ))
         }
         return .error(HonestContract.encodeStateC(
             error: .elementNotFound,
-            hint: "tempo slider not located in Logic control bar; ensure Logic Pro is frontmost with an open project",
-            extras: baseExtras
+            hint: missingHint,
+            extras: missingExtras
         ))
+    }
+
+    private static func tempoControlLandmarks(
+        runtime: AXLogicProElements.Runtime
+    ) -> [String: Any] {
+        let window = AXLogicProElements.mainWindow(runtime: runtime)
+        let controlBar = AXLogicProElements.getControlBar(runtime: runtime)
+        let transportBar = AXLogicProElements.getTransportBar(runtime: runtime)
+
+        return [
+            "main_window_title": (window.flatMap { AXHelpers.getTitle($0, runtime: runtime.ax) } ?? "") as Any,
+            "dialog_present": AXLogicProElements.dialogPresent(runtime: runtime),
+            "control_bar_found": controlBar != nil,
+            "transport_bar_found": transportBar != nil,
+            "track_header_count": AXLogicProElements.allTrackHeaders(runtime: runtime).count,
+            "control_bar_slider_descriptions": tempoLandmarkStrings(
+                in: controlBar,
+                role: kAXSliderRole,
+                runtime: runtime.ax
+            ),
+            "transport_slider_descriptions": tempoLandmarkStrings(
+                in: transportBar,
+                role: kAXSliderRole,
+                runtime: runtime.ax
+            ),
+            "control_bar_checkbox_labels": tempoLandmarkCheckboxLabels(
+                in: controlBar,
+                runtime: runtime.ax
+            ),
+        ]
+    }
+
+    private static func tempoControlMissingHint(landmarks: [String: Any]) -> String {
+        let dialogPresent = landmarks["dialog_present"] as? Bool ?? false
+        let trackHeaderCount = landmarks["track_header_count"] as? Int ?? 0
+        let controlBarFound = landmarks["control_bar_found"] as? Bool ?? false
+        let transportBarFound = landmarks["transport_bar_found"] as? Bool ?? false
+
+        if dialogPresent {
+            return "tempo slider not located while a Logic dialog is present. Dismiss the dialog, clear the Create New Track prompt if visible, and retry."
+        }
+        if trackHeaderCount == 0 {
+            return "tempo slider not located: no track headers are visible yet. Clear the Create New Track dialog or create a software instrument track first."
+        }
+        if !controlBarFound && !transportBarFound {
+            return "tempo slider not located: Logic's Control Bar and transport UI were both absent from the AX tree. Ensure the project window is frontmost and fully loaded, then retry."
+        }
+        if !controlBarFound {
+            return "tempo slider not located in Logic's Control Bar. Ensure the project window is frontmost and the Control Bar is visible, then retry."
+        }
+        return "tempo slider not located in Logic control bar; ensure Logic Pro is frontmost with an open project"
+    }
+
+    private static func shouldAttemptTempoFallback(landmarks: [String: Any]) -> Bool {
+        let dialogPresent = landmarks["dialog_present"] as? Bool ?? false
+        let trackHeaderCount = landmarks["track_header_count"] as? Int ?? 0
+        let controlBarFound = landmarks["control_bar_found"] as? Bool ?? false
+        let transportBarFound = landmarks["transport_bar_found"] as? Bool ?? false
+
+        return !dialogPresent && trackHeaderCount > 0 && (controlBarFound || transportBarFound)
+    }
+
+    private static func tempoLandmarkStrings(
+        in root: AXUIElement?,
+        role: String,
+        runtime: AXHelpers.Runtime
+    ) -> [String] {
+        guard let root else { return [] }
+        let descendants = AXHelpers.findAllDescendants(
+            of: root,
+            role: role,
+            maxDepth: 6,
+            runtime: runtime
+        )
+        var values: [String] = []
+        for element in descendants {
+            let label = [
+                AXHelpers.getDescription(element, runtime: runtime),
+                AXHelpers.getTitle(element, runtime: runtime),
+            ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+            if let label, !values.contains(label) {
+                values.append(label)
+            }
+        }
+        return values
+    }
+
+    private static func tempoLandmarkCheckboxLabels(
+        in root: AXUIElement?,
+        runtime: AXHelpers.Runtime
+    ) -> [String] {
+        tempoLandmarkStrings(in: root, role: kAXCheckBoxRole, runtime: runtime)
     }
 
     private static func runTempoFallbackScript(tempo: String) -> Bool {
