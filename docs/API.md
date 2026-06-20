@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **9 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **10 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -20,6 +20,7 @@ Every tool call returns a `CallTool.Result` with `content: [{ type: "text", text
 | [`logic_edit`](#logic_edit) | Undo/redo/cut/copy/paste/quantize | Write |
 | [`logic_navigate`](#logic_navigate) | Bar navigation, markers, zoom, view toggles | Write |
 | [`logic_project`](#logic_project) | Open, save, close, bounce, quit | Write |
+| [`logic_audio`](#logic_audio) | Read-only exported audio artifact analysis | Read |
 | [`logic_system`](#logic_system) | Health, permissions, help, cache refresh | Mixed |
 
 All tool invocations use:
@@ -710,6 +711,52 @@ Envelope `source` values:
 On Logic Pro 12.x the new `AXRuler`-structural walker (v3.1.8) succeeds for typical projects but a 12.2-specific marker hierarchy variant has been observed where the walk fails; tracked separately. When `source: "default"` appears on a project that visibly has markers, the AX subtree on that Logic build hasn't been characterized yet.
 
 ---
+
+## logic_audio
+
+Read-only post-export audio artifact analysis. This tool never mutates Logic projects or audio files.
+
+| Command | Params | Returns | Level |
+|---------|--------|---------|-------|
+| `analyze_file` | `{ path: string, output_root?: string, min_duration_seconds?: number, expected_duration_seconds?: number, max_duration_drift_seconds?: number, min_file_size_bytes?: int, max_peak_dbfs?: number, near_silence_dbfs?: number, max_silence_ratio?: number, expected_sample_rate?: int, expected_channel_count?: int }` | JSON `logic_pro_mcp_audio_analysis.v1` | L0 |
+
+Path safety:
+- `path` must be absolute.
+- `..` traversal and iCloud paths are rejected.
+- `output_root`, when supplied, is resolved after symlink cleanup and the analyzed file must remain inside it.
+- Unsupported formats, missing files, zero-byte files, and decoder errors fail closed with `verification.status:"fail"`.
+
+Measurement honesty:
+- `peak_dbfs` is measured from raw sample magnitude and is **not clamped to 0 dBFS** — true digital overs report positive dBFS so clipping is visible to `max_peak_dbfs`.
+- `duration_seconds`, `silence_ratio`, and `frame_count` are derived from frames actually decoded, not the header's declared length. If the decoder yields fewer frames than the header claims, `verification.reasons` includes `truncated_or_short_data` and the status is `fail`.
+- `exists` reflects on-disk presence honestly per error kind: an existing-but-unanalyzable artifact (unsupported format, zero bytes, directory, decoder/metadata error) reports `exists:true` with `verification.status:"fail"`; only a missing or rejected (unsafe) path reports `exists:false`.
+
+Loudness honesty:
+- `loudness_method:"rms_estimate"` is an RMS-derived estimate, not EBU R128 LUFS.
+- `loudness_estimate_lufs` carries the RMS dBFS estimate (equal to `rms_dbfs`); `true_peak_dbfs` and spectral fields are not claimed when not measured.
+
+Verification schema:
+- `verification.reasons` is always a list of stable machine codes (e.g. `peak_above_threshold`, `near_silent_output`, `sample_rate_mismatch`, `unsupported_format`, `missing_file`, `directory_path`, `decoder_error`, `zero_length_file`, `truncated_or_short_data`).
+- `verification.detail` is an optional human-readable message present only on the error path; clients should parse `reasons`, not `detail`.
+
+Example:
+
+```json
+{
+  "name": "logic_audio",
+  "arguments": {
+    "command": "analyze_file",
+    "params": {
+      "path": "/tmp/LogicProMCP/export.wav",
+      "output_root": "/tmp/LogicProMCP",
+      "min_duration_seconds": 10,
+      "max_peak_dbfs": -0.1,
+      "expected_sample_rate": 48000,
+      "expected_channel_count": 2
+    }
+  }
+}
+```
 
 ## logic_project
 

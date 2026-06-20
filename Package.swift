@@ -37,6 +37,7 @@ let package = Package(
                 .linkedFramework("CoreMIDI"),
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("CoreGraphics"),
+                .linkedFramework("AVFoundation"),
             ]
         ),
         .testTarget(

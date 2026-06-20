@@ -23,6 +23,7 @@ private let serverResourceText = sharedResourceText
         "logic_edit",
         "logic_navigate",
         "logic_project",
+        "logic_audio",
         "logic_system",
         "logic_plugins",
     ])
@@ -70,6 +71,7 @@ private let serverResourceText = sharedResourceText
         "logic_edit",
         "logic_navigate",
         "logic_project",
+        "logic_audio",
         "logic_system",
     ]
 
@@ -195,7 +197,7 @@ private let serverResourceText = sharedResourceText
 
     let handlers = await server.makeHandlers()
     let toolNames = await handlers.listTools(ListTools.Parameters())
-    #expect(toolNames.tools.count == 9)
+    #expect(toolNames.tools.count == 10)
 }
 
 @Test func testLogicProServerStartUsesDefaultRegisterAndCleanupPaths() async throws {
