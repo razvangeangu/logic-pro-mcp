@@ -7,6 +7,7 @@ enum LogicProMCPMain {
         serverFactory: () -> any ServerStarting = { LogicProServer() },
         approvalStoreFactory: () -> any ManualValidationStoring = { ManualValidationStore() },
         doctorRuntime: SetupDoctor.Runtime = .production,
+        lifecycleRuntime: SetupLifecycle.Runtime = .production,
         writeStdout: (String) -> Void = { message in
             FileHandle.standardOutput.write(Data(message.utf8))
         },
@@ -20,6 +21,7 @@ enum LogicProMCPMain {
             serverFactory: serverFactory,
             approvalStoreFactory: approvalStoreFactory,
             doctorRuntime: doctorRuntime,
+            lifecycleRuntime: lifecycleRuntime,
             writeStdout: writeStdout,
             writeStderr: writeStderr
         )
