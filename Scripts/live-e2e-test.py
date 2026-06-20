@@ -1019,6 +1019,75 @@ def main():
         ),
     )
 
+    probe_category = None
+    probe_preset = None
+    if tracks and isinstance(list_library_json, dict):
+        presets_by_category = list_library_json.get("presetsByCategory")
+        categories = list_library_json.get("categories")
+        candidate_categories = []
+        current_category = list_library_json.get("currentCategory")
+        if isinstance(current_category, str) and current_category:
+            candidate_categories.append(current_category)
+        if isinstance(categories, list):
+            for category in categories:
+                if isinstance(category, str) and category and category not in candidate_categories:
+                    candidate_categories.append(category)
+        if isinstance(presets_by_category, dict):
+            for category in candidate_categories:
+                presets = presets_by_category.get(category)
+                if not isinstance(presets, list):
+                    continue
+                preset = next((item for item in presets if isinstance(item, str) and item), None)
+                if preset:
+                    probe_category = category
+                    probe_preset = preset
+                    break
+
+    if tracks and probe_category and probe_preset:
+        r = call_tool(
+            client,
+            "logic_tracks",
+            "set_instrument",
+            {"index": 0, "category": probe_category, "preset": probe_preset},
+        )
+        set_instrument_text = tool_text(r)
+        set_instrument_json = safe_json(set_instrument_text)
+        T(
+            "track.set_instrument returns verification metadata or fail-closed selection error",
+            r,
+            lambda _: (
+                isinstance(set_instrument_json, dict)
+                and (
+                    (
+                        set_instrument_json.get("success") is True
+                        and set_instrument_json.get("requested_patch_name") == probe_preset
+                        and set_instrument_json.get("requested_category") == probe_category
+                        and set_instrument_json.get("target_track_index") == 0
+                        and "target_track_selection_verified" in set_instrument_json
+                        and "observed_patch_name" in set_instrument_json
+                        and "readback_state" in set_instrument_json
+                    )
+                    or (
+                        set_instrument_json.get("success") is False
+                        and set_instrument_json.get("error") in {
+                            "track_selection_failed",
+                            "ax_write_failed",
+                            "element_not_found",
+                            "permission_denied",
+                            "readback_unavailable",
+                            "readback_mismatch",
+                        }
+                        and set_instrument_json.get("requested_patch_name") == probe_preset
+                        and set_instrument_json.get("requested_category") == probe_category
+                        and set_instrument_json.get("target_track_index") == 0
+                    )
+                )
+            ) or "Library panel not found" in set_instrument_text
+              or "Accessibility not trusted" in set_instrument_text
+              or "Event-post permission required" in set_instrument_text
+              or "No document open" in set_instrument_text,
+        )
+
     r = call_tool(client, "logic_tracks", "scan_plugin_presets", {"submenuOpenDelayMs": 300})
     T("track.scan_plugin_presets returns content or guidance", r, lambda _: len(tool_text(r)) > 0)
 
