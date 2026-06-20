@@ -11,7 +11,7 @@ struct ProjectDispatcher {
 
     static let tool = commandTool(
         name: "logic_project",
-        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions, export_plan. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); export_plan -> { projects: [absolute .logicx], output_root: String, artifacts?: [bounce|stem|preview|variant], collision_policy?: fail_if_exists|skip_existing } dry-run only; others -> {}.",
+        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions, export_plan, audit, cleanup_plan. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); export_plan -> { projects: [absolute .logicx], output_root: String, artifacts?: [bounce|stem|preview|variant], collision_policy?: fail_if_exists|skip_existing } dry-run only; audit -> read-only project/session audit JSON; cleanup_plan -> read-only serializable cleanup plan JSON; others -> {}.",
         commandDescription: "Project command to execute"
     )
 
@@ -199,6 +199,30 @@ struct ProjectDispatcher {
             await refreshRegionCache(from: result, cache: cache)
             return toolTextResult(result)
 
+        case "audit":
+            let report = await ProjectSessionAudit.buildAudit(cache: cache)
+            do {
+                return toolTextResult(try encodeJSONStrict(report, compact: true))
+            } catch {
+                // Honest Contract: a serialization failure must NOT be returned
+                // as a success-shaped body. Fail loud with isError=true.
+                return toolTextResult(
+                    "{\"error\":\"audit encode failed: \(jsonStringEscape(error.localizedDescription))\"}",
+                    isError: true
+                )
+            }
+
+        case "cleanup_plan":
+            let report = await ProjectSessionAudit.buildCleanupPlan(cache: cache)
+            do {
+                return toolTextResult(try encodeJSONStrict(report, compact: true))
+            } catch {
+                return toolTextResult(
+                    "{\"error\":\"cleanup_plan encode failed: \(jsonStringEscape(error.localizedDescription))\"}",
+                    isError: true
+                )
+            }
+
         case "launch":
             if isLogicProRunning() {
                 audit(command, phase: .rejected, reason: "already running")
@@ -239,7 +263,7 @@ struct ProjectDispatcher {
 
         default:
             return toolTextResult(
-                "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions, export_plan",
+                "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions, export_plan, audit, cleanup_plan",
                 isError: true
             )
         }

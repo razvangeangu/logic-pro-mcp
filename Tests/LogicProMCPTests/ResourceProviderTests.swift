@@ -31,6 +31,8 @@ struct ResourceProviderTests {
         #expect(uris.contains("logic://stock-plugins/capabilities"))
         #expect(uris.contains("logic://workflow-skills"))
         #expect(uris.contains("logic://workflow-skills/schema"))
+        #expect(uris.contains("logic://project/audit"))
+        #expect(uris.contains("logic://project/cleanup-plan"))
     }
 
     @Test("new templates are registered: regions per track, mixer per strip, catalog/search detail")

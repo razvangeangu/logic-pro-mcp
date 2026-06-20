@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **10 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **10 tools**, **16 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -32,7 +32,7 @@ All tool invocations use:
 
 ## Resource Catalog (Read-only)
 
-**14 static resources + 7 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
+**16 static resources + 7 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
 
 | URI | Content | Source |
 |-----|---------|--------|
@@ -42,6 +42,8 @@ All tool invocations use:
 | `logic://mixer` | `{ cache_age_sec, fetched_at, data_source, ax_occluded, mcu_connected, mcu_registered, mcu_last_feedback_age_ms, registered (alias), strips }` — `data_source` ∈ `ax_poll`/`cache_stale`/`mixer_not_visible` (#11) | Cache (MCU echo + AX poll) |
 | `logic://markers` | `MarkerState[]` JSON | Cache (AX poll, every 5 cycles) — see [Marker semantics](#marker-semantics) |
 | `logic://project/info` | `ProjectInfo` JSON wrapped in cache envelope (v3.1.8+) — see [Tempo semantics](#tempo-semantics-projectinfo-vs-transportstate) | Tier-merge: live transport/cache → MetaData.plist → defaults (3s AX poll) |
+| `logic://project/audit` | `logic_pro_mcp_project_audit.v1` JSON: project evidence, deterministic findings, export readiness, and read-only cleanup plan | Cache/resource provenance synthesis; read-only |
+| `logic://project/cleanup-plan` | `logic_pro_mcp_project_cleanup_plan.v1` JSON: serializable cleanup steps with risk, confirmation, readback, stop conditions, and current tool support | Derived from current project audit; read-only |
 | `logic://midi/ports` | `{ sources, destinations }` | CoreMIDI live query |
 | `logic://mcu/state` | `{ connection, display }` — MCU handshake + LCD state | Cache |
 | `logic://library/inventory` | Cached Library tree JSON (empty placeholder if not yet scanned) | File (resolved via `LOGIC_PRO_MCP_LIBRARY_INVENTORY` env, `Resources/library-inventory.json`, or `~/Library/Application Support/LogicProMCP/`). All candidates must sit under the path allowlist (`~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`); extend via `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` (colon-separated, additive). |
@@ -773,6 +775,8 @@ Example:
 | `is_running` | — | `"true"` or `"false"` | (direct) | L0 |
 | `get_regions` | — | JSON `RegionInfo[]` | Accessibility (read-only arrange area scan) | L0 |
 | `export_plan` | `{ projects?: string[], project?: string, output_root: string, artifacts?: string[], collision_policy?: "fail_if_exists"\|"skip_existing" }` | JSON `logic_pro_mcp_export_manifest.v1` dry-run plan | (direct, read-only filesystem checks) | L0 |
+| `audit` | — | `logic_pro_mcp_project_audit.v1` JSON | Cache/resource provenance synthesis | L0 |
+| `cleanup_plan` | — | `logic_pro_mcp_project_cleanup_plan.v1` JSON | Derived from audit; no mutation | L0 |
 | `launch` | — | text | AppleScript | L1 |
 | `quit` | `{ confirmed?: bool }` | text | AppleScript | L3 |
 
@@ -795,6 +799,14 @@ Example:
   lastSavedAgeSec?: number        // v3.1.8+; present when source == "project_file"
 }
 ```
+
+### Project audit and cleanup planning
+
+Use `logic://project/audit` or `logic_project audit` to inspect a messy session without mutation. The audit reports `schema: "logic_pro_mcp_project_audit.v1"`, `status`, `read_only: true`, evidence/provenance sections, deterministic findings, and an embedded `cleanup_plan`.
+
+Use `logic://project/cleanup-plan` or `logic_project cleanup_plan` when a client only needs the serializable plan. Each step includes `target_identifier`, `proposed_operation`, `risk_level`, `required_confirmation`, `expected_readback`, `rollback_or_recovery`, `stop_condition`, `supported_by_current_tools`, and `mutates_project`.
+
+The first milestone is intentionally read-only: it can propose rename, mute/solo/arm reset, marker planning, or mixer-refresh steps, but it never executes them. Unsupported or unsafe cleanup actions are labelled `supported_by_current_tools:false`; deletion is never proposed by default.
 
 #### Tempo semantics: `project/info` vs `transport/state`
 

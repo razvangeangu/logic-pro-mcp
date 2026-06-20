@@ -1,0 +1,324 @@
+import Foundation
+import MCP
+import Testing
+@testable import LogicProMCP
+
+// MARK: - Deterministic Snapshot fixture
+
+/// Build a fully-formed audit Snapshot with a fixed `now` so `buildAudit(snapshot:)`
+/// is fully deterministic and the file-vs-AX cross-check can be driven explicitly.
+private func makeAuditSnapshot(
+    now: Date = Date(timeIntervalSince1970: 1_730_000_000),
+    hasDocument: Bool = true,
+    project: ProjectInfo? = nil,
+    transport: TransportState? = nil,
+    tracks: [TrackState],
+    regions: [RegionState] = [],
+    markers: [MarkerState] = [],
+    channelStrips: [ChannelStripState] = [],
+    fileTrackCount: Int? = nil
+) -> ProjectSessionAudit.Snapshot {
+    var proj = project ?? ProjectInfo()
+    if project == nil {
+        proj.name = "Fixture Session"
+        proj.filePath = "/tmp/Fixture Session.logicx"
+        proj.source = "ax_live"
+        proj.trackCount = tracks.count
+    }
+    var tport = transport ?? TransportState()
+    if transport == nil {
+        tport.tempo = 126
+        tport.lastUpdated = now
+    }
+    return ProjectSessionAudit.Snapshot(
+        now: now,
+        hasDocument: hasDocument,
+        axOccluded: false,
+        project: proj,
+        projectFetchedAt: now,
+        transport: tport,
+        tracks: tracks,
+        tracksFetchedAt: now,
+        regions: regions,
+        regionsFetchedAt: now,
+        markers: markers,
+        markersFetchedAt: now,
+        channelStrips: channelStrips,
+        mixerFetchedAt: now,
+        fileTrackCount: fileTrackCount
+    )
+}
+
+private func messySnapshot(
+    now: Date = Date(timeIntervalSince1970: 1_730_000_000)
+) -> ProjectSessionAudit.Snapshot {
+    var kickA = TrackState(id: 0, name: "Kick", type: .audio)
+    kickA.isSoloed = true
+    var kickB = TrackState(id: 1, name: "Kick", type: .audio)
+    kickB.isMuted = true
+    kickB.isSoloed = true
+    var unnamed = TrackState(id: 2, name: "", type: .softwareInstrument)
+    unnamed.isArmed = true
+
+    var strip = ChannelStripState(trackIndex: 0)
+    strip.plugins = [PluginSlotState(index: 0, name: "Channel EQ", isBypassed: false)]
+    strip.pluginsSource = "ax"
+
+    return makeAuditSnapshot(
+        now: now,
+        tracks: [kickA, kickB, unnamed],
+        regions: [
+            RegionState(
+                id: "0:1:5:Kick",
+                name: "Kick",
+                trackIndex: 0,
+                startPosition: "1 1 1 1",
+                endPosition: "5 1 1 1",
+                length: "4 0 0 0"
+            ),
+        ],
+        markers: [],
+        channelStrips: [strip]
+    )
+}
+
+@Test func testProjectSessionAuditFindingsAndCleanupPlanAreDeterministic() async throws {
+    let now = Date(timeIntervalSince1970: 1_730_000_000)
+    let snap = messySnapshot(now: now)
+
+    // Real determinism: build twice from the identical snapshot and compare the
+    // full ORDERED id arrays. A non-stable ordering or slug collision would
+    // diverge here.
+    let runA = ProjectSessionAudit.buildAudit(snapshot: snap)
+    let runB = ProjectSessionAudit.buildAudit(snapshot: snap)
+    #expect(runA.findings.map(\.id) == runB.findings.map(\.id))
+    #expect(runA.cleanupPlan.map(\.id) == runB.cleanupPlan.map(\.id))
+
+    // Uniqueness: cardinality of the id array equals cardinality of its Set.
+    let findingIDsArray = runA.findings.map(\.id)
+    #expect(findingIDsArray.count == Set(findingIDsArray).count)
+    let stepIDsArray = runA.cleanupPlan.map(\.id)
+    #expect(stepIDsArray.count == Set(stepIDsArray).count)
+
+    // Documented sort invariant on findings.
+    #expect(findingIDsArray == findingIDsArray.sorted())
+
+    let report = runA
+    #expect(report.schema == "logic_pro_mcp_project_audit.v1")
+    #expect(report.readOnly)
+    #expect(report.status == .degraded)
+    #expect(report.evidence.tracks.total == 3)
+    #expect(report.evidence.mixer.occupiedPluginSlots.count == 1)
+
+    let findingIDs = Set(report.findings.map(\.id))
+    #expect(findingIDs.contains("duplicate_track_names_kick_0_1"))
+    #expect(findingIDs.contains("unnamed_or_placeholder_tracks"))
+    #expect(findingIDs.contains("empty_tracks_detected"))
+    #expect(findingIDs.contains("soloed_tracks_present"))
+    #expect(findingIDs.contains("armed_tracks_present"))
+    #expect(findingIDs.contains("muted_and_soloed_tracks"))
+    #expect(findingIDs.contains("marker_structure_missing"))
+    #expect(findingIDs.contains("occupied_plugin_slots_present"))
+
+    let stepIDs = Set(report.cleanupPlan.map(\.id))
+    #expect(stepIDs.contains("read_audit_snapshot"))
+    #expect(stepIDs.contains("rename_duplicate_kick_0_1"))
+    #expect(stepIDs.contains("rename_unnamed_or_placeholder_tracks"))
+    #expect(stepIDs.contains("review_empty_tracks_no_delete"))
+    #expect(stepIDs.contains("clear_solo_states"))
+    #expect(stepIDs.contains("clear_arm_states"))
+
+    // Empty-track step is a manual-review, non-mutating, non-executable step.
+    let emptyTrackReview = try #require(report.cleanupPlan.first { $0.id == "review_empty_tracks_no_delete" })
+    #expect(!emptyTrackReview.supportedByCurrentTools)
+    #expect(!emptyTrackReview.mutatesProject)
+    #expect(emptyTrackReview.command == nil)
+    #expect(emptyTrackReview.tool == nil)
+
+    // Plan-wide safety invariants (each allSatisfy is a non-optional Bool).
+    // No step ever proposes a delete command by default.
+    #expect(report.cleanupPlan.allSatisfy { ($0.command ?? "") != "delete" })
+    // Any step that is not supported by current tools must be non-mutating.
+    #expect(report.cleanupPlan.filter { !$0.supportedByCurrentTools }.allSatisfy { !$0.mutatesProject })
+}
+
+@Test func testProjectAuditFailsClosedWhenNoDocumentOpen() async throws {
+    let cache = StateCache()
+    await cache.updateDocumentState(false) // hasDocument defaults to TRUE; flip explicitly.
+    let report = await ProjectSessionAudit.buildAudit(cache: cache)
+
+    let blocker = try #require(report.findings.first { $0.id == "no_open_document" })
+    #expect(blocker.severity == .blocker)
+    #expect(report.status == .failed)
+    #expect(report.evidence.exportReadiness.status == "blocked")
+    #expect(report.evidence.exportReadiness.blockers.contains("no_open_document"))
+    // Cleanup plan must stay read-only: no mutating step when the gate trips.
+    #expect(report.cleanupPlan.allSatisfy { !$0.mutatesProject })
+    #expect(report.cleanupPlan.contains { $0.id == "read_audit_snapshot" })
+}
+
+@Test func testProjectAuditSlugCollidingGroupsGetDistinctStableIds() throws {
+    // Two distinct duplicate-name groups that slug() collapses to "kick-1":
+    // "Kick #1" x2 (indices 0,1) and "Kick @1" x2 (indices 2,3).
+    let tracks = [
+        TrackState(id: 0, name: "Kick #1", type: .audio),
+        TrackState(id: 1, name: "Kick #1", type: .audio),
+        TrackState(id: 2, name: "Kick @1", type: .audio),
+        TrackState(id: 3, name: "Kick @1", type: .audio),
+    ]
+    let report = ProjectSessionAudit.buildAudit(snapshot: makeAuditSnapshot(tracks: tracks))
+
+    let dupFindingIDs = report.findings.map(\.id).filter { $0.hasPrefix("duplicate_track_names") }
+    #expect(dupFindingIDs.count == 2)
+    #expect(dupFindingIDs.count == Set(dupFindingIDs).count)
+
+    let renameStepIDs = report.cleanupPlan.map(\.id).filter { $0.hasPrefix("rename_duplicate") }
+    #expect(renameStepIDs.count == 2)
+    #expect(renameStepIDs.count == Set(renameStepIDs).count)
+
+    // Whole-report uniqueness still holds.
+    let allFindingIDs = report.findings.map(\.id)
+    #expect(allFindingIDs.count == Set(allFindingIDs).count)
+    let allStepIDs = report.cleanupPlan.map(\.id)
+    #expect(allStepIDs.count == Set(allStepIDs).count)
+}
+
+@Test func testProjectAuditEmojiOnlyDuplicateGroupsGetDistinctIds() throws {
+    // slug() returns the literal "unnamed" for any name with no alphanumerics,
+    // so two distinct emoji-only duplicate groups would collide without the
+    // index disambiguator.
+    let tracks = [
+        TrackState(id: 0, name: "🔥", type: .audio),
+        TrackState(id: 1, name: "🔥", type: .audio),
+        TrackState(id: 2, name: "🎹", type: .audio),
+        TrackState(id: 3, name: "🎹", type: .audio),
+    ]
+    let report = ProjectSessionAudit.buildAudit(snapshot: makeAuditSnapshot(tracks: tracks))
+
+    let dupFindingIDs = report.findings.map(\.id).filter { $0.hasPrefix("duplicate_track_names") }
+    #expect(dupFindingIDs.count == 2)
+    let firstID = try #require(dupFindingIDs.first)
+    let secondID = try #require(dupFindingIDs.dropFirst().first)
+    #expect(firstID != secondID)
+}
+
+@Test func testProjectAuditReportsTrackReadbackGapWhenFileExceedsAX() throws {
+    // AX surfaced 1 track but the project file says there are 4. The audit must
+    // report this honestly (so it agrees with logic://tracks placeholder rows)
+    // rather than claiming the inventory is empty.
+    let snap = makeAuditSnapshot(
+        tracks: [TrackState(id: 0, name: "Lead", type: .audio)],
+        fileTrackCount: 4
+    )
+    let report = ProjectSessionAudit.buildAudit(snapshot: snap)
+
+    let gap = try #require(report.findings.first { $0.id == "track_readback_gap" })
+    #expect(gap.severity == .warn)
+    #expect(gap.provenance == "project_file")
+    #expect(gap.evidence.values.contains("file_track_count=4"))
+    #expect(gap.evidence.values.contains("ax_track_count=1"))
+    // The misleading "blank project" info must NOT be emitted alongside a gap.
+    #expect(!report.findings.contains { $0.id == "track_inventory_empty" })
+}
+
+@Test func testProjectAuditEmptyAXAndNoFileCountEmitsInventoryEmpty() throws {
+    // No AX tracks and no file count => honest "inventory empty" info, no gap.
+    let snap = makeAuditSnapshot(tracks: [], fileTrackCount: nil)
+    let report = ProjectSessionAudit.buildAudit(snapshot: snap)
+
+    #expect(report.findings.contains { $0.id == "track_inventory_empty" })
+    #expect(!report.findings.contains { $0.id == "track_readback_gap" })
+}
+
+@Test func testProjectAuditAndCleanupPlanResourcesAndCommandsReturnJSON() async throws {
+    let cache = StateCache()
+    var project = ProjectInfo()
+    project.name = "Read Only"
+    project.filePath = "/tmp/Read Only.logicx"
+    project.source = "ax_live"
+    await cache.updateProject(project)
+    await cache.updateTracks([TrackState(id: 0, name: "Lead", type: .audio)])
+
+    let router = ChannelRouter()
+    let auditResource = try await ResourceHandlers.read(uri: "logic://project/audit", cache: cache, router: router)
+    let auditJSON = try #require(sharedJSONObject(sharedResourceText(auditResource)))
+    #expect(auditJSON["schema"] as? String == "logic_pro_mcp_project_audit.v1")
+    #expect(try #require(auditJSON["read_only"] as? Bool))
+
+    let planResource = try await ResourceHandlers.read(uri: "logic://project/cleanup-plan", cache: cache, router: router)
+    let planJSON = try #require(sharedJSONObject(sharedResourceText(planResource)))
+    #expect(planJSON["schema"] as? String == "logic_pro_mcp_project_cleanup_plan.v1")
+    #expect(try #require(planJSON["requires_plan_confirmation"] as? Bool))
+    #expect(try #require(planJSON["read_only"] as? Bool))
+
+    let auditTool = await ProjectDispatcher.handle(command: "audit", params: [:], router: router, cache: cache)
+    #expect(!auditTool.isError!)
+    let auditToolJSON = try #require(sharedJSONObject(sharedToolText(auditTool)))
+    #expect(auditToolJSON["schema"] as? String == "logic_pro_mcp_project_audit.v1")
+    #expect(try #require(auditToolJSON["read_only"] as? Bool))
+
+    let planTool = await ProjectDispatcher.handle(command: "cleanup_plan", params: [:], router: router, cache: cache)
+    #expect(!planTool.isError!)
+    let planToolJSON = try #require(sharedJSONObject(sharedToolText(planTool)))
+    #expect(planToolJSON["schema"] as? String == "logic_pro_mcp_project_cleanup_plan.v1")
+    #expect(try #require(planToolJSON["read_only"] as? Bool))
+}
+
+@Test func testProjectAuditSchemaV1KeySetsAreStable() async throws {
+    // Lock the v1 wire schema key sets so a field add/remove forces a deliberate
+    // test edit (and a schema version bump). Exact Set equality (not contains).
+    let cache = StateCache()
+    var project = ProjectInfo()
+    project.name = "Schema Probe"
+    project.filePath = "/tmp/Schema Probe.logicx"
+    project.source = "ax_live"
+    await cache.updateProject(project)
+    // Two duplicate tracks so a rename step (with tool+command set) is emitted.
+    await cache.updateTracks([
+        TrackState(id: 0, name: "Bass", type: .audio),
+        TrackState(id: 1, name: "Bass", type: .audio),
+    ])
+
+    let router = ChannelRouter()
+    let auditResource = try await ResourceHandlers.read(uri: "logic://project/audit", cache: cache, router: router)
+    let auditJSON = try #require(sharedJSONObject(sharedResourceText(auditResource)))
+
+    let topLevel = try #require(auditJSON["evidence"] as? [String: Any])
+    #expect(Set(topLevel.keys) == [
+        "has_document", "ax_occluded", "project", "transport",
+        "tracks", "regions", "markers", "mixer", "export_readiness",
+    ])
+
+    let tracksKeys = try #require(topLevel["tracks"] as? [String: Any])
+    #expect(Set(tracksKeys.keys) == [
+        "total", "freshness", "selected_indices", "muted_indices",
+        "soloed_indices", "armed_indices", "unnamed_track_indices", "duplicate_names",
+    ])
+
+    let mixerKeys = try #require(topLevel["mixer"] as? [String: Any])
+    #expect(Set(mixerKeys.keys) == [
+        "strip_count", "data_source", "freshness",
+        "occupied_plugin_slots", "plugin_read_errors",
+    ])
+
+    let plan = try #require(auditJSON["cleanup_plan"] as? [[String: Any]])
+    let renameStep = try #require(plan.first { ($0["id"] as? String)?.hasPrefix("rename_duplicate") ?? false })
+    #expect(Set(renameStep.keys) == [
+        "id", "target_identifier", "proposed_operation", "rationale",
+        "risk_level", "required_confirmation", "expected_readback",
+        "rollback_or_recovery", "stop_condition", "supported_by_current_tools",
+        "mutates_project", "tool", "command",
+    ])
+}
+
+@Test func testProjectAuditWorkflowCatalogEntryIsReadOnlyAndResolved() throws {
+    let snapshot = WorkflowSkillCatalog.defaultSnapshot()
+    let workflow = try #require(snapshot.workflows.first { $0.id == "logic.workflow.project.audit_cleanup_plan" })
+
+    #expect(snapshot.validation.isValid)
+    #expect(workflow.mutationKind == .readOnly)
+    #expect(workflow.productionReady)
+    #expect(try #require(workflow.dependenciesResolved as Bool?))
+    #expect(workflow.allowedResources.contains("logic://project/audit"))
+    #expect(workflow.allowedResources.contains("logic://project/cleanup-plan"))
+}

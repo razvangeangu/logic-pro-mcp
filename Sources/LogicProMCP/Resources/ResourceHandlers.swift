@@ -156,6 +156,12 @@ extension ResourceHandlers {
         case "logic://project/info":
             return try await readProjectInfo(cache: cache, uri: uri, fileReader: fileReader)
 
+        case "logic://project/audit":
+            return try await readProjectAudit(cache: cache, uri: uri)
+
+        case "logic://project/cleanup-plan":
+            return try await readProjectCleanupPlan(cache: cache, uri: uri)
+
         case "logic://midi/ports":
             return try await readMIDIPorts(router: router, uri: uri)
 
@@ -795,6 +801,28 @@ extension ResourceHandlers {
         return ReadResource.Result(
             contents: [.text(payload, uri: uri, mimeType: "application/json")]
         )
+    }
+
+    private static func readProjectAudit(cache: StateCache, uri: String) async throws -> ReadResource.Result {
+        let report = await ProjectSessionAudit.buildAudit(cache: cache)
+        // Honest Contract: never emit a success-shaped body that is missing the
+        // schema/read_only contract fields. On encode failure, fail loud.
+        do {
+            let json = try encodeJSONStrict(report, compact: true)
+            return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+        } catch {
+            throw MCPError.internalError("audit encode failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func readProjectCleanupPlan(cache: StateCache, uri: String) async throws -> ReadResource.Result {
+        let report = await ProjectSessionAudit.buildCleanupPlan(cache: cache)
+        do {
+            let json = try encodeJSONStrict(report, compact: true)
+            return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+        } catch {
+            throw MCPError.internalError("cleanup_plan encode failed: \(error.localizedDescription)")
+        }
     }
 
     private static func readTrackRegions(

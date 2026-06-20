@@ -97,6 +97,45 @@ actor StateCache {
     /// poll or when the document is genuinely closed.
     func getAXOccluded() -> Bool { axOccluded }
 
+    /// Atomic, single-hop read of every field the project audit consumes.
+    /// `buildAudit` previously assembled its snapshot from ~13 separate `await`
+    /// calls; each was individually actor-serialized but the sequence was not a
+    /// single critical section, so a concurrent poller/dispatcher write could
+    /// interleave and yield a torn snapshot (e.g. `regions` from a newer track
+    /// set than `tracks`). This method runs synchronously inside the actor, so
+    /// all returned fields belong to one consistent cache state.
+    func auditSnapshot() -> (
+        hasDocument: Bool,
+        axOccluded: Bool,
+        project: ProjectInfo,
+        projectFetchedAt: Date,
+        transport: TransportState,
+        tracks: [TrackState],
+        tracksFetchedAt: Date,
+        regions: [RegionState],
+        regionsFetchedAt: Date,
+        markers: [MarkerState],
+        markersFetchedAt: Date,
+        channelStrips: [ChannelStripState],
+        mixerFetchedAt: Date
+    ) {
+        (
+            hasDocument: hasDocument,
+            axOccluded: axOccluded,
+            project: project,
+            projectFetchedAt: projectFetchedAt,
+            transport: transport,
+            tracks: tracks,
+            tracksFetchedAt: tracksFetchedAt,
+            regions: regions,
+            regionsFetchedAt: regionsFetchedAt,
+            markers: markers,
+            markersFetchedAt: markersFetchedAt,
+            channelStrips: channelStrips,
+            mixerFetchedAt: mixerFetchedAt
+        )
+    }
+
     // MARK: - Document state
 
     func updateDocumentState(_ hasDoc: Bool) {
