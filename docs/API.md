@@ -804,6 +804,7 @@ Example:
 | `export_plan` | `{ projects?: string[], project?: string, output_root: string, artifacts?: string[], collision_policy?: "fail_if_exists"\|"skip_existing" }` | JSON `logic_pro_mcp_export_manifest.v1` dry-run plan | (direct, read-only filesystem checks) | L0 |
 | `audit` | — | `logic_pro_mcp_project_audit.v1` JSON | Cache/resource provenance synthesis | L0 |
 | `cleanup_plan` | — | `logic_pro_mcp_project_cleanup_plan.v1` JSON | Derived from audit; no mutation | L0 |
+| `cleanup_apply` | `{ step_id: string, confirmed: bool, names?: "newA,newB" \| new_name?: string }` | HC JSON; State A only after the underlying `track.rename` AX readback confirms | Re-derives audit → routes one supported mutating step through `track.rename` | L1 |
 | `launch` | — | text | AppleScript | L1 |
 | `quit` | `{ confirmed?: bool }` | text | AppleScript | L3 |
 
@@ -834,6 +835,18 @@ Use `logic://project/audit` or `logic_project audit` to inspect a messy session 
 Use `logic://project/cleanup-plan` or `logic_project cleanup_plan` when a client only needs the serializable plan. Each step includes `target_identifier`, `proposed_operation`, `risk_level`, `required_confirmation`, `expected_readback`, `rollback_or_recovery`, `stop_condition`, `supported_by_current_tools`, and `mutates_project`.
 
 The first milestone is intentionally read-only: it can propose rename, mute/solo/arm reset, marker planning, or mixer-refresh steps, but it never executes them. Unsupported or unsafe cleanup actions are labelled `supported_by_current_tools:false`; deletion is never proposed by default.
+
+#### Guarded execution: `cleanup_apply`
+
+`logic_project cleanup_apply` (#28) executes exactly **one** supported, mutating cleanup-plan step. It re-derives the audit + cleanup plan deterministically on every call (the caller passes only a `step_id`, never a step body), matches the step by id, then runs a fail-closed gate chain before any write:
+
+- `confirmed` must be a literal `true`. A missing or non-boolean value is **not** coerced — the op refuses (State C) without touching the project.
+- The `step_id` must exist in the freshly-derived plan (`element_not_found` otherwise).
+- The audit's inventory must be safe to act on: refuses (`stale_snapshot`) when there is no open document, when Accessibility is occluded, when the track inventory is unread/stale, or when a `track_readback_gap` finding is present (the file reports more tracks than AX surfaced).
+- The step must be mutating (`invalid_params` for a no-op step) and `supported_by_current_tools:true` (`not_implemented` otherwise).
+- **Deletion is never executed.** Deletion steps are `supported_by_current_tools:false` by construction, and `cleanup_apply` additionally refuses any step whose command/operation looks like a delete (`not_implemented`).
+
+Currently only the rename family (`rename_duplicate_*`, `rename_unnamed_or_placeholder_tracks`) is executable. Supply one new name per target track via `names` (CSV aligned to the step's target indices) or `new_name` for a single target; a count mismatch or a blank name fails closed before any write so a multi-target rename is all-or-nothing. Each rename is dispatched through the existing `track.rename` path, inheriting its AX readback and Honest Contract State A/B/C — `cleanup_apply` reports an overall **State A only when every target reached verified State A**, and surfaces **State C** (with the underlying envelope and the failed track index) the moment any rename comes back State B/C. solo/arm-clear steps are not yet executable here (the read-only plan does not carry a per-track enabled vector); perform them through `logic_tracks` directly for now.
 
 #### Tempo semantics: `project/info` vs `transport/state`
 

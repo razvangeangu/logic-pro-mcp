@@ -19,7 +19,11 @@ enum DestructivePolicy {
             return .l3
         case "save_as", "bounce", "open":
             return .l2
-        case "save", "new", "launch":
+        case "save", "new", "launch", "cleanup_apply":
+            // cleanup_apply mutates the project (executes a confirmed cleanup
+            // step through track.rename). It carries its own confirmed:true
+            // gate (#28), so it does NOT use the L2/L3 confirmation-prompt
+            // flow — L1 here just turns on the SIEM audit trail.
             return .l1
         default:
             return .l0
