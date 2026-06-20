@@ -33,11 +33,14 @@ The only visible Logic content is the actual Logic window capture.
 - The video must not claim a capability without matching live readback or repo
   evidence.
 - The MP4 is a live capture artifact. `docs/media/render-demo.py` validates the
-  MP4 and regenerates the GIF/thumbnail derivatives from it.
+  MP4, regenerates the GIF/thumbnail derivatives from it, validates black/white
+  frames plus thumbnail safety, and writes the evidence manifest/contact sheet.
 
 ## Verification checklist
 
-- `python3 docs/media/render-demo.py` validates the MP4 and regenerates GIF and thumbnail.
+- `python3 docs/media/render-demo.py` validates the MP4 and regenerates GIF, thumbnail, contact sheet, and evidence manifest.
+- `docs/media/logic-pro-mcp-demo-transcript.json` records the real-UI-only truth boundary for the hero cut.
+- `docs/media/logic-pro-mcp-demo-evidence.json` records source capture, transcript, ffprobe metadata, frame scans, contact sheet, and audio provenance.
 - `ffprobe` confirms the MP4 duration, dimensions, frame rate, and frame count.
 - `sips` confirms GIF and thumbnail dimensions.
 - Sampled frames confirm the hero is real Logic UI with playhead and meter movement.

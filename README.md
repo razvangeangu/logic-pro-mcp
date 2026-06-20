@@ -26,7 +26,9 @@
 <p align="center">
   Actual Logic Pro 12.2 capture, cropped from a live playback recording.<br/>
   <a href="docs/media/logic-pro-mcp-demo.mp4">6 sec MP4</a> ·
-  <a href="docs/media/logic-pro-mcp-thumbnail.png">social thumbnail</a>
+  <a href="docs/media/logic-pro-mcp-thumbnail.png">social thumbnail</a> ·
+  <a href="docs/media/logic-pro-mcp-demo-contact-sheet.jpg">contact sheet</a> ·
+  <a href="docs/media/logic-pro-mcp-demo-evidence.json">evidence manifest</a>
 </p>
 
 ---

@@ -1,0 +1,169 @@
+{
+  "generated_at": "2026-06-19T17:13:09.075638+00:00",
+  "source_capture": "docs/media/logic-pro-mcp-demo.mp4",
+  "brief": "docs/media/demo-brief.md",
+  "transcript": "docs/media/logic-pro-mcp-demo-transcript.json",
+  "derivatives": {
+    "gif": "docs/media/logic-pro-mcp-demo.gif",
+    "thumbnail": "docs/media/logic-pro-mcp-thumbnail.png",
+    "contact_sheet": "docs/media/logic-pro-mcp-demo-contact-sheet.jpg"
+  },
+  "surface_mode": "real-ui-only",
+  "source_capture_kind": "actual_logic_capture",
+  "audio_provenance": {
+    "policy": "no_audio_stream",
+    "claim": "The README hero asset is intentionally video-only and does not claim live Logic audio."
+  },
+  "ffprobe_audio_stream": null,
+  "ffprobe": {
+    "streams": [
+      {
+        "index": 0,
+        "codec_name": "h264",
+        "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+        "profile": "High",
+        "codec_type": "video",
+        "codec_tag_string": "avc1",
+        "codec_tag": "0x31637661",
+        "mime_codec_string": "avc1.640029",
+        "width": 1920,
+        "height": 1080,
+        "coded_width": 1920,
+        "coded_height": 1080,
+        "has_b_frames": 2,
+        "pix_fmt": "yuv420p",
+        "level": 41,
+        "color_range": "tv",
+        "color_space": "bt709",
+        "color_transfer": "bt709",
+        "color_primaries": "bt709",
+        "chroma_location": "left",
+        "field_order": "progressive",
+        "is_avc": "true",
+        "nal_length_size": "4",
+        "id": "0x1",
+        "r_frame_rate": "24/1",
+        "avg_frame_rate": "24/1",
+        "time_base": "1/12288",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 73728,
+        "duration": "6.000000",
+        "bit_rate": "689333",
+        "bits_per_raw_sample": "8",
+        "nb_frames": "144",
+        "extradata_size": 50,
+        "disposition": {
+          "default": 1,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0,
+          "non_diegetic": 0,
+          "captions": 0,
+          "descriptions": 0,
+          "metadata": 0,
+          "dependent": 0,
+          "still_image": 0,
+          "multilayer": 0
+        },
+        "tags": {
+          "language": "und",
+          "handler_name": "Core Media Video",
+          "encoder": "Lavc62.28.100 libx264"
+        }
+      }
+    ],
+    "format": {
+      "filename": "docs/media/logic-pro-mcp-demo.mp4",
+      "nb_streams": 1,
+      "nb_programs": 0,
+      "nb_stream_groups": 0,
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "format_long_name": "QuickTime / MOV",
+      "start_time": "0.000000",
+      "duration": "6.000000",
+      "size": "519526",
+      "bit_rate": "692701",
+      "probe_score": 100,
+      "tags": {
+        "major_brand": "isom",
+        "minor_version": "512",
+        "compatible_brands": "isomiso2avc1mp41",
+        "encoder": "Lavf62.12.100"
+      }
+    }
+  },
+  "black_frame_scan": {
+    "mode": "black",
+    "thresholds": {
+      "black_frame_max_yhigh": 24.0,
+      "black_frame_max_yavg": 8.0,
+      "white_frame_min_ylow": 235.0,
+      "white_frame_min_yavg": 245.0
+    },
+    "event_count": 0,
+    "events": []
+  },
+  "white_frame_scan": {
+    "mode": "white",
+    "thresholds": {
+      "black_frame_max_yhigh": 24.0,
+      "black_frame_max_yavg": 8.0,
+      "white_frame_min_ylow": 235.0,
+      "white_frame_min_yavg": 245.0
+    },
+    "event_count": 0,
+    "events": []
+  },
+  "thumbnail_validation": {
+    "selected": {
+      "timestamp_s": 2.0,
+      "stats": {
+        "YLOW": 62.0,
+        "YAVG": 94.987,
+        "YHIGH": 104.0,
+        "SATAVG": 33.764
+      },
+      "extreme": null,
+      "selected": true,
+      "dimensions": {
+        "pixelWidth": 1280,
+        "pixelHeight": 720
+      }
+    },
+    "evaluations": [
+      {
+        "timestamp_s": 2.0,
+        "stats": {
+          "YLOW": 62.0,
+          "YAVG": 94.987,
+          "YHIGH": 104.0,
+          "SATAVG": 33.764
+        },
+        "extreme": null,
+        "selected": true,
+        "dimensions": {
+          "pixelWidth": 1280,
+          "pixelHeight": 720
+        }
+      }
+    ]
+  },
+  "contact_sheet": {
+    "path": "docs/media/logic-pro-mcp-demo-contact-sheet.jpg",
+    "sample_count": 6,
+    "columns": 3,
+    "dimensions": {
+      "pixelWidth": 1920,
+      "pixelHeight": 720
+    }
+  }
+}
