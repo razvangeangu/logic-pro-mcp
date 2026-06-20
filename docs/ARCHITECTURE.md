@@ -25,7 +25,7 @@ Logic Pro MCP Server is a Swift 6 actor-based system that multiplexes **7 native
        │                  │                   │                    │
 ┌──────▼────────┐  ┌──────▼────────┐  ┌───────▼────────┐  ┌────────▼──────┐
 │  Dispatchers  │  │ ResourceHandlers │ │   StateCache   │  │  StatePoller  │
-│ (9 tools)     │  │ (14 + 7 templ.) │ │   (actor)      │  │ (3s AX poll)  │
+│ (10 tools)    │  │ (14 + 7 templ.) │ │   (actor)      │  │ (3s AX poll)  │
 └──────┬────────┘  └──────┬────────┘  └───────▲────────┘  └────────┬──────┘
        │                  │                   │                    │
        │                  │                   │                    │

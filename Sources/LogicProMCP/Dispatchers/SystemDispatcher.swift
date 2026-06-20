@@ -386,7 +386,7 @@ struct SystemDispatcher {
 
         default:
             return """
-                Logic Pro MCP — 9 dispatcher tools + \(ResourceProvider.resources.count) resources + \(ResourceProvider.templates.count) templates
+                Logic Pro MCP — 10 dispatcher tools + \(ResourceProvider.resources.count) resources + \(ResourceProvider.templates.count) templates
 
                 Tools (actions):
                   logic_transport  — Transport control (play, stop, record, tempo...)
@@ -396,6 +396,7 @@ struct SystemDispatcher {
                   logic_edit       — Editing (undo, cut, quantize...)
                   logic_navigate   — Navigation + views (markers, zoom, toggle views...)
                   logic_project    — Project lifecycle (open, save, bounce...)
+                  logic_audio      — Read-only audio artifact analysis
                   logic_system     — Diagnostics + help
                   logic_plugins    — Verified plugin apply-back (inventory, set_param_verified, insert_verified)
 

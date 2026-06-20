@@ -92,7 +92,7 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     let readme = try readRepoFile("README.md")
     #expect(readme.contains("| Read resources | 14 static resources"))
     #expect(readme.contains("| Resource templates | 7 templates"))
-    #expect(readme.contains("All 9 tools, 14 resources, 7 templates"))
+    #expect(readme.contains("All 10 tools, 14 resources, 7 templates"))
 
     let api = try readRepoFile("docs/API.md")
     #expect(api.contains("| `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |"))

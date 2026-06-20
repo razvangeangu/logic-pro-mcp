@@ -820,11 +820,11 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 // MARK: - §11 Server Composition & Catalog (5 tests)
 // ═══════════════════════════════════════════════════════════════════════
 
-@Test func testE2EServerCatalogHas9Tools() async {
+@Test func testE2EServerCatalogHas10Tools() async {
     let snapshot = await LogicProServer().compositionSnapshot()
-    #expect(snapshot.toolNames.count == 9)
+    #expect(snapshot.toolNames.count == 10)
     let expected = Set(["logic_transport", "logic_tracks", "logic_mixer", "logic_midi",
-                        "logic_edit", "logic_navigate", "logic_project", "logic_system",
+                        "logic_edit", "logic_navigate", "logic_project", "logic_audio", "logic_system",
                         "logic_plugins"])
     #expect(Set(snapshot.toolNames) == expected)
 }
