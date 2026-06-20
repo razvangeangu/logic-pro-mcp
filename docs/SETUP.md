@@ -420,6 +420,129 @@ Inside Logic Pro, open **Control Surfaces → Setup…**, select the Mackie Cont
 
 ---
 
+## Lifecycle Plans (`install` / `update` / `uninstall` — read-only preview)
+
+Before running an install, update, or uninstall, you can preview exactly which artifacts the operation would touch with a **read-only plan**. Like `doctor`, these commands are strictly non-mutating and run before any server startup:
+
+```bash
+LogicProMCP install --dry-run
+LogicProMCP update --dry-run --json
+LogicProMCP uninstall --dry-run
+```
+
+`--dry-run` is currently **required**. Without it the binary refuses to run the command, prints an honest message, and exits non-zero — live execution is delegated to `Scripts/install.sh` and `Scripts/uninstall.sh`, which carry the pinned-version + provenance checks. The binary never fakes execution.
+
+`--json` emits the stable schema `logic_pro_mcp_lifecycle_plan.v1`. Each plan reports `command`, `execution_mode` (always `dry_run_only`), `installed_version`, `target_version`, `install_dir`, and an ordered list of `steps`. Every step carries a stable `id`, an `action` (`create` / `update` / `delete` / `register` / `unregister` / `skip`), the `target` (path or registration key), the observed `current_state`, the `planned_state`, plus `reversible` and `requires_sudo` flags and a `remediation` whose `type` and anchors match the doctor's vocabulary.
+
+The plan inspects current state through the same primitives the install/uninstall scripts touch: the binary at `INSTALL_DIR/LogicProMCP` (`INSTALL_DIR` defaults to `/usr/local/bin`, overridable via `LOGIC_PRO_MCP_INSTALL_DIR`), the Claude Code MCP registration in `~/.claude.json`, the Key Commands mapping reference, the optional launchd agent, and the operator-approval store. Scripter insertion has no filesystem artifact, so it is always reported as a `manual` Logic-side step. When `INSTALL_DIR` is not writable without elevation, the relevant binary step reports `requires_sudo: true`.
+
+### Lifecycle Remediation Anchors
+
+<a id="lifecycle-binaryinstall"></a>
+#### `binary.install`
+
+Place the `LogicProMCP` binary into `INSTALL_DIR`. Run the installer, which pins the release version and verifies provenance (SHA256 + Team ID / signature) before copying:
+
+```bash
+Scripts/install.sh
+```
+
+<a id="lifecycle-binaryupdate"></a>
+#### `binary.update`
+
+Refresh the installed binary to the version this build targets. Re-run the installer with a pinned version:
+
+```bash
+LOGIC_PRO_MCP_VERSION=v3.6.0 Scripts/install.sh
+```
+
+<a id="lifecycle-binaryremove"></a>
+#### `binary.remove`
+
+Remove the installed binary from `INSTALL_DIR`. The uninstaller handles sudo escalation when the install directory is not writable:
+
+```bash
+Scripts/uninstall.sh
+```
+
+<a id="lifecycle-mcpregister"></a>
+#### `mcp.register`
+
+Register the binary with Claude Code so the MCP server auto-starts when Claude connects:
+
+```bash
+claude mcp add --scope user logic-pro -- /usr/local/bin/LogicProMCP
+```
+
+<a id="lifecycle-mcpunregister"></a>
+#### `mcp.unregister`
+
+Remove the Claude Code MCP registration:
+
+```bash
+claude mcp remove logic-pro
+```
+
+<a id="lifecycle-keycmdsstage"></a>
+#### `keycmds.stage`
+
+Stage the CC→Command mapping reference. Note that on Logic Pro 12.2+ the live bindings still require manual MIDI Learn (see [§4 MIDIKeyCommands](#4-midikeycommands-optional--only-if-you-need-channel-only-ops)):
+
+```bash
+Scripts/install-keycmds.sh
+```
+
+<a id="lifecycle-keycmdsremove"></a>
+#### `keycmds.remove`
+
+Remove the staged mapping reference and restore any pre-install Key Commands backup:
+
+```bash
+Scripts/uninstall-keycmds.sh
+```
+
+<a id="lifecycle-scripterinsert"></a>
+#### `scripter.insert`
+
+Scripter is an optional, manual Logic-side step with no filesystem artifact to plan. Insert the Scripter MIDI FX, load `Scripts/LogicProMCP-Scripter.js`, then approve the channel (see [§6 Install Scripter Insert](#6-install-scripter-insert-optional--legacy-plugin-parameter-path)).
+
+<a id="lifecycle-scripterremove"></a>
+#### `scripter.remove`
+
+Remove the LogicProMCP Scripter MIDI FX from each channel strip manually inside Logic Pro (Channel Strip → MIDI FX → remove LogicProMCP-Scripter).
+
+<a id="lifecycle-launchagentinstall"></a>
+#### `launch_agent.install`
+
+The optional launchd agent runs the server detached from Claude Code so Logic always sees the virtual MIDI ports. Only install it if you need the ports outside Claude Code sessions:
+
+```bash
+mkdir -p ~/Library/LaunchAgents
+cp Scripts/com.logicpro.mcp.plist.template ~/Library/LaunchAgents/com.logicpro.mcp.plist
+launchctl load ~/Library/LaunchAgents/com.logicpro.mcp.plist
+```
+
+<a id="lifecycle-launchagentremove"></a>
+#### `launch_agent.remove`
+
+Unload and remove the optional launchd agent:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.logicpro.mcp.plist
+rm ~/Library/LaunchAgents/com.logicpro.mcp.plist
+```
+
+<a id="lifecycle-approvalsremove"></a>
+#### `approvals.remove`
+
+Remove the operator-approval store. Approvals are re-creatable later with `--approve-channel`:
+
+```bash
+rm "$HOME/Library/Application Support/LogicProMCP/operator-approvals.json"
+```
+
+---
+
 ## What's Next
 
 - [API Reference](API.md) — full MCP tool surface

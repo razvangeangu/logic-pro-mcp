@@ -21,6 +21,7 @@ enum MainEntrypoint {
         serverFactory: () -> any ServerStarting = { LogicProServer() },
         approvalStoreFactory: () -> any ManualValidationStoring = { ManualValidationStore() },
         doctorRuntime: SetupDoctor.Runtime = .production,
+        lifecycleRuntime: SetupLifecycle.Runtime = .production,
         writeStdout: (String) -> Void = { message in
             FileHandle.standardOutput.write(Data(message.utf8))
         },
@@ -42,6 +43,29 @@ enum MainEntrypoint {
                 : SetupDoctor.renderHuman(report)
             writeStdout(output + "\n")
             return SetupDoctor.shouldExitWithFailure(report) ? 1 : 0
+        }
+
+        if let command = lifecycleCommand(arguments) {
+            // Live execution is intentionally NOT performed here — it is delegated
+            // to Scripts/install.sh / uninstall.sh. Without --dry-run we refuse
+            // honestly and exit non-zero rather than faking execution.
+            guard arguments.contains("--dry-run") else {
+                let script = command == .uninstall
+                    ? "Scripts/uninstall.sh"
+                    : "Scripts/install.sh"
+                writeStderr(
+                    "Live \(command.rawValue) is not performed by this binary. "
+                        + "Re-run with --dry-run to preview the plan, or run \(script) "
+                        + "to execute (see docs/SETUP.md).\n"
+                )
+                return 1
+            }
+            let plan = SetupLifecycle.plan(command: command, runtime: lifecycleRuntime)
+            let output = arguments.contains("--json")
+                ? encodeJSON(plan)
+                : SetupLifecycle.renderHuman(plan)
+            writeStdout(output + "\n")
+            return 0
         }
 
         if arguments.contains("--list-approvals") {
@@ -144,5 +168,10 @@ enum MainEntrypoint {
 
     private static func isDoctorCommand(_ arguments: [String]) -> Bool {
         Array(arguments.dropFirst()).first == "doctor"
+    }
+
+    private static func lifecycleCommand(_ arguments: [String]) -> SetupLifecycle.Command? {
+        guard let first = Array(arguments.dropFirst()).first else { return nil }
+        return SetupLifecycle.Command(rawValue: first)
     }
 }
