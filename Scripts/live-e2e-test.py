@@ -18,6 +18,7 @@ import time
 import uuid
 
 from logic_session_bootstrap import bootstrap_fresh_logic_session
+from logic_free_tempo_modal import DEFAULT_FREE_TEMPO_POLICY, detect_free_tempo_modal, resolve_free_tempo_modal
 
 BINARY = os.environ.get("LOGIC_PRO_MCP_BINARY", ".build/release/LogicProMCP")
 STRICT_LIVE = os.environ.get("LOGIC_PRO_MCP_STRICT_LIVE", "0") == "1"
@@ -366,6 +367,46 @@ def safe_json(text):
     try: return json.loads(text)
     except: return None
 
+
+def read_tracks_data(client):
+    envelope = safe_json(resource_text(read_resource(client, "logic://tracks")))
+    if not isinstance(envelope, dict):
+        return None
+    data = envelope.get("data")
+    return data if isinstance(data, list) else None
+
+
+def read_track_regions(client, index):
+    regions = safe_json(resource_text(read_resource(client, f"logic://tracks/{index}/regions")))
+    return regions if isinstance(regions, list) else None
+
+
+def wait_for_track_arm(client, index, enabled, timeout=5.0):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        call_tool(client, "logic_system", "refresh_cache", timeout=3)
+        tracks = read_tracks_data(client)
+        if isinstance(tracks, list) and 0 <= index < len(tracks):
+            last = tracks[index]
+            if last.get("isArmed") is enabled:
+                return last
+        time.sleep(0.2)
+    return last
+
+
+def fresh_record_bootstrap_status(client):
+    tracks = read_tracks_data(client)
+    if not isinstance(tracks, list):
+        return False, "tracks resource unavailable"
+    if len(tracks) != 1:
+        return False, f"expected exactly 1 track, found {len(tracks)}"
+    regions = read_track_regions(client, 0)
+    if regions is None:
+        return False, "track 0 regions resource unavailable"
+    if len(regions) != 0:
+        return False, f"expected 0 regions on track 0, found {len(regions)}"
+    return True, "fresh bootstrap detected"
 
 def transport_envelope(client):
     return safe_json(resource_text(read_resource(client, "logic://transport/state")))
@@ -1649,6 +1690,136 @@ def main():
     # Send a full MIDI sequence (chord)
     r = call_tool(client, "logic_midi", "send_chord", {"notes": "60,64,67,72", "duration_ms": 30})
     T_LIVE("send chord (4 notes) completes", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+
+    # ═══════════════════════════════════════════════════════════════
+    # §17b Fresh Record Modal Guard (7 tests)
+    # ═══════════════════════════════════════════════════════════════
+    section("§17b Fresh Record Modal Guard")
+
+    fresh_record_live_ready = False
+    fresh_record_reason = "fresh Logic bootstrap with 1 track and 0 regions is required"
+    if live_logic_ready and midi_live_ready and has_document:
+        call_tool(client, "logic_system", "refresh_cache", timeout=3)
+        fresh_record_live_ready, fresh_record_reason = fresh_record_bootstrap_status(client)
+        if not fresh_record_live_ready:
+            fresh_record_reason = f"fresh bootstrap not detected: {fresh_record_reason}"
+
+    preflight_modal = {"status": "skipped", "policy_id": DEFAULT_FREE_TEMPO_POLICY["policy_id"]}
+    select_for_record = {"gate": fresh_record_reason}
+    arm_for_record = {"gate": fresh_record_reason}
+    arm_track = None
+    record_resp = {"gate": fresh_record_reason}
+    midi_record_pass = {"gate": fresh_record_reason}
+    stop_after_record = {"gate": fresh_record_reason}
+    post_record_modal = {"status": "skipped", "policy_id": DEFAULT_FREE_TEMPO_POLICY["policy_id"]}
+    final_modal_snapshot = {"status": "skipped"}
+    regions_after_record = None
+    disarm_after_record = {"gate": fresh_record_reason}
+    disarm_track = None
+
+    fresh_record_execute_ready = False
+    fresh_record_execute_reason = fresh_record_reason
+
+    if fresh_record_live_ready:
+        preflight_modal = resolve_free_tempo_modal()
+        if preflight_modal.get("status") in {"not_present", "dismissed"}:
+            fresh_record_execute_ready = True
+            fresh_record_execute_reason = "fresh bootstrap ready"
+            select_for_record = call_tool(client, "logic_tracks", "select", {"index": 0})
+            arm_for_record = call_tool(client, "logic_tracks", "arm", {"index": 0, "enabled": True})
+            arm_track = wait_for_track_arm(client, 0, True)
+            record_resp = call_tool(client, "logic_transport", "record")
+            midi_record_pass = call_tool(
+                client,
+                "logic_midi",
+                "play_sequence",
+                {"notes": "60,0,180,104;64,250,180,100;67,500,240,108"},
+                timeout=20,
+            )
+            stop_after_record = call_tool(client, "logic_transport", "stop")
+            time.sleep(0.8)
+            post_record_modal = resolve_free_tempo_modal()
+            call_tool(client, "logic_system", "refresh_cache", timeout=3)
+            regions_after_record = read_track_regions(client, 0)
+            final_modal_snapshot = detect_free_tempo_modal()
+            disarm_after_record = call_tool(client, "logic_tracks", "arm", {"index": 0, "enabled": False})
+            disarm_track = wait_for_track_arm(client, 0, False)
+        else:
+            fresh_record_execute_reason = (
+                f"free tempo modal preflight blocked: {preflight_modal.get('reason', preflight_modal.get('status'))}"
+            )
+
+    T_LIVE(
+        "fresh record bootstrap detected",
+        {"result": {"reason": fresh_record_reason}},
+        lambda _: fresh_record_live_ready,
+        fresh_record_live_ready,
+        fresh_record_reason,
+    )
+    T_LIVE(
+        "free tempo modal policy is recorded for fresh record flow",
+        {"result": preflight_modal},
+        lambda _: preflight_modal.get("policy_id") == DEFAULT_FREE_TEMPO_POLICY["policy_id"],
+        fresh_record_live_ready,
+        fresh_record_reason,
+    )
+    T_LIVE(
+        "free tempo modal preflight is absent or dismissed",
+        {"result": preflight_modal},
+        lambda _: preflight_modal.get("status") in {"not_present", "dismissed"},
+        fresh_record_live_ready,
+        fresh_record_reason,
+    )
+    T_LIVE(
+        "track 0 arms for fresh MIDI record pass",
+        {"result": arm_for_record, "track": arm_track},
+        lambda _: isinstance(arm_track, dict) and arm_track.get("isArmed") is True,
+        fresh_record_execute_ready,
+        fresh_record_execute_reason,
+    )
+    T_LIVE(
+        "fresh MIDI record pass dispatches",
+        midi_record_pass,
+        lambda _: record_resp is not None
+        and midi_record_pass is not None
+        and stop_after_record is not None
+        and not is_error(record_resp)
+        and not is_error(midi_record_pass)
+        and not is_error(stop_after_record),
+        fresh_record_execute_ready,
+        fresh_record_execute_reason,
+    )
+    T_LIVE(
+        "free tempo modal is dismissed or absent after fresh record pass",
+        {"result": post_record_modal},
+        lambda _: post_record_modal.get("status") in {"dismissed", "not_present"},
+        fresh_record_execute_ready,
+        fresh_record_execute_reason,
+    )
+    T_LIVE(
+        "fresh record final modal check is clear and policy provenance is explicit",
+        {"result": {"modal": final_modal_snapshot, "policy": post_record_modal}},
+        lambda _: final_modal_snapshot.get("status") != "present"
+        and post_record_modal.get("policy_id") == DEFAULT_FREE_TEMPO_POLICY["policy_id"]
+        and (
+            post_record_modal.get("status") == "not_present"
+            or (
+                isinstance(post_record_modal.get("decision"), dict)
+                and post_record_modal["decision"].get("selection") == DEFAULT_FREE_TEMPO_POLICY["selection_labels"][0]
+            )
+        ),
+        fresh_record_execute_ready,
+        fresh_record_execute_reason,
+    )
+    T_LIVE(
+        "fresh record flow clears modal handling and disarms track 0",
+        {"regions": regions_after_record, "result": disarm_after_record, "track": disarm_track},
+        lambda _: isinstance(regions_after_record, list)
+        and isinstance(disarm_track, dict)
+        and disarm_track.get("isArmed") is False,
+        fresh_record_execute_ready,
+        fresh_record_execute_reason,
+    )
 
     # ═══════════════════════════════════════════════════════════════
     # §18 Performance (4 tests)
