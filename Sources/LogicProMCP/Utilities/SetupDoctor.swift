@@ -68,6 +68,21 @@ enum SetupDoctor {
         let stderr: String
     }
 
+    /// Result of inspecting the Claude Code config for a logic-pro registration.
+    /// This is a pure config read — it never spawns the registered server, so the
+    /// doctor's read-only / run-before-startup contract is honored (no CoreMIDI
+    /// ports, no health sweep, no SIGKILL of an indirectly-spawned server).
+    enum ClaudeRegistration: Equatable, Sendable {
+        /// A logic-pro-style MCP entry resolving to a LogicProMCP binary was found.
+        /// `command` is the registered command string for evidence.
+        case registered(command: String)
+        /// The config was read successfully but no matching registration exists.
+        case notRegistered
+        /// The config file is absent / unreadable / not valid JSON.
+        /// `reason` is a short human-readable explanation for the evidence dict.
+        case configUnavailable(reason: String)
+    }
+
     struct Runtime: @unchecked Sendable {
         let resolveExecutablePath: (String?) -> String?
         let fileExists: (String) -> Bool
@@ -75,6 +90,7 @@ enum SetupDoctor {
         let logicProRunning: () -> Bool
         let logicProHasVisibleWindow: () -> Bool
         let runCommand: (String, [String]) -> CommandOutput?
+        let readClaudeRegistration: () -> ClaudeRegistration
 
         static let production = Runtime(
             resolveExecutablePath: { raw in
@@ -93,7 +109,10 @@ enum SetupDoctor {
                 ProcessUtils.hasVisibleWindow()
             },
             runCommand: { executable, arguments in
-                runProductionCommand(executable: executable, arguments: arguments, timeout: 1.5)
+                runProductionCommand(executable: executable, arguments: arguments, timeout: 1.5)?.output
+            },
+            readClaudeRegistration: {
+                readProductionClaudeRegistration()
             }
         )
     }
@@ -103,7 +122,6 @@ enum SetupDoctor {
     static let remediationAnchorsByCheckID: [String: String] = [
         "binary.path": "docs/SETUP.md#doctor-binarypath",
         "binary.executable": "docs/SETUP.md#doctor-binaryexecutable",
-        "binary.version": "docs/SETUP.md#doctor-binaryversion",
         "install.source": "docs/SETUP.md#doctor-installsource",
         "release.signature": "docs/SETUP.md#doctor-releasesignature",
         "release.quarantine": "docs/SETUP.md#doctor-releasequarantine",
@@ -225,13 +243,18 @@ enum SetupDoctor {
     }
 
     private static func binaryVersionCheck() -> Check {
+        // Honest reporting: this echoes the version compiled into the running
+        // doctor process, not the version of the binary at binary.path. It cannot
+        // detect a stale/mismatched install, so it never fails — the summary states
+        // exactly what it reports and the remediation is unconditionally .none
+        // rather than carrying a dead .fail branch + unreachable docs anchor.
         check(
             id: "binary.version",
             domain: "binary",
-            status: ServerConfig.serverVersion.isEmpty ? .fail : .pass,
-            summary: "Server version is available.",
+            status: .pass,
+            summary: "Running server version: \(ServerConfig.serverVersion).",
             evidence: ["version": ServerConfig.serverVersion],
-            remediationType: ServerConfig.serverVersion.isEmpty ? .docs : .none
+            remediationType: .none
         )
     }
 
@@ -303,42 +326,90 @@ enum SetupDoctor {
                 remediationType: .docs
             )
         }
-        let quarantined = output.exitCode == 0
+        // Distinguish three outcomes instead of folding everything but exit 0 into
+        // .pass. xattr exits non-zero both when the attribute is absent (exit 1,
+        // "No such xattr") AND on permission-denied or other errors; collapsing all
+        // of those to "not quarantined" would let the doctor affirm a clean state it
+        // never verified.
+        let trimmedStderr = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedStdout = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let evidence: [String: String] = [
+            "path": executablePath,
+            "exit_code": String(output.exitCode),
+            "stderr": trimmedStderr,
+        ]
+        if output.exitCode == 0 {
+            return check(
+                id: "release.quarantine",
+                domain: "release",
+                status: .warn,
+                summary: "Binary has a macOS quarantine attribute.",
+                evidence: evidence,
+                remediationType: .command,
+                remediationValueOverride: "xattr -d com.apple.quarantine \(executablePath)"
+            )
+        }
+        let attributeAbsent = output.exitCode == 1
+            && trimmedStdout.isEmpty
+            && trimmedStderr.localizedCaseInsensitiveContains("No such xattr")
+        if attributeAbsent {
+            return check(
+                id: "release.quarantine",
+                domain: "release",
+                status: .pass,
+                summary: "Binary is not quarantined.",
+                evidence: evidence,
+                remediationType: .none
+            )
+        }
         return check(
             id: "release.quarantine",
             domain: "release",
-            status: quarantined ? .warn : .pass,
-            summary: quarantined ? "Binary has a macOS quarantine attribute." : "Binary is not quarantined.",
-            evidence: ["path": executablePath, "quarantined": String(quarantined)],
-            remediationType: quarantined ? .command : .none,
-            remediationValueOverride: quarantined ? "xattr -d com.apple.quarantine \(executablePath)" : nil
+            status: .warn,
+            summary: "Quarantine state could not be determined.",
+            evidence: evidence,
+            remediationType: .docs
         )
     }
 
     private static func claudeRegistrationCheck(runtime: Runtime) -> Check {
-        guard let output = runtime.runCommand("/usr/bin/env", ["claude", "mcp", "list"]) else {
+        // Read-only registration detection: inspect the Claude Code config file
+        // directly instead of shelling out to `claude mcp list`. `claude mcp list`
+        // health-checks every registered MCP server, which spawns the registered
+        // LogicProMCP binary over stdio (creating CoreMIDI virtual ports + AX
+        // pollers) — a real side effect that violates the doctor's documented
+        // "read-only / run-before-startup" contract, and one the old 1.5s SIGKILL
+        // could orphan. Reading the config is fast, non-mutating, and spawns nothing.
+        switch runtime.readClaudeRegistration() {
+        case let .registered(command):
+            return check(
+                id: "mcp.claude_code_registration",
+                domain: "mcp",
+                status: .pass,
+                summary: "Claude Code MCP registration found.",
+                evidence: ["registered": "true", "command": command],
+                remediationType: .none
+            )
+        case .notRegistered:
+            return check(
+                id: "mcp.claude_code_registration",
+                domain: "mcp",
+                status: .warn,
+                summary: "Claude Code MCP registration was not found.",
+                evidence: ["registered": "false"],
+                remediationType: .command,
+                remediationValueOverride: "claude mcp add --scope user logic-pro -- LogicProMCP"
+            )
+        case let .configUnavailable(reason):
             return check(
                 id: "mcp.claude_code_registration",
                 domain: "mcp",
                 status: .manual,
-                summary: "Claude Code registration could not be checked because the Claude CLI was not available.",
-                evidence: [:],
+                summary: "Claude Code registration could not be checked because the Claude config could not be read.",
+                evidence: ["reason": reason],
                 remediationType: .manual
             )
         }
-        let combined = "\(output.stdout)\n\(output.stderr)"
-        let registered = output.exitCode == 0
-            && combined.localizedCaseInsensitiveContains("logic-pro")
-            && combined.localizedCaseInsensitiveContains("LogicProMCP")
-        return check(
-            id: "mcp.claude_code_registration",
-            domain: "mcp",
-            status: registered ? .pass : .warn,
-            summary: registered ? "Claude Code MCP registration found." : "Claude Code MCP registration was not found.",
-            evidence: ["exit_code": String(output.exitCode)],
-            remediationType: registered ? .none : .command,
-            remediationValueOverride: registered ? nil : "claude mcp add --scope user logic-pro -- LogicProMCP"
-        )
     }
 
     private static func accessibilityPermissionCheck(_ status: PermissionChecker.PermissionStatus) -> Check {
@@ -404,14 +475,23 @@ enum SetupDoctor {
     }
 
     private static func detectInstallSource(executablePath: String?, runtime: Runtime) -> InstallSource {
-        if let executablePath, executablePath.contains("/.build/") || executablePath.contains(".build/") {
+        // Match a real `.build` path component (SwiftPM's canonical build dir),
+        // not a bare substring — a path like `/Users/x/my.build/release/LogicProMCP`
+        // must NOT be misclassified as source_build.
+        if let executablePath, URL(fileURLWithPath: executablePath).pathComponents.contains(".build") {
             return .sourceBuild
         }
 
-        if let brew = runtime.runCommand("/usr/bin/env", ["brew", "list", "--versions", "logic-pro-mcp"]),
-           brew.exitCode == 0,
-           brew.stdout.contains("logic-pro-mcp") {
-            return .homebrew
+        // Probe brew at canonical absolute paths instead of resolving via PATH.
+        // A launchd/minimal-supervisor env often has a stripped PATH without
+        // /opt/homebrew/bin, which would otherwise make a genuine Homebrew install
+        // fall through to .releaseBinary based purely on ambient PATH.
+        for brewPath in ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
+            if let brew = runtime.runCommand(brewPath, ["list", "--versions", "logic-pro-mcp"]),
+               brew.exitCode == 0,
+               brew.stdout.contains("logic-pro-mcp") {
+                return .homebrew
+            }
         }
 
         guard let executablePath else { return .unknown }
@@ -497,18 +577,35 @@ enum SetupDoctor {
             executable: "/usr/bin/which",
             arguments: [raw],
             timeout: 1.0
-        ), output.exitCode == 0 else {
+        )?.output, output.exitCode == 0 else {
             return nil
         }
         let path = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return path.isEmpty ? nil : path
     }
 
+    /// Outcome of running an external command, distinguishing the failure modes
+    /// so callers can message truthfully (timeout vs. could-not-spawn) rather than
+    /// collapsing both into a bare `nil`.
+    enum ProductionCommandResult: Equatable, Sendable {
+        case completed(CommandOutput)
+        /// The process did not finish within the timeout (terminated/killed).
+        case timedOut
+        /// The process could not be launched (e.g. executable not found).
+        case spawnFailed(String)
+
+        /// Convenience accessor for callers that only need the successful output.
+        var output: CommandOutput? {
+            if case let .completed(value) = self { return value }
+            return nil
+        }
+    }
+
     private static func runProductionCommand(
         executable: String,
         arguments: [String],
         timeout: TimeInterval
-    ) -> CommandOutput? {
+    ) -> ProductionCommandResult? {
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()
@@ -520,14 +617,54 @@ enum SetupDoctor {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        // Drain both pipes CONCURRENTLY with the child. Reading only after the
+        // process exits deadlocks when the child writes more than the OS pipe
+        // buffer (~16-64KB): its write() blocks, the child never exits, the
+        // termination handler never fires, and the timeout becomes the only exit
+        // path. Accumulating into thread-safe buffers from readabilityHandler
+        // removes that buffer-full deadlock and makes the timeout the only failure
+        // path. The buffer is a Sendable reference type so the @Sendable handler
+        // can mutate it safely.
+        let stdoutBuffer = PipeDrainBuffer()
+        let stderrBuffer = PipeDrainBuffer()
+
         let group = DispatchGroup()
+
+        group.enter()
+        stdout.fileHandleForReading.readabilityHandler = { fileHandle in
+            let chunk = fileHandle.availableData
+            if chunk.isEmpty {
+                fileHandle.readabilityHandler = nil
+                group.leave()
+                return
+            }
+            stdoutBuffer.append(chunk)
+        }
+        group.enter()
+        stderr.fileHandleForReading.readabilityHandler = { fileHandle in
+            let chunk = fileHandle.availableData
+            if chunk.isEmpty {
+                fileHandle.readabilityHandler = nil
+                group.leave()
+                return
+            }
+            stderrBuffer.append(chunk)
+        }
+
         group.enter()
         process.terminationHandler = { _ in group.leave() }
 
         do {
             try process.run()
         } catch {
-            return nil
+            // The readers never received data; clear them and balance the group so
+            // it cannot leak. terminationHandler will not fire because run() threw.
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            group.leave() // termination handler
+            group.leave() // stdout reader
+            group.leave() // stderr reader
+            return .spawnFailed(String(describing: error))
         }
 
         if group.wait(timeout: .now() + timeout) == .timedOut {
@@ -536,13 +673,108 @@ enum SetupDoctor {
             }
             if group.wait(timeout: .now() + 0.2) == .timedOut, process.isRunning {
                 kill(process.processIdentifier, SIGKILL)
-                _ = group.wait(timeout: .now() + 0.2)
+                _ = group.wait(timeout: .now() + 0.5)
             }
-            return nil
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            return .timedOut
         }
 
-        let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return CommandOutput(exitCode: process.terminationStatus, stdout: stdoutText, stderr: stderrText)
+        let stdoutText = String(data: stdoutBuffer.snapshot(), encoding: .utf8) ?? ""
+        let stderrText = String(data: stderrBuffer.snapshot(), encoding: .utf8) ?? ""
+        return .completed(
+            CommandOutput(exitCode: process.terminationStatus, stdout: stdoutText, stderr: stderrText)
+        )
+    }
+
+    /// Thread-safe Data accumulator for concurrent pipe draining. Reference type so
+    /// the `@Sendable` readabilityHandler can mutate shared state without capturing
+    /// a non-Sendable closure.
+    private final class PipeDrainBuffer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+
+        func append(_ chunk: Data) {
+            lock.lock()
+            data.append(chunk)
+            lock.unlock()
+        }
+
+        func snapshot() -> Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return data
+        }
+    }
+
+    /// Production reader for the Claude Code registration. Parses ~/.claude.json
+    /// directly (top-level `mcpServers` plus every `projects.<path>.mcpServers`)
+    /// and reports registration when a logic-pro-style entry resolves to a
+    /// LogicProMCP binary. This spawns nothing — honoring the read-only contract.
+    static func readProductionClaudeRegistration(
+        configURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude.json")
+    ) -> ClaudeRegistration {
+        guard FileManager.default.fileExists(atPath: configURL.path) else {
+            return .configUnavailable(reason: "config file not found at \(configURL.path)")
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: configURL)
+        } catch {
+            return .configUnavailable(reason: "config file could not be read: \(String(describing: error))")
+        }
+        let root: Any
+        do {
+            root = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            return .configUnavailable(reason: "config file is not valid JSON: \(String(describing: error))")
+        }
+        guard let object = root as? [String: Any] else {
+            return .configUnavailable(reason: "config root is not a JSON object")
+        }
+
+        var serverScopes: [[String: Any]] = []
+        if let top = object["mcpServers"] as? [String: Any] {
+            serverScopes.append(top)
+        }
+        if let projects = object["projects"] as? [String: Any] {
+            for case let project as [String: Any] in projects.values {
+                if let scoped = project["mcpServers"] as? [String: Any] {
+                    serverScopes.append(scoped)
+                }
+            }
+        }
+
+        for scope in serverScopes {
+            for (name, rawEntry) in scope {
+                guard let entry = rawEntry as? [String: Any] else { continue }
+                let nameMatches = name.localizedCaseInsensitiveContains("logic-pro")
+                let command = (entry["command"] as? String) ?? ""
+                let commandMatches = command
+                    .localizedCaseInsensitiveContains("LogicProMCP")
+                if nameMatches && commandMatches {
+                    return .registered(command: command)
+                }
+            }
+        }
+        return .notRegistered
+    }
+
+    // MARK: - Test seams
+
+    /// Test-only access to the production subprocess runner so the concurrent-drain
+    /// and timeout/spawn-failure distinction can be exercised against real children.
+    static func runProductionCommandForTesting(
+        executable: String,
+        arguments: [String],
+        timeout: TimeInterval
+    ) -> ProductionCommandResult? {
+        runProductionCommand(executable: executable, arguments: arguments, timeout: timeout)
+    }
+
+    /// Test-only access to the config-based registration reader against a custom URL.
+    static func readClaudeRegistrationForTesting(configURL: URL) -> ClaudeRegistration {
+        readProductionClaudeRegistration(configURL: configURL)
     }
 }

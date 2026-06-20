@@ -84,6 +84,8 @@ LogicProMCP doctor --json
 
 `doctor --json` emits the stable schema `logic_pro_mcp_doctor.v1`. Every check has a stable `id`, `domain`, `status`, `evidence`, and `remediation` so support answers and MCP clients can link to exact remediation steps.
 
+Doctor is strictly read-only and runs **before** any server, channel, or MIDI-port startup. It never mutates the install or Logic state, and it does not launch or focus Logic for you. In particular, the MCP registration check reads the Claude Code config file (`~/.claude.json`) directly rather than running `claude mcp list`, so it never spawns the registered server, never opens CoreMIDI virtual ports, and never triggers Claude's connectivity health sweep.
+
 #### Doctor Remediation Anchors
 
 <a id="doctor-binarypath"></a>
@@ -103,15 +105,6 @@ The resolved binary is not executable. Fix the executable bit on the exact path 
 
 ```bash
 chmod +x /path/to/LogicProMCP
-```
-
-<a id="doctor-binaryversion"></a>
-##### `binary.version`
-
-The binary did not report the compiled server version. Rebuild or reinstall from a pinned release and rerun:
-
-```bash
-LogicProMCP doctor --json
 ```
 
 <a id="doctor-installsource"></a>
@@ -145,12 +138,13 @@ xattr -d com.apple.quarantine /path/to/LogicProMCP
 <a id="doctor-mcpclaude-code-registration"></a>
 ##### `mcp.claude_code_registration`
 
-Claude Code does not appear to have a `logic-pro` MCP registration. Register explicitly:
+Doctor reads `~/.claude.json` directly (top-level `mcpServers` plus every `projects.<path>.mcpServers`) and looks for a `logic-pro`-style entry whose `command` resolves to a `LogicProMCP` binary. If no such entry is found, register explicitly:
 
 ```bash
 claude mcp add --scope user logic-pro -- LogicProMCP
-claude mcp list
 ```
+
+If doctor reports this check as `manual` (status `manual_action_required`), the Claude config file could not be read (missing, unreadable, or not valid JSON) — confirm `~/.claude.json` exists and is well-formed, then rerun.
 
 <a id="doctor-permissionsaccessibility"></a>
 ##### `permissions.accessibility`
