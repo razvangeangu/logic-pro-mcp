@@ -73,6 +73,108 @@ LogicProMCP --check-permissions
 # Expected: Accessibility: granted / Automation (Logic Pro): granted
 ```
 
+### 2.1 Setup Doctor
+
+Run the non-mutating setup doctor any time install, MCP registration, permissions, or Logic readiness is ambiguous:
+
+```bash
+LogicProMCP doctor
+LogicProMCP doctor --json
+```
+
+`doctor --json` emits the stable schema `logic_pro_mcp_doctor.v1`. Every check has a stable `id`, `domain`, `status`, `evidence`, and `remediation` so support answers and MCP clients can link to exact remediation steps.
+
+Doctor is strictly read-only and runs **before** any server, channel, or MIDI-port startup. It never mutates the install or Logic state, and it does not launch or focus Logic for you. In particular, the MCP registration check reads the Claude Code config file (`~/.claude.json`) directly rather than running `claude mcp list`, so it never spawns the registered server, never opens CoreMIDI virtual ports, and never triggers Claude's connectivity health sweep.
+
+#### Doctor Remediation Anchors
+
+<a id="doctor-binarypath"></a>
+##### `binary.path`
+
+The binary could not be resolved from the launched executable path or `PATH`. Reinstall with Homebrew, copy the release binary into `/usr/local/bin`, or run the source-built binary by absolute path:
+
+```bash
+swift build -c release
+.build/release/LogicProMCP doctor --json
+```
+
+<a id="doctor-binaryexecutable"></a>
+##### `binary.executable`
+
+The resolved binary is not executable. Fix the executable bit on the exact path reported by doctor:
+
+```bash
+chmod +x /path/to/LogicProMCP
+```
+
+<a id="doctor-installsource"></a>
+##### `install.source`
+
+Doctor could not determine whether the binary came from Homebrew, a release binary, or a source build. Prefer Homebrew for production installs:
+
+```bash
+brew tap MongLong0214/logic-pro-mcp https://github.com/MongLong0214/logic-pro-mcp
+brew install logic-pro-mcp
+```
+
+<a id="doctor-releasesignature"></a>
+##### `release.signature`
+
+The binary signature could not be verified. For release binaries, compare the artifact with the release metadata and reinstall from a pinned source. Source builds may need local ad-hoc signing:
+
+```bash
+codesign --force --sign - /path/to/LogicProMCP
+```
+
+<a id="doctor-releasequarantine"></a>
+##### `release.quarantine`
+
+macOS quarantine can block first launch. Only remove it after verifying the release SHA256 and signature:
+
+```bash
+xattr -d com.apple.quarantine /path/to/LogicProMCP
+```
+
+<a id="doctor-mcpclaude-code-registration"></a>
+##### `mcp.claude_code_registration`
+
+Doctor reads `~/.claude.json` directly (top-level `mcpServers` plus every `projects.<path>.mcpServers`) and looks for a `logic-pro`-style entry whose `command` resolves to a `LogicProMCP` binary. If no such entry is found, register explicitly:
+
+```bash
+claude mcp add --scope user logic-pro -- LogicProMCP
+```
+
+If doctor reports this check as `manual` (status `manual_action_required`), the Claude config file could not be read (missing, unreadable, or not valid JSON) — confirm `~/.claude.json` exists and is well-formed, then rerun.
+
+<a id="doctor-permissionsaccessibility"></a>
+##### `permissions.accessibility`
+
+Grant Accessibility access in **System Settings -> Privacy & Security -> Accessibility** for the parent app that launches `LogicProMCP` (Claude Code, terminal, or your MCP client).
+
+<a id="doctor-permissionsautomation-logic-pro"></a>
+##### `permissions.automation_logic_pro`
+
+Grant Automation access in **System Settings -> Privacy & Security -> Automation -> Logic Pro**. If doctor reports `not_verifiable`, launch Logic Pro once and rerun:
+
+```bash
+LogicProMCP doctor --json
+```
+
+<a id="doctor-logicapplication-state"></a>
+##### `logic.application_state`
+
+Launch Logic Pro and open or create a project before expecting live readiness checks to pass. Doctor stays read-only and will not launch or focus Logic for you.
+
+<a id="doctor-channelsmanual-validation"></a>
+##### `channels.manual_validation`
+
+MIDIKeyCommands and Scripter are manual-validation channels. Approve them only after completing the corresponding Logic-side setup:
+
+```bash
+LogicProMCP --approve-channel MIDIKeyCommands --approval-note "Manual MIDI Learn completed"
+LogicProMCP --approve-channel Scripter --approval-note "Scripter inserted on intended tracks"
+```
+
 ---
 
 ## 3. Register MCU Control Surface (mandatory for mixer control)
