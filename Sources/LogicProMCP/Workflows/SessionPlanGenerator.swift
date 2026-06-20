@@ -270,7 +270,7 @@ enum SessionPlanGenerator {
         confidence["genre"] = genre == "unspecified" ? "default" : "prompt"
 
         let tempo: Int
-        if let capturedTempo = capture(#"(\d{2,3})\s*(?:bpm|BPM)"#, in: prompt).first,
+        if let capturedTempo = capture(#"(?<!\d)(\d{1,4})\s*bpm\b"#, in: lower).first,
            let bpm = Int(capturedTempo),
            (40...240).contains(bpm) {
             tempo = bpm
@@ -281,7 +281,7 @@ enum SessionPlanGenerator {
         }
 
         let bars: Int
-        if let capturedBars = capture(#"(\d{1,3})\s*[- ]?\s*bar"#, in: lower).first,
+        if let capturedBars = capture(#"\b(\d{1,3})\s*[- ]?\s*bars?\b"#, in: lower).first,
            let parsedBars = Int(capturedBars),
            (1...128).contains(parsedBars) {
             bars = parsedBars
@@ -296,7 +296,8 @@ enum SessionPlanGenerator {
         confidence["scale"] = keyScale.source
 
         let timeSignature: String
-        if let capturedTime = capture(#"\b(\d{1,2}/\d{1,2})\b"#, in: prompt).first {
+        if let capturedTime = capture(#"\b(\d{1,2}/\d{1,2})\b"#, in: prompt).first,
+           isValidTimeSignature(capturedTime) {
             timeSignature = capturedTime
             confidence["time_signature"] = "prompt"
         } else {
@@ -623,12 +624,30 @@ enum SessionPlanGenerator {
     }
 
     private static func detectMood(_ lower: String) -> [String] {
-        ["dark", "bright", "warm", "aggressive", "soft", "dreamy", "uplifting", "moody", "minimal"]
-            .filter { lower.contains($0) }
+        // Word-boundary match so unrelated words ("software", "warmth") cannot inject
+        // a phantom mood the user never expressed.
+        let moods = ["dark", "bright", "warm", "aggressive", "soft", "dreamy", "uplifting", "moody", "minimal"]
+        return moods.filter { mood in
+            !capture(#"\b("# + mood + #")\b"#, in: lower).isEmpty
+        }
+    }
+
+    private static func isValidTimeSignature(_ value: String) -> Bool {
+        let parts = value.split(separator: "/", maxSplits: 1)
+        guard parts.count == 2,
+              let numerator = Int(parts[0]),
+              let denominator = Int(parts[1]) else {
+            return false
+        }
+        return numerator > 0 && [1, 2, 4, 8, 16].contains(denominator)
     }
 
     private static func detectKeyAndScale(_ prompt: String) -> (key: String, scale: String, source: String) {
-        let pattern = #"(?:in\s+)?([A-Ga-g](?:#|b|♭)?)[ -]?(major|minor|maj|min)\b"#
+        // Require an explicit "in <key> <scale>" form so adjectives ending in a note
+        // letter (harmonic/melodic/dramatic minor) cannot produce a phantom key with
+        // high "prompt" confidence. A leading \b and a mandatory separator stop the
+        // note-letter from being clipped out of the middle of a word.
+        let pattern = #"\bin\s+([A-Ga-g](?:#|b|♭)?)[ -](major|minor|maj|min)\b"#
         let captures = capture(pattern, in: prompt)
         guard captures.count >= 2 else {
             return ("C", "minor", "default")
