@@ -11,7 +11,7 @@ struct ProjectDispatcher {
 
     static let tool = commandTool(
         name: "logic_project",
-        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); others -> {}.",
+        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions, audit, cleanup_plan. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); audit -> read-only project/session audit JSON; cleanup_plan -> read-only serializable cleanup plan JSON; others -> {}.",
         commandDescription: "Project command to execute"
     )
 
@@ -187,6 +187,14 @@ struct ProjectDispatcher {
             await refreshRegionCache(from: result, cache: cache)
             return toolTextResult(result)
 
+        case "audit":
+            let report = await ProjectSessionAudit.buildAudit(cache: cache)
+            return toolTextResult(encodeJSON(report, compact: true))
+
+        case "cleanup_plan":
+            let report = await ProjectSessionAudit.buildCleanupPlan(cache: cache)
+            return toolTextResult(encodeJSON(report, compact: true))
+
         case "launch":
             if isLogicProRunning() {
                 audit(command, phase: .rejected, reason: "already running")
@@ -227,7 +235,7 @@ struct ProjectDispatcher {
 
         default:
             return toolTextResult(
-                "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions",
+                "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions, audit, cleanup_plan",
                 isError: true
             )
         }

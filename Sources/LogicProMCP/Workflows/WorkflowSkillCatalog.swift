@@ -420,6 +420,7 @@ enum WorkflowSkillCatalog {
     static func defaultWorkflows() -> [WorkflowSkill] {
         [
             projectReadiness(),
+            projectAuditCleanupPlan(),
             midiIdeaSketch(),
             arrangementMarkerPlan(),
             gainStagingPrep(),
@@ -531,7 +532,7 @@ enum WorkflowSkillCatalog {
         ],
         "logic_project": [
             "new", "open", "save", "save_as", "close", "bounce",
-            "is_running", "get_regions", "launch", "quit",
+            "is_running", "get_regions", "audit", "cleanup_plan", "launch", "quit",
         ],
         "logic_system": [
             "health", "permissions", "refresh_cache", "help",
@@ -642,6 +643,55 @@ enum WorkflowSkillCatalog {
             productionReady: true,
             dependsOn: [],
             limitations: ["Does not open Logic or create a project."],
+            mutationKind: .readOnly
+        )
+    }
+
+    private static func projectAuditCleanupPlan() -> WorkflowSkill {
+        makeWorkflow(
+            id: "logic.workflow.project.audit_cleanup_plan",
+            title: "Project Audit And Cleanup Plan",
+            intent: "Inspect a messy Logic session, identify deterministic risks, and produce a serializable cleanup plan before any mutation.",
+            scope: "Read-only audit and planning; no cleanup step is executed by this workflow.",
+            prerequisites: ["Open project when available", "Project/tracks/resources readable", "Caller reviews cleanup plan before any mutation"],
+            allowedTools: ["logic_project"],
+            allowedResources: [
+                "logic://project/audit",
+                "logic://project/cleanup-plan",
+                "logic://project/info",
+                "logic://tracks",
+                "logic://mixer",
+                "logic://markers",
+                "logic://transport/state",
+            ],
+            requiredConfirmations: [],
+            stateChecks: [
+                stateCheck("audit", "logic://project/audit", ["schema", "findings", "cleanup_plan"], true),
+                stateCheck("cleanup_plan", "logic://project/cleanup-plan", ["schema", "steps"], true),
+            ],
+            steps: [
+                readStep("read_audit", "Read evidence-backed project/session audit", "logic://project/audit", ["schema", "status", "findings", "cleanup_plan"]),
+                readStep("read_cleanup_plan", "Read serializable cleanup plan", "logic://project/cleanup-plan", ["schema", "steps"]),
+                toolStep("audit_command", "Optionally fetch the same audit through logic_project", "logic_project", command: "audit", false, nil, ["schema", "findings", "cleanup_plan"], ["audit status failed"]),
+                toolStep("cleanup_plan_command", "Optionally fetch the same cleanup plan through logic_project", "logic_project", command: "cleanup_plan", false, nil, ["schema", "steps"], ["cleanup plan missing"]),
+            ],
+            verification: WorkflowVerification(evidence: ["project_audit_json", "cleanup_plan_json"], successFields: ["schema", "findings", "steps"], liveEvidenceFile: nil),
+            failureModes: [
+                "project identity ambiguous",
+                "track inventory unavailable",
+                "mixer inventory stale",
+                "AX occluded",
+                "cleanup plan contains unsupported mutation steps",
+            ],
+            rollbackOrRecovery: "No rollback required; the workflow is read-only and stops before cleanup mutation.",
+            evidenceLevel: .deterministic,
+            productionReady: true,
+            dependsOn: [],
+            limitations: [
+                "Does not delete, hide, rename, mute, solo, arm, or create markers.",
+                "Mutating plan steps require a future caller to request explicit confirmation and verify readback one step at a time.",
+                "Does not score mix quality or musical intent.",
+            ],
             mutationKind: .readOnly
         )
     }

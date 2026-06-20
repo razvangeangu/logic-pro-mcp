@@ -156,6 +156,12 @@ extension ResourceHandlers {
         case "logic://project/info":
             return try await readProjectInfo(cache: cache, uri: uri, fileReader: fileReader)
 
+        case "logic://project/audit":
+            return try await readProjectAudit(cache: cache, uri: uri)
+
+        case "logic://project/cleanup-plan":
+            return try await readProjectCleanupPlan(cache: cache, uri: uri)
+
         case "logic://midi/ports":
             return try await readMIDIPorts(router: router, uri: uri)
 
@@ -795,6 +801,18 @@ extension ResourceHandlers {
         return ReadResource.Result(
             contents: [.text(payload, uri: uri, mimeType: "application/json")]
         )
+    }
+
+    private static func readProjectAudit(cache: StateCache, uri: String) async throws -> ReadResource.Result {
+        let report = await ProjectSessionAudit.buildAudit(cache: cache)
+        let json = encodeJSON(report, compact: true)
+        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+    }
+
+    private static func readProjectCleanupPlan(cache: StateCache, uri: String) async throws -> ReadResource.Result {
+        let report = await ProjectSessionAudit.buildCleanupPlan(cache: cache)
+        let json = encodeJSON(report, compact: true)
+        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
     }
 
     private static func readTrackRegions(

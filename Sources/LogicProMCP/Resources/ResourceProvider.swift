@@ -90,6 +90,20 @@ struct ResourceProvider {
             annotations: annotations(priority: 0.7)
         ),
         Resource(
+            name: "Project Session Audit",
+            uri: "logic://project/audit",
+            description: "Read-only project/session audit with evidence-backed findings and cleanup plan",
+            mimeType: "application/json",
+            annotations: annotations(priority: 0.68)
+        ),
+        Resource(
+            name: "Project Cleanup Plan",
+            uri: "logic://project/cleanup-plan",
+            description: "Read-only serializable cleanup plan derived from the current project/session audit",
+            mimeType: "application/json",
+            annotations: annotations(priority: 0.67)
+        ),
+        Resource(
             name: "MIDI Ports",
             uri: "logic://midi/ports",
             description: "Available MIDI ports (system + virtual)",

@@ -393,6 +393,8 @@ private func waitForFeedbackEvents(
         "logic://mixer",
         "logic://markers",
         "logic://project/info",
+        "logic://project/audit",
+        "logic://project/cleanup-plan",
         "logic://midi/ports",
         "logic://mcu/state",
         "logic://library/inventory",

@@ -831,7 +831,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 
 @Test func testE2EServerCatalogAdvertisesAllResources() async {
     let snapshot = await LogicProServer().compositionSnapshot()
-    #expect(snapshot.resourceURIs.count >= 14)
+    #expect(snapshot.resourceURIs.count >= 16)
     let uris = Set(snapshot.resourceURIs)
     let expectedResources: Set<String> = [
         "logic://system/health",
@@ -840,6 +840,8 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         "logic://mixer",
         "logic://markers",
         "logic://project/info",
+        "logic://project/audit",
+        "logic://project/cleanup-plan",
         "logic://midi/ports",
         "logic://mcu/state",
         "logic://library/inventory",
