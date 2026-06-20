@@ -180,6 +180,8 @@ actor AccessibilityChannel: Channel {
             hasVisibleWindow: @escaping @Sendable () -> Bool = { ProcessUtils.hasVisibleWindow() },
             logicRuntime: AXLogicProElements.Runtime = .production,
             controlBarMouseRuntime: AXMouseHelper.Runtime = .production,
+            trackRenameMouseRuntime: AXMouseHelper.Runtime = .production,
+            processRuntime: ProcessUtils.Runtime = .production,
             runTempoFallback: @escaping @Sendable (String) -> Bool = { tempo in
                 AccessibilityChannel.runTempoFallbackScript(tempo: tempo)
             }
@@ -203,7 +205,14 @@ actor AccessibilityChannel: Channel {
                 selectedTrack: { AccessibilityChannel.defaultGetSelectedTrack(runtime: logicRuntime) },
                 selectTrack: { await AccessibilityChannel.defaultSelectTrack(params: $0, runtime: logicRuntime) },
                 setTrackToggle: { AccessibilityChannel.defaultSetTrackToggle(params: $0, button: $1, runtime: logicRuntime) },
-                renameTrack: { AccessibilityChannel.defaultRenameTrack(params: $0, runtime: logicRuntime) },
+                renameTrack: {
+                    AccessibilityChannel.defaultRenameTrack(
+                        params: $0,
+                        runtime: logicRuntime,
+                        mouseRuntime: trackRenameMouseRuntime,
+                        processRuntime: processRuntime
+                    )
+                },
                 mixerState: { AccessibilityChannel.defaultGetMixerState(runtime: logicRuntime) },
                 channelStrip: { AccessibilityChannel.defaultGetChannelStrip(params: $0, runtime: logicRuntime) },
                 setMixerValue: { AccessibilityChannel.defaultSetMixerValue(params: $0, target: $1, runtime: logicRuntime) },
@@ -1180,7 +1189,9 @@ actor AccessibilityChannel: Channel {
 
     private static func defaultRenameTrack(
         params: [String: String],
-        runtime: AXLogicProElements.Runtime = .production
+        runtime: AXLogicProElements.Runtime = .production,
+        mouseRuntime: AXMouseHelper.Runtime = .production,
+        processRuntime: ProcessUtils.Runtime = .production
     ) -> ChannelResult {
         guard let indexStr = params["index"], let index = Int(indexStr),
               let name = params["name"] else {
@@ -1190,35 +1201,139 @@ actor AccessibilityChannel: Channel {
             ))
         }
         let truncatedName = String(name.prefix(255))
-        guard let field = AXLogicProElements.findTrackNameField(trackIndex: index, runtime: runtime) else {
+        let baseExtras: [String: Any] = ["track": index, "requested": truncatedName]
+
+        func observedTrackName() -> String? {
+            AXLogicProElements.trackName(at: index, runtime: runtime)
+        }
+
+        func verifiedResult(via: String) -> ChannelResult? {
+            guard let observed = observedTrackName(), observed == truncatedName else { return nil }
+            return .success(HonestContract.encodeStateA(
+                extras: baseExtras.merging([
+                    "observed": observed,
+                    "via": via
+                ]) { _, new in new }
+            ))
+        }
+
+        if let currentName = observedTrackName(), currentName == truncatedName {
+            return .success(HonestContract.encodeStateA(
+                extras: baseExtras.merging([
+                    "observed": currentName,
+                    "via": "no-op"
+                ]) { _, new in new }
+            ))
+        }
+
+        guard AXLogicProElements.findTrackHeader(at: index, runtime: runtime) != nil else {
             return .error(HonestContract.encodeStateC(
                 error: .elementNotFound,
-                hint: "name field for track \(index) not located",
-                extras: ["track": index, "requested": truncatedName]
+                hint: "Track at index \(index) not found",
+                extras: baseExtras
             ))
         }
-        AXHelpers.performAction(field, kAXPressAction, runtime: runtime.ax)
-        AXHelpers.setAttribute(field, kAXValueAttribute, truncatedName as CFTypeRef, runtime: runtime.ax)
-        AXHelpers.performAction(field, kAXConfirmAction, runtime: runtime.ax)
-        usleep(50_000)
 
-        let baseExtras: [String: Any] = ["track": index, "requested": truncatedName]
-        let observed = AXHelpers.getValue(field, runtime: runtime.ax) as? String
-        guard let observed else {
-            return .success(HonestContract.encodeStateB(
-                reason: .readbackUnavailable,
-                extras: baseExtras.merging(["observed": NSNull()]) { _, new in new }
+        if let field = AXLogicProElements.findTrackNameField(trackIndex: index, runtime: runtime) {
+            AXHelpers.performAction(field, kAXPressAction, runtime: runtime.ax)
+            AXHelpers.setAttribute(field, kAXValueAttribute, truncatedName as CFTypeRef, runtime: runtime.ax)
+            AXHelpers.performAction(field, kAXConfirmAction, runtime: runtime.ax)
+            usleep(50_000)
+            if let verified = verifiedResult(via: "ax_set_value") {
+                return verified
+            }
+        }
+
+        _ = ProcessUtils.activateLogicPro(runtime: processRuntime)
+        guard selectTrackForRename(index: index, runtime: runtime) else {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "Failed to select track \(index) before rename",
+                extras: baseExtras
             ))
         }
-        if observed == truncatedName {
-            return .success(HonestContract.encodeStateA(
-                extras: baseExtras.merging(["observed": observed]) { _, new in new }
+        raiseTrackWindowForRename(index: index, runtime: runtime)
+
+        let click = clickTrackMenu(
+            ["Rename Track", "트랙 이름 변경", "이름 변경"],
+            menuName: "트랙",
+            englishMenuName: "Track",
+            runtime: runtime
+        )
+        guard click.isSuccess else {
+            return .error(HonestContract.encodeStateC(
+                error: .elementNotFound,
+                hint: "Track > Rename Track menu item not found / not pressable",
+                extras: baseExtras
             ))
         }
+
+        usleep(150_000)
+        AXMouseHelper.typeText(truncatedName, runtime: mouseRuntime)
+        usleep(50_000)
+        AXMouseHelper.pressReturn(runtime: mouseRuntime)
+        usleep(150_000)
+
+        if let verified = verifiedResult(via: "track_menu") {
+            return verified
+        }
+
+        AXMouseHelper.pressEscape(runtime: mouseRuntime)
+        usleep(50_000)
+        let observed = observedTrackName()
         return .success(HonestContract.encodeStateB(
-            reason: .readbackMismatch,
-            extras: baseExtras.merging(["observed": observed]) { _, new in new }
+            reason: observed == nil ? .readbackUnavailable : .readbackMismatch,
+            extras: baseExtras.merging([
+                "observed": observed as Any? ?? NSNull(),
+                "via": "track_menu"
+            ]) { _, new in new }
         ))
+    }
+
+    private static func raiseTrackWindowForRename(
+        index: Int,
+        runtime: AXLogicProElements.Runtime = .production
+    ) {
+        guard let header = AXLogicProElements.findTrackHeader(at: index, runtime: runtime),
+              let window: AXUIElement = AXHelpers.getAttribute(header, kAXWindowAttribute, runtime: runtime.ax)
+        else {
+            return
+        }
+        _ = AXHelpers.performAction(window, kAXRaiseAction, runtime: runtime.ax)
+        usleep(50_000)
+    }
+
+    private static func selectTrackForRename(
+        index: Int,
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> Bool {
+        let initialHeaders = AXLogicProElements.allTrackHeaders(runtime: runtime)
+        guard index >= 0 && index < initialHeaders.count else { return false }
+        if AXValueExtractors.extractSelectedState(initialHeaders[index], runtime: runtime.ax) == true {
+            return true
+        }
+
+        guard AXLogicProElements.selectTrackViaAX(at: index, runtime: runtime) else {
+            return false
+        }
+
+        var sawSelectionMetadata = false
+        for attempt in 0..<6 {
+            let headers = AXLogicProElements.allTrackHeaders(runtime: runtime)
+            guard index < headers.count else { return false }
+
+            let selectionStates = headers.map { AXValueExtractors.extractSelectedState($0, runtime: runtime.ax) }
+            if selectionStates.contains(where: { $0 != nil }) {
+                sawSelectionMetadata = true
+            }
+            if selectionStates[index] == true {
+                return true
+            }
+            if attempt < 5 {
+                usleep(100_000)
+            }
+        }
+        return !sawSelectionMetadata
     }
 
     private enum TrackSelectionVerification {
@@ -1609,20 +1724,28 @@ actor AccessibilityChannel: Channel {
         englishMenuName: String = "Track",
         runtime: AXLogicProElements.Runtime = .production
     ) -> ChannelResult {
-        if let item = AXLogicProElements.menuItem(path: [menuName, menuItemTitle], runtime: runtime) {
-            guard AXHelpers.performAction(item, kAXPressAction, runtime: runtime.ax) else {
-                return .error("Failed to click menu item: \(menuItemTitle)")
+        clickTrackMenu([menuItemTitle], menuName: menuName, englishMenuName: englishMenuName, runtime: runtime)
+    }
+
+    private static func clickTrackMenu(
+        _ menuItemTitles: [String],
+        menuName: String = "트랙",
+        englishMenuName: String = "Track",
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> ChannelResult {
+        for menuTitle in [menuName, englishMenuName] {
+            for itemTitle in menuItemTitles {
+                guard let item = AXLogicProElements.menuItem(path: [menuTitle, itemTitle], runtime: runtime) else {
+                    continue
+                }
+                guard AXHelpers.performAction(item, kAXPressAction, runtime: runtime.ax) else {
+                    return .error("Failed to click menu item: \(itemTitle)")
+                }
+                return .success("{\"menu_clicked\":\"\(itemTitle)\"}")
             }
-            return .success("{\"menu_clicked\":\"\(menuItemTitle)\"}")
         }
-        // Fallback: English menu names for non-Korean locales
-        if let item = AXLogicProElements.menuItem(path: [englishMenuName, menuItemTitle], runtime: runtime) {
-            guard AXHelpers.performAction(item, kAXPressAction, runtime: runtime.ax) else {
-                return .error("Failed to click menu item: \(menuItemTitle)")
-            }
-            return .success("{\"menu_clicked\":\"\(menuItemTitle)\"}")
-        }
-        return .error("Cannot find menu item: \(menuName) > \(menuItemTitle)")
+        let joinedTitles = menuItemTitles.joined(separator: " | ")
+        return .error("Cannot find menu item: \(menuName) > \(joinedTitles)")
     }
 
     // MARK: - Mixer

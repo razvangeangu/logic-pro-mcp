@@ -156,6 +156,15 @@ struct TrackDispatcher {
                 operation: "track.rename",
                 params: ["index": String(index), "name": name]
             )
+            guard result.isSuccess else {
+                return toolTextResult(result.message, isError: true)
+            }
+            if let data = result.message.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let verified = json["verified"] as? Bool,
+               verified == false {
+                return toolTextResult(result.message, isError: true)
+            }
             return toolTextResult(result)
 
         case "mute":
