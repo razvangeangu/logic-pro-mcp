@@ -61,7 +61,7 @@ struct EditDispatcher {
 
         case "select_all":
             let result = await router.route(operation: "edit.select_all")
-            return toolTextResult(result)
+            return toolTextResultTreatingUnverifiedAsError(result)
 
         case "split":
             let result = await router.route(operation: "edit.split")
@@ -89,7 +89,7 @@ struct EditDispatcher {
                 operation: "edit.quantize",
                 params: ["value": value]
             )
-            return toolTextResult(result)
+            return toolTextResultTreatingUnverifiedAsError(result)
 
         case "bounce_in_place":
             let result = await router.route(operation: "edit.bounce_in_place")

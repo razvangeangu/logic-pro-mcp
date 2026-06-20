@@ -35,7 +35,12 @@ struct NavigateDispatcher {
                 operation: "transport.goto_position",
                 params: ["position": "\(bar).1.1.1"]
             )
-            return toolTextResult(result)
+            return await TransportDispatcher.finalizeGotoPositionResult(
+                result,
+                requestedPosition: "\(bar).1.1.1",
+                router: router,
+                cache: cache
+            )
 
         case "goto_marker":
             // v3.1.10 (boomer P1-1) — resolve the target marker from cache and
@@ -48,19 +53,24 @@ struct NavigateDispatcher {
             //
             let markers = await cache.getMarkers()
             func routeMarkerTarget(_ target: MarkerState) async -> CallTool.Result {
-                let result = await router.route(
+                var result = await router.route(
                     operation: "transport.goto_position",
                     params: ["position": target.position]
                 )
                 // canonical 마커는 응답 그대로. fallback/unknown 만 uncertainty
                 // 머신 가독으로 surface (HC State A/B 한정; State C 보존).
-                guard !target.positionSource.isCanonical else {
-                    return toolTextResult(result)
+                if !target.positionSource.isCanonical {
+                    let merged = mergeMarkerUncertainty(
+                        into: result.message, source: target.positionSource
+                    )
+                    result = result.isSuccess ? .success(merged) : .error(merged)
                 }
-                let merged = mergeMarkerUncertainty(
-                    into: result.message, source: target.positionSource
+                return await TransportDispatcher.finalizeGotoPositionResult(
+                    result,
+                    requestedPosition: target.position,
+                    router: router,
+                    cache: cache
                 )
-                return toolTextResult(merged, isError: !result.isSuccess)
             }
             // H-2 (2026-05-08 enterprise review): pre-fix the cache-cold
             // index-based path fell back to `nav.goto_marker` (CC 38), which
@@ -117,12 +127,12 @@ struct NavigateDispatcher {
             )
 
         case "create_marker":
-            let name = stringParam(params, "name", default: "Marker")
-            let result = await router.route(
-                operation: "nav.create_marker",
-                params: ["name": name]
+            let providedName = stringParam(params, "name")
+            return await finalizeCreateMarkerResult(
+                requestedName: providedName.isEmpty ? nil : providedName,
+                router: router,
+                cache: cache
             )
-            return toolTextResult(result)
 
         case "delete_marker":
             // RB-1.b (2026-05-08 enterprise review): pre-fix `intParam(default: 0)`
@@ -165,7 +175,7 @@ struct NavigateDispatcher {
 
         case "zoom_to_fit":
             let result = await router.route(operation: "nav.zoom_to_fit")
-            return toolTextResult(result)
+            return toolTextResultTreatingUnverifiedAsError(result)
 
         case "set_zoom":
             // Accept both `level` (docs) and `direction` (common caller term) —
@@ -184,16 +194,16 @@ struct NavigateDispatcher {
                     operation: "nav.set_zoom_level",
                     params: ["level": "8"]
                 )
-                return toolTextResult(result)
+                return toolTextResultTreatingUnverifiedAsError(result)
             case "out":
                 let result = await router.route(
                     operation: "nav.set_zoom_level",
                     params: ["level": "2"]
                 )
-                return toolTextResult(result)
+                return toolTextResultTreatingUnverifiedAsError(result)
             case "fit":
                 let result = await router.route(operation: "nav.zoom_to_fit")
-                return toolTextResult(result)
+                return toolTextResultTreatingUnverifiedAsError(result)
             default:
                 guard let numericLevel = Int(level),
                       (1...10).contains(numericLevel) else {
@@ -205,7 +215,7 @@ struct NavigateDispatcher {
                     operation: "nav.set_zoom_level",
                     params: ["level": String(numericLevel)]
                 )
-                return toolTextResult(result)
+                return toolTextResultTreatingUnverifiedAsError(result)
             }
 
         case "toggle_view":
@@ -239,6 +249,97 @@ struct NavigateDispatcher {
                 isError: true
             )
         }
+    }
+
+    private static func finalizeCreateMarkerResult(
+        requestedName: String?,
+        router: ChannelRouter,
+        cache: StateCache
+    ) async -> CallTool.Result {
+        let routedName = requestedName ?? "Marker"
+        let routeResult = await router.route(
+            operation: "nav.create_marker",
+            params: ["name": routedName]
+        )
+        guard routeResult.isSuccess else {
+            return toolTextResult(routeResult)
+        }
+        guard channelResultIsUnverified(routeResult) else {
+            return toolTextResult(routeResult)
+        }
+        let beforeMarkers = await liveMarkers(router: router, cache: cache)
+        guard let beforeMarkers else {
+            return toolTextResult(
+                HonestContract.addExtras(
+                    ["verification_source": "logic://markers"],
+                    into: routeResult.message
+                ),
+                isError: true
+            )
+        }
+        guard let afterMarkers = await liveMarkers(router: router, cache: cache) else {
+            return toolTextResult(
+                HonestContract.addExtras(
+                    ["verification_source": "logic://markers"],
+                    into: routeResult.message
+                ),
+                isError: true
+            )
+        }
+
+        var extras = honestContractExtras(from: routeResult.message)
+        extras["verification_source"] = "logic://markers"
+        extras["marker_count_before"] = beforeMarkers.count
+        extras["marker_count_after"] = afterMarkers.count
+        if let requestedName {
+            extras["requested_name"] = requestedName
+        }
+
+        let createdMarker = createdMarker(after: afterMarkers, before: beforeMarkers)
+        if let createdMarker {
+            extras["observed_marker_id"] = createdMarker.id
+            extras["observed_marker_name"] = createdMarker.name
+            extras["observed_marker_position"] = createdMarker.position
+            extras["observed_marker_position_source"] = createdMarker.positionSource.rawValue
+        }
+
+        guard afterMarkers.count > beforeMarkers.count, let createdMarker else {
+            return toolTextResult(
+                HonestContract.encodeStateB(reason: .readbackMismatch, extras: extras),
+                isError: true
+            )
+        }
+
+        if let requestedName, createdMarker.name != requestedName {
+            return toolTextResult(
+                HonestContract.encodeStateB(reason: .readbackMismatch, extras: extras),
+                isError: true
+            )
+        }
+
+        return toolTextResult(HonestContract.encodeStateA(extras: extras))
+    }
+
+    private static func liveMarkers(
+        router: ChannelRouter,
+        cache: StateCache
+    ) async -> [MarkerState]? {
+        let readback = await router.route(operation: "nav.get_markers")
+        guard readback.isSuccess,
+              let markers = decodeJSONValue([MarkerState].self, from: readback.message) else {
+            return nil
+        }
+        await cache.updateMarkers(markers)
+        return markers
+    }
+
+    private static func createdMarker(
+        after afterMarkers: [MarkerState],
+        before beforeMarkers: [MarkerState]
+    ) -> MarkerState? {
+        return afterMarkers.last(where: { candidate in
+            !beforeMarkers.contains(candidate)
+        })
     }
 
     /// goto_marker 응답에 marker provenance uncertainty 를 surface — State A/B

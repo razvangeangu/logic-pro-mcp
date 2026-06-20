@@ -1,3 +1,4 @@
+import Foundation
 import MCP
 
 func intParam(_ params: [String: Value], _ keys: String..., default defaultValue: Int = 0) -> Int {
@@ -172,4 +173,48 @@ func routedTextResult(
     params: [String: String] = [:]
 ) async -> CallTool.Result {
     toolTextResult(await router.route(operation: operation, params: params))
+}
+
+private let dispatcherJSONDecoder: JSONDecoder = {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return decoder
+}()
+
+func decodedJSONObject(_ raw: String) -> [String: Any]? {
+    guard let data = raw.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+    return object
+}
+
+func decodeJSONValue<T: Decodable>(_ type: T.Type, from raw: String) -> T? {
+    guard let data = raw.data(using: .utf8) else { return nil }
+    return try? dispatcherJSONDecoder.decode(type, from: data)
+}
+
+func honestContractExtras(from raw: String) -> [String: Any] {
+    guard var object = decodedJSONObject(raw) else { return [:] }
+    for key in ["success", "verified", "reason", "error", "state", "hc_schema"] {
+        object.removeValue(forKey: key)
+    }
+    return object
+}
+
+func channelResultIsVerified(_ result: ChannelResult) -> Bool {
+    guard result.isSuccess else { return false }
+    return decodedJSONObject(result.message)?["verified"] as? Bool == true
+}
+
+func channelResultIsUnverified(_ result: ChannelResult) -> Bool {
+    guard result.isSuccess else { return false }
+    return decodedJSONObject(result.message)?["verified"] as? Bool == false
+}
+
+func toolTextResultTreatingUnverifiedAsError(_ result: ChannelResult) -> CallTool.Result {
+    if channelResultIsUnverified(result) {
+        return toolTextResult(result.message, isError: true)
+    }
+    return toolTextResult(result)
 }
