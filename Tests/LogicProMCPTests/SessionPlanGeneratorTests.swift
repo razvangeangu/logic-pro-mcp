@@ -164,6 +164,26 @@ struct SessionPlanArrangementTests {
         #expect(plan.trackPlan.contains { $0.role == "guitar" && $0.catalogResource == nil })
         #expect(plan.trackPlan.allSatisfy { $0.suggestionSource == "catalog_reference" })
     }
+
+    @Test("every catalog resource the planner emits resolves to a real issue-31 catalog entry")
+    func plannerCatalogResourcesResolve() {
+        // Locks the #97->#96 linkage: a rename of a stock-instrument / Session Player
+        // entry ID must break this test rather than ship a session plan that points
+        // clients at a catalog resource that fails closed on read.
+        let validIDs = Set(
+            StockInstrumentCatalog.stockInstrumentSnapshot.entries.map(\.id)
+                + StockInstrumentCatalog.sessionPlayerSnapshot.entries.map(\.id)
+        )
+        let plan = SessionPlanGenerator.plan(
+            prompt: "16-bar orchestral funk with drums, percussion, bass, guitar, keys, strings, brass, pad, and synth at 110 BPM in E minor"
+        )
+        let referenced = plan.trackPlan.compactMap(\.catalogResource)
+        #expect(!referenced.isEmpty)
+        for uri in referenced {
+            let id = String(uri.split(separator: "/").last ?? "")
+            #expect(validIDs.contains(id), "session plan references catalog entry '\(id)' (\(uri)) absent from the issue-31 catalog")
+        }
+    }
 }
 
 @Suite("Session plan generator — safety")

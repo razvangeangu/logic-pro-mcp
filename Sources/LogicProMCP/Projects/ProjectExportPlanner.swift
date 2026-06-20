@@ -218,7 +218,7 @@ enum ProjectExportPlanner {
                 "no_silent_overwrite",
             ],
             enhancementPath: [
-                "Integrate Issue #29 audio analysis for duration, non-silence, peak/clipping, sample-rate, channels, and honest loudness estimates.",
+                "After a real bounce/export, verify each produced artifact with logic_audio.analyze_file (logic_pro_mcp_audio_analysis.v1) for duration, non-silence, peak/clipping, sample-rate, channels, and honest loudness estimates.",
             ],
             nextSafeAction: "review_export_plan"
         )

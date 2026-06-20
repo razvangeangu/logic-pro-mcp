@@ -316,6 +316,27 @@ private let toolText = sharedToolText
     }
 }
 
+@Test func testSystemHelpEnumeratesEveryRegisteredResourceAndTemplate() async {
+    // The help overview is an LLM-facing capability-discovery surface: it must
+    // ENUMERATE every registered resource/template, not merely claim the count.
+    // Guards the union-merge drift class where counts are bumped but list lines
+    // are left behind (e.g. project audit / stock-instruments / session-players).
+    let result = await SystemDispatcher.handle(
+        command: "help",
+        params: ["category": .string("all")],
+        router: ChannelRouter(),
+        cache: StateCache()
+    )
+    #expect(result.isError == false)
+    let text = toolText(result)
+    for uri in ResourceProvider.resources.map(\.uri) {
+        #expect(text.contains(uri), "logic_system help overview omits registered resource \(uri)")
+    }
+    for template in ResourceProvider.templates.map(\.uriTemplate) {
+        #expect(text.contains(template), "logic_system help overview omits registered template \(template)")
+    }
+}
+
 @Test func testSystemDispatcherPermissionsReturnsSummary() async {
     let result = await SystemDispatcher.handle(
         command: "permissions",

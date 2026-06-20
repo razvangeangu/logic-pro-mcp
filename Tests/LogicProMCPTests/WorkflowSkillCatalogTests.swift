@@ -434,6 +434,7 @@ struct WorkflowCommandCensusTests {
         "logic_navigate": "NavigateDispatcher.swift",
         "logic_project": "ProjectDispatcher.swift",
         "logic_system": "SystemDispatcher.swift",
+        "logic_audio": "AudioDispatcher.swift",
     ]
 
     @Test("every census command exists as an executable case label in its dispatcher source")

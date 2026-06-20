@@ -539,6 +539,9 @@ enum WorkflowSkillCatalog {
         "logic_system": [
             "health", "permissions", "refresh_cache", "help",
         ],
+        "logic_audio": [
+            "analyze_file",
+        ],
     ]
 
     static func currentStaticResourceURIs() -> Set<String> {
@@ -831,7 +834,7 @@ enum WorkflowSkillCatalog {
             dependsOn: [],
             limitations: [
                 "Does not create projects, tracks, regions, MIDI files, or audio.",
-                "Instrument suggestions degrade to heuristics until Issue #31 catalog resources are served.",
+                "Instrument suggestions are catalog-backed when the stock-instruments/session-players resources are served (default in this build); some roles (e.g. guitar) have no catalog-backed stock patch and fall back to a manual Library suggestion.",
                 "Musical choices are heuristic planning aids, not verified musical truth.",
             ],
             mutationKind: .readOnly
@@ -1009,7 +1012,7 @@ enum WorkflowSkillCatalog {
             dependsOn: [],
             limitations: [
                 "Does not open Logic, bounce, resume, or write manifests.",
-                "Post-export audio analysis remains an Issue #29 integration path, not part of this dry-run planner.",
+                "Post-export audio analysis is available via logic_audio.analyze_file but is intentionally not auto-chained by this dry-run planner.",
                 "Cloud upload, email, and external delivery are out of scope.",
             ],
             mutationKind: .readOnly

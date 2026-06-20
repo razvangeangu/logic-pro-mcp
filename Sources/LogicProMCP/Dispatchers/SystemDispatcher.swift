@@ -409,12 +409,16 @@ struct SystemDispatcher {
                   logic://mixer                 — Mixer state
                   logic://markers               — All project markers
                   logic://project/info          — Project info
+                  logic://project/audit         — Read-only project/session audit
+                  logic://project/cleanup-plan  — Read-only serializable cleanup plan
                   logic://midi/ports            — MIDI ports
                   logic://mcu/state             — MCU control-surface state (hidden in list when disconnected)
                   logic://library/inventory     — Cached Library tree JSON
                   logic://stock-plugins         — Stock plugin intelligence catalog
                   logic://stock-plugins/census  — Stock plugin census metadata
                   logic://stock-plugins/capabilities — Stock plugin catalog capabilities
+                  logic://stock-instruments     — Stock instrument intelligence catalog
+                  logic://session-players       — Session Player + Drummer catalog
                   logic://workflow-skills       — Validated workflow skills pack
                   logic://workflow-skills/schema — Workflow skill schema
 
@@ -424,6 +428,9 @@ struct SystemDispatcher {
                   logic://mixer/{strip}           — Single channel strip
                   logic://stock-plugins/{id}      — Stock plugin detail
                   logic://stock-plugins/search?query={query} — Stock plugin search
+                  logic://stock-instruments/{id}  — Stock instrument detail
+                  logic://stock-instruments/search?query={query} — Stock instrument search
+                  logic://session-players/{id}    — Session Player detail
                   logic://workflow-plans/session?prompt={prompt} — Dry-run session plan
                   logic://workflow-skills/{id}    — Workflow skill detail
                   logic://workflow-skills/search?query={query} — Workflow skill search
