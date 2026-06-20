@@ -56,6 +56,15 @@ enum ProjectExportExecutor {
     /// `policy` carries the output-root containment + non-silence/duration gates.
     typealias ArtifactAnalyzer = @Sendable (_ path: String, _ policy: AudioAnalyzer.AnalysisPolicy) -> AudioAnalyzer.Result
 
+    /// Drives a real path-directed bounce and returns the produced on-disk path
+    /// (nil on failure). Logic Pro has NO AppleScript bounce/export verb and its
+    /// bounce save panel is not Accessibility-addressable, so the live default
+    /// shells out to `Scripts/logic_bounce.py` (cliclick/CGEvent UI automation).
+    /// `name` is the artifact basename without extension; `outputDir` is where the
+    /// produced file must land. When nil (unit tests / no live Logic), `produce`
+    /// falls back to the router-bounce + poll-planned-path seam.
+    typealias BounceToPath = @Sendable (_ name: String, _ outputDir: String) async -> String?
+
     /// `@unchecked Sendable` mirrors `AudioAnalyzer.Runtime`: the only
     /// non-Sendable member is `FileManager`, which Apple documents as safe to
     /// share across threads for the read-only `fileExists` use here.
@@ -69,6 +78,9 @@ enum ProjectExportExecutor {
         /// Minimum sane duration (seconds) for a produced artifact. A bounce that
         /// yields a sub-tick file is treated as not-verified (State B).
         var minimumDurationSeconds: Double
+        /// Live path-directed bounce. nil keeps the legacy router-bounce seam so
+        /// the deterministic unit tests never shell out to the UI helper.
+        var bounceToPath: BounceToPath?
 
         static func live() -> Options {
             Options(
@@ -78,9 +90,40 @@ enum ProjectExportExecutor {
                 pollAttempts: defaultPollAttempts,
                 pollIntervalNanos: defaultPollIntervalNanos,
                 sleep: { try? await Task.sleep(nanoseconds: $0) },
-                minimumDurationSeconds: 0.05
+                minimumDurationSeconds: 0.05,
+                bounceToPath: { name, dir in await ProjectExportExecutor.runBounceHelper(name: name, outputDir: dir) }
             )
         }
+    }
+
+    /// Invoke the cliclick-based bounce helper and return the produced artifact
+    /// path. Resolves the helper via `LOGIC_PRO_MCP_BOUNCE_HELPER` or the
+    /// repo-relative `Scripts/logic_bounce.py`. Returns nil on any failure.
+    static func runBounceHelper(name: String, outputDir: String) async -> String? {
+        let env = ProcessInfo.processInfo.environment
+        let helper = env["LOGIC_PRO_MCP_BOUNCE_HELPER"]
+            ?? FileManager.default.currentDirectoryPath + "/Scripts/logic_bounce.py"
+        guard FileManager.default.fileExists(atPath: helper) else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["python3", helper, "--name", name, "--output-dir", outputDir]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = obj["success"] as? Bool, ok,
+              let artifact = obj["artifact"] as? String else {
+            return nil
+        }
+        return artifact
     }
 
     // MARK: - Result model (logic_pro_mcp_export_run.v1)
@@ -418,47 +461,69 @@ enum ProjectExportExecutor {
             )
         }
 
-        // (3d) Trigger the bounce (existing bounce path through the router).
-        let bounceResult = await router.route(operation: "project.bounce")
-        guard bounceResult.isSuccess else {
-            return RunArtifact(
-                kind: artifact.kind,
-                path: artifact.path,
-                state: "C",
-                verified: false,
-                bounceFired: false,
-                error: "bounce_failed: \(bounceResult.message)",
-                reason: nil,
-                evidence: nil
-            )
-        }
-
-        // (3e) Bounded poll for the artifact file to appear on disk.
-        let appeared = await waitForArtifact(path: artifact.path, options: options)
-        guard appeared else {
-            // State B — the bounce fired but the artifact never materialized in
-            // the poll window. We canNOT claim success; we also did not hard-fail
-            // the mutation, so this is honestly uncertain.
-            return RunArtifact(
-                kind: artifact.kind,
-                path: artifact.path,
-                state: "B",
-                verified: false,
-                bounceFired: true,
-                error: nil,
-                reason: "artifact_not_observed_within_poll_window",
-                evidence: nil
-            )
+        // (3d) Trigger the bounce. The live seam (bounceToPath) drives a real
+        // path-directed bounce via the cliclick helper and returns the produced
+        // file; the legacy seam (nil, used by unit tests) fires the router bounce
+        // and polls the planner-resolved path.
+        let producedPath: String
+        if let bounce = options.bounceToPath {
+            let dir = (artifact.path as NSString).deletingLastPathComponent
+            let base = ((artifact.path as NSString).lastPathComponent as NSString).deletingPathExtension
+            guard let produced = await bounce(base, dir) else {
+                return RunArtifact(
+                    kind: artifact.kind,
+                    path: artifact.path,
+                    state: "C",
+                    verified: false,
+                    bounceFired: false,
+                    error: "bounce_helper_failed: no verified artifact produced at \(dir)",
+                    reason: nil,
+                    evidence: nil
+                )
+            }
+            producedPath = produced
+        } else {
+            let bounceResult = await router.route(operation: "project.bounce")
+            guard bounceResult.isSuccess else {
+                return RunArtifact(
+                    kind: artifact.kind,
+                    path: artifact.path,
+                    state: "C",
+                    verified: false,
+                    bounceFired: false,
+                    error: "bounce_failed: \(bounceResult.message)",
+                    reason: nil,
+                    evidence: nil
+                )
+            }
+            // (3e) Bounded poll for the artifact file to appear on disk.
+            let appeared = await waitForArtifact(path: artifact.path, options: options)
+            guard appeared else {
+                // State B — the bounce fired but the artifact never materialized in
+                // the poll window. We canNOT claim success; we also did not hard-fail
+                // the mutation, so this is honestly uncertain.
+                return RunArtifact(
+                    kind: artifact.kind,
+                    path: artifact.path,
+                    state: "B",
+                    verified: false,
+                    bounceFired: true,
+                    error: nil,
+                    reason: "artifact_not_observed_within_poll_window",
+                    evidence: nil
+                )
+            }
+            producedPath = artifact.path
         }
 
         // (3f) Verify with AudioAnalyzer (exists + non-zero + non-silent + sane
         // duration). State A ONLY when verification passes.
-        let analysis = options.analyze(artifact.path, analysisPolicy(plan: plan, options: options))
+        let analysis = options.analyze(producedPath, analysisPolicy(plan: plan, options: options))
         let evidence = ArtifactEvidence(from: analysis, source: "audio_analyzer")
         if analysis.verification.status == .pass {
             return RunArtifact(
                 kind: artifact.kind,
-                path: artifact.path,
+                path: producedPath,
                 state: "A",
                 verified: true,
                 bounceFired: true,
@@ -471,7 +536,7 @@ enum ProjectExportExecutor {
         // unreadable). State B — success uncertain, NOT verified.
         return RunArtifact(
             kind: artifact.kind,
-            path: artifact.path,
+            path: producedPath,
             state: "B",
             verified: false,
             bounceFired: true,
