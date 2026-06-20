@@ -523,7 +523,7 @@ actor AccessibilityChannel: Channel {
         // through AX/CGEvent only, with readback as the only State-A authority
         // and State-C fail-closed behavior for unsupported or drifting UI.
         case "plugin.get_inventory":
-            return AccessibilityChannel.defaultGetPluginInventory(params: params, runtime: runtime.logicRuntime)
+            return await AccessibilityChannel.defaultGetPluginInventory(params: params, runtime: runtime.logicRuntime)
         case "plugin.set_param_verified":
             return await AccessibilityChannel.defaultSetParamVerified(params: params, runtime: runtime.logicRuntime)
         case "plugin.insert_verified":

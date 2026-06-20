@@ -25,6 +25,35 @@ extension AccessibilityChannel {
 
     // MARK: - get_inventory (R3, AC2/AC12/AC22)
 
+    struct MixerRevealResult: Sendable {
+        let attempted: Bool
+        let alreadyVisible: Bool
+        let strategies: [String]
+        let menuItemFound: Bool
+        let menuClicked: Bool
+        let keySent: Bool
+        let mixerVisible: Bool
+
+        static let alreadyVisible = MixerRevealResult(
+            attempted: false,
+            alreadyVisible: true,
+            strategies: [],
+            menuItemFound: false,
+            menuClicked: false,
+            keySent: false,
+            mixerVisible: true
+        )
+    }
+
+    typealias MixerRevealAction = @Sendable (
+        _ runtime: AXLogicProElements.Runtime
+    ) async -> (mixer: AXUIElement?, result: MixerRevealResult)
+
+    private static let showMixerMenuCandidates: [(bar: String, item: String)] = [
+        ("View", "Show Mixer"),
+        ("보기", "믹서 보기"),
+    ]
+
     /// Build the `plugins[]` array for one strip from its drift-safe slot
     /// enumeration. Pure + deterministic so it can be unit-tested against a
     /// strip element without a full mixer fixture.
@@ -74,8 +103,9 @@ extension AccessibilityChannel {
     /// at all (AC2).
     static func defaultGetPluginInventory(
         params: [String: String],
-        runtime: AXLogicProElements.Runtime = .production
-    ) -> ChannelResult {
+        runtime: AXLogicProElements.Runtime = .production,
+        revealMixer: MixerRevealAction = ensureMixerAreaVisibleForInventory
+    ) async -> ChannelResult {
         let operation = "logic_plugins.get_inventory"
         guard let trackRaw = params["track"] ?? params["track_index"] ?? params["index"],
               let track = Int(trackRaw), track >= 0 else {
@@ -95,7 +125,9 @@ extension AccessibilityChannel {
         // The AX insert subtree is unreadable when the mixer or the requested
         // strip cannot be located — there is nothing to enumerate, so this is
         // State B `readback_unavailable` rather than a fabricated empty chain.
-        guard let mixer = AXLogicProElements.getMixerArea(runtime: runtime) else {
+        let ensuredMixer = await revealMixer(runtime)
+        let reveal = ensuredMixer.result
+        guard let mixer = ensuredMixer.mixer else {
             return .success(HonestContract.encodeV2StateB(
                 reason: .readbackUnavailable,
                 extras: [
@@ -103,9 +135,19 @@ extension AccessibilityChannel {
                     "track": track,
                     "plugins_source": "ax",
                     "plugins_fetched_at": fetchedAt,
-                    "plugins_unknown_reason": "ax_subtree_unreadable",
-                    "what_was_attempted": "read insert chain inventory for track \(track)",
-                    "what_was_observed": "mixer area was not locatable in the AX tree",
+                    "plugins_unknown_reason": "mixer_not_visible",
+                    "mixer_reveal_attempted": reveal.attempted,
+                    "mixer_reveal_strategies": reveal.strategies,
+                    "mixer_reveal_menu_item_found": reveal.menuItemFound,
+                    "mixer_reveal_menu_clicked": reveal.menuClicked,
+                    "mixer_reveal_key_sent": reveal.keySent,
+                    "what_was_attempted": reveal.attempted
+                        ? "reveal the mixer, then read insert chain inventory for track \(track)"
+                        : "read insert chain inventory for track \(track)",
+                    "what_was_observed": reveal.attempted
+                        ? "the mixer remained hidden after the reveal attempt, so the insert subtree could not be read"
+                        : "mixer area was not locatable in the AX tree",
+                    "recovery_hint": "Open View > Show Mixer in Logic Pro and retry the inventory read.",
                     "safe_to_retry": true,
                 ]
             ))
@@ -136,9 +178,94 @@ extension AccessibilityChannel {
             "plugins_source": "ax",
             "plugins_fetched_at": fetchedAt,
             "plugins_unknown_reason": NSNull(),
+            "mixer_reveal_attempted": reveal.attempted,
+            "mixer_reveal_strategies": reveal.strategies,
             "complete": built.complete,
             "plugins": built.items,
         ]))
+    }
+
+    private static func ensureMixerAreaVisibleForInventory(
+        runtime: AXLogicProElements.Runtime
+    ) async -> (mixer: AXUIElement?, result: MixerRevealResult) {
+        if let mixer = AXLogicProElements.getMixerArea(runtime: runtime) {
+            return (mixer, .alreadyVisible)
+        }
+
+        var strategies: [String] = []
+        _ = ProcessUtils.Runtime.production.activateLogicPro()
+
+        let menuAttempt = await clickTopLevelMenuItemViaAXMenuClick(
+            candidates: showMixerMenuCandidates,
+            runtime: runtime,
+            maxEnabledRetries: 1,
+            focusBetweenAttempts: false
+        )
+        if menuAttempt.clicked {
+            strategies.append("ax_menu_view_show_mixer")
+            if let mixer = await pollMixerAreaVisible(runtime: runtime, timeoutMs: 1_500) {
+                return (
+                    mixer,
+                    MixerRevealResult(
+                        attempted: true,
+                        alreadyVisible: false,
+                        strategies: strategies,
+                        menuItemFound: menuAttempt.itemFound,
+                        menuClicked: true,
+                        keySent: false,
+                        mixerVisible: true
+                    )
+                )
+            }
+        }
+
+        var keySent = false
+        if let pid = runtime.logicProPID(),
+           CGEventChannel.Runtime.production.postKeyEvent(7, [], pid) {
+            keySent = true
+            strategies.append("cgevent_x")
+            if let mixer = await pollMixerAreaVisible(runtime: runtime, timeoutMs: 1_500) {
+                return (
+                    mixer,
+                    MixerRevealResult(
+                        attempted: true,
+                        alreadyVisible: false,
+                        strategies: strategies,
+                        menuItemFound: menuAttempt.itemFound,
+                        menuClicked: menuAttempt.clicked,
+                        keySent: true,
+                        mixerVisible: true
+                    )
+                )
+            }
+        }
+
+        return (
+            nil,
+            MixerRevealResult(
+                attempted: true,
+                alreadyVisible: false,
+                strategies: strategies,
+                menuItemFound: menuAttempt.itemFound,
+                menuClicked: menuAttempt.clicked,
+                keySent: keySent,
+                mixerVisible: false
+            )
+        )
+    }
+
+    private static func pollMixerAreaVisible(
+        runtime: AXLogicProElements.Runtime,
+        timeoutMs: Int
+    ) async -> AXUIElement? {
+        let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+        repeat {
+            if let mixer = AXLogicProElements.getMixerArea(runtime: runtime) {
+                return mixer
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        } while Date() < deadline
+        return nil
     }
 
     // MARK: - Shared validation inputs
