@@ -788,7 +788,8 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(json?["schema"] as? String == SessionPlanGenerator.schema)
     #expect(json?["execution_mode"] as? String == "dry_run_only")
     #expect((json?["parsed_intent"] as? [String: Any])?["tempo_bpm"] as? Int == 110)
-    #expect((json?["workflow_steps"] as? [[String: Any]])?.allSatisfy { $0["executed"] as? Bool == false } == true)
+    let workflowSteps = try #require(json?["workflow_steps"] as? [[String: Any]])
+    #expect(workflowSteps.allSatisfy { ($0["executed"] as? Bool) == .some(false) })
 }
 
 @Test func testE2EResourceHealthMatchesToolHealth() async throws {

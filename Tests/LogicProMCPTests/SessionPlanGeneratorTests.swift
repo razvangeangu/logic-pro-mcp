@@ -96,7 +96,7 @@ struct SessionPlanSafetyTests {
     func proposedCommandsValidate() {
         let plan = SessionPlanGenerator.plan(prompt: "8-bar techno in A minor at 140 BPM with drums, bass, and synth")
 
-        #expect(plan.toolSurfaceValidation.isValid == true)
+        #expect(plan.toolSurfaceValidation.isValid)
         #expect(plan.toolSurfaceValidation.checkedCommands.contains("logic_transport.set_tempo"))
         #expect(plan.toolSurfaceValidation.checkedCommands.contains("logic_tracks.create_instrument"))
         #expect(plan.toolSurfaceValidation.checkedCommands.contains("logic_midi.import_file"))
@@ -108,7 +108,7 @@ struct SessionPlanSafetyTests {
         let plan = SessionPlanGenerator.plan(prompt: "16-bar funk in E minor at 110 BPM with drums, bass, guitar, and keys")
 
         #expect(plan.executionMode == "dry_run_only")
-        #expect(plan.workflowSteps.allSatisfy { $0.executed == false })
+        #expect(plan.workflowSteps.allSatisfy { !$0.executed })
         #expect(plan.workflowSteps.contains { $0.mutates })
         #expect(plan.nextSafeAction == "review_plan")
     }
@@ -131,11 +131,15 @@ struct SessionPlanResourceTests {
         #expect(resource["schema"] as? String == SessionPlanGenerator.schema)
         #expect(resource["execution_mode"] as? String == "dry_run_only")
         #expect((resource["parsed_intent"] as? [String: Any])?["tempo_bpm"] as? Int == 110)
-        #expect((resource["sections"] as? [[String: Any]])?.isEmpty == false)
+        let sections = try #require(resource["sections"] as? [[String: Any]])
+        #expect(!sections.isEmpty)
         #expect((resource["chord_plan"] as? [[String: Any]])?.first?["chord"] as? String == "Em")
-        #expect((resource["track_plan"] as? [[String: Any]])?.contains { $0["role"] as? String == "bass" } == true)
-        #expect((resource["tool_surface_validation"] as? [String: Any])?["is_valid"] as? Bool == true)
-        #expect((resource["workflow_steps"] as? [[String: Any]])?.allSatisfy { $0["executed"] as? Bool == false } == true)
+        let trackPlan = try #require(resource["track_plan"] as? [[String: Any]])
+        #expect(trackPlan.contains { $0["role"] as? String == "bass" })
+        let validation = try #require(resource["tool_surface_validation"] as? [String: Any])
+        #expect(try #require(validation["is_valid"] as? Bool))
+        let workflowSteps = try #require(resource["workflow_steps"] as? [[String: Any]])
+        #expect(workflowSteps.allSatisfy { ($0["executed"] as? Bool) == .some(false) })
     }
 
     @Test("workflow plan URI routing fails closed on malformed inputs")

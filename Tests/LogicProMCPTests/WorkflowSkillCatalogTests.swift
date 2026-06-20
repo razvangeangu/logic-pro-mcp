@@ -359,7 +359,7 @@ struct WorkflowSkillCatalogTests {
         let sessionPlan = try! workflow("logic.workflow.composition.session_plan")
         #expect(try! stepFields(sessionPlan, "read_session_plan") == ["schema", "parsed_intent", "sections", "chord_plan", "track_plan", "workflow_steps"])
         #expect(sessionPlan.mutationKind == .readOnly)
-        #expect(sessionPlan.productionReady == true)
+        #expect(sessionPlan.productionReady)
     }
 
     @Test("dependencies resolve once the stock plugin surface exists")
@@ -501,9 +501,10 @@ struct WorkflowSkillResourceTests {
         } == true)
 
         let compositionSearch = try await workflowResourceObject("logic://workflow-skills/search?query=session")
-        #expect((compositionSearch["workflows"] as? [[String: Any]])?.contains {
+        let compositionWorkflows = try #require(compositionSearch["workflows"] as? [[String: Any]])
+        #expect(compositionWorkflows.contains {
             $0["id"] as? String == "logic.workflow.composition.session_plan"
-        } == true)
+        })
 
         let schema = try await workflowResourceObject("logic://workflow-skills/schema")
         #expect((schema["fields"] as? [String])?.contains("state_checks") == true)
