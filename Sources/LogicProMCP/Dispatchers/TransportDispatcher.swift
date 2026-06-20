@@ -12,19 +12,26 @@ struct TransportDispatcher {
         command: String,
         params: [String: Value],
         router: ChannelRouter,
-        cache: StateCache
+        cache: StateCache,
+        sleep: @escaping (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }
     ) async -> CallTool.Result {
         switch command {
         case "play":
-            let result = await router.route(operation: "transport.play")
-            return toolTextResult(result)
+            return await handleVerifiedTransportCommand(
+                action: .play,
+                router: router,
+                sleep: sleep
+            )
 
         case "stop":
             return await verifiedStopResult(router: router, cache: cache)
 
         case "record":
-            let result = await router.route(operation: "transport.record")
-            return toolTextResult(result)
+            return await handleVerifiedTransportCommand(
+                action: .record,
+                router: router,
+                sleep: sleep
+            )
 
         case "pause":
             let result = await router.route(operation: "transport.pause")
@@ -185,6 +192,22 @@ struct TransportDispatcher {
         router: ChannelRouter,
         cache: StateCache
     ) async -> CallTool.Result {
+        if let beforeState = await readTransportState(router: router),
+           beforeState.isPlaying == false,
+           beforeState.isRecording == false {
+            return toolTextResult(.success(HonestContract.encodeStateA(
+                extras: [
+                    "operation": "transport.stop",
+                    "requested_state": "stopped",
+                    "verify_source": "transport_state",
+                    "write_attempted": false,
+                    "unchanged": true,
+                    "observed_before": transportStateSummary(beforeState),
+                    "observed_after": transportStateSummary(beforeState)
+                ]
+            )))
+        }
+
         let writeResult = await router.route(operation: "transport.stop")
         guard writeResult.isSuccess else {
             return toolTextResult(writeResult)
@@ -371,5 +394,132 @@ struct TransportDispatcher {
         }
         await cache.updateTransport(transport)
         return transport
+    }
+
+    private enum VerifiedTransportAction: String {
+        case play
+        case record
+
+        var operation: String { "transport.\(rawValue)" }
+
+        func matches(_ state: TransportState) -> Bool {
+            switch self {
+            case .play:
+                return state.isPlaying
+            case .record:
+                return state.isPlaying && state.isRecording
+            }
+        }
+    }
+
+    private static func handleVerifiedTransportCommand(
+        action: VerifiedTransportAction,
+        router: ChannelRouter,
+        sleep: @escaping (UInt64) async -> Void
+    ) async -> CallTool.Result {
+        let beforeState = await readTransportState(router: router)
+        if let beforeState, action.matches(beforeState) {
+            return toolTextResult(.success(HonestContract.encodeStateA(
+                extras: [
+                    "operation": action.operation,
+                    "verify_source": "transport_state",
+                    "write_attempted": false,
+                    "unchanged": true,
+                    "observed_before": transportStateSummary(beforeState),
+                    "observed_after": transportStateSummary(beforeState)
+                ]
+            )))
+        }
+
+        let writeResult = await router.route(operation: action.operation)
+        let writePayload = jsonValue(from: writeResult.message)
+        var attempts = 0
+        var afterState: TransportState?
+        for _ in 0..<12 {
+            attempts += 1
+            if let observed = await readTransportState(router: router) {
+                afterState = observed
+                if action.matches(observed) {
+                    var extras: [String: Any] = [
+                        "operation": action.operation,
+                        "verify_source": "transport_state",
+                        "write_attempted": true,
+                        "poll_attempts": attempts,
+                        "observed_after": transportStateSummary(observed),
+                        "write_result": writePayload
+                    ]
+                    if let beforeState {
+                        extras["observed_before"] = transportStateSummary(beforeState)
+                    }
+                    if !writeResult.isSuccess {
+                        extras["write_result_error"] = writeResult.message
+                    }
+                    return toolTextResult(.success(HonestContract.encodeStateA(extras: extras)))
+                }
+            }
+            await sleep(100_000_000)
+        }
+
+        guard writeResult.isSuccess else {
+            return toolTextResult(writeResult)
+        }
+
+        var extras: [String: Any] = [
+            "operation": action.operation,
+            "verify_source": "transport_state",
+            "write_attempted": true,
+            "poll_attempts": attempts,
+            "write_result": writePayload
+        ]
+        if let beforeState {
+            extras["observed_before"] = transportStateSummary(beforeState)
+        }
+        if let afterState {
+            extras["observed_after"] = transportStateSummary(afterState)
+            return toolTextResult(.success(HonestContract.encodeStateB(
+                reason: .readbackMismatch,
+                extras: extras
+            )))
+        }
+        return toolTextResult(.success(HonestContract.encodeStateB(
+            reason: .readbackUnavailable,
+            extras: extras
+        )))
+    }
+
+    private static func readTransportState(router: ChannelRouter) async -> TransportState? {
+        let result = await router.route(operation: "transport.get_state")
+        guard result.isSuccess,
+              let dict = jsonValue(from: result.message) as? [String: Any] else {
+            return nil
+        }
+        var state = TransportState()
+        if let isPlaying = dict["isPlaying"] as? Bool { state.isPlaying = isPlaying }
+        if let isRecording = dict["isRecording"] as? Bool { state.isRecording = isRecording }
+        if let isPaused = dict["isPaused"] as? Bool { state.isPaused = isPaused }
+        if let isCycleEnabled = dict["isCycleEnabled"] as? Bool { state.isCycleEnabled = isCycleEnabled }
+        if let isMetronomeEnabled = dict["isMetronomeEnabled"] as? Bool { state.isMetronomeEnabled = isMetronomeEnabled }
+        if let tempo = dict["tempo"] as? Double { state.tempo = tempo }
+        if let position = dict["position"] as? String { state.position = position }
+        if let timePosition = dict["timePosition"] as? String { state.timePosition = timePosition }
+        if let sampleRate = dict["sampleRate"] as? Int { state.sampleRate = sampleRate }
+        return state
+    }
+
+    private static func transportStateSummary(_ state: TransportState) -> [String: Any] {
+        [
+            "isPlaying": state.isPlaying,
+            "isRecording": state.isRecording,
+            "position": state.position,
+            "tempo": state.tempo
+        ]
+    }
+
+    private static func jsonValue(from text: String) -> Any {
+        guard let data = text.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) else {
+            return text
+        }
+        return value
     }
 }

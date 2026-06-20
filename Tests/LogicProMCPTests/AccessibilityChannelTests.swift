@@ -636,7 +636,6 @@ private func makeSetInstrumentFixture() -> (
     #expect(regions[0].endBar == 2)
     #expect(regions[0].kind == "midi")
 }
-}
 
 @Test func testAccessibilityChannelAXBackedTransportDefaultsUseFakeAXTree() async throws {
     let builder = FakeAXRuntimeBuilder()

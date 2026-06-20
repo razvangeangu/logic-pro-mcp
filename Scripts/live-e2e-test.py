@@ -368,6 +368,11 @@ def safe_json(text):
     except: return None
 
 
+def tool_json(resp):
+    value = safe_json(tool_text(resp))
+    return value if isinstance(value, dict) else None
+
+
 def read_tracks_data(client):
     envelope = safe_json(resource_text(read_resource(client, "logic://tracks")))
     if not isinstance(envelope, dict):
@@ -408,6 +413,21 @@ def fresh_record_bootstrap_status(client):
         return False, f"expected 0 regions on track 0, found {len(regions)}"
     return True, "fresh bootstrap detected"
 
+
+def fresh_transport_bootstrap_status(client):
+    tracks = read_tracks_data(client)
+    if not isinstance(tracks, list):
+        return False, "tracks resource unavailable"
+    if len(tracks) != 1:
+        return False, f"expected exactly 1 track, found {len(tracks)}"
+    regions = read_track_regions(client, 0)
+    if regions is None:
+        return False, "track 0 regions resource unavailable"
+    if len(regions) != 0:
+        return False, f"expected 0 regions on track 0, found {len(regions)}"
+    return True, "fresh bootstrap detected"
+
+
 def transport_envelope(client):
     return safe_json(resource_text(read_resource(client, "logic://transport/state")))
 
@@ -425,7 +445,7 @@ def transport_state(client):
     return envelope, state
 
 
-def wait_for_transport_state(client, predicate, timeout=5.0, interval=0.2):
+def wait_for_transport_state_envelope(client, predicate, timeout=5.0, interval=0.2):
     deadline = time.time() + timeout
     last_envelope = None
     last_state = None
@@ -435,6 +455,17 @@ def wait_for_transport_state(client, predicate, timeout=5.0, interval=0.2):
             return last_envelope, last_state
         time.sleep(interval)
     return last_envelope, last_state
+
+
+def wait_for_transport_state(client, predicate, timeout=6.0, interval=0.2):
+    deadline = time.time() + timeout
+    last_state = None
+    while time.time() < deadline:
+        _, last_state = transport_state(client)
+        if isinstance(last_state, dict) and predicate(last_state):
+            return last_state
+        time.sleep(interval)
+    return last_state
 
 
 def ui_stop_logic_transport():
@@ -841,17 +872,17 @@ def main():
     mcp_stop_state = None
     if stop_live_ready:
         call_tool(client, "logic_transport", "play")
-        _, playing_state = wait_for_transport_state(client, transport_playing_verified, timeout=5.0)
+        _, playing_state = wait_for_transport_state_envelope(client, transport_playing_verified, timeout=5.0)
         if isinstance(playing_state, dict) and ui_stop_logic_transport():
-            ui_stop_envelope, ui_stop_state = wait_for_transport_state(
+            ui_stop_envelope, ui_stop_state = wait_for_transport_state_envelope(
                 client, transport_stopped_verified, timeout=5.0
             )
 
         call_tool(client, "logic_transport", "play")
-        _, replay_state = wait_for_transport_state(client, transport_playing_verified, timeout=5.0)
+        _, replay_state = wait_for_transport_state_envelope(client, transport_playing_verified, timeout=5.0)
         if isinstance(replay_state, dict):
             mcp_stop_response = call_tool(client, "logic_transport", "stop")
-            mcp_stop_envelope, mcp_stop_state = wait_for_transport_state(
+            mcp_stop_envelope, mcp_stop_state = wait_for_transport_state_envelope(
                 client, transport_stopped_verified, timeout=5.0
             )
         call_tool(client, "logic_transport", "stop")
@@ -903,8 +934,218 @@ def main():
     T_LIVE("transport.toggle_metronome returns non-error", r, lambda _: not is_error(r), live_logic_ready, "Logic Pro + Accessibility are required")
     call_tool(client, "logic_transport", "toggle_metronome")  # restore
 
+    fresh_transport_live_ready = False
+    fresh_transport_reason = "fresh Logic bootstrap with 1 track and 0 regions is required"
+    if live_logic_ready and has_document:
+        call_tool(client, "logic_system", "refresh_cache", timeout=3)
+        fresh_transport_live_ready, fresh_transport_reason = fresh_transport_bootstrap_status(client)
+        if not fresh_transport_live_ready:
+            fresh_transport_reason = f"fresh bootstrap not detected: {fresh_transport_reason}"
+
+    select_for_record = {"gate": fresh_transport_reason}
+    arm_for_record = {"gate": fresh_transport_reason}
+    arm_track = None
+    stop_unchanged = {"gate": fresh_transport_reason}
+    stop_unchanged_env = None
+    stop_unchanged_state = None
+    record_resp = {"gate": fresh_transport_reason}
+    record_env = None
+    record_state = None
+    stop_after_record = {"gate": fresh_transport_reason}
+    stop_after_record_env = None
+    stop_after_record_state = None
+    stop_after_record_unchanged = {"gate": fresh_transport_reason}
+    stop_after_record_unchanged_env = None
+    stop_after_record_unchanged_state = None
+    play_resp = {"gate": fresh_transport_reason}
+    play_env = None
+    play_state = None
+    play_unchanged = {"gate": fresh_transport_reason}
+    play_unchanged_env = None
+    play_unchanged_state = None
+    final_stop = {"gate": fresh_transport_reason}
+    final_stop_env = None
+    final_stop_state = None
+    disarm_after_transport = {"gate": fresh_transport_reason}
+    disarm_track = None
+
+    if fresh_transport_live_ready:
+        select_for_record = call_tool(client, "logic_tracks", "select", {"index": 0})
+        arm_for_record = call_tool(client, "logic_tracks", "arm", {"index": 0, "enabled": True})
+        arm_track = wait_for_track_arm(client, 0, True)
+
+        stop_unchanged = call_tool(client, "logic_transport", "stop")
+        stop_unchanged_env = tool_json(stop_unchanged)
+        stop_unchanged_state = wait_for_transport_state(
+            client,
+            lambda state: state.get("isPlaying") is False and state.get("isRecording") is False,
+        )
+
+        record_resp = call_tool(client, "logic_transport", "record")
+        record_env = tool_json(record_resp)
+        record_state = wait_for_transport_state(
+            client,
+            lambda state: state.get("isPlaying") is True and state.get("isRecording") is True,
+            timeout=8.0,
+        )
+
+        stop_after_record = call_tool(client, "logic_transport", "stop")
+        stop_after_record_env = tool_json(stop_after_record)
+        stop_after_record_state = wait_for_transport_state(
+            client,
+            lambda state: state.get("isPlaying") is False and state.get("isRecording") is False,
+        )
+
+        stop_after_record_unchanged = call_tool(client, "logic_transport", "stop")
+        stop_after_record_unchanged_env = tool_json(stop_after_record_unchanged)
+        stop_after_record_unchanged_state = wait_for_transport_state(
+            client,
+            lambda state: state.get("isPlaying") is False and state.get("isRecording") is False,
+        )
+
+        play_resp = call_tool(client, "logic_transport", "play")
+        play_env = tool_json(play_resp)
+        play_state = wait_for_transport_state(
+            client,
+            lambda state: state.get("isPlaying") is True and state.get("isRecording") is False,
+        )
+
+        play_unchanged = call_tool(client, "logic_transport", "play")
+        play_unchanged_env = tool_json(play_unchanged)
+        play_unchanged_state = wait_for_transport_state(
+            client,
+            lambda state: state.get("isPlaying") is True and state.get("isRecording") is False,
+        )
+
+        final_stop = call_tool(client, "logic_transport", "stop")
+        final_stop_env = tool_json(final_stop)
+        final_stop_state = wait_for_transport_state(
+            client,
+            lambda state: state.get("isPlaying") is False and state.get("isRecording") is False,
+        )
+
+        disarm_after_transport = call_tool(client, "logic_tracks", "arm", {"index": 0, "enabled": False})
+        disarm_track = wait_for_track_arm(client, 0, False)
+
+    T_LIVE(
+        "fresh transport bootstrap detected",
+        {"result": {"bootstrap": fresh_transport_reason}},
+        lambda _: fresh_transport_live_ready,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport record prep selects track 0",
+        select_for_record,
+        lambda _: not is_error(select_for_record),
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport record prep arms track 0",
+        arm_for_record,
+        lambda _: not is_error(arm_for_record) and isinstance(arm_track, dict) and arm_track.get("isArmed") is True,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport.stop returns verified unchanged when already stopped",
+        stop_unchanged,
+        lambda _: isinstance(stop_unchanged_env, dict)
+        and stop_unchanged_env.get("verified") is True
+        and stop_unchanged_env.get("unchanged") is True
+        and stop_unchanged_env.get("operation") == "transport.stop"
+        and isinstance(stop_unchanged_state, dict)
+        and stop_unchanged_state.get("isPlaying") is False
+        and stop_unchanged_state.get("isRecording") is False,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport.record reaches verified recording state",
+        record_resp,
+        lambda _: isinstance(record_env, dict)
+        and record_env.get("verified") is True
+        and record_env.get("operation") == "transport.record"
+        and isinstance(record_state, dict)
+        and record_state.get("isPlaying") is True
+        and record_state.get("isRecording") is True,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport.stop reaches verified stopped state after record",
+        stop_after_record,
+        lambda _: isinstance(stop_after_record_env, dict)
+        and stop_after_record_env.get("verified") is True
+        and stop_after_record_env.get("operation") == "transport.stop"
+        and isinstance(stop_after_record_state, dict)
+        and stop_after_record_state.get("isPlaying") is False
+        and stop_after_record_state.get("isRecording") is False,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport.stop stays verified unchanged after record stop",
+        stop_after_record_unchanged,
+        lambda _: isinstance(stop_after_record_unchanged_env, dict)
+        and stop_after_record_unchanged_env.get("verified") is True
+        and stop_after_record_unchanged_env.get("unchanged") is True
+        and stop_after_record_unchanged_env.get("operation") == "transport.stop"
+        and isinstance(stop_after_record_unchanged_state, dict)
+        and stop_after_record_unchanged_state.get("isPlaying") is False
+        and stop_after_record_unchanged_state.get("isRecording") is False,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport.play reaches verified playback state",
+        play_resp,
+        lambda _: isinstance(play_env, dict)
+        and play_env.get("verified") is True
+        and play_env.get("operation") == "transport.play"
+        and isinstance(play_state, dict)
+        and play_state.get("isPlaying") is True
+        and play_state.get("isRecording") is False,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport.play stays verified unchanged while already playing",
+        play_unchanged,
+        lambda _: isinstance(play_unchanged_env, dict)
+        and play_unchanged_env.get("verified") is True
+        and play_unchanged_env.get("unchanged") is True
+        and play_unchanged_env.get("operation") == "transport.play"
+        and isinstance(play_unchanged_state, dict)
+        and play_unchanged_state.get("isPlaying") is True
+        and play_unchanged_state.get("isRecording") is False,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport.stop reaches verified stopped state after play",
+        final_stop,
+        lambda _: isinstance(final_stop_env, dict)
+        and final_stop_env.get("verified") is True
+        and final_stop_env.get("operation") == "transport.stop"
+        and isinstance(final_stop_state, dict)
+        and final_stop_state.get("isPlaying") is False
+        and final_stop_state.get("isRecording") is False,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+    T_LIVE(
+        "transport record prep disarms track 0 after transport checks",
+        disarm_after_transport,
+        lambda _: not is_error(disarm_after_transport) and isinstance(disarm_track, dict) and disarm_track.get("isArmed") is False,
+        fresh_transport_live_ready,
+        fresh_transport_reason,
+    )
+
     r = call_tool(client, "logic_transport", "toggle_count_in")
     T("transport.toggle_count_in dispatches", r, lambda _: len(tool_text(r)) > 0)
+    call_tool(client, "logic_transport", "toggle_count_in")  # restore
 
     fresh_tracks = safe_get_tracks(client)
     if live_logic_ready and has_document and isinstance(fresh_tracks, list) and len(fresh_tracks) == 0:

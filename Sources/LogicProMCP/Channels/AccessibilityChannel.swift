@@ -637,10 +637,14 @@ actor AccessibilityChannel: Channel {
         }
         // Legacy fallback: search by role=Button with title/description.
         guard let button = AXLogicProElements.findTransportButton(named: name, runtime: runtime) else {
+            var extras = transportLookupDiagnostics(named: name, runtime: runtime)
+            extras["button"] = name
+            extras["recovery_hint"] =
+                "Bring Logic's main arrange window frontmost and dismiss any plugin, chooser, or modal window covering the transport controls."
             return .error(HonestContract.encodeStateC(
                 error: .elementNotFound,
-                hint: "transport button '\(name)' not located in control bar",
-                extras: ["button": name]
+                hint: "transport button '\(name)' not located in the visible Logic transport UI",
+                extras: extras
             ))
         }
         guard AXHelpers.performAction(button, kAXPressAction, runtime: runtime.ax) else {
@@ -654,6 +658,57 @@ actor AccessibilityChannel: Channel {
             reason: .readbackUnavailable,
             extras: ["button": name, "via": "legacy-axpress"]
         ))
+    }
+
+    private static func transportLookupDiagnostics(
+        named name: String,
+        runtime: AXLogicProElements.Runtime
+    ) -> [String: Any] {
+        let mainWindow = AXLogicProElements.mainWindow(runtime: runtime)
+        let windowTitle = mainWindow.flatMap { AXHelpers.getTitle($0, runtime: runtime.ax) } ?? ""
+        let controlBar = AXLogicProElements.getControlBar(runtime: runtime)
+        let transportBar = AXLogicProElements.getTransportBar(runtime: runtime)
+        return [
+            "requested_button": name,
+            "window_title": windowTitle,
+            "control_bar_present": controlBar != nil,
+            "transport_bar_present": transportBar != nil,
+            "control_bar_checkboxes": controlBar.map {
+                transportLandmarkLabels(root: $0, role: kAXCheckBoxRole, runtime: runtime)
+            } ?? [],
+            "transport_buttons": transportBar.map {
+                transportLandmarkLabels(root: $0, role: kAXButtonRole, runtime: runtime)
+            } ?? []
+        ]
+    }
+
+    private static func transportLandmarkLabels(
+        root: AXUIElement,
+        role: String,
+        runtime: AXLogicProElements.Runtime
+    ) -> [String] {
+        let elements = AXHelpers.findAllDescendants(
+            of: root,
+            role: role,
+            maxDepth: 4,
+            runtime: runtime.ax
+        )
+        var seen = Set<String>()
+        var labels: [String] = []
+        for element in elements {
+            let candidates = [
+                AXHelpers.getTitle(element, runtime: runtime.ax),
+                AXHelpers.getDescription(element, runtime: runtime.ax),
+                AXHelpers.getIdentifier(element, runtime: runtime.ax)
+            ]
+            for candidate in candidates.compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) }) {
+                guard !candidate.isEmpty, seen.insert(candidate).inserted else { continue }
+                labels.append(candidate)
+                break
+            }
+            if labels.count >= 12 { break }
+        }
+        return labels
     }
 
     private static func defaultSetTempo(
