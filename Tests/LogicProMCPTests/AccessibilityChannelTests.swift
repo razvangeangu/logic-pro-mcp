@@ -550,17 +550,20 @@ private func makeAXBackedAccessibilityChannel(
 
     let cycleMissing = await channel.execute(operation: "transport.set_cycle_range", params: [:])
     #expect(!cycleMissing.isSuccess)
-    #expect(cycleMissing.message.contains("Missing 'start'"))
+    #expect(cycleMissing.message.contains("\"error\":\"invalid_params\""))
 
     let cycleUnsupported = await channel.execute(
         operation: "transport.set_cycle_range",
         params: ["start": "1.1.1.1", "end": "9.1.1.1"]
     )
     // With the fake AX tree (no transport bar cycle fields) and osascript
-    // fallback unavailable in unit tests, the handler now returns a descriptive
-    // "locator fields not found" error rather than "not yet implemented".
+    // fallback unavailable in unit tests, the handler must fail closed with a
+    // specific structured envelope rather than a free-form string.
     #expect(!cycleUnsupported.isSuccess)
-    #expect(cycleUnsupported.message.contains("Cycle range") || cycleUnsupported.message.contains("locator"))
+    #expect(cycleUnsupported.message.contains("\"error\":\"not_implemented\""))
+    #expect(cycleUnsupported.message.contains("\"requested\""))
+    #expect(cycleUnsupported.message.contains("\"observed\""))
+    #expect(cycleUnsupported.message.contains("\"scanned_landmarks\""))
 }
 
 @Test func testAccessibilityChannelTransportStatePrefersLiveControlBarOverStaleTransportGroup() async throws {

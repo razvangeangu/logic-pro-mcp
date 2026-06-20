@@ -133,8 +133,9 @@ private func decodeJSON(_ s: String) -> [String: Any] {
 // MARK: - T5 set_cycle_range
 //
 // AX-path read-back is exercised through `defaultSetCycleRange`. When the
-// transport bar isn't wired we hit the fallback; when read-back fields are
-// absent we return State B `readback_unavailable`.
+// transport bar doesn't expose numeric locator fields we must fail closed with
+// a structured State C payload instead of letting the router wrap a free-form
+// string in `channels_exhausted`.
 
 @Test func testSetCycleRangeReturnsErrorWhenNoTransportFields() {
     let builder = FakeAXRuntimeBuilder()
@@ -149,10 +150,19 @@ private func decodeJSON(_ s: String) -> [String: Any] {
         runtime: runtime,
         runFallback: { _, _ in false }
     )
-    #expect(!res.isSuccess, "No transport bar + no fallback → hard error")
+    #expect(!res.isSuccess, "No transport bar + no fallback → structured State C")
+    let obj = decodeJSON(res.message)
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "not_implemented")
+    #expect(obj["operation"] as? String == "transport.set_cycle_range")
+    #expect(obj["method"] as? String == "ax_cycle_locator_text_fields")
+    #expect(obj["requested"] as? [String: Any] != nil)
+    #expect(obj["observed"] as? [String: Any] != nil)
+    #expect(obj["scanned_landmarks"] as? [String: Any] != nil)
+    #expect(obj["safe_to_retry"] as? Bool == false)
 }
 
-@Test func testSetCycleRangeOsascriptFallbackReturnsStateB() {
+@Test func testSetCycleRangeOsascriptFallbackFailsClosedWithoutReadback() {
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(750)
     let window = builder.element(751)
@@ -165,12 +175,13 @@ private func decodeJSON(_ s: String) -> [String: Any] {
         runtime: runtime,
         runFallback: { _, _ in true }
     )
-    #expect(res.isSuccess)
+    #expect(!res.isSuccess)
     let obj = decodeJSON(res.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
-    #expect(obj["reason"] as? String == "readback_unavailable")
-    #expect(obj["via"] as? String == "osascript")
+    #expect(obj["success"] as? Bool == false)
+    #expect(obj["error"] as? String == "readback_unavailable")
+    #expect(obj["method"] as? String == "osascript_set_locators_dialog")
+    #expect(obj["write_attempted"] as? Bool == true)
+    #expect(obj["observed"] as? [String: Any] != nil)
 }
 
 // MARK: - T-3 (v3.1.1): track.rename — HC envelope

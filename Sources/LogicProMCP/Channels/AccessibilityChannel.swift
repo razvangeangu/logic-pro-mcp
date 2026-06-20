@@ -796,11 +796,16 @@ actor AccessibilityChannel: Channel {
         runFallback: @escaping @Sendable (String, String) -> Bool = runCycleRangeFallbackScript
     ) -> ChannelResult {
         guard let startStr = params["start"], let endStr = params["end"] else {
-            return .error("Missing 'start' and/or 'end' parameters")
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "set_cycle_range requires explicit 'start' and 'end'",
+                extras: ["operation": "transport.set_cycle_range"]
+            ))
         }
         // Normalise input: accept plain bar int ("5") or full bar/beat string ("5.1.1.1").
         let startPos = startStr.contains(".") ? startStr : "\(startStr).1.1.1"
         let endPos = endStr.contains(".") ? endStr : "\(endStr).1.1.1"
+        let requested = cycleRangeRequested(start: startPos, end: endPos)
 
         // AX path: locate cycle locator text fields in the transport bar.
         // Logic Pro exposes two text fields whose descriptions contain
@@ -841,10 +846,12 @@ actor AccessibilityChannel: Channel {
                 // matches the osascript fallback: both paths emit
                 // `{start, end, via, verified, requested, observed}`.
                 let extras: [String: Any] = [
+                    "operation": "transport.set_cycle_range",
                     "start": startPos,
                     "end": endPos,
                     "via": "ax",
-                    "requested": ["start": startPos, "end": endPos]
+                    "method": "ax_cycle_locator_text_fields",
+                    "requested": requested
                 ]
                 if !sSet || !eSet {
                     // v3.1.0 (Ralph-2 / M-1) — State C must route through
@@ -881,35 +888,152 @@ actor AccessibilityChannel: Channel {
                     reason: .readbackMismatch, extras: merged
                 ))
             }
-        }
 
-        // Fallback: osascript using Logic's "Go To Position" dialog combined with
-        // "Set Cycle Locators by Selection" isn't reliable without a region.
-        // Use direct keystroke into the transport cycle display fields via
-        // `click at` on the transport strip. Success is reported as unverified
-        // because Logic's cycle locator state isn't readable via the cached
-        // transport snapshot (cycle bar positions aren't in the state schema).
-        if runFallback(startPos, endPos) {
-            // v3.1.0 (T5) — osascript path stays unverified (no read-back).
-            // Re-encode via HonestContract so the envelope matches the AX
-            // path: `verified:false + reason:"readback_unavailable"`.
-            return .success(HonestContract.encodeStateB(
-                reason: .readbackUnavailable,
+            let transportLandmarks = cycleRangeLandmarks(
+                runtime: runtime,
+                transport: transport,
+                textFields: texts
+            )
+            if runFallback(startPos, endPos) {
+                return .error(HonestContract.encodeStateC(
+                    error: .readbackUnavailable,
+                    hint: "set_cycle_range could drive Logic's 'Set Locators' dialog fallback, but this build exposes no deterministic numeric locator readback; refusing to claim success without observed start/end locators",
+                    extras: [
+                        "operation": "transport.set_cycle_range",
+                        "method": "osascript_set_locators_dialog",
+                        "attempted_methods": ["ax_cycle_locator_text_fields", "osascript_set_locators_dialog"],
+                        "requested": requested,
+                        "observed": cycleRangeObserved(start: nil, end: nil),
+                        "write_attempted": true,
+                        "safe_to_retry": false,
+                        "what_was_attempted": "locate numeric cycle locator AX text fields, then drive Logic's 'Set Locators' dialog as a fallback",
+                        "what_was_observed": "Logic exposes no cycle start/end AX text fields in the transport bar, so the fallback write could not be independently read back",
+                        "scanned_landmarks": transportLandmarks,
+                        "recovery_hint": "Set the cycle range manually in Logic or select a region and use Logic's 'Set Locators by Selection' command before bounce/export."
+                    ]
+                ))
+            }
+
+            return .error(HonestContract.encodeStateC(
+                error: .notImplemented,
+                hint: "set_cycle_range could not find numeric cycle locator fields and could not complete the 'Set Locators' dialog fallback. This Logic build/session does not expose a verifiable numeric cycle locator automation path.",
                 extras: [
-                    "start": startPos,
-                    "end": endPos,
-                    "via": "osascript",
-                    "requested": ["start": startPos, "end": endPos],
-                    "observed": NSNull()
+                    "operation": "transport.set_cycle_range",
+                    "method": "ax_cycle_locator_text_fields",
+                    "attempted_methods": ["ax_cycle_locator_text_fields", "osascript_set_locators_dialog"],
+                    "requested": requested,
+                    "observed": cycleRangeObserved(start: nil, end: nil),
+                    "write_attempted": false,
+                    "safe_to_retry": false,
+                    "what_was_attempted": "locate numeric cycle locator AX text fields, then open Logic's 'Set Locators' dialog as a fallback",
+                    "what_was_observed": "Logic exposes no cycle start/end AX text fields in the transport bar and the fallback dialog could not be completed",
+                    "scanned_landmarks": transportLandmarks,
+                    "recovery_hint": "Set the cycle range manually in Logic or select a region and use Logic's 'Set Locators by Selection' command before bounce/export."
                 ]
             ))
         }
-        return .error(
-            "set_cycle_range: Logic's cycle locators aren't exposed as AX text fields in this build (tried ko/en locales). " +
-            "Workarounds: (1) select the region covering the desired cycle and use Navigate > '선택 범위로 로케이터 설정 및 사이클 활성화'. " +
-            "(2) Drag the upper ruler to set locators manually. " +
-            "The MCP server cannot currently set numeric cycle locators programmatically."
+
+        let missingTransportLandmarks = cycleRangeLandmarks(runtime: runtime)
+        if runFallback(startPos, endPos) {
+            // Fail closed when the fallback may have written but we still have
+            // no observed numeric locator readback surface.
+            return .error(HonestContract.encodeStateC(
+                error: .readbackUnavailable,
+                hint: "set_cycle_range could drive Logic's 'Set Locators' dialog fallback, but no transport bar was locatable for independent numeric locator readback",
+                extras: [
+                    "operation": "transport.set_cycle_range",
+                    "method": "osascript_set_locators_dialog",
+                    "attempted_methods": ["ax_cycle_locator_text_fields", "osascript_set_locators_dialog"],
+                    "requested": requested,
+                    "observed": cycleRangeObserved(start: nil, end: nil),
+                    "write_attempted": true,
+                    "safe_to_retry": false,
+                    "what_was_attempted": "find the transport bar, then drive Logic's 'Set Locators' dialog as a fallback",
+                    "what_was_observed": "no transport bar was locatable for AX readback, so the fallback write could not be independently verified",
+                    "scanned_landmarks": missingTransportLandmarks,
+                    "recovery_hint": "Bring the arrange window to the front and set the cycle range manually before bounce/export."
+                ]
+            ))
+        }
+        return .error(HonestContract.encodeStateC(
+            error: .notImplemented,
+            hint: "set_cycle_range could not locate Logic's transport bar or a verifiable numeric cycle locator surface. The MCP server cannot currently set numeric cycle locators programmatically in this UI state.",
+            extras: [
+                "operation": "transport.set_cycle_range",
+                "method": "ax_cycle_locator_text_fields",
+                "attempted_methods": ["ax_cycle_locator_text_fields", "osascript_set_locators_dialog"],
+                "requested": requested,
+                "observed": cycleRangeObserved(start: nil, end: nil),
+                "write_attempted": false,
+                "safe_to_retry": false,
+                "what_was_attempted": "find Logic's transport bar and numeric cycle locator fields",
+                "what_was_observed": "no transport bar was locatable and the fallback dialog path could not be completed",
+                "scanned_landmarks": missingTransportLandmarks,
+                "recovery_hint": "Bring the arrange window to the front and set the cycle range manually before bounce/export."
+            ]
+        ))
+    }
+
+    private static func cycleRangeRequested(start: String, end: String) -> [String: Any] {
+        ["start": start, "end": end]
+    }
+
+    private static func cycleRangeObserved(start: String?, end: String?) -> [String: Any] {
+        ["start": start ?? NSNull(), "end": end ?? NSNull()]
+    }
+
+    private static func cycleRangeLandmarks(
+        runtime: AXLogicProElements.Runtime,
+        transport: AXUIElement? = nil,
+        textFields: [AXUIElement]? = nil
+    ) -> [String: Any] {
+        let window = AXLogicProElements.mainWindow(runtime: runtime)
+        let resolvedTransport = transport ?? AXLogicProElements.getTransportBar(runtime: runtime)
+        let resolvedTextFields: [AXUIElement]
+        if let textFields {
+            resolvedTextFields = textFields
+        } else if let resolvedTransport {
+            resolvedTextFields = AXHelpers.findAllDescendants(
+                of: resolvedTransport,
+                role: kAXTextFieldRole,
+                maxDepth: 6,
+                runtime: runtime.ax
+            )
+        } else {
+            resolvedTextFields = []
+        }
+
+        let textFieldSnapshots: [[String: Any]] = Array(resolvedTextFields.prefix(6)).map { field in
+            let value: String? = AXHelpers.getAttribute(field, kAXValueAttribute, runtime: runtime.ax)
+            return [
+                "role": AXHelpers.getRole(field, runtime: runtime.ax) ?? NSNull(),
+                "title": AXHelpers.getTitle(field, runtime: runtime.ax) ?? NSNull(),
+                "description": AXHelpers.getDescription(field, runtime: runtime.ax) ?? NSNull(),
+                "identifier": AXHelpers.getIdentifier(field, runtime: runtime.ax) ?? NSNull(),
+                "value": value ?? NSNull(),
+            ]
+        }
+
+        let cycleCheckbox = AXLogicProElements.findControlBarCheckbox(
+            named: "사이클",
+            englishName: "Cycle",
+            runtime: runtime
         )
+
+        return [
+            "main_window_found": window != nil,
+            "main_window_title": window.flatMap { AXHelpers.getTitle($0, runtime: runtime.ax) } ?? NSNull(),
+            "transport_bar_found": resolvedTransport != nil,
+            "transport_role": resolvedTransport.flatMap { AXHelpers.getRole($0, runtime: runtime.ax) } ?? NSNull(),
+            "transport_title": resolvedTransport.flatMap { AXHelpers.getTitle($0, runtime: runtime.ax) } ?? NSNull(),
+            "transport_description": resolvedTransport.flatMap { AXHelpers.getDescription($0, runtime: runtime.ax) } ?? NSNull(),
+            "transport_identifier": resolvedTransport.flatMap { AXHelpers.getIdentifier($0, runtime: runtime.ax) } ?? NSNull(),
+            "transport_child_count": resolvedTransport.flatMap { AXHelpers.getChildCount($0, runtime: runtime.ax) } ?? NSNull(),
+            "transport_text_field_count": resolvedTextFields.count,
+            "transport_text_fields": textFieldSnapshots,
+            "cycle_checkbox_found": cycleCheckbox != nil,
+            "cycle_checkbox_value": cycleCheckbox.flatMap { AXHelpers.getValue($0, runtime: runtime.ax) } ?? NSNull(),
+        ]
     }
 
     private static func runCycleRangeFallbackScript(startPos: String, endPos: String) -> Bool {
