@@ -182,7 +182,7 @@ import MCP
         router: ChannelRouter(),
         cache: cache
     )
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let text = sharedToolText(result)
     // Hint must mention channel range so the LLM agent can self-correct.
     #expect(

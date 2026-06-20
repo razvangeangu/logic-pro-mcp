@@ -140,7 +140,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(try #require(json["success"] as? Bool) == false)
     // Fail-closed: NO rename was attempted.
@@ -164,7 +164,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(try #require(json["success"] as? Bool) == false)
     let calls = await channel.calls()
@@ -188,7 +188,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(try #require(json["success"] as? Bool) == false)
     #expect(json["error"] as? String == "element_not_found")
@@ -238,7 +238,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(try #require(json["success"] as? Bool) == false)
     // A non-mutating step is caught by the mutates_project gate first.
@@ -308,7 +308,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(try #require(json["success"] as? Bool) == false)
     let calls = await channel.calls()
@@ -342,7 +342,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(try #require(json["success"] as? Bool) == false)
     #expect(json["error"] as? String == "stale_snapshot")
@@ -372,7 +372,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(try #require(json["success"] as? Bool) == false)
     // Some rename(s) were attempted; the failure surfaces the failed track.
@@ -398,7 +398,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
         cache: cache
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(try #require(json["success"] as? Bool) == false)
     #expect(json["error"] as? String == "invalid_params")

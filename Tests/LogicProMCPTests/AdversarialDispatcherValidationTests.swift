@@ -74,7 +74,7 @@ private func expectInvalidParamsWithoutRoute(
     let (result, channels) = await runAdversarialDispatcherCase(testCase)
     let text = sharedToolText(result)
     #expect(
-        result.isError == true,
+        result.isError!,
         "\(testCase.label) must reject malformed input before routing; got text=\(text)"
     )
     #expect(

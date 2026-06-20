@@ -94,7 +94,7 @@ struct MIDIDispatcherSendCCPortTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let text = sharedToolText(result)
         #expect(text.contains("invalid_params"), "expected invalid_params, got: \(text)")
         // Hint must list the supported port values so the LLM agent can self-correct.
@@ -124,7 +124,7 @@ struct MIDIDispatcherSendCCPortTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let text = sharedToolText(result)
         #expect(text.contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
@@ -166,7 +166,7 @@ struct MIDIDispatcherSendCCPortTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let text = sharedToolText(result)
         #expect(text.contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
@@ -187,7 +187,7 @@ struct MIDIDispatcherSendCCPortTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let text = sharedToolText(result)
         #expect(text.contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)

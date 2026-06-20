@@ -163,7 +163,7 @@ struct MIDIDispatcherEntryPointConsistencyTests {
                     cache: StateCache()
                 )
 
-                #expect(result.isError == true, "\(command) ch=17 should reject")
+                #expect(result.isError!, "\(command) ch=17 should reject")
                 #expect(sharedToolText(result).contains("invalid_params"))
                 #expect(await coreMidi.executedOps.isEmpty)
             }

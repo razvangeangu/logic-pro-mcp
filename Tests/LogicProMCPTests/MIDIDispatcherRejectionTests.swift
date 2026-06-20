@@ -40,7 +40,7 @@ struct MIDIDispatcherRejectionTests {
             cache: cache
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let text = sharedToolText(result)
         #expect(text.contains("invalid_params"), "expected invalid_params, got: \(text)")
         #expect(text.contains("record_sequence"),
@@ -65,7 +65,7 @@ struct MIDIDispatcherRejectionTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let text = sharedToolText(result)
         #expect(text.contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
@@ -97,8 +97,8 @@ struct MIDIDispatcherRejectionTests {
             cache: StateCache()
         )
 
-        #expect(barResult.isError == true)
-        #expect(timeResult.isError == true)
+        #expect(barResult.isError!)
+        #expect(timeResult.isError!)
         #expect(sharedToolText(barResult).contains("invalid_params"))
         #expect(sharedToolText(timeResult).contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
@@ -121,7 +121,7 @@ struct MIDIDispatcherRejectionTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         #expect(sharedToolText(result).contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
     }
@@ -144,7 +144,7 @@ struct MIDIDispatcherRejectionTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         #expect(sharedToolText(result).contains("invalid_params"))
         #expect(await ax.executedOps.isEmpty)
     }
@@ -164,7 +164,7 @@ struct MIDIDispatcherRejectionTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         #expect(sharedToolText(result).contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
     }
@@ -184,7 +184,7 @@ struct MIDIDispatcherRejectionTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         #expect(sharedToolText(result).contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
     }
@@ -204,7 +204,7 @@ struct MIDIDispatcherRejectionTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         #expect(sharedToolText(result).contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
     }
@@ -222,7 +222,7 @@ struct MIDIDispatcherRejectionTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true)
+        #expect(result.isError!)
         #expect(sharedToolText(result).contains("invalid_params"))
         #expect(await coreMidi.executedOps.isEmpty)
     }
@@ -256,7 +256,7 @@ struct MIDIDispatcherRejectionTests {
                 cache: StateCache()
             )
 
-            #expect(result.isError == true, "\(command) should reject missing payload")
+            #expect(result.isError!, "\(command) should reject missing payload")
             #expect(sharedToolText(result).contains("invalid_params"))
             #expect(await coreMidi.executedOps.isEmpty)
             #expect(await mcu.executedOps.isEmpty)

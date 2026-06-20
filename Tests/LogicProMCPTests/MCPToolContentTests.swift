@@ -16,7 +16,7 @@ import Testing
 @Test func testToolTextResultUsesExplicitErrorFlag() {
     let result = toolTextResult("boom", isError: true)
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(result.content.count == 1)
     if case .text(let text, _, _) = result.content[0] {
         #expect(text == "boom")
@@ -29,8 +29,8 @@ import Testing
     let success = toolTextResult(ChannelResult.success("ok"))
     let failure = toolTextResult(ChannelResult.error("failed"))
 
-    #expect(success.isError == false)
-    #expect(failure.isError == true)
+    #expect(!(success.isError!))
+    #expect(failure.isError!)
 
     if case .text(let text, _, _) = success.content[0] {
         #expect(text == "ok")

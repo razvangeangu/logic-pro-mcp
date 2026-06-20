@@ -83,7 +83,7 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 | Transport | Play, stop, record, locate, cycle, metronome, tempo | CoreMIDI/AX routing with live `logic://transport/state` readback |
 | Tracks | Create, delete, duplicate, select, rename, mute, solo, arm, set instruments | Mutating targets require explicit index/name; uncertain selection fails closed before writes |
 | MIDI composition | Generate SMF server-side, import MIDI, send notes/CC/MMC, create virtual ports | `.mid` imports are constrained to `/tmp/LogicProMCP/` and must create a live track |
-| Mixer | Volume, pan, plugin snapshots, guarded stock plugin insertion | MCU writes plus AX readback/provenance; occupied plugin slots refuse replacement |
+| Mixer | Volume, pan, plugin snapshots, guarded stock plugin insertion | AX writes with same-surface readback for volume/pan (since #83); MCU writes for master/send; occupied plugin slots refuse replacement |
 | Library | Scan Logic's instrument library and load patches by path | Disk/AX inventory is cached and path-allowlisted |
 | Navigation | Bars, markers, zoom, view toggles | Marker navigation is target-faithful; cold-cache misses return failure instead of "next marker" |
 | Project lifecycle | New, open, save, save-as, close, bounce, export plan, quit | Destructive operations require confirmation; dry-run export plans do not open Logic or write artifacts |

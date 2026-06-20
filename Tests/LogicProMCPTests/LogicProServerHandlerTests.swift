@@ -94,7 +94,7 @@ private let serverResourceText = sharedResourceText
     let unknown = await handlers.callTool(
         CallTool.Parameters(name: "logic_unknown", arguments: ["command": Value.string("noop")])
     )
-    #expect(unknown.isError == true)
+    #expect(unknown.isError!)
     #expect(serverToolText(unknown).contains("Unknown tool"))
 }
 

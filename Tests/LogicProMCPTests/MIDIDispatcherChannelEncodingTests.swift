@@ -31,7 +31,7 @@ struct MIDIDispatcherChannelEncodingTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true,
+        #expect(result.isError!,
                 "pitch_bend ch=17 must reject — pre-T5 silently emitted wire byte 17")
         let text = sharedToolText(result)
         #expect(text.contains("invalid_params"))
@@ -53,7 +53,7 @@ struct MIDIDispatcherChannelEncodingTests {
             cache: StateCache()
         )
 
-        #expect(result.isError == true,
+        #expect(result.isError!,
                 "aftertouch ch=0 must reject — channel is 1-based")
         let text = sharedToolText(result)
         #expect(text.contains("invalid_params"))
