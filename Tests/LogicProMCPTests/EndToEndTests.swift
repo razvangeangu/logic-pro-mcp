@@ -792,9 +792,13 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     let searchJSON = e2eJSON(e2eResourceText(search))
     let sessionJSON = e2eJSON(e2eResourceText(sessions))
     #expect(instrumentsJSON?["catalog_kind"] as? String == "stock_instruments")
-    #expect((instrumentsJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool == true)
-    #expect(((detailJSON?["entry"] as? [String: Any])?["provenance"] as? [[String: Any]])?.isEmpty == false)
-    #expect((searchJSON?["entries"] as? [[String: Any]])?.contains { $0["id"] as? String == "logic.stock.instrument.sampler" } == true)
+    let validation = try #require(instrumentsJSON?["validation"] as? [String: Any])
+    #expect(try #require(validation["is_valid"] as? Bool))
+    let detailEntry = try #require(detailJSON?["entry"] as? [String: Any])
+    let provenance = try #require(detailEntry["provenance"] as? [[String: Any]])
+    #expect(!provenance.isEmpty)
+    let searchEntries = try #require(searchJSON?["entries"] as? [[String: Any]])
+    #expect(searchEntries.contains { $0["id"] as? String == "logic.stock.instrument.sampler" })
     #expect((sessionJSON?["entry"] as? [String: Any])?["kind"] as? String == "drummer")
 }
 
