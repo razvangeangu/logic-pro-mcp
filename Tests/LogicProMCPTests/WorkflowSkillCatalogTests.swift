@@ -322,6 +322,12 @@ struct WorkflowSkillCatalogTests {
         let readiness = snapshot.workflows.first { $0.id == "logic.workflow.readiness.project" }
         #expect(readiness?.dependenciesResolved == true)
         #expect(readiness?.unresolvedResources == nil)
+
+        let exportPlan = snapshot.workflows.first { $0.id == "logic.workflow.export.batch_plan" }
+        #expect(exportPlan?.mutationKind == .readOnly)
+        #expect(exportPlan?.productionReady == true)
+        #expect(exportPlan?.evidenceLevel == .deterministic)
+        #expect(exportPlan?.steps.contains { $0.tool == "logic_project" && $0.command == "export_plan" } == true)
     }
 
     @Test("default workflows declare required fields that match served top-level resource shapes")
@@ -352,6 +358,9 @@ struct WorkflowSkillCatalogTests {
         #expect(try! stepFields(guardedInsert, "read_gain_catalog") == ["entry", "validation"])
         #expect(try! stepFields(guardedInsert, "read_mixer_slots") == ["strips", "data_source"])
         #expect(try! stepFields(guardedInsert, "read_strip_after_insert") == ["strip"])
+
+        let exportPlan = try! workflow("logic.workflow.export.batch_plan")
+        #expect(try! stepFields(exportPlan, "plan_exports") == ["schema", "projects", "baseline_verification", "required_confirmations"])
     }
 
     @Test("dependencies resolve once the stock plugin surface exists")
@@ -490,6 +499,11 @@ struct WorkflowSkillResourceTests {
         } == true)
         #expect((search["workflows"] as? [[String: Any]])?.contains {
             $0["id"] as? String == "logic.workflow.plugins.stock_insert_gain_live_verified"
+        } == true)
+
+        let exportSearch = try await workflowResourceObject("logic://workflow-skills/search?query=export")
+        #expect((exportSearch["workflows"] as? [[String: Any]])?.contains {
+            $0["id"] as? String == "logic.workflow.export.batch_plan"
         } == true)
 
         let schema = try await workflowResourceObject("logic://workflow-skills/schema")

@@ -565,6 +565,35 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(text == "true" || text == "false" || text.contains("running"))
 }
 
+@Test func testE2EProjectExportPlanReturnsDryRunManifest() async throws {
+    let h = await makeE2EHandlers()
+    let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    let project = tempRoot.appendingPathComponent("E2E Export.logicx", isDirectory: true)
+    let outputRoot = tempRoot.appendingPathComponent("exports", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outputRoot, withIntermediateDirectories: true)
+
+    let r = await e2eCall(
+        h,
+        tool: "logic_project",
+        command: "export_plan",
+        params: [
+            "projects": .array([.string(project.path)]),
+            "output_root": .string(outputRoot.path),
+        ]
+    )
+
+    #expect(r.isError != true)
+    let json = try #require(e2eJSON(e2eText(r)))
+    #expect(json["schema"] as? String == "logic_pro_mcp_export_manifest.v1")
+    #expect(json["execution_mode"] as? String == "dry_run_only")
+    #expect(json["project_count"] as? Int == 1)
+    let projects = try #require(json["projects"] as? [[String: Any]])
+    let steps = try #require(projects.first?["workflow_steps"] as? [[String: Any]])
+    #expect(steps.allSatisfy { $0["executed"] as? Bool == false })
+}
+
 @Test func testE2EProjectUnknownCommandFails() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_project", command: "reformat_hard_drive")

@@ -359,6 +359,8 @@ struct SystemDispatcher {
                   save_as           -> { path: String } — Save to new path
                   close             -> {} — Close project
                   bounce            -> {} — Open bounce dialog
+                  get_regions       -> {} — Read arrange regions
+                  export_plan       -> { projects, output_root, artifacts? } — Dry-run export manifest plan
                   launch            -> {} — Launch Logic Pro
                   quit              -> {} — Quit Logic Pro
 

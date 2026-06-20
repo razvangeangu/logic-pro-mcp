@@ -426,6 +426,7 @@ enum WorkflowSkillCatalog {
             stockPluginChainPlan(),
             stockPluginGuardedInsert(),
             bounceReadiness(),
+            batchExportPlan(),
         ]
     }
 
@@ -531,7 +532,7 @@ enum WorkflowSkillCatalog {
         ],
         "logic_project": [
             "new", "open", "save", "save_as", "close", "bounce",
-            "is_running", "get_regions", "launch", "quit",
+            "is_running", "get_regions", "export_plan", "launch", "quit",
         ],
         "logic_system": [
             "health", "permissions", "refresh_cache", "help",
@@ -873,6 +874,53 @@ enum WorkflowSkillCatalog {
             productionReady: true,
             dependsOn: [],
             limitations: ["Does not perform a bounce/export; project.bounce is keycmd-only on Logic 12.2."],
+            mutationKind: .readOnly
+        )
+    }
+
+    private static func batchExportPlan() -> WorkflowSkill {
+        makeWorkflow(
+            id: "logic.workflow.export.batch_plan",
+            title: "Batch Export Manifest Plan",
+            intent: "Generate a dry-run batch export manifest before any Logic project is opened, bounced, or closed.",
+            scope: "Read-only planning; returns expected artifact paths, verification gates, and blocked execution steps.",
+            prerequisites: ["Explicit .logicx project paths", "Absolute local output root", "Caller accepts dry-run-only execution"],
+            allowedTools: ["logic_project"],
+            allowedResources: [],
+            requiredConfirmations: [],
+            stateChecks: [],
+            steps: [
+                toolStep(
+                    "plan_exports",
+                    "Build export manifest plan without touching Logic",
+                    "logic_project",
+                    command: "export_plan",
+                    false,
+                    nil,
+                    ["schema", "projects", "baseline_verification", "required_confirmations"],
+                    ["invalid project path", "output root rejected", "collision risk reported"]
+                ),
+            ],
+            verification: WorkflowVerification(
+                evidence: ["export_manifest_json"],
+                successFields: ["schema", "execution_mode", "projects", "unsupported_or_blocked_steps"],
+                liveEvidenceFile: nil
+            ),
+            failureModes: [
+                "project path missing or not absolute .logicx",
+                "output root is relative or unsafe",
+                "planned artifact already exists under fail_if_exists",
+                "requested artifact kind is unsupported",
+            ],
+            rollbackOrRecovery: "No rollback required; export_plan is dry-run-only and does not write manifests or audio.",
+            evidenceLevel: .deterministic,
+            productionReady: true,
+            dependsOn: [],
+            limitations: [
+                "Does not open Logic, bounce, resume, or write manifests.",
+                "Post-export audio analysis remains an Issue #29 integration path, not part of this dry-run planner.",
+                "Cloud upload, email, and external delivery are out of scope.",
+            ],
             mutationKind: .readOnly
         )
     }
