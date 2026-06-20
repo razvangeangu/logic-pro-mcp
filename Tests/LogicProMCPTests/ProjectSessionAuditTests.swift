@@ -3,7 +3,7 @@ import MCP
 import Testing
 @testable import LogicProMCP
 
-@Test func testProjectSessionAuditFindingsAndCleanupPlanAreDeterministic() async {
+@Test func testProjectSessionAuditFindingsAndCleanupPlanAreDeterministic() async throws {
     let cache = StateCache()
 
     var project = ProjectInfo()
@@ -48,7 +48,7 @@ import Testing
     let report = await ProjectSessionAudit.buildAudit(cache: cache)
 
     #expect(report.schema == "logic_pro_mcp_project_audit.v1")
-    #expect(report.readOnly == true)
+    #expect(report.readOnly)
     #expect(report.status == .degraded)
     #expect(report.evidence.tracks.total == 3)
     #expect(report.evidence.mixer.occupiedPluginSlots.count == 1)
@@ -70,7 +70,8 @@ import Testing
     #expect(stepIDs.contains("review_empty_tracks_no_delete"))
     #expect(stepIDs.contains("clear_solo_states"))
     #expect(stepIDs.contains("clear_arm_states"))
-    #expect(report.cleanupPlan.first { $0.id == "review_empty_tracks_no_delete" }?.supportedByCurrentTools == false)
+    let emptyTrackReview = try #require(report.cleanupPlan.first { $0.id == "review_empty_tracks_no_delete" })
+    #expect(!emptyTrackReview.supportedByCurrentTools)
 }
 
 @Test func testProjectAuditAndCleanupPlanResourcesAndCommandsReturnJSON() async throws {
@@ -86,12 +87,12 @@ import Testing
     let auditResource = try await ResourceHandlers.read(uri: "logic://project/audit", cache: cache, router: router)
     let auditJSON = try #require(sharedJSONObject(sharedResourceText(auditResource)))
     #expect(auditJSON["schema"] as? String == "logic_pro_mcp_project_audit.v1")
-    #expect(auditJSON["read_only"] as? Bool == true)
+    #expect(try #require(auditJSON["read_only"] as? Bool))
 
     let planResource = try await ResourceHandlers.read(uri: "logic://project/cleanup-plan", cache: cache, router: router)
     let planJSON = try #require(sharedJSONObject(sharedResourceText(planResource)))
     #expect(planJSON["schema"] as? String == "logic_pro_mcp_project_cleanup_plan.v1")
-    #expect(planJSON["requires_plan_confirmation"] as? Bool == true)
+    #expect(try #require(planJSON["requires_plan_confirmation"] as? Bool))
 
     let auditTool = await ProjectDispatcher.handle(command: "audit", params: [:], router: router, cache: cache)
     let auditToolJSON = try #require(sharedJSONObject(sharedToolText(auditTool)))
@@ -102,14 +103,14 @@ import Testing
     #expect(planToolJSON["schema"] as? String == "logic_pro_mcp_project_cleanup_plan.v1")
 }
 
-@Test func testProjectAuditWorkflowCatalogEntryIsReadOnlyAndResolved() {
+@Test func testProjectAuditWorkflowCatalogEntryIsReadOnlyAndResolved() throws {
     let snapshot = WorkflowSkillCatalog.defaultSnapshot()
-    let workflow = snapshot.workflows.first { $0.id == "logic.workflow.project.audit_cleanup_plan" }
+    let workflow = try #require(snapshot.workflows.first { $0.id == "logic.workflow.project.audit_cleanup_plan" })
 
-    #expect(snapshot.validation.isValid == true)
-    #expect(workflow?.mutationKind == .readOnly)
-    #expect(workflow?.productionReady == true)
-    #expect(workflow?.dependenciesResolved == true)
-    #expect(workflow?.allowedResources.contains("logic://project/audit") == true)
-    #expect(workflow?.allowedResources.contains("logic://project/cleanup-plan") == true)
+    #expect(snapshot.validation.isValid)
+    #expect(workflow.mutationKind == .readOnly)
+    #expect(workflow.productionReady)
+    #expect(try #require(workflow.dependenciesResolved as Bool?))
+    #expect(workflow.allowedResources.contains("logic://project/audit"))
+    #expect(workflow.allowedResources.contains("logic://project/cleanup-plan"))
 }
