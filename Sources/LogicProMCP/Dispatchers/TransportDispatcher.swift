@@ -20,8 +20,7 @@ struct TransportDispatcher {
             return toolTextResult(result)
 
         case "stop":
-            let result = await router.route(operation: "transport.stop")
-            return toolTextResult(result)
+            return await verifiedStopResult(router: router, cache: cache)
 
         case "record":
             let result = await router.route(operation: "transport.record")
@@ -180,6 +179,72 @@ struct TransportDispatcher {
                 isError: true
             )
         }
+    }
+
+    private static func verifiedStopResult(
+        router: ChannelRouter,
+        cache: StateCache
+    ) async -> CallTool.Result {
+        let writeResult = await router.route(operation: "transport.stop")
+        guard writeResult.isSuccess else {
+            return toolTextResult(writeResult)
+        }
+
+        let liveRefresh = await ResourceHandlers.readLiveTransportState(router: router)
+        guard let liveState = liveRefresh.state else {
+            let cachedState = await cache.getTransport()
+            return toolTextResult(HonestContract.encodeStateC(
+                error: .readbackUnavailable,
+                hint: "transport.stop executed, but live transport state could not be refreshed. Focus Logic's Tracks window, dismiss modal or plugin dialogs, then retry or run logic_system refresh_cache.",
+                extras: stopReadbackUnavailableExtras(
+                    cachedState: cachedState,
+                    refreshError: liveRefresh.errorCode
+                )
+            ), isError: true)
+        }
+
+        await cache.updateTransport(liveState)
+        let observedExtras: [String: Any] = [
+            "operation": "transport.stop",
+            "requested_state": "stopped",
+            "verify_source": "ax_transport_state",
+            "observed_isPlaying": liveState.isPlaying,
+            "observed_isRecording": liveState.isRecording,
+            "observed_position": liveState.position,
+            "observed_time_position": liveState.timePosition,
+        ]
+
+        guard liveState.isPlaying == false, liveState.isRecording == false else {
+            return toolTextResult(HonestContract.encodeStateC(
+                error: .readbackMismatch,
+                hint: "transport.stop executed, but live transport state still reports playback or recording",
+                extras: observedExtras.merging(["safe_to_retry": true]) { _, new in new }
+            ), isError: true)
+        }
+
+        return toolTextResult(HonestContract.encodeStateA(extras: observedExtras))
+    }
+
+    private static func stopReadbackUnavailableExtras(
+        cachedState: TransportState,
+        refreshError: String?
+    ) -> [String: Any] {
+        [
+            "operation": "transport.stop",
+            "requested_state": "stopped",
+            "verify_source": "cache_only",
+            "cached_source": cachedState.lastUpdated > .distantPast ? "cache" : "default",
+            "cache_age_sec": cacheAgeExtra(for: cachedState),
+            "refresh_error": refreshError ?? "live_transport_read_failed",
+            "safe_to_retry": true,
+        ]
+    }
+
+    private static func cacheAgeExtra(for state: TransportState) -> Any {
+        guard state.lastUpdated > .distantPast else {
+            return NSNull()
+        }
+        return max(0, Date().timeIntervalSince(state.lastUpdated))
     }
 
     /// Accept "bar.beat.sub.tick" (each positive) or "HH:MM:SS:FF" (with

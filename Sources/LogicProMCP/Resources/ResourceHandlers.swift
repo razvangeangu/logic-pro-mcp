@@ -173,7 +173,8 @@ extension ResourceHandlers {
     // MARK: - Individual resource handlers
 
     private static func readTransportState(cache: StateCache, router: ChannelRouter, uri: String) async throws -> ReadResource.Result {
-        if let liveState = await readLiveTransportState(router: router) {
+        let liveRefresh = await readLiveTransportState(router: router)
+        if let liveState = liveRefresh.state {
             await cache.updateTransport(liveState)
         }
 
@@ -188,18 +189,60 @@ extension ResourceHandlers {
         let body = """
             {"state":\(inner),"has_document":\(hasDocument)}
             """
-        let json = wrapWithCacheEnvelope(bodyJSON: body, fetchedAt: state.lastUpdated, axOccluded: axOccluded)
+        let json = wrapWithCacheEnvelope(
+            bodyJSON: body,
+            fetchedAt: state.lastUpdated,
+            axOccluded: axOccluded,
+            extras: transportStateEnvelopeExtras(liveRefresh: liveRefresh, cachedState: state)
+        )
         return ReadResource.Result(
             contents: [.text(json, uri: uri, mimeType: "application/json")]
         )
     }
 
-    private static func readLiveTransportState(router: ChannelRouter) async -> TransportState? {
-        guard case .success(let json) = await router.route(operation: "transport.get_state") else {
-            return nil
+    struct LiveTransportStateReadback: Sendable {
+        let state: TransportState?
+        let errorCode: String?
+    }
+
+    /// Live transport refresh shared by the `logic://transport/state`
+    /// resource and post-write dispatcher verification.
+    static func readLiveTransportState(router: ChannelRouter) async -> LiveTransportStateReadback {
+        let result = await router.route(operation: "transport.get_state")
+        guard result.isSuccess else {
+            return LiveTransportStateReadback(
+                state: nil,
+                errorCode: HonestContract.stateCErrorCode(result.message) ?? "live_transport_read_failed"
+            )
+        }
+        guard let state = decodeTransportState(result.message) else {
+            return LiveTransportStateReadback(
+                state: nil,
+                errorCode: "undecodable_live_transport_state"
+            )
+        }
+        return LiveTransportStateReadback(state: state, errorCode: nil)
+    }
+
+    private static func transportStateEnvelopeExtras(
+        liveRefresh: LiveTransportStateReadback,
+        cachedState: TransportState
+    ) -> [String: Any] {
+        if liveRefresh.state != nil {
+            return ["source": "ax_live"]
         }
 
-        return decodeTransportState(json)
+        let hasCachedState = cachedState.lastUpdated > .distantPast
+        var extras: [String: Any] = [
+            "source": hasCachedState ? "cache" : "default",
+            "unverified": true,
+            "stale": hasCachedState,
+            "recovery_hint": "live transport refresh unavailable; focus Logic's Tracks window, dismiss modal or plugin dialogs, then retry or run logic_system refresh_cache."
+        ]
+        if let errorCode = liveRefresh.errorCode {
+            extras["refresh_error"] = errorCode
+        }
+        return extras
     }
 
     private static func decodeTransportState(_ json: String) -> TransportState? {
