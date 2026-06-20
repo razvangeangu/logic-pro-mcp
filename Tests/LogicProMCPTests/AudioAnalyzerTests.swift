@@ -52,7 +52,7 @@ private func writeAudioFixture(
     )
 
     #expect(result.schema == "logic_pro_mcp_audio_analysis.v1")
-    #expect(result.exists == true)
+    #expect(result.exists)
     #expect(result.format == "wav")
     #expect(result.sampleRate == 44_100)
     #expect(result.channelCount == 2)
@@ -165,7 +165,7 @@ private func writeAudioFixture(
         command: "analyze_file",
         params: ["path": .string(silent.path)]
     )
-    #expect(result.isError == true)
+    #expect(try #require(result.isError))
     let json = try #require(sharedJSONObject(sharedToolText(result)))
     #expect(json["schema"] as? String == "logic_pro_mcp_audio_analysis.v1")
     let verification = try #require(json["verification"] as? [String: Any])
