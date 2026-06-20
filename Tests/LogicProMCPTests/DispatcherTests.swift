@@ -89,6 +89,58 @@ private actor FailingExecuteChannel: Channel {
     }
 }
 
+private actor TrackArmEnvelopeChannel: Channel {
+    nonisolated let id: ChannelID
+    let unverifiedIndices: Set<Int>
+    let failedIndices: Set<Int>
+
+    init(
+        id: ChannelID = .accessibility,
+        unverifiedIndices: Set<Int> = [],
+        failedIndices: Set<Int> = []
+    ) {
+        self.id = id
+        self.unverifiedIndices = unverifiedIndices
+        self.failedIndices = failedIndices
+    }
+
+    func start() async throws {}
+    func stop() async {}
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        guard operation == "track.set_arm" else {
+            return .success("Mock: \(operation)")
+        }
+        let index = Int(params["index"] ?? "") ?? -1
+        let enabled = (params["enabled"] ?? "true") == "true"
+        let extras: [String: Any] = [
+            "track": index,
+            "enabled": enabled,
+            "function": "recArm",
+            "verification_source": "mock_ax_readback",
+        ]
+        if failedIndices.contains(index) {
+            return .error("Mock failure: track.set_arm \(index)")
+        }
+        if unverifiedIndices.contains(index) {
+            return .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: extras
+            ))
+        }
+        return .success(HonestContract.encodeStateA(
+            extras: extras.merging([
+                "observed": enabled,
+                "verification_source": "mock_ax_readback",
+            ]) { _, new in new }
+        ))
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "track arm envelope channel")
+    }
+}
+
 // MARK: - TransportDispatcher
 
 @Test func testTransportDispatcherRoutesPrimaryCommands() async {
@@ -1378,7 +1430,7 @@ private actor SelectiveFailChannel: Channel {
 
 @Test func testArmOnlySuccessPathReportsArmedSuccess() async {
     let router = ChannelRouter()
-    let ax = MockChannel(id: .accessibility)
+    let ax = TrackArmEnvelopeChannel()
     await router.register(ax)
     let cache = StateCache()
     await cache.updateTracks([
@@ -1396,6 +1448,83 @@ private actor SelectiveFailChannel: Channel {
     let text = dispatcherText(result)
     #expect(text.contains("\"armedSuccess\":true"))
     #expect(text.contains("\"armed\":1"))
+    #expect(text.contains("\"verified\":true"))
+    #expect(text.contains("\"requested_enabled\":true"))
+    #expect(text.contains("\"observed_enabled\":true"))
+    #expect(text.contains("\"verification_source\":\"mock_ax_readback\""))
+}
+
+@Test func testArmReturnsErrorForUnverifiedEnvelope() async {
+    let router = ChannelRouter()
+    let ax = TrackArmEnvelopeChannel(unverifiedIndices: [5])
+    await router.register(ax)
+    let cache = StateCache()
+
+    let result = await TrackDispatcher.handle(
+        command: "arm",
+        params: ["index": .int(5), "enabled": .bool(true)],
+        router: router,
+        cache: cache
+    )
+
+    let text = dispatcherText(result)
+    #expect(result.isError!)
+    #expect(text.contains("\"verified\":false"))
+    #expect(text.contains("\"reason\":\"readback_unavailable\""))
+    #expect(text.contains("\"verification_source\":\"mock_ax_readback\""))
+}
+
+@Test func testArmOnlyTreatsUnverifiedTargetArmAsError() async {
+    let router = ChannelRouter()
+    let ax = TrackArmEnvelopeChannel(unverifiedIndices: [1])
+    await router.register(ax)
+    let cache = StateCache()
+    await cache.updateTracks([
+        TrackState(id: 1, name: "Target", type: .softwareInstrument),
+    ])
+
+    let result = await TrackDispatcher.handle(
+        command: "arm_only",
+        params: ["index": .int(1)],
+        router: router,
+        cache: cache
+    )
+
+    let text = dispatcherText(result)
+    #expect(result.isError!)
+    #expect(text.contains("\"armedSuccess\":false"))
+    #expect(text.contains("\"verified\":false"))
+    #expect(text.contains("\"unverifiedDisarm\":[]"))
+    #expect(text.contains("\"requested_enabled\":true"))
+    #expect(text.contains("\"observed_enabled\":null"))
+    #expect(text.contains("\"verification_source\":\"mock_ax_readback\""))
+}
+
+@Test func testArmOnlyTreatsUnverifiedDisarmAsError() async {
+    let router = ChannelRouter()
+    let ax = TrackArmEnvelopeChannel(unverifiedIndices: [0])
+    await router.register(ax)
+    let cache = StateCache()
+    await cache.updateTracks([
+        TrackState(id: 0, name: "Track 1", type: .audio, isArmed: true),
+        TrackState(id: 1, name: "Target", type: .softwareInstrument),
+    ])
+
+    let result = await TrackDispatcher.handle(
+        command: "arm_only",
+        params: ["index": .int(1)],
+        router: router,
+        cache: cache
+    )
+
+    let text = dispatcherText(result)
+    #expect(result.isError!)
+    #expect(text.contains("\"armed\":1"))
+    #expect(text.contains("\"unverifiedDisarm\":[0]"))
+    #expect(text.contains("\"verified\":false"))
+    #expect(text.contains("\"requested_enabled\":true"))
+    #expect(text.contains("\"observed_enabled\":true"))
+    #expect(text.contains("\"verification_source\":\"mock_ax_readback\""))
 }
 
 // MARK: - EditDispatcher

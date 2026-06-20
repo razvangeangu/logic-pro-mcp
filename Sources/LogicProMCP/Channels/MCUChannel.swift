@@ -473,7 +473,9 @@ actor MCUChannel: Channel {
                 extras: [
                     "function": "\(function)",
                     "track": track,
-                    "enabled": enabled
+                    "enabled": enabled,
+                    "write_source": "mcu",
+                    "verification_source": "mcu_led_echo"
                 ]
             ))
         }
