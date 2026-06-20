@@ -20,17 +20,22 @@ private func stockInstrumentResourceThrows(_ uri: String) async -> Bool {
 private func makeStockInstrumentEntry(
     id: String,
     provenance: [StockInstrumentProvenance],
+    schema: String = StockInstrumentCatalogValidator.entrySchema,
+    displayName: String = "Fixture",
+    kind: StockInstrumentKind = .stockInstrument,
+    logicTrackType: StockInstrumentTrackType = .softwareInstrument,
+    roles: [String] = ["fixture"],
     supportedActions: [String] = ["planning.recommend_instrument"],
     unsupportedActions: [String] = ["direct_stock_instrument_parameter_write"],
     relatedStockPluginIDs: [String] = ["logic.stock.instrument.alchemy"]
 ) -> StockInstrumentCatalogEntry {
     StockInstrumentCatalogEntry(
-        schema: StockInstrumentCatalogValidator.entrySchema,
+        schema: schema,
         id: id,
-        displayName: "Fixture",
-        kind: .stockInstrument,
-        logicTrackType: .softwareInstrument,
-        roles: ["fixture"],
+        displayName: displayName,
+        kind: kind,
+        logicTrackType: logicTrackType,
+        roles: roles,
         genreTags: ["fixture"],
         knownFactoryPaths: ["Instrument/Fixture"],
         knownPresets: [],
@@ -131,6 +136,109 @@ struct StockInstrumentValidatorTests {
         let issues = StockInstrumentCatalogValidator.validate([entry], knownStockPluginIDs: knownPluginIDs).issues
         #expect(issues.contains { $0.code == "dangling_stock_plugin_ref" })
     }
+
+    @Test("verified_live provenance must be high confidence")
+    func verifiedLiveConfidenceRejected() {
+        let provenance = [
+            StockInstrumentProvenance(source: .verifiedLive, confidence: .medium, evidence: ["x"]),
+        ]
+        let entry = makeStockInstrumentEntry(id: "logic.stock.instrument.fixture", provenance: provenance)
+
+        let issues = StockInstrumentCatalogValidator.validate([entry], knownStockPluginIDs: knownPluginIDs).issues
+        #expect(issues.contains { $0.code == "verified_live_confidence" })
+    }
+
+    @Test("stock instruments must use the software_instrument track type")
+    func stockInstrumentTrackTypeRejected() {
+        let provenance = [
+            StockInstrumentProvenance(source: .inferred, confidence: .medium, evidence: ["fixture"]),
+        ]
+        let entry = makeStockInstrumentEntry(
+            id: "logic.stock.instrument.fixture",
+            provenance: provenance,
+            logicTrackType: .sessionPlayer
+        )
+
+        let issues = StockInstrumentCatalogValidator.validate([entry], knownStockPluginIDs: knownPluginIDs).issues
+        #expect(issues.contains { $0.code == "stock_instrument_track_type" })
+    }
+
+    @Test("session players must not be shaped as stock software instruments")
+    func sessionPlayerShapeRejected() {
+        let provenance = [
+            StockInstrumentProvenance(source: .inferred, confidence: .medium, evidence: ["fixture"]),
+        ]
+        let entry = makeStockInstrumentEntry(
+            id: "logic.session_player.fixture",
+            provenance: provenance,
+            kind: .stockInstrument,
+            logicTrackType: .softwareInstrument
+        )
+
+        let issues = StockInstrumentCatalogValidator.validate([entry], knownStockPluginIDs: knownPluginIDs).issues
+        #expect(issues.contains { $0.code == "session_player_shape" })
+    }
+
+    @Test("validator rejects an unexpected schema string")
+    func invalidSchemaRejected() {
+        let provenance = [
+            StockInstrumentProvenance(source: .inferred, confidence: .medium, evidence: ["fixture"]),
+        ]
+        let entry = makeStockInstrumentEntry(
+            id: "logic.stock.instrument.fixture",
+            provenance: provenance,
+            schema: "logic_pro_mcp_instrument_catalog.v0"
+        )
+
+        let issues = StockInstrumentCatalogValidator.validate([entry], knownStockPluginIDs: knownPluginIDs).issues
+        #expect(issues.contains { $0.code == "invalid_schema" })
+    }
+
+    @Test("validator rejects a missing id")
+    func missingIDRejected() {
+        let provenance = [
+            StockInstrumentProvenance(source: .inferred, confidence: .medium, evidence: ["fixture"]),
+        ]
+        let entry = makeStockInstrumentEntry(id: "", provenance: provenance)
+
+        let issues = StockInstrumentCatalogValidator.validate([entry], knownStockPluginIDs: knownPluginIDs).issues
+        #expect(issues.contains { $0.code == "missing_id" })
+    }
+
+    @Test("validator rejects a missing display name")
+    func missingDisplayNameRejected() {
+        let provenance = [
+            StockInstrumentProvenance(source: .inferred, confidence: .medium, evidence: ["fixture"]),
+        ]
+        let entry = makeStockInstrumentEntry(
+            id: "logic.stock.instrument.fixture",
+            provenance: provenance,
+            displayName: ""
+        )
+
+        let issues = StockInstrumentCatalogValidator.validate([entry], knownStockPluginIDs: knownPluginIDs).issues
+        #expect(issues.contains { $0.code == "missing_display_name" })
+    }
+
+    @Test("validator rejects an entry with no musical roles")
+    func missingRolesRejected() {
+        let provenance = [
+            StockInstrumentProvenance(source: .inferred, confidence: .medium, evidence: ["fixture"]),
+        ]
+        let entry = makeStockInstrumentEntry(
+            id: "logic.stock.instrument.fixture",
+            provenance: provenance,
+            roles: []
+        )
+
+        let issues = StockInstrumentCatalogValidator.validate([entry], knownStockPluginIDs: knownPluginIDs).issues
+        #expect(issues.contains { $0.code == "missing_roles" })
+    }
+
+    @Test("support-contract schema string id is pinned to its stable literal")
+    func entrySchemaLiteralPinned() {
+        #expect(StockInstrumentCatalogValidator.entrySchema == "logic_pro_mcp_instrument_catalog.v1")
+    }
 }
 
 @Suite("Stock instrument intelligence — catalog snapshots")
@@ -167,7 +275,7 @@ struct StockInstrumentSnapshotTests {
         #expect(snapshot.entries.contains { $0.id == "logic.session_player.bass_player" })
         #expect(snapshot.entries.contains { $0.id == "logic.session_player.keyboard_player" })
         #expect(snapshot.entries.contains { $0.id == "logic.session_player.synth_player" })
-        #expect(snapshot.entries.allSatisfy { $0.unsupportedActions.contains("session_player_direct_performance_control") || $0.kind == .drummer })
+        #expect(snapshot.entries.allSatisfy { $0.unsupportedActions.contains("session_player_direct_performance_control") })
         #expect(snapshot.entries.contains { entry in
             entry.id == "logic.session_player.synth_player" &&
                 entry.notes.contains { $0.localizedCaseInsensitiveContains("style") }
@@ -212,10 +320,14 @@ struct StockInstrumentResourceTests {
 
         let detail = try await stockInstrumentResourceObject("logic://stock-instruments/logic.stock.instrument.alchemy")
         let detailEntry = try #require(detail["entry"] as? [String: Any])
-        #expect(detailEntry["schema"] as? String == StockInstrumentCatalogValidator.entrySchema)
+        #expect(detailEntry["schema"] as? String == "logic_pro_mcp_instrument_catalog.v1")
         #expect(detailEntry["id"] as? String == "logic.stock.instrument.alchemy")
         let detailProvenance = try #require(detailEntry["provenance"] as? [[String: Any]])
         #expect(!detailProvenance.isEmpty)
+        let detailSupported = try #require(detailEntry["supported_actions"] as? [String])
+        #expect(!detailSupported.isEmpty)
+        let detailUnsupported = try #require(detailEntry["unsupported_actions"] as? [String])
+        #expect(detailUnsupported.contains("direct_stock_instrument_parameter_write"))
 
         let search = try await stockInstrumentResourceObject("logic://stock-instruments/search?query=sampler")
         #expect(search["query"] as? String == "sampler")
@@ -228,7 +340,12 @@ struct StockInstrumentResourceTests {
         #expect(sessionEntries.contains { $0["id"] as? String == "logic.session_player.drummer" })
 
         let drummer = try await stockInstrumentResourceObject("logic://session-players/logic.session_player.drummer")
-        #expect((drummer["entry"] as? [String: Any])?["kind"] as? String == "drummer")
+        let drummerEntry = try #require(drummer["entry"] as? [String: Any])
+        #expect(drummerEntry["kind"] as? String == "drummer")
+        let drummerSupported = try #require(drummerEntry["supported_actions"] as? [String])
+        #expect(!drummerSupported.isEmpty)
+        let drummerUnsupported = try #require(drummerEntry["unsupported_actions"] as? [String])
+        #expect(drummerUnsupported.contains("session_player_direct_performance_control"))
     }
 
     @Test("stock instrument URI routing fails closed on malformed inputs")
