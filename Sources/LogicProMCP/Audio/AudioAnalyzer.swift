@@ -34,6 +34,22 @@ enum AudioAnalyzer {
             case .decoderError(let reason): return reason
             }
         }
+
+        /// Honest disk-presence for the `exists` contract field. `directoryPath`,
+        /// `zeroLengthFile`, `unsupportedFormat`, `unreadableMetadata`, and
+        /// `decoderError` are all reached only after the path was confirmed present
+        /// (an addressable item exists on disk), so reporting exists:false for those
+        /// would lie about a file an agent may otherwise needlessly re-export.
+        /// `unsafePath` is rejected before any existence check; `missingFile` is the
+        /// genuine not-present case.
+        var pathExists: Bool {
+            switch self {
+            case .unsafePath, .missingFile:
+                return false
+            case .directoryPath, .zeroLengthFile, .unsupportedFormat, .unreadableMetadata, .decoderError:
+                return true
+            }
+        }
     }
 
     enum VerificationStatus: String, Codable, Sendable {
@@ -45,6 +61,16 @@ enum AudioAnalyzer {
     struct Verification: Codable, Equatable, Sendable {
         let status: VerificationStatus
         let reasons: [String]
+        /// Optional human-readable message for the error path. `reasons` is always a
+        /// uniform list of stable machine codes; `detail` is the only place a free-text
+        /// sentence appears, so consumers can parse codes without special-casing.
+        let detail: String?
+
+        init(status: VerificationStatus, reasons: [String], detail: String? = nil) {
+            self.status = status
+            self.reasons = reasons
+            self.detail = detail
+        }
     }
 
     struct FrequencyPeak: Codable, Equatable, Sendable {
@@ -255,6 +281,7 @@ enum AudioAnalyzer {
 
         var remaining = frameCount
         var sampleCount = 0
+        var framesProcessed: Int64 = 0
         var silentFrames = 0
         var sumSquares = 0.0
         var peak = 0.0
@@ -269,6 +296,7 @@ enum AudioAnalyzer {
             let framesRead = Int(buffer.frameLength)
             guard framesRead > 0 else { break }
             remaining -= Int64(framesRead)
+            framesProcessed += Int64(framesRead)
 
             guard let channelData = buffer.floatChannelData else {
                 throw AnalysisError.decoderError("decoded audio is not float PCM")
@@ -277,8 +305,11 @@ enum AudioAnalyzer {
             for frame in 0..<framesRead {
                 var framePeak = 0.0
                 for channel in 0..<channelCount {
-                    let value = Double(channelData[channel][frame])
-                    let absValue = min(abs(value), 1.0)
+                    // Measure the raw magnitude — do NOT clamp to 1.0. Float PCM from a
+                    // bounce can legitimately exceed full scale (digital/inter-sample overs),
+                    // and clamping would make true overs report as exactly 0 dBFS, hiding
+                    // destructive clipping from the max_peak_dbfs gate.
+                    let absValue = abs(Double(channelData[channel][frame]))
                     framePeak = max(framePeak, absValue)
                     peak = max(peak, absValue)
                     sumSquares += absValue * absValue
@@ -290,16 +321,21 @@ enum AudioAnalyzer {
             }
         }
 
-        guard sampleCount > 0 else {
+        guard sampleCount > 0, framesProcessed > 0 else {
             throw AnalysisError.zeroLengthFile
         }
 
-        let duration = Double(frameCount) / sampleRate
+        // Duration and silenceRatio are derived from frames ACTUALLY decoded, not the
+        // header frame count. A truncated/short-data-chunk file (header claims more frames
+        // than the data contains) otherwise reports overstated duration and understated
+        // silenceRatio, letting a missing-audio export pass near-silence/duration checks.
+        let duration = Double(framesProcessed) / sampleRate
         let rms = sqrt(sumSquares / Double(sampleCount))
         let rmsDbfs = amplitudeToDbfs(rms)
         let peakDbfs = amplitudeToDbfs(peak)
-        let silenceRatio = min(max(Double(silentFrames) / Double(frameCount), 0.0), 1.0)
+        let silenceRatio = min(max(Double(silentFrames) / Double(framesProcessed), 0.0), 1.0)
         let nonSilentDuration = duration * (1.0 - silenceRatio)
+        let truncated = framesProcessed != frameCount
 
         return Result(
             schema: schema,
@@ -309,7 +345,7 @@ enum AudioAnalyzer {
             durationSeconds: rounded(duration),
             sampleRate: Int(sampleRate.rounded()),
             channelCount: channelCount,
-            frameCount: frameCount,
+            frameCount: framesProcessed,
             fileSizeBytes: fileSizeBytes,
             rmsDbfs: rounded(rmsDbfs),
             peakDbfs: rounded(peakDbfs),
@@ -320,12 +356,16 @@ enum AudioAnalyzer {
             nonSilentDurationSeconds: rounded(nonSilentDuration),
             spectralCentroidHz: nil,
             frequencyPeaks: [],
-            verification: Verification(status: .pass, reasons: [])
+            // Seed truncation as a verification reason so evaluate() can fail-close when
+            // the decoder yielded fewer frames than the header declared.
+            verification: Verification(status: .pass, reasons: truncated ? ["truncated_or_short_data"] : [])
         )
     }
 
     private static func evaluate(_ result: Result, policy: AnalysisPolicy) -> Verification {
-        var reasons: [String] = []
+        // Carry forward any measurement-time reasons (e.g. truncated_or_short_data) so a
+        // truncated file cannot pass even when every policy check is satisfied.
+        var reasons: [String] = result.verification.reasons
 
         if let minimumFileSizeBytes = policy.minimumFileSizeBytes,
            result.fileSizeBytes < Int64(minimumFileSizeBytes) {
@@ -363,7 +403,7 @@ enum AudioAnalyzer {
         Result(
             schema: schema,
             path: path,
-            exists: false,
+            exists: error.pathExists,
             format: normalizedExtension(path).isEmpty ? "unknown" : normalizedExtension(path),
             durationSeconds: 0,
             sampleRate: 0,
@@ -379,7 +419,10 @@ enum AudioAnalyzer {
             nonSilentDurationSeconds: 0,
             spectralCentroidHz: nil,
             frequencyPeaks: [],
-            verification: Verification(status: .fail, reasons: [error.code, error.message])
+            // reasons stays a uniform machine-code list (v1 schema contract); the human
+            // sentence goes in the optional `detail` field so a client parsing reasons
+            // never hits free text on the error path.
+            verification: Verification(status: .fail, reasons: [error.code], detail: error.message)
         )
     }
 
@@ -389,8 +432,12 @@ enum AudioAnalyzer {
 
     private static func isICloudPath(_ path: String) -> Bool {
         let lowercased = path.lowercased()
+        // Genuine iCloud placeholder stubs use the `<name>.icloud` extension; match by
+        // extension, not an unanchored substring, so a legitimate local path that merely
+        // contains the literal text ".icloud" in a directory component is not rejected.
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         return lowercased.contains("/mobile documents/")
-            || lowercased.contains(".icloud")
+            || ext == "icloud"
             || lowercased.contains("/icloud drive/")
     }
 

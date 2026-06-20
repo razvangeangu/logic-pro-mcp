@@ -726,9 +726,18 @@ Path safety:
 - `output_root`, when supplied, is resolved after symlink cleanup and the analyzed file must remain inside it.
 - Unsupported formats, missing files, zero-byte files, and decoder errors fail closed with `verification.status:"fail"`.
 
+Measurement honesty:
+- `peak_dbfs` is measured from raw sample magnitude and is **not clamped to 0 dBFS** — true digital overs report positive dBFS so clipping is visible to `max_peak_dbfs`.
+- `duration_seconds`, `silence_ratio`, and `frame_count` are derived from frames actually decoded, not the header's declared length. If the decoder yields fewer frames than the header claims, `verification.reasons` includes `truncated_or_short_data` and the status is `fail`.
+- `exists` reflects on-disk presence honestly per error kind: an existing-but-unanalyzable artifact (unsupported format, zero bytes, directory, decoder/metadata error) reports `exists:true` with `verification.status:"fail"`; only a missing or rejected (unsafe) path reports `exists:false`.
+
 Loudness honesty:
 - `loudness_method:"rms_estimate"` is an RMS-derived estimate, not EBU R128 LUFS.
-- `true_peak_dbfs` and spectral fields are not claimed when not measured.
+- `loudness_estimate_lufs` carries the RMS dBFS estimate (equal to `rms_dbfs`); `true_peak_dbfs` and spectral fields are not claimed when not measured.
+
+Verification schema:
+- `verification.reasons` is always a list of stable machine codes (e.g. `peak_above_threshold`, `near_silent_output`, `sample_rate_mismatch`, `unsupported_format`, `missing_file`, `directory_path`, `decoder_error`, `zero_length_file`, `truncated_or_short_data`).
+- `verification.detail` is an optional human-readable message present only on the error path; clients should parse `reasons`, not `detail`.
 
 Example:
 

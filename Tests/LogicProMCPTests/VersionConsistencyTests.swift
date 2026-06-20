@@ -53,6 +53,12 @@ private func readRepoFile(_ relativePath: String) throws -> String {
 @Test func testManifestResourceSurfaceMatchesPublishedStableRelease() throws {
     let manifest = try sharedParseJSON(readRepoFile("manifest.json")) as! [String: Any]
 
+    // The manifest tools array is the published MCP-registry surface; it must equal the
+    // server catalog exactly so it can never silently drift (e.g. omit logic_audio).
+    let tools = Set(try #require(manifest["tools"] as? [String]))
+    #expect(tools == Set(ServerCatalog.tools.map(\.name)))
+    #expect(tools.count == 10)
+
     let resources = Set(try #require(manifest["resources"] as? [String]))
     #expect(resources == [
         "logic://system/health",
@@ -85,7 +91,7 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     #expect(templates == Set(ResourceProvider.templates.map(\.uriTemplate)))
 
     let description = try #require(manifest["description"] as? String)
-    #expect(description.contains("14 resources + 7 templates"))
+    #expect(description.contains("10 tools + 14 resources + 7 templates"))
 }
 
 @Test func testReadmeAndAPIDocsMatchPublicSurfaceAndRouting() throws {
