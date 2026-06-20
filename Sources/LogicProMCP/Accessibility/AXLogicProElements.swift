@@ -220,7 +220,7 @@ enum AXLogicProElements {
         let groups = AXHelpers.findAllDescendants(of: window, role: kAXGroupRole, maxDepth: 8, runtime: runtime.ax)
         for group in groups {
             let desc = AXHelpers.getDescription(group, runtime: runtime.ax) ?? ""
-            if desc == "컨트롤 막대" || desc.lowercased() == "control bar" {
+            if AXLocalePolicy.controlBarGroupLabel.matches(desc, mode: .exactStrict) {
                 return group
             }
         }
@@ -264,7 +264,7 @@ enum AXLogicProElements {
         )
         for s in sliders {
             let desc = AXHelpers.getDescription(s, runtime: runtime.ax) ?? ""
-            if desc == "마디" || desc.lowercased() == "bar" {
+            if AXLocalePolicy.barSliderLabel.matches(desc, mode: .exactStrict) {
                 return s
             }
         }
@@ -293,7 +293,7 @@ enum AXLogicProElements {
             )
             for s in sliders {
                 let desc = (AXHelpers.getDescription(s, runtime: runtime.ax) ?? "").lowercased()
-                if desc == "템포" || desc == "tempo" || desc == "bpm" {
+                if AXLocalePolicy.tempoSliderLabel.matches(desc, mode: .exactStrict) {
                     return s
                 }
             }
@@ -309,7 +309,7 @@ enum AXLogicProElements {
         )
         for s in sliders {
             let desc = AXHelpers.getDescription(s, runtime: runtime.ax) ?? ""
-            if desc == "비트" || desc.lowercased() == "beat" {
+            if AXLocalePolicy.beatSliderLabel.matches(desc, mode: .exactStrict) {
                 return s
             }
         }
@@ -1221,9 +1221,12 @@ enum AXLogicProElements {
         let checkboxes = AXHelpers.findAllDescendants(
             of: header, role: kAXCheckBoxRole, maxDepth: 4, runtime: runtime.ax
         )
+        // Verbatim (case-sensitive) equality preserves the historical locator
+        // exactly; only the EN/KO label tokens move into AXLocalePolicy.
+        let armLabels = AXLocalePolicy.trackRecordEnableCheckbox.labels
         for cb in checkboxes {
             let desc = AXHelpers.getDescription(cb, runtime: runtime.ax) ?? ""
-            if desc == "녹음 활성화" || desc == "Record Enable" || desc == "Record" {
+            if armLabels.contains(desc) {
                 return cb
             }
         }

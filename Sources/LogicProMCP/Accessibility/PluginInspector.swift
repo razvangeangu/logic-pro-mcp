@@ -520,7 +520,9 @@ public enum PluginInspector {
             var valRaw: AnyObject?
             AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valRaw)
             let v = (valRaw as? String) ?? ""
-            if v.contains("Preset") || v.contains("프리셋") || v.contains("Default") || v.contains("기본") {
+            // Verbatim (case-sensitive) substring match preserves the historical
+            // locator; only the EN/KO Setting-dropdown tokens move into policy.
+            if AXLocalePolicy.settingPopupValue.labels.contains(where: { v.contains($0) }) {
                 return element
             }
         }
