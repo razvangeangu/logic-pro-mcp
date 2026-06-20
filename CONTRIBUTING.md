@@ -1,12 +1,49 @@
-# Contributing
+# Contributing to Logic Pro MCP
 
 Thanks for your interest. Logic Pro MCP is a Swift 6 actor-based macOS binary that bridges Logic Pro to the Model Context Protocol.
+
+You do not need a full Logic Pro setup for many contributions. Docs, examples, issue reproduction notes, parser tests, validation tests, and CLI message improvements can usually be completed with Swift and the normal unit test suite.
+
+Start here:
+
+- Review the [open issues](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen) and choose a narrow, already-scoped change.
+- Comment on the issue before starting if the issue has ambiguity about scope or acceptance criteria.
+- Keep each PR narrow. One issue, one behavioral change, one verification story.
 
 ## Prerequisites
 
 - macOS 14+
 - Swift 6.0+ (Xcode 16 or Command Line Tools)
 - Logic Pro 12.0.1+ (only for live E2E testing — unit tests run without it)
+
+## Low-Risk PRs
+
+Low-risk PRs are intentionally narrow and reviewable:
+
+- Documentation examples in `README.md`, `docs/SETUP.md`, `docs/API.md`, or `docs/TROUBLESHOOTING.md`
+- New unit tests around validation, JSON envelopes, parser edge cases, permission summaries, or resource schemas
+- Clearer CLI or error output that does not change the public contract
+- Reproduction notes for an existing issue, especially with exact Logic Pro/macOS versions
+- Small refactors that remove duplication without changing routing, safety, or fallback behavior
+
+Avoid these unless the issue explicitly asks for them:
+
+- New automation fallbacks
+- Logic-facing write behavior
+- Release, signing, Homebrew, or installer trust changes
+- Broad rewrites across multiple channel/router surfaces
+- Claims that something is "verified" without independent readback evidence
+
+## Do I Need Logic Pro?
+
+| Work type | Logic Pro required? | Expected verification |
+|-----------|---------------------|-----------------------|
+| Docs-only changes | No | `git diff --check` |
+| Unit tests, parser tests, schema tests | No | `swift test --filter <testName>` and relevant full-suite evidence when practical |
+| CLI text or non-Logic validation | No | Focused tests plus `swift build` |
+| MCP resource contract changes | Usually no | Focused resource tests and JSON envelope assertions |
+| Channel routing or write/readback changes | Yes for final evidence | Unit tests plus live Logic Pro evidence |
+| Release, installer, signing, Homebrew | No Logic needed, but maintainer review required | Release workflow or documented dry-run evidence |
 
 ## Development Loop
 
@@ -15,7 +52,7 @@ git clone https://github.com/MongLong0214/logic-pro-mcp.git
 cd logic-pro-mcp
 
 swift build              # debug
-swift test               # 1388 unit + integration tests on current v3.6.0 source
+swift test               # 1396 unit + integration tests on current v3.6.0 source
 swift build -c release   # release binary at .build/release/LogicProMCP
 ```
 
@@ -25,6 +62,8 @@ For a faster local iteration:
 # After making changes to source + tests:
 swift test --filter <testName>
 ```
+
+Use `swift test --no-parallel` before asking for review when the change touches shared routing, state, resource envelopes, or safety-sensitive behavior.
 
 ## Live E2E Testing
 
@@ -41,6 +80,8 @@ This exercises every tool against a real Logic Pro instance. Requires:
 - MCU Control Surface registered (see [docs/SETUP.md](docs/SETUP.md))
 - Accessibility + Automation permissions granted
 
+Live E2E is not required for docs-only PRs or unit-test-only PRs. If an issue requires live evidence, include the exact command, Logic Pro version, macOS version, and the observed State A/B/C result in the PR description.
+
 ## Project Layout
 
 ```
@@ -54,7 +95,7 @@ Sources/LogicProMCP/
 ├── Server/            LogicProServer + ServerConfig
 └── Utilities/         DestructivePolicy, AppleScriptSafety, Logger, PermissionChecker
 
-Tests/LogicProMCPTests/  1388 tests across the Swift test target on the v3.6.0 source
+Tests/LogicProMCPTests/  1396 tests across the Swift test target on the v3.6.0 source
 Scripts/                 install / uninstall / live E2E / Scripter JS
 docs/                    SETUP, API, ARCHITECTURE, TROUBLESHOOTING, MAINTAINERS, live verification notes
 artifacts/               generated local artifacts; only final v4 MIDI-only package is allowed in git
@@ -76,10 +117,42 @@ When adding a new operation, assign it to the channel with the best protocol sup
 
 Register the operation in `ChannelRouter.v2RoutingTable` as an ordered list; the router tries each channel in turn.
 
+When adding or changing routes, do not add quiet fallback chains. If a fallback is necessary, make the condition, reason, and verification boundary visible in the response or logs.
+
+## Branch and PR Workflow
+
+1. Create a branch from current `main`.
+2. Link exactly one issue unless the issue explicitly groups related work.
+3. Add or update tests before changing production behavior.
+4. Keep generated media, local Logic projects, and temporary artifacts out of the PR.
+5. Open a PR with the template filled in, including exact commands run.
+6. Do not push directly to `main`.
+
+Use this branch naming style:
+
+```bash
+git switch -c docs/setup-cursor-example
+git switch -c test/note-sequence-parser-invalid-channel
+git switch -c fix/permission-summary-automation-copy
+```
+
+## Verification Matrix
+
+| Change | Minimum local evidence |
+|--------|------------------------|
+| Markdown/docs only | `git diff --check` |
+| Python scripts | `python3 -m py_compile <script>` |
+| Swift parser/validation tests | `swift test --filter <testName>` |
+| Public MCP envelope/resource changes | Focused tests plus JSON assertions |
+| Shared routing/state changes | `swift test --no-parallel` |
+| Logic-facing write/readback changes | Focused tests, full suite, and live Logic Pro evidence |
+
+If you cannot run a required gate, say so in the PR and explain why. Do not mark unverified live behavior as verified.
+
 ## Pull Request Checklist
 
 - [ ] `swift build` clean
-- [ ] `swift test` green (all 1388 tests on current v3.6.0 source)
+- [ ] `swift test` green (all 1396 tests on current v3.6.0 source)
 - [ ] New behavior covered by at least one unit test
 - [ ] Changed production code keeps the global coverage floor green (`region >=70%`, `line >=78%`); high-risk Logic-facing changes target about 90% line coverage on the touched surface or document the live/manual evidence that substitutes for direct measurement
 - [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`; new MCP tools also require README, `docs/API.md`, `docs/ARCHITECTURE.md`, and release-note updates
