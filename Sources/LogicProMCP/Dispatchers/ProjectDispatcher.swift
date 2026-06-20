@@ -184,6 +184,7 @@ struct ProjectDispatcher {
             // verification of record_sequence region placement — without this
             // the only feedback loop was visual screenshots.
             let result = await router.route(operation: "region.get_regions")
+            await refreshRegionCache(from: result, cache: cache)
             return toolTextResult(result)
 
         case "launch":
@@ -239,6 +240,14 @@ struct ProjectDispatcher {
     private static func invalidateOnSuccess(_ result: ChannelResult, cache: StateCache) async {
         guard result.isSuccess else { return }
         await cache.clearProjectState()
+    }
+
+    private static func refreshRegionCache(from result: ChannelResult, cache: StateCache) async {
+        guard result.isSuccess,
+              let regions = try? RegionInfo.decodeToolPayload(result.message) else {
+            return
+        }
+        await cache.updateRegions(regions.map { $0.asRegionState() })
     }
 
     /// H-1 (2026-05-08 enterprise review): audit phases for L1+ project

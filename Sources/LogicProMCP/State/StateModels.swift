@@ -220,6 +220,33 @@ struct RegionInfo: Sendable, Codable {
     var trackIndex: Int
     var startBar: Int
     var endBar: Int
-    var kind: String  // "midi" | "audio" | "unknown"
+    var kind: String  // "midi" | "audio" | "drummer" | "unknown"
     var rawHelp: String?  // raw AXHelp text — preserved for debugging parser misses
+}
+
+private struct RegionToolPayload: Decodable {
+    let regions: [RegionInfo]
+}
+
+extension RegionInfo {
+    static func decodeToolPayload(_ text: String) throws -> [RegionInfo] {
+        if let direct: [RegionInfo] = try? decodeJSON(text) {
+            return direct
+        }
+        let wrapped: RegionToolPayload = try decodeJSON(text)
+        return wrapped.regions
+    }
+
+    func asRegionState() -> RegionState {
+        let safeName = name.isEmpty ? "region" : name
+        let lengthBars = max(0, endBar - startBar)
+        return RegionState(
+            id: "\(trackIndex):\(startBar):\(endBar):\(safeName)",
+            name: safeName,
+            trackIndex: trackIndex,
+            startPosition: "\(startBar) 1 1 1",
+            endPosition: "\(endBar) 1 1 1",
+            length: "\(lengthBars) 0 0 0"
+        )
+    }
 }

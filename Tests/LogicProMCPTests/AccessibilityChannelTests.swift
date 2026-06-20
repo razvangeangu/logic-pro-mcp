@@ -380,6 +380,101 @@ private func makeAXBackedAccessibilityChannel(
     #expect(regions[0].kind == "midi")
 }
 
+@Test func testAccessibilityChannelAXBackedRegionsRecognizeTracksContentsAndFilterOffscreen() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(900)
+    let window = builder.element(901)
+    let headerRail = builder.element(902)
+    let header0 = builder.element(903)
+    let header1 = builder.element(904)
+    let contentGroup = builder.element(905)
+    let visibleMIDI = builder.element(906)
+    let offscreenAudio = builder.element(907)
+    let visibleDrummer = builder.element(908)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [headerRail, contentGroup])
+    builder.setAttribute(window, kAXPositionAttribute as String, axPoint(0, 0))
+    builder.setAttribute(window, kAXSizeAttribute as String, axSize(1_200, 400))
+
+    builder.setAttribute(headerRail, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(headerRail, kAXDescriptionAttribute as String, "Tracks header")
+    builder.setChildren(headerRail, [header0, header1])
+
+    builder.setAttribute(header0, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(header0, kAXPositionAttribute as String, axPoint(0, 100))
+    builder.setAttribute(header0, kAXSizeAttribute as String, axSize(200, 40))
+
+    builder.setAttribute(header1, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(header1, kAXPositionAttribute as String, axPoint(0, 160))
+    builder.setAttribute(header1, kAXSizeAttribute as String, axSize(200, 40))
+
+    builder.setAttribute(contentGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(contentGroup, kAXDescriptionAttribute as String, "Tracks contents")
+    builder.setChildren(contentGroup, [visibleMIDI, offscreenAudio, visibleDrummer])
+
+    builder.setAttribute(visibleMIDI, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(visibleMIDI, kAXDescriptionAttribute as String, "MIDI Region")
+    builder.setAttribute(visibleMIDI, kAXHelpAttribute as String, "Region starts at 1 bars and ends at 2 bars, MIDI region.")
+    builder.setAttribute(visibleMIDI, kAXPositionAttribute as String, axPoint(240, 108))
+    builder.setAttribute(visibleMIDI, kAXSizeAttribute as String, axSize(320, 24))
+
+    builder.setAttribute(offscreenAudio, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(offscreenAudio, kAXDescriptionAttribute as String, "Audio Region")
+    builder.setAttribute(offscreenAudio, kAXHelpAttribute as String, "Region starts at 33 bars and ends at 34 bars, audio region.")
+    builder.setAttribute(offscreenAudio, kAXPositionAttribute as String, axPoint(2_500, 108))
+    builder.setAttribute(offscreenAudio, kAXSizeAttribute as String, axSize(320, 24))
+
+    builder.setAttribute(visibleDrummer, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(visibleDrummer, kAXDescriptionAttribute as String, "Session Player Region")
+    builder.setAttribute(visibleDrummer, kAXHelpAttribute as String, "Region starts at 9 bars and ends at 13 bars, Session Player region.")
+    builder.setAttribute(visibleDrummer, kAXPositionAttribute as String, axPoint(260, 168))
+    builder.setAttribute(visibleDrummer, kAXSizeAttribute as String, axSize(360, 24))
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let result = await channel.execute(operation: "region.get_regions", params: [:])
+
+    #expect(result.isSuccess)
+
+    let regions = try JSONDecoder().decode([RegionInfo].self, from: Data(result.message.utf8))
+    #expect(regions.count == 2)
+    #expect(regions[0].name == "MIDI Region")
+    #expect(regions[0].trackIndex == 0)
+    #expect(regions[0].startBar == 1)
+    #expect(regions[0].endBar == 2)
+    #expect(regions[0].kind == "midi")
+    #expect(regions[1].name == "Session Player Region")
+    #expect(regions[1].trackIndex == 1)
+    #expect(regions[1].startBar == 9)
+    #expect(regions[1].endBar == 13)
+    #expect(regions[1].kind == "drummer")
+}
+
+@Test func testAccessibilityChannelAXBackedRegionsMissingContentGroupIncludesHint() async {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(950)
+    let window = builder.element(951)
+    let headerRail = builder.element(952)
+    let projectGroup = builder.element(953)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [headerRail, projectGroup])
+
+    builder.setAttribute(headerRail, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(headerRail, kAXDescriptionAttribute as String, "Tracks header")
+
+    builder.setAttribute(projectGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(projectGroup, kAXDescriptionAttribute as String, "Project")
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let result = await channel.execute(operation: "region.get_regions", params: [:])
+
+    #expect(!result.isSuccess)
+    #expect(result.message.contains("Track Content group not found"))
+    #expect(result.message.contains("Tracks header"))
+    #expect(result.message.contains("Recovery hint"))
+}
+
 @Test func testAccessibilityChannelAXBackedTransportDefaultsUseFakeAXTree() async throws {
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(100)

@@ -124,7 +124,7 @@ extension ResourceHandlers {
             if remainder.hasSuffix("/regions") {
                 let indexStr = String(remainder.dropLast("/regions".count))
                 if let index = Int(indexStr) {
-                    return try await readTrackRegions(at: index, cache: cache, uri: uri)
+                    return try await readTrackRegions(at: index, cache: cache, router: router, uri: uri)
                 }
             }
             if let index = Int(remainder) {
@@ -754,7 +754,16 @@ extension ResourceHandlers {
         )
     }
 
-    private static func readTrackRegions(at index: Int, cache: StateCache, uri: String) async throws -> ReadResource.Result {
+    private static func readTrackRegions(
+        at index: Int,
+        cache: StateCache,
+        router: ChannelRouter,
+        uri: String
+    ) async throws -> ReadResource.Result {
+        if case .success(let payload) = await router.route(operation: "region.get_regions"),
+           let liveRegions = try? RegionInfo.decodeToolPayload(payload) {
+            await cache.updateRegions(liveRegions.map { $0.asRegionState() })
+        }
         let regions = await cache.getRegions().filter { $0.trackIndex == index }
         let json = encodeJSON(regions)
         return ReadResource.Result(
