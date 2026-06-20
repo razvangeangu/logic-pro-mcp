@@ -182,7 +182,11 @@ enum LogicProjectFileReader {
         }
         var fields = ParsedFields()
 
-        if let tempo = (plist["BeatsPerMinute"] as? NSNumber)?.doubleValue, tempo > 0 {
+        // `tempo.isFinite` rejects NaN/±Inf so a non-finite BeatsPerMinute never
+        // enters the cache/report. A non-finite Double would make JSONEncoder
+        // throw downstream, which would otherwise surface as a silent encode
+        // fallback rather than honest data.
+        if let tempo = (plist["BeatsPerMinute"] as? NSNumber)?.doubleValue, tempo > 0, tempo.isFinite {
             fields.tempo = tempo
         }
         if let n = (plist["SongSignatureNumerator"] as? NSNumber)?.intValue,

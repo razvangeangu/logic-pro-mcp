@@ -115,6 +115,29 @@ func parseMetaData_zeroSignature_returnsNilTimesig() async throws {
 }
 
 @Test
+func parseMetaData_infiniteTempo_isDropped() async throws {
+    // A non-finite BeatsPerMinute must never enter the cache/report — a +Inf
+    // Double would make JSONEncoder throw downstream. The guard drops it so the
+    // tempo field stays nil and the caller falls back to a safe default.
+    let bundle = try makeProjectBundle(name: "InfTempo", tempo: Double.infinity, trackCount: 2)
+    defer { cleanupBundle(bundle) }
+    let metadata = await LogicProjectFileReader.read(runtime: runtimeForFixture(bundle: bundle))
+    #expect(metadata != nil)
+    #expect(metadata?.tempo == nil)
+    #expect(metadata?.trackCount == 2)
+}
+
+@Test
+func parseMetaData_nanTempo_isDropped() async throws {
+    let bundle = try makeProjectBundle(name: "NaNTempo", tempo: Double.nan, trackCount: 5)
+    defer { cleanupBundle(bundle) }
+    let metadata = await LogicProjectFileReader.read(runtime: runtimeForFixture(bundle: bundle))
+    #expect(metadata != nil)
+    #expect(metadata?.tempo == nil)
+    #expect(metadata?.trackCount == 5)
+}
+
+@Test
 func parseMetaData_corruptBytes_returnsNil() async throws {
     let tmp = FileManager.default.temporaryDirectory
         .appendingPathComponent("logic-mcp-corrupt-\(UUID().uuidString)", isDirectory: true)

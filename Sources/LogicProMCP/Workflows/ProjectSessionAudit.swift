@@ -139,7 +139,6 @@ enum ProjectSessionAudit {
         let soloedIndices: [Int]
         let armedIndices: [Int]
         let unnamedTrackIndices: [Int]
-        let placeholderIndices: [Int]
         let duplicateNames: [DuplicateNameGroup]
 
         enum CodingKeys: String, CodingKey {
@@ -150,7 +149,6 @@ enum ProjectSessionAudit {
             case soloedIndices = "soloed_indices"
             case armedIndices = "armed_indices"
             case unnamedTrackIndices = "unnamed_track_indices"
-            case placeholderIndices = "placeholder_indices"
             case duplicateNames = "duplicate_names"
         }
     }
@@ -267,30 +265,53 @@ enum ProjectSessionAudit {
         let markersFetchedAt: Date
         let channelStrips: [ChannelStripState]
         let mixerFetchedAt: Date
+        /// File-derived track count (MetaData.plist `NumberOfTracks`), read via
+        /// `LogicProjectFileReader` the same way `logic://tracks` synthesises
+        /// placeholder rows. `nil` when no `.logicx` is resolvable. Used only to
+        /// cross-check against the AX-derived `tracks.count` and emit
+        /// `track_readback_gap` when the file says there are more tracks than AX
+        /// surfaced — keeping the audit honest against `logic://tracks`.
+        let fileTrackCount: Int?
     }
 
-    static func buildAudit(cache: StateCache, now: Date = Date()) async -> AuditReport {
+    static func buildAudit(
+        cache: StateCache,
+        now: Date = Date(),
+        fileReader: LogicProjectFileReader.Runtime = .production
+    ) async -> AuditReport {
+        // Read-only cross-check source: the same MetaData.plist track count the
+        // `logic://tracks` resource uses to synthesise placeholder rows. This is
+        // a read; it never mutates the cache or the project.
+        let fileTrackCount = await LogicProjectFileReader.read(runtime: fileReader)?.trackCount
+        // Single atomic hop so the cross-field read cannot tear against a
+        // concurrent poller/dispatcher write.
+        let s = await cache.auditSnapshot()
         let snapshot = Snapshot(
             now: now,
-            hasDocument: await cache.getHasDocument(),
-            axOccluded: await cache.getAXOccluded(),
-            project: await cache.getProject(),
-            projectFetchedAt: await cache.getProjectFetchedAt(),
-            transport: await cache.getTransport(),
-            tracks: await cache.getTracks(),
-            tracksFetchedAt: await cache.getTracksFetchedAt(),
-            regions: await cache.getRegions(),
-            regionsFetchedAt: await cache.getRegionsFetchedAt(),
-            markers: await cache.getMarkers(),
-            markersFetchedAt: await cache.getMarkersFetchedAt(),
-            channelStrips: await cache.getChannelStrips(),
-            mixerFetchedAt: await cache.getMixerFetchedAt()
+            hasDocument: s.hasDocument,
+            axOccluded: s.axOccluded,
+            project: s.project,
+            projectFetchedAt: s.projectFetchedAt,
+            transport: s.transport,
+            tracks: s.tracks,
+            tracksFetchedAt: s.tracksFetchedAt,
+            regions: s.regions,
+            regionsFetchedAt: s.regionsFetchedAt,
+            markers: s.markers,
+            markersFetchedAt: s.markersFetchedAt,
+            channelStrips: s.channelStrips,
+            mixerFetchedAt: s.mixerFetchedAt,
+            fileTrackCount: fileTrackCount
         )
         return buildAudit(snapshot: snapshot)
     }
 
-    static func buildCleanupPlan(cache: StateCache, now: Date = Date()) async -> CleanupPlanReport {
-        let audit = await buildAudit(cache: cache, now: now)
+    static func buildCleanupPlan(
+        cache: StateCache,
+        now: Date = Date(),
+        fileReader: LogicProjectFileReader.Runtime = .production
+    ) async -> CleanupPlanReport {
+        let audit = await buildAudit(cache: cache, now: now, fileReader: fileReader)
         return CleanupPlanReport(
             schema: cleanupPlanSchema,
             sourceAuditSchema: audit.schema,
@@ -318,10 +339,15 @@ enum ProjectSessionAudit {
         )
 
         let duplicateNames = duplicateNameGroups(snapshot.tracks)
+        // Empty-name AX rows only. Placeholder rows (synthesised by the
+        // `logic://tracks` resource from MetaData.plist) never reach the cache
+        // that `buildAudit` consumes, so a `placeholder` filter here is dead;
+        // the file/AX disagreement is surfaced via `track_readback_gap` instead.
+        // Gating strictly on empty names also keeps the rename cleanup step from
+        // ever targeting a file-synthesised index that is not an addressable AX row.
         let unnamed = snapshot.tracks
-            .filter { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || ($0.placeholder ?? false) }
+            .filter { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .map(\.id)
-        let placeholders = snapshot.tracks.filter { $0.placeholder == true }.map(\.id)
         let muted = snapshot.tracks.filter(\.isMuted).map(\.id)
         let soloed = snapshot.tracks.filter(\.isSoloed).map(\.id)
         let armed = snapshot.tracks.filter(\.isArmed).map(\.id)
@@ -335,7 +361,6 @@ enum ProjectSessionAudit {
             soloedIndices: soloed,
             armedIndices: armed,
             unnamedTrackIndices: unnamed,
-            placeholderIndices: placeholders,
             duplicateNames: duplicateNames
         )
 
@@ -461,6 +486,13 @@ enum ProjectSessionAudit {
                 "unavailable"
             ))
         }
+        // File vs AX cross-check: `snapshot.fileTrackCount` is the MetaData.plist
+        // `NumberOfTracks` (same source `logic://tracks` uses to synthesise
+        // placeholder rows), while `tracks.total` is the AX-derived count. When
+        // the file reports more tracks than AX surfaced, the audit must not claim
+        // the session is empty — it must report the readback gap honestly so it
+        // agrees with `logic://tracks` (which shows N placeholder rows).
+        let fileExceedsAX = (snapshot.fileTrackCount ?? 0) > tracks.total
         if snapshot.tracksFetchedAt <= .distantPast {
             findings.append(finding(
                 "track_inventory_unread",
@@ -471,6 +503,18 @@ enum ProjectSessionAudit {
                 nil,
                 ["track_count=\(tracks.total)"],
                 "unavailable"
+            ))
+        } else if fileExceedsAX {
+            let fileCount = snapshot.fileTrackCount ?? 0
+            findings.append(finding(
+                "track_readback_gap",
+                .warn,
+                "tracks",
+                "The project file reports more tracks than Accessibility surfaced; logic://tracks shows file-derived rows the audit could not inspect.",
+                "logic://tracks",
+                nil,
+                ["file_track_count=\(fileCount)", "ax_track_count=\(tracks.total)"],
+                "project_file"
             ))
         } else if tracks.total == 0 {
             findings.append(finding(
@@ -487,7 +531,7 @@ enum ProjectSessionAudit {
         if !tracks.duplicateNames.isEmpty {
             for group in tracks.duplicateNames {
                 findings.append(finding(
-                    "duplicate_track_names_\(slug(group.name))",
+                    "duplicate_track_names_\(slug(group.name))_\(group.indices.map(String.init).joined(separator: "_"))",
                     .warn,
                     "tracks",
                     "Duplicate track name detected: \(group.name).",
@@ -659,6 +703,15 @@ enum ProjectSessionAudit {
         unnamedTrackIndices: [Int],
         emptyTrackIndices: [Int]
     ) -> [CleanupPlanStep] {
+        // Defense-in-depth: turn the advisory "stale track inventory" stop
+        // condition into a structured per-step flag. A mutating rename/solo/arm
+        // step is only executable when there is a confirmed open document AND
+        // the track inventory has actually been read; otherwise it stays a plan
+        // entry the caller must re-read `logic://tracks` before running.
+        let inventoryUsable = snapshot.hasDocument && snapshot.tracksFetchedAt > .distantPast
+        let staleInventoryHint = inventoryUsable
+            ? ""
+            : " Re-read logic://tracks first; track inventory is unread or no document is confirmed open."
         var steps: [CleanupPlanStep] = [
             CleanupPlanStep(
                 id: "read_audit_snapshot",
@@ -679,16 +732,16 @@ enum ProjectSessionAudit {
 
         for group in duplicateNames {
             steps.append(CleanupPlanStep(
-                id: "rename_duplicate_\(slug(group.name))",
+                id: "rename_duplicate_\(slug(group.name))_\(group.indices.map(String.init).joined(separator: "_"))",
                 targetIdentifier: "tracks:\(group.indices.map(String.init).joined(separator: ","))",
                 proposedOperation: "Rename duplicate tracks with explicit user-provided names.",
-                rationale: "Duplicate names make later target selection and handoff ambiguous.",
+                rationale: "Duplicate names make later target selection and handoff ambiguous.\(staleInventoryHint)",
                 riskLevel: .medium,
                 requiredConfirmation: "L1 + explicit new name per track",
                 expectedReadback: "logic://tracks shows unique names for the same indices",
                 rollbackOrRecovery: "Rename each track back to its previous name from the audit evidence.",
                 stopCondition: "Stop on State B/C, stale track inventory, or name readback mismatch.",
-                supportedByCurrentTools: true,
+                supportedByCurrentTools: inventoryUsable,
                 mutatesProject: true,
                 tool: "logic_tracks",
                 command: "rename"
@@ -700,13 +753,13 @@ enum ProjectSessionAudit {
                 id: "rename_unnamed_or_placeholder_tracks",
                 targetIdentifier: "tracks:\(unnamedTrackIndices.map(String.init).joined(separator: ","))",
                 proposedOperation: "Rename unnamed or placeholder tracks with explicit user-provided names.",
-                rationale: "Placeholder track names are unsafe targets for later automated operations.",
+                rationale: "Placeholder track names are unsafe targets for later automated operations.\(staleInventoryHint)",
                 riskLevel: .medium,
                 requiredConfirmation: "L1 + explicit new name per track",
                 expectedReadback: "logic://tracks shows non-empty, non-placeholder names",
                 rollbackOrRecovery: "Rename each track back to its previous name from audit evidence.",
                 stopCondition: "Stop on State B/C, stale track inventory, or name readback mismatch.",
-                supportedByCurrentTools: true,
+                supportedByCurrentTools: inventoryUsable,
                 mutatesProject: true,
                 tool: "logic_tracks",
                 command: "rename"
@@ -738,7 +791,8 @@ enum ProjectSessionAudit {
                 target: soloed,
                 operation: "Set solo=false for explicitly confirmed tracks.",
                 command: "solo",
-                rationale: "Soloed tracks can alter export/handoff readiness."
+                rationale: "Soloed tracks can alter export/handoff readiness.\(staleInventoryHint)",
+                supportedByCurrentTools: inventoryUsable
             ))
         }
 
@@ -749,7 +803,8 @@ enum ProjectSessionAudit {
                 target: armed,
                 operation: "Set arm=false for explicitly confirmed tracks.",
                 command: "arm",
-                rationale: "Record-armed tracks should not be left armed before cleanup or export."
+                rationale: "Record-armed tracks should not be left armed before cleanup or export.\(staleInventoryHint)",
+                supportedByCurrentTools: inventoryUsable
             ))
         }
 
@@ -797,7 +852,8 @@ enum ProjectSessionAudit {
         target: [Int],
         operation: String,
         command: String,
-        rationale: String
+        rationale: String,
+        supportedByCurrentTools: Bool
     ) -> CleanupPlanStep {
         CleanupPlanStep(
             id: id,
@@ -809,7 +865,7 @@ enum ProjectSessionAudit {
             expectedReadback: "logic://tracks shows \(command)=false for the same indices",
             rollbackOrRecovery: "Restore previous state from audit evidence if the change was not intended.",
             stopCondition: "Stop on State B/C, stale track inventory, or readback mismatch.",
-            supportedByCurrentTools: true,
+            supportedByCurrentTools: supportedByCurrentTools,
             mutatesProject: true,
             tool: "logic_tracks",
             command: command

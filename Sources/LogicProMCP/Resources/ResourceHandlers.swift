@@ -805,14 +805,24 @@ extension ResourceHandlers {
 
     private static func readProjectAudit(cache: StateCache, uri: String) async throws -> ReadResource.Result {
         let report = await ProjectSessionAudit.buildAudit(cache: cache)
-        let json = encodeJSON(report, compact: true)
-        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+        // Honest Contract: never emit a success-shaped body that is missing the
+        // schema/read_only contract fields. On encode failure, fail loud.
+        do {
+            let json = try encodeJSONStrict(report, compact: true)
+            return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+        } catch {
+            throw MCPError.internalError("audit encode failed: \(error.localizedDescription)")
+        }
     }
 
     private static func readProjectCleanupPlan(cache: StateCache, uri: String) async throws -> ReadResource.Result {
         let report = await ProjectSessionAudit.buildCleanupPlan(cache: cache)
-        let json = encodeJSON(report, compact: true)
-        return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+        do {
+            let json = try encodeJSONStrict(report, compact: true)
+            return ReadResource.Result(contents: [.text(json, uri: uri, mimeType: "application/json")])
+        } catch {
+            throw MCPError.internalError("cleanup_plan encode failed: \(error.localizedDescription)")
+        }
     }
 
     private static func readTrackRegions(

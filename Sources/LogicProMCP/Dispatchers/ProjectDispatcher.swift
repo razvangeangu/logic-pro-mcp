@@ -189,11 +189,27 @@ struct ProjectDispatcher {
 
         case "audit":
             let report = await ProjectSessionAudit.buildAudit(cache: cache)
-            return toolTextResult(encodeJSON(report, compact: true))
+            do {
+                return toolTextResult(try encodeJSONStrict(report, compact: true))
+            } catch {
+                // Honest Contract: a serialization failure must NOT be returned
+                // as a success-shaped body. Fail loud with isError=true.
+                return toolTextResult(
+                    "{\"error\":\"audit encode failed: \(jsonStringEscape(error.localizedDescription))\"}",
+                    isError: true
+                )
+            }
 
         case "cleanup_plan":
             let report = await ProjectSessionAudit.buildCleanupPlan(cache: cache)
-            return toolTextResult(encodeJSON(report, compact: true))
+            do {
+                return toolTextResult(try encodeJSONStrict(report, compact: true))
+            } catch {
+                return toolTextResult(
+                    "{\"error\":\"cleanup_plan encode failed: \(jsonStringEscape(error.localizedDescription))\"}",
+                    isError: true
+                )
+            }
 
         case "launch":
             if isLogicProRunning() {
