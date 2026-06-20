@@ -43,7 +43,8 @@ struct ProjectExportPlannerTests {
 
         let artifacts = try #require(plan.projects.first?.expectedArtifacts)
         #expect(artifacts.map(\.kind) == ["bounce", "stem"])
-        #expect(artifacts.first?.path.hasSuffix("/Planner-Song-bounce.wav") == true)
+        let firstArtifact = try #require(artifacts.first)
+        #expect(firstArtifact.path.hasSuffix("/Planner-Song-bounce.wav"))
         #expect(artifacts.allSatisfy { $0.verification.pathUnderOutputRoot })
         #expect(artifacts.allSatisfy { $0.status == "pending" })
 

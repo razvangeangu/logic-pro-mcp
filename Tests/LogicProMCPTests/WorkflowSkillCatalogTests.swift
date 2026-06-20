@@ -292,7 +292,7 @@ struct WorkflowSkillCatalogTests {
     }
 
     @Test("default workflow pack validates and stays honest about unresolved dependencies")
-    func defaultPackValidates() {
+    func defaultPackValidates() throws {
         let snapshot = WorkflowSkillCatalog.defaultSnapshot()
 
         #expect(snapshot.schemaVersion == 1)
@@ -323,11 +323,11 @@ struct WorkflowSkillCatalogTests {
         #expect(readiness?.dependenciesResolved == true)
         #expect(readiness?.unresolvedResources == nil)
 
-        let exportPlan = snapshot.workflows.first { $0.id == "logic.workflow.export.batch_plan" }
-        #expect(exportPlan?.mutationKind == .readOnly)
-        #expect(exportPlan?.productionReady == true)
-        #expect(exportPlan?.evidenceLevel == .deterministic)
-        #expect(exportPlan?.steps.contains { $0.tool == "logic_project" && $0.command == "export_plan" } == true)
+        let exportPlan = try #require(snapshot.workflows.first { $0.id == "logic.workflow.export.batch_plan" })
+        #expect(exportPlan.mutationKind == .readOnly)
+        #expect(exportPlan.productionReady)
+        #expect(exportPlan.evidenceLevel == .deterministic)
+        #expect(exportPlan.steps.contains { $0.tool == "logic_project" && $0.command == "export_plan" })
     }
 
     @Test("default workflows declare required fields that match served top-level resource shapes")
@@ -502,9 +502,10 @@ struct WorkflowSkillResourceTests {
         } == true)
 
         let exportSearch = try await workflowResourceObject("logic://workflow-skills/search?query=export")
-        #expect((exportSearch["workflows"] as? [[String: Any]])?.contains {
+        let exportWorkflows = try #require(exportSearch["workflows"] as? [[String: Any]])
+        #expect(exportWorkflows.contains {
             $0["id"] as? String == "logic.workflow.export.batch_plan"
-        } == true)
+        })
 
         let schema = try await workflowResourceObject("logic://workflow-skills/schema")
         #expect((schema["fields"] as? [String])?.contains("state_checks") == true)

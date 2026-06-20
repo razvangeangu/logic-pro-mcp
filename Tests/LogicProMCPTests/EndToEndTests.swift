@@ -591,7 +591,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(json["project_count"] as? Int == 1)
     let projects = try #require(json["projects"] as? [[String: Any]])
     let steps = try #require(projects.first?["workflow_steps"] as? [[String: Any]])
-    #expect(steps.allSatisfy { $0["executed"] as? Bool == false })
+    #expect(steps.allSatisfy { ($0["executed"] as? Bool) == .some(false) })
 }
 
 @Test func testE2EProjectUnknownCommandFails() async {
