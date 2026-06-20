@@ -272,6 +272,7 @@ struct WorkflowSkillCatalogTests {
             "logic://mixer/{strip}",
             "logic://stock-plugins/{id}",
             "logic://stock-plugins/search?query={query}",
+            "logic://workflow-plans/session?prompt={prompt}",
         ]
 
         #expect(WorkflowSkillCatalog.resourceRefResolves("logic://mixer/{strip}", staticURIs: [], templateURIs: templates))
@@ -279,9 +280,11 @@ struct WorkflowSkillCatalogTests {
         #expect(WorkflowSkillCatalog.resourceRefResolves("logic://tracks/0/regions", staticURIs: [], templateURIs: templates))
         #expect(WorkflowSkillCatalog.resourceRefResolves("logic://stock-plugins/logic.stock.effect.gain", staticURIs: [], templateURIs: templates))
         #expect(WorkflowSkillCatalog.resourceRefResolves("logic://stock-plugins/search?query=reverb", staticURIs: [], templateURIs: templates))
+        #expect(WorkflowSkillCatalog.resourceRefResolves("logic://workflow-plans/session?prompt=16-bar-funk", staticURIs: [], templateURIs: templates))
         #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://stock-plugins", staticURIs: [], templateURIs: templates))
         #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://mixer/3/extra", staticURIs: [], templateURIs: templates))
         #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://stock-plugins/search?other=x", staticURIs: [], templateURIs: templates))
+        #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://workflow-plans/session?other=x", staticURIs: [], templateURIs: templates))
         #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://mixer/3/", staticURIs: [], templateURIs: templates),
                 "trailing slash must fail closed")
         #expect(!WorkflowSkillCatalog.resourceRefResolves("logic://mixer//3", staticURIs: [], templateURIs: templates),
@@ -352,6 +355,11 @@ struct WorkflowSkillCatalogTests {
         #expect(try! stepFields(guardedInsert, "read_gain_catalog") == ["entry", "validation"])
         #expect(try! stepFields(guardedInsert, "read_mixer_slots") == ["strips", "data_source"])
         #expect(try! stepFields(guardedInsert, "read_strip_after_insert") == ["strip"])
+
+        let sessionPlan = try! workflow("logic.workflow.composition.session_plan")
+        #expect(try! stepFields(sessionPlan, "read_session_plan") == ["schema", "parsed_intent", "sections", "chord_plan", "track_plan", "workflow_steps"])
+        #expect(sessionPlan.mutationKind == .readOnly)
+        #expect(sessionPlan.productionReady == true)
     }
 
     @Test("dependencies resolve once the stock plugin surface exists")
@@ -490,6 +498,11 @@ struct WorkflowSkillResourceTests {
         } == true)
         #expect((search["workflows"] as? [[String: Any]])?.contains {
             $0["id"] as? String == "logic.workflow.plugins.stock_insert_gain_live_verified"
+        } == true)
+
+        let compositionSearch = try await workflowResourceObject("logic://workflow-skills/search?query=session")
+        #expect((compositionSearch["workflows"] as? [[String: Any]])?.contains {
+            $0["id"] as? String == "logic.workflow.composition.session_plan"
         } == true)
 
         let schema = try await workflowResourceObject("logic://workflow-skills/schema")

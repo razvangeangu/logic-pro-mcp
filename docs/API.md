@@ -1,6 +1,6 @@
 # API Reference
 
-Complete schema for Logic Pro MCP server. The server exposes **9 tools**, **14 resources**, and **7 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
+Complete schema for Logic Pro MCP server. The server exposes **9 tools**, **14 resources**, and **8 resource templates** over MCP JSON-RPC (stdio transport). `logic://mcu/state` is filtered out of `resources/list` when the MCU control surface is disconnected.
 
 **Design principle:** Tools perform write/action operations. **Reads are exposed exclusively through resources** — use `resources/read` for state queries, not tool calls.
 
@@ -31,7 +31,7 @@ All tool invocations use:
 
 ## Resource Catalog (Read-only)
 
-**14 static resources + 7 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
+**14 static resources + 8 templates.** `logic://mcu/state` is filtered from `resources/list` when the MCU control surface is disconnected, but direct `resources/read` still works for bookmarked clients.
 
 | URI | Content | Source |
 |-----|---------|--------|
@@ -54,6 +54,7 @@ All tool invocations use:
 | `logic://mixer/{strip}` | `{ cache_age_sec, fetched_at, data_source, strip: ChannelStripState }` | Cache — template |
 | `logic://stock-plugins/{id}` | Single stock plugin catalog entry by stable ID | Static catalog + local Logic app census — template |
 | `logic://stock-plugins/search?query={query}` | Search stock plugin catalog entries | Static catalog + local Logic app census — template |
+| `logic://workflow-plans/session?prompt={prompt}` | Planning-only composition/session dry-run plan from a natural-language musical prompt | Static parser + public command census — template |
 | `logic://workflow-skills/{id}` | Single workflow skill by stable ID | Static validated pack — template |
 | `logic://workflow-skills/search?query={query}` | Search workflow skills | Static validated pack — template |
 
@@ -81,6 +82,18 @@ The production census can only produce `inferred` and `manifested` (see `product
 `known_presets` stays empty unless preset names have provenance. For `manifested` entries it lists factory preset filenames harvested from the probed settings folder (capped at `preset_name_cap`, currently 12; the full set remains on disk at the provenance `source_path`).
 
 Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Insert paths are menu hints unless their own state says otherwise. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced. Entries with `safe_write_capabilities: "insert_only"` (Gain, Compressor, Channel EQ) match the `logic_plugins.insert_verified` allowlist for the v3.6.0 release line; everything else is discovery-only.
+
+### Planning-Only Session Plans
+
+`logic://workflow-plans/session?prompt={prompt}` converts a musical prompt into a structured dry-run plan. It never calls tools, creates projects, creates tracks, imports MIDI, or mutates Logic. Every proposed tool step carries `executed:false`, `mutates`, expected readback fields, and confirmation metadata when mutation would be required later.
+
+Returned fields include `schema: "logic_pro_mcp_session_plan.v1"`, `parsed_intent`, `sections`, `chord_plan`, `track_plan`, `workflow_steps`, `unsupported_or_risky_steps`, `required_confirmations`, `tool_surface_validation`, and `next_safe_action: "review_plan"`. Musical decisions are prompt-derived or heuristic and are not verified truth.
+
+Examples:
+
+- `logic://workflow-plans/session?prompt=16-bar%20funk%20in%20E%20minor%20at%20110%20BPM%20with%20drums%2C%20bass%2C%20guitar%2C%20and%20keys`
+- `logic://workflow-plans/session?prompt=32-bar%20cinematic%20cue%20in%20D%20minor%20with%20strings%2C%20brass%2C%20and%20percussion`
+- `logic://workflow-plans/session?prompt=8-bar%20lo-fi%20loop%20at%2075%20BPM%20in%20Bb%20major`
 
 ### Workflow Skills
 

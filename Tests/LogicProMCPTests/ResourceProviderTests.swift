@@ -40,6 +40,7 @@ struct ResourceProviderTests {
         #expect(uris.contains("logic://mixer/{strip}"))
         #expect(uris.contains("logic://stock-plugins/{id}"))
         #expect(uris.contains("logic://stock-plugins/search?query={query}"))
+        #expect(uris.contains("logic://workflow-plans/session?prompt={prompt}"))
         #expect(uris.contains("logic://workflow-skills/{id}"))
         #expect(uris.contains("logic://workflow-skills/search?query={query}"))
     }
@@ -71,6 +72,7 @@ struct ResourceProviderTests {
             "logic://tracks/0",
             "logic://tracks/0/regions",
             "logic://mixer/0",
+            "logic://workflow-plans/session?prompt=16-bar%20funk%20in%20E%20minor%20at%20110%20BPM",
         ]
         for uri in probes {
             do {

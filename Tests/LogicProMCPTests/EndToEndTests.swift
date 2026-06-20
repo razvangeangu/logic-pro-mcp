@@ -780,6 +780,17 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect((schemaJSON?["evidence_levels"] as? [String])?.contains("live_verified") == true)
 }
 
+@Test func testE2EResourceSessionPlanIsDryRunOnly() async throws {
+    let h = await makeE2EHandlers()
+    let plan = try await h.readResource(.init(uri: "logic://workflow-plans/session?prompt=16-bar%20funk%20in%20E%20minor%20at%20110%20BPM%20with%20drums%2C%20bass%2C%20guitar%2C%20and%20keys"))
+
+    let json = e2eJSON(e2eResourceText(plan))
+    #expect(json?["schema"] as? String == SessionPlanGenerator.schema)
+    #expect(json?["execution_mode"] as? String == "dry_run_only")
+    #expect((json?["parsed_intent"] as? [String: Any])?["tempo_bpm"] as? Int == 110)
+    #expect((json?["workflow_steps"] as? [[String: Any]])?.allSatisfy { $0["executed"] as? Bool == false } == true)
+}
+
 @Test func testE2EResourceHealthMatchesToolHealth() async throws {
     let h = await makeE2EHandlers()
     let resourceResult = try await h.readResource(.init(uri: "logic://system/health"))
@@ -860,6 +871,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         "logic://mixer/{strip}",
         "logic://stock-plugins/{id}",
         "logic://stock-plugins/search?query={query}",
+        "logic://workflow-plans/session?prompt={prompt}",
         "logic://workflow-skills/{id}",
         "logic://workflow-skills/search?query={query}",
     ]
