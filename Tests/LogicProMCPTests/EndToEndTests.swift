@@ -809,6 +809,28 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect((schemaJSON?["evidence_levels"] as? [String])?.contains("live_verified") == true)
 }
 
+@Test func testE2EResourceStockInstrumentsExposeProvenance() async throws {
+    let h = await makeE2EHandlers()
+    let instruments = try await h.readResource(.init(uri: "logic://stock-instruments"))
+    let detail = try await h.readResource(.init(uri: "logic://stock-instruments/logic.stock.instrument.alchemy"))
+    let search = try await h.readResource(.init(uri: "logic://stock-instruments/search?query=sampler"))
+    let sessions = try await h.readResource(.init(uri: "logic://session-players/logic.session_player.drummer"))
+
+    let instrumentsJSON = e2eJSON(e2eResourceText(instruments))
+    let detailJSON = e2eJSON(e2eResourceText(detail))
+    let searchJSON = e2eJSON(e2eResourceText(search))
+    let sessionJSON = e2eJSON(e2eResourceText(sessions))
+    #expect(instrumentsJSON?["catalog_kind"] as? String == "stock_instruments")
+    let validation = try #require(instrumentsJSON?["validation"] as? [String: Any])
+    #expect(try #require(validation["is_valid"] as? Bool))
+    let detailEntry = try #require(detailJSON?["entry"] as? [String: Any])
+    let provenance = try #require(detailEntry["provenance"] as? [[String: Any]])
+    #expect(!provenance.isEmpty)
+    let searchEntries = try #require(searchJSON?["entries"] as? [[String: Any]])
+    #expect(searchEntries.contains { $0["id"] as? String == "logic.stock.instrument.sampler" })
+    #expect((sessionJSON?["entry"] as? [String: Any])?["kind"] as? String == "drummer")
+}
+
 @Test func testE2EResourceHealthMatchesToolHealth() async throws {
     let h = await makeE2EHandlers()
     let resourceResult = try await h.readResource(.init(uri: "logic://system/health"))
@@ -877,6 +899,8 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         "logic://stock-plugins",
         "logic://stock-plugins/census",
         "logic://stock-plugins/capabilities",
+        "logic://stock-instruments",
+        "logic://session-players",
         "logic://workflow-skills",
         "logic://workflow-skills/schema",
     ]
@@ -891,6 +915,9 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         "logic://mixer/{strip}",
         "logic://stock-plugins/{id}",
         "logic://stock-plugins/search?query={query}",
+        "logic://stock-instruments/{id}",
+        "logic://stock-instruments/search?query={query}",
+        "logic://session-players/{id}",
         "logic://workflow-skills/{id}",
         "logic://workflow-skills/search?query={query}",
     ]

@@ -125,7 +125,7 @@ struct ServerRuntimePlan: @unchecked Sendable {
 }
 
 /// Main MCP server for Logic Pro integration.
-/// Exposes 10 dispatcher tools + 16 resources + 7 templates, routing through
+/// Exposes 10 dispatcher tools + 18 resources + 10 templates, routing through
 /// the ChannelRouter to the appropriate macOS communication channel.
 actor LogicProServer {
     private let server: Server
@@ -287,7 +287,7 @@ actor LogicProServer {
         }
     }
 
-    // MARK: - Resource Registration (16 resources + 7 templates)
+    // MARK: - Resource Registration (18 resources + 10 templates)
 
     private func registerResources() async {
         let handlers = makeHandlers()

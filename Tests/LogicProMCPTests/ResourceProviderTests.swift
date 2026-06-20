@@ -20,7 +20,7 @@ struct ResourceProviderTests {
         #expect(uris.count == Set(uris).count, "Duplicate template URI: \(uris)")
     }
 
-    @Test("new resources are registered: markers, mcu/state, library/inventory, stock plugins, workflow skills")
+    @Test("new resources are registered: markers, mcu/state, library/inventory, catalogs, workflow skills")
     func newResourcesRegistered() {
         let uris = Set(ResourceProvider.resources.map(\.uri))
         #expect(uris.contains("logic://markers"))
@@ -29,6 +29,8 @@ struct ResourceProviderTests {
         #expect(uris.contains("logic://stock-plugins"))
         #expect(uris.contains("logic://stock-plugins/census"))
         #expect(uris.contains("logic://stock-plugins/capabilities"))
+        #expect(uris.contains("logic://stock-instruments"))
+        #expect(uris.contains("logic://session-players"))
         #expect(uris.contains("logic://workflow-skills"))
         #expect(uris.contains("logic://workflow-skills/schema"))
         #expect(uris.contains("logic://project/audit"))
@@ -42,6 +44,9 @@ struct ResourceProviderTests {
         #expect(uris.contains("logic://mixer/{strip}"))
         #expect(uris.contains("logic://stock-plugins/{id}"))
         #expect(uris.contains("logic://stock-plugins/search?query={query}"))
+        #expect(uris.contains("logic://stock-instruments/{id}"))
+        #expect(uris.contains("logic://stock-instruments/search?query={query}"))
+        #expect(uris.contains("logic://session-players/{id}"))
         #expect(uris.contains("logic://workflow-skills/{id}"))
         #expect(uris.contains("logic://workflow-skills/search?query={query}"))
     }
@@ -73,6 +78,13 @@ struct ResourceProviderTests {
             "logic://tracks/0",
             "logic://tracks/0/regions",
             "logic://mixer/0",
+            "logic://stock-plugins/logic.stock.effect.gain",
+            "logic://stock-plugins/search?query=gain",
+            "logic://stock-instruments/logic.stock.instrument.alchemy",
+            "logic://stock-instruments/search?query=sampler",
+            "logic://session-players/logic.session_player.drummer",
+            "logic://workflow-skills/logic.workflow.plugins.stock_chain_plan",
+            "logic://workflow-skills/search?query=plugin",
         ]
         for uri in probes {
             do {

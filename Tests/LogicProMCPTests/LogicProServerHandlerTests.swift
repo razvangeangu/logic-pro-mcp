@@ -44,6 +44,8 @@ private let serverResourceText = sharedResourceText
         "logic://stock-plugins",
         "logic://stock-plugins/census",
         "logic://stock-plugins/capabilities",
+        "logic://stock-instruments",
+        "logic://session-players",
         "logic://workflow-skills",
         "logic://workflow-skills/schema",
     ]
@@ -56,6 +58,9 @@ private let serverResourceText = sharedResourceText
         "logic://mixer/{strip}",
         "logic://stock-plugins/{id}",
         "logic://stock-plugins/search?query={query}",
+        "logic://stock-instruments/{id}",
+        "logic://stock-instruments/search?query={query}",
+        "logic://session-players/{id}",
         "logic://workflow-skills/{id}",
         "logic://workflow-skills/search?query={query}",
     ]
@@ -272,6 +277,8 @@ private let serverResourceText = sharedResourceText
         "logic://stock-plugins",
         "logic://stock-plugins/census",
         "logic://stock-plugins/capabilities",
+        "logic://stock-instruments",
+        "logic://session-players",
         "logic://workflow-skills",
         "logic://workflow-skills/schema",
     ]
