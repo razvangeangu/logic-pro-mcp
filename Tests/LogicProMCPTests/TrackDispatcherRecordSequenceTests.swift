@@ -44,6 +44,58 @@ private func minimalNoteSpec() -> Value {
     .string("60,0,500,100,1")
 }
 
+private final class SequentialIntBox: @unchecked Sendable {
+    private var values: [Int]
+
+    init(_ values: [Int]) {
+        self.values = values
+    }
+
+    func next() -> Int {
+        guard !values.isEmpty else { return 0 }
+        if values.count == 1 { return values[0] }
+        return values.removeFirst()
+    }
+}
+
+private final class SequentialRegionReadBox: @unchecked Sendable {
+    private var values: [TrackDispatcher.RecordSequenceRegionReadback]
+
+    init(_ values: [TrackDispatcher.RecordSequenceRegionReadback]) {
+        self.values = values
+    }
+
+    func next() -> TrackDispatcher.RecordSequenceRegionReadback {
+        guard !values.isEmpty else { return .success([]) }
+        if values.count == 1 { return values[0] }
+        return values.removeFirst()
+    }
+}
+
+private func makeRegion(
+    name: String = "Imported Idea",
+    trackIndex: Int,
+    startBar: Int,
+    endBar: Int,
+    kind: String = "midi",
+    rawHelp: String? = nil
+) -> RegionInfo {
+    RegionInfo(
+        name: name,
+        trackIndex: trackIndex,
+        startBar: startBar,
+        endBar: endBar,
+        kind: kind,
+        rawHelp: rawHelp
+    )
+}
+
+private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any] {
+    let text = sharedToolText(result)
+    let data = Data(text.utf8)
+    return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+}
+
 @Test func testRecordSequenceUsesLiveAXNotCache() async {
     // Pre-fill the cache with 2 tracks so that under the OLD cache-poll
     // verification, `tracksBefore = 2` and `tracksAfter` would also stay 2
@@ -125,4 +177,152 @@ private func minimalNoteSpec() -> Value {
         text.contains("midi.import_file"),
         "import-failure path must surface the import handler error, got: \(text)"
     )
+}
+
+@Test func testRecordSequenceReturnsVerifiedRegionReadbackPayload() async {
+    let cache = StateCache()
+    await cache.updateDocumentState(true)
+
+    let router = ChannelRouter()
+    let ax = RecordingMockChannel(id: .accessibility, importResult: .success("imported"))
+    await router.register(ax)
+
+    let trackCounts = SequentialIntBox([1, 2])
+    let regionReads = SequentialRegionReadBox([
+        .success([]),
+        .success([makeRegion(trackIndex: 1, startBar: 1, endBar: 2)]),
+    ])
+
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
+        params: [
+            "notes": minimalNoteSpec(),
+            "bar": .int(1),
+        ],
+        router: router,
+        cache: cache,
+        trackHeaderCount: { trackCounts.next() },
+        trackNameAt: { $0 == 1 ? "Imported Piano" : nil },
+        readRegions: { regionReads.next() },
+        settleReadback: {}
+    )
+
+    #expect(result.isError == false)
+    let object = recordSequenceJSONObject(result)
+    #expect(object["success"] as? Bool == true)
+    #expect(object["verified"] as? Bool == true)
+    #expect(object["created_track"] as? Int == 1)
+    #expect(object["recorded_to_track"] as? Int == 1)
+    #expect(object["target_track_index"] as? Int == 1)
+    #expect(object["target_track_name"] as? String == "Imported Piano")
+    #expect(object["region_name"] as? String == "Imported Idea")
+    #expect(object["start_bar"] as? Int == 1)
+    #expect(object["end_bar"] as? Int == 2)
+    #expect(object["note_count"] as? Int == 1)
+    #expect(object["verify_source"] as? String == "ax_region_delta")
+}
+
+@Test func testRecordSequenceDistinguishesWrongTrackImport() async {
+    let cache = StateCache()
+    await cache.updateDocumentState(true)
+
+    let router = ChannelRouter()
+    let ax = RecordingMockChannel(id: .accessibility, importResult: .success("imported"))
+    await router.register(ax)
+
+    let trackCounts = SequentialIntBox([1, 2])
+    let regionReads = SequentialRegionReadBox([
+        .success([]),
+        .success([makeRegion(trackIndex: 0, startBar: 1, endBar: 2)]),
+    ])
+
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
+        params: [
+            "notes": minimalNoteSpec(),
+            "bar": .int(1),
+        ],
+        router: router,
+        cache: cache,
+        trackHeaderCount: { trackCounts.next() },
+        trackNameAt: { $0 == 1 ? "Imported Piano" : nil },
+        readRegions: { regionReads.next() },
+        settleReadback: {}
+    )
+
+    #expect(result.isError == true)
+    let object = recordSequenceJSONObject(result)
+    #expect(object["error"] as? String == "wrong_track_import")
+    #expect(object["target_track_index"] as? Int == 1)
+    #expect(object["observed_track_index"] as? Int == 0)
+    #expect(object["observed_region_name"] as? String == "Imported Idea")
+}
+
+@Test func testRecordSequenceDistinguishesTimingMismatch() async {
+    let cache = StateCache()
+    await cache.updateDocumentState(true)
+
+    let router = ChannelRouter()
+    let ax = RecordingMockChannel(id: .accessibility, importResult: .success("imported"))
+    await router.register(ax)
+
+    let trackCounts = SequentialIntBox([1, 2])
+    let regionReads = SequentialRegionReadBox([
+        .success([]),
+        .success([makeRegion(trackIndex: 1, startBar: 1, endBar: 3)]),
+    ])
+
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
+        params: [
+            "notes": minimalNoteSpec(),
+            "bar": .int(1),
+        ],
+        router: router,
+        cache: cache,
+        trackHeaderCount: { trackCounts.next() },
+        trackNameAt: { $0 == 1 ? "Imported Piano" : nil },
+        readRegions: { regionReads.next() },
+        settleReadback: {}
+    )
+
+    #expect(result.isError == true)
+    let object = recordSequenceJSONObject(result)
+    #expect(object["error"] as? String == "timing_mismatch")
+    #expect(object["region_name"] as? String == "Imported Idea")
+    #expect(object["start_bar"] as? Int == 1)
+    #expect(object["end_bar"] as? Int == 3)
+    #expect(object["expected_end_bar"] as? Int == 2)
+}
+
+@Test func testRecordSequenceDistinguishesUnreadableReadback() async {
+    let cache = StateCache()
+    await cache.updateDocumentState(true)
+
+    let router = ChannelRouter()
+    let ax = RecordingMockChannel(id: .accessibility, importResult: .success("imported"))
+    await router.register(ax)
+
+    let trackCounts = SequentialIntBox([1, 2])
+    let regionReads = SequentialRegionReadBox([
+        .success([]),
+        .success([makeRegion(trackIndex: 1, startBar: -1, endBar: -1, rawHelp: "MIDI Region")]),
+    ])
+
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
+        params: [
+            "notes": minimalNoteSpec(),
+            "bar": .int(1),
+        ],
+        router: router,
+        cache: cache,
+        trackHeaderCount: { trackCounts.next() },
+        trackNameAt: { $0 == 1 ? "Imported Piano" : nil },
+        readRegions: { regionReads.next() },
+        settleReadback: {}
+    )
+
+    #expect(result.isError == true)
+    let object = recordSequenceJSONObject(result)
+    #expect(object["error"] as? String == "unreadable_readback")
+    #expect(object["region_name"] as? String == "Imported Idea")
+    #expect(object["start_bar"] as? Int == -1)
+    #expect(object["end_bar"] as? Int == -1)
 }

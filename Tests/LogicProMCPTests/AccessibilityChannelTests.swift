@@ -545,6 +545,99 @@ private func makeSetInstrumentFixture() -> (
     #expect(result.message.contains("Recovery hint"))
 }
 
+@Test func testAccessibilityChannelAXBackedRegionReadAcceptsPluralTracksContentsLabel() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(70)
+    let window = builder.element(71)
+    let headerRail = builder.element(72)
+    let trackHeader = builder.element(73)
+    let contentGroup = builder.element(74)
+    let region = builder.element(75)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [headerRail, contentGroup])
+
+    builder.setAttribute(headerRail, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(headerRail, kAXDescriptionAttribute as String, "Tracks header")
+    builder.setChildren(headerRail, [trackHeader])
+
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(trackHeader, kAXPositionAttribute as String, axPoint(0, 100))
+    builder.setAttribute(trackHeader, kAXSizeAttribute as String, axSize(200, 40))
+
+    builder.setAttribute(contentGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(contentGroup, kAXDescriptionAttribute as String, "Tracks contents")
+    builder.setChildren(contentGroup, [region])
+
+    builder.setAttribute(region, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(region, kAXDescriptionAttribute as String, "Imported Idea")
+    builder.setAttribute(region, kAXHelpAttribute as String, "Region starts at bar 1 and ends at bar 2, MIDI region.")
+    builder.setAttribute(region, kAXPositionAttribute as String, axPoint(240, 108))
+    builder.setAttribute(region, kAXSizeAttribute as String, axSize(320, 24))
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let result = await channel.execute(operation: "region.get_regions", params: [:])
+
+    #expect(result.isSuccess)
+
+    let regions = try JSONDecoder().decode([RegionInfo].self, from: Data(result.message.utf8))
+    #expect(regions.count == 1)
+    #expect(regions[0].name == "Imported Idea")
+    #expect(regions[0].trackIndex == 0)
+    #expect(regions[0].startBar == 1)
+    #expect(regions[0].endBar == 2)
+    #expect(regions[0].kind == "midi")
+}
+
+@Test func testAccessibilityChannelAXBackedRegionReadAcceptsNumericBeforeBarEnglishHelp() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(76)
+    let window = builder.element(77)
+    let headerRail = builder.element(78)
+    let trackHeader = builder.element(79)
+    let contentGroup = builder.element(80)
+    let region = builder.element(81)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [headerRail, contentGroup])
+
+    builder.setAttribute(headerRail, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(headerRail, kAXDescriptionAttribute as String, "Tracks header")
+    builder.setChildren(headerRail, [trackHeader])
+
+    builder.setAttribute(trackHeader, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(trackHeader, kAXPositionAttribute as String, axPoint(0, 100))
+    builder.setAttribute(trackHeader, kAXSizeAttribute as String, axSize(200, 40))
+
+    builder.setAttribute(contentGroup, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(contentGroup, kAXDescriptionAttribute as String, "Tracks contents")
+    builder.setChildren(contentGroup, [region])
+
+    builder.setAttribute(region, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    builder.setAttribute(region, kAXDescriptionAttribute as String, "Imported Idea")
+    builder.setAttribute(
+        region,
+        kAXHelpAttribute as String,
+        "Region starts at 1 bar  and ends at 2 bars , MIDI region."
+    )
+    builder.setAttribute(region, kAXPositionAttribute as String, axPoint(240, 108))
+    builder.setAttribute(region, kAXSizeAttribute as String, axSize(320, 24))
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let result = await channel.execute(operation: "region.get_regions", params: [:])
+
+    #expect(result.isSuccess)
+
+    let regions = try JSONDecoder().decode([RegionInfo].self, from: Data(result.message.utf8))
+    #expect(regions.count == 1)
+    #expect(regions[0].name == "Imported Idea")
+    #expect(regions[0].trackIndex == 0)
+    #expect(regions[0].startBar == 1)
+    #expect(regions[0].endBar == 2)
+    #expect(regions[0].kind == "midi")
+}
+}
+
 @Test func testAccessibilityChannelAXBackedTransportDefaultsUseFakeAXTree() async throws {
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(100)

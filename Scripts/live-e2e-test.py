@@ -1183,6 +1183,42 @@ def main():
     r = call_tool(client, "logic_tracks", "scan_plugin_presets", {"submenuOpenDelayMs": 300})
     T("track.scan_plugin_presets returns content or guidance", r, lambda _: len(tool_text(r)) > 0)
 
+    r = call_tool(client, "logic_tracks", "record_sequence", {
+        "bar": 1,
+        "notes": "60,0,500,100,1",
+    })
+    record_sequence_text = tool_text(r)
+    record_sequence_json = safe_json(record_sequence_text)
+    T_LIVE(
+        "track.record_sequence verifies imported region or returns structured readback failure",
+        r,
+        lambda _: (
+            isinstance(record_sequence_json, dict)
+            and record_sequence_json.get("success") is True
+            and record_sequence_json.get("verified") is True
+            and isinstance(record_sequence_json.get("created_track"), int)
+            and isinstance(record_sequence_json.get("target_track_index"), int)
+            and isinstance(record_sequence_json.get("region_name"), str)
+            and isinstance(record_sequence_json.get("start_bar"), int)
+            and isinstance(record_sequence_json.get("end_bar"), int)
+            and isinstance(record_sequence_json.get("note_count"), int)
+            and isinstance(record_sequence_json.get("verify_source"), str)
+        ) or (
+            isinstance(record_sequence_json, dict)
+            and record_sequence_json.get("success") is False
+            and record_sequence_json.get("error") in (
+                "import_failure",
+                "wrong_track_import",
+                "timing_mismatch",
+                "unreadable_readback",
+            )
+            and isinstance(record_sequence_json.get("note_count"), int)
+            and isinstance(record_sequence_json.get("method"), str)
+        ),
+        live_logic_ready and has_document,
+        "Logic Pro with an open project is required",
+    )
+
     # ═══════════════════════════════════════════════════════════════
     # §5 Mixer Live Operations (25 tests)
     # ═══════════════════════════════════════════════════════════════
