@@ -54,9 +54,9 @@ private func validGainParams(
     let obj = await runSetParam(validGainParams())
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "unsupported_param_readback")
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["hc_schema"] as? Int == 2)
-    #expect(obj["write_attempted"] as? Bool == false, "no write may be attempted (AC10)")
+    #expect(!((obj["write_attempted"] as? Bool)!), "no write may be attempted (AC10)")
     // post-resolution identity carries canonical id.
     let identity = obj["target_identity"] as? [String: Any]
     #expect(identity?["plugin_id"] as? String == "logic.stock.effect.gain")
@@ -75,7 +75,7 @@ private func validGainParams(
 @Test func testSetParamConfirmedLiveBlocked() async {
     let obj = await runSetParam(validGainParams(mode: "confirmed_live"))
     #expect(obj["error"] as? String == "unsupported_mode")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 // MARK: - AC19: project_expected_path required (step 3)

@@ -185,8 +185,8 @@ private func insertParams(
     let obj = await runInsert(insertParams(insert: "0"), runtime: runtime, driver: fake.driver)
 
     #expect(obj["state"] as? String == "A")
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["hc_schema"] as? Int == 2)
     #expect(obj["observed_plugin_id"] as? String == "logic.stock.effect.gain")
     #expect(obj["observed_plugin_name"] as? String == "Gain")
@@ -264,9 +264,9 @@ private func insertParams(
 
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "post_insert_readback_unavailable")
-    #expect(obj["verified"] as? Bool == false)
-    #expect(obj["write_attempted"] as? Bool == true)
-    #expect(obj["safe_to_retry"] as? Bool == true)
+    #expect(!((obj["verified"] as? Bool)!))
+    #expect((obj["write_attempted"] as? Bool)!)
+    #expect((obj["safe_to_retry"] as? Bool)!)
     #expect(obj["select_trace"] != nil)
 }
 
@@ -284,8 +284,8 @@ private func insertParams(
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "insert_setup_failed")
     #expect(obj["setup_stage"] as? String == "search_field_not_found")
-    #expect(obj["safe_to_retry"] as? Bool == true)
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect((obj["safe_to_retry"] as? Bool)!)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 @Test func testInsertVerifiedPostCommitTimeoutIsStateC() async {
@@ -300,8 +300,8 @@ private func insertParams(
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "operation_timeout")
     #expect(obj["commit_strategy"] as? String == "slot_popup_physical_menu_click")
-    #expect(obj["safe_to_retry"] as? Bool == true)
-    #expect(obj["write_attempted"] as? Bool == true)
+    #expect((obj["safe_to_retry"] as? Bool)!)
+    #expect((obj["write_attempted"] as? Bool)!)
 }
 
 @Test func testInsertVerifiedRollbackFailedAbortsStateC() async {
@@ -327,10 +327,10 @@ private func insertParams(
     #expect(obj["error"] as? String == "rollback_failed")
     #expect(obj["observed_slot"] as? Int == 3)
     #expect(obj["observed_plugin_name"] as? String == "Third Party FX")
-    #expect(obj["rollback_attempted"] as? Bool == true)
-    #expect(obj["rollback_succeeded"] as? Bool == false)
+    #expect((obj["rollback_attempted"] as? Bool)!)
+    #expect(!((obj["rollback_succeeded"] as? Bool)!))
     #expect(obj["rollback_retries"] as? Int == 2)
-    #expect(obj["write_attempted"] as? Bool == true)
+    #expect((obj["write_attempted"] as? Bool)!)
     #expect(obj["recovery_action"] != nil)
 }
 
@@ -344,8 +344,8 @@ private func insertParams(
 
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "insert_not_ax_automatable")
-    #expect(obj["write_attempted"] as? Bool == true)
-    #expect(obj["safe_to_retry"] as? Bool == false)
+    #expect((obj["write_attempted"] as? Bool)!)
+    #expect(!((obj["safe_to_retry"] as? Bool)!))
     #expect((obj["what_was_observed"] as? String)?.contains("exact slot popup") == true)
 }
 
@@ -373,7 +373,7 @@ private func insertParams(
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "post_insert_plugin_mismatch")
     #expect(obj["observed_plugin_id"] as? String == "logic.stock.effect.compressor")
-    #expect(obj["write_attempted"] as? Bool == true)
+    #expect((obj["write_attempted"] as? Bool)!)
 }
 
 // MARK: - insert:K honesty — wrong-slot readback still fails closed
@@ -394,10 +394,10 @@ private func insertParams(
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "insert_landed_at_different_slot")
     #expect(obj["observed_slot"] as? Int == 6)
-    #expect(obj["rollback_attempted"] as? Bool == true)
-    #expect(obj["rollback_succeeded"] as? Bool == true)
+    #expect((obj["rollback_attempted"] as? Bool)!)
+    #expect((obj["rollback_succeeded"] as? Bool)!)
     #expect(obj["rollback_retries"] as? Int == 1)
-    #expect(obj["write_attempted"] as? Bool == true)
+    #expect((obj["write_attempted"] as? Bool)!)
 }
 
 @Test func testInsertVerifiedLandedAtDifferentSlotReportsRollbackFailureHonestly() async {
@@ -413,8 +413,8 @@ private func insertParams(
         rollback: fakeRollback(attempted: true, succeeded: false, retries: 4)
     )
     #expect(obj["error"] as? String == "insert_landed_at_different_slot")
-    #expect(obj["rollback_attempted"] as? Bool == true)
-    #expect(obj["rollback_succeeded"] as? Bool == false)
+    #expect((obj["rollback_attempted"] as? Bool)!)
+    #expect(!((obj["rollback_succeeded"] as? Bool)!))
 }
 
 @Test func testInsertVerifiedNonFirstFreeRequestStillDrivesInsert() async {
@@ -457,7 +457,7 @@ private func insertParams(
     // insert 1 is occupied → slot_occupied, no silent replace.
     let obj = await runInsert(insertParams(insert: "1"), runtime: runtime)
     #expect(obj["error"] as? String == "slot_occupied")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
     #expect((obj["target_identity"] as? [String: Any])?["plugin_id"] as? String == "logic.stock.effect.gain")
     // The slot was never pressed — the gate refuses before any UI mutation.
     #expect(b.actionCalls.isEmpty)
@@ -477,7 +477,7 @@ private func insertParams(
     let error = obj["error"] as? String
     #expect(error == "incomplete_inventory" || error == "slot_occupied",
             "an occupied-unreadable slot is never write-safe")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 // MARK: - incomplete inventory refusal (R3)
@@ -491,7 +491,7 @@ private func insertParams(
     }
     let obj = await runInsert(insertParams(insert: "0"), runtime: runtime)
     #expect(obj["error"] as? String == "incomplete_inventory")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 @Test func testVerifiedDiffSnapshotRefusesUnreadableSlots() async {
@@ -511,7 +511,7 @@ private func insertParams(
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 950)] }
     let obj = await runInsert(insertParams(mode: "confirmed_live"), runtime: runtime)
     #expect(obj["error"] as? String == "unsupported_mode")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 @Test func testInsertVerifiedMissingPathBlocked() async {
@@ -519,7 +519,7 @@ private func insertParams(
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 960)] }
     let obj = await runInsert(insertParams(path: nil), runtime: runtime)
     #expect(obj["error"] as? String == "project_path_required")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 @Test func testInsertVerifiedPathMismatchBlocked() async {
@@ -529,7 +529,7 @@ private func insertParams(
     let obj = await runInsert(insertParams(insert: "0"), runtime: runtime,
                               frontDoc: "/Users/me/Music/Other.logicx")
     #expect(obj["error"] as? String == "project_identity_mismatch")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 @Test func testInsertVerifiedNoiseGateNotInsertable() async {
@@ -538,7 +538,7 @@ private func insertParams(
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 970)] }
     let obj = await runInsert(insertParams(plugin: "Noise Gate"), runtime: runtime)
     #expect(obj["error"] as? String == "unknown_plugin_identity")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 @Test func testInsertVerifiedUnknownIdentityBlocked() async {
@@ -546,7 +546,7 @@ private func insertParams(
     let runtime = makeMixerFixture(b) { b in [addEmptySlot(b, 980)] }
     let obj = await runInsert(insertParams(plugin: "com.apple.logic.gain"), runtime: runtime)
     #expect(obj["error"] as? String == "unknown_plugin_identity")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 // MARK: - Compressor also routes through the driver (not plugin-specific)

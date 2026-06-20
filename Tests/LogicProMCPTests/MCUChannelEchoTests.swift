@@ -33,8 +33,8 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["track"] as? Int == 0)
     // `requested` is the target; `observed` should be within tolerance.
     #expect(obj["requested"] as? Double ?? 0 == target)
@@ -53,7 +53,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess, "timeout is State B (success:true, verified:false)")
     let obj = decodeJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     let reason = obj["reason"] as? String ?? ""
     #expect(reason.hasPrefix("echo_timeout_"), "expected echo_timeout_<ms>ms, got \(reason)")
     #expect(reason.hasSuffix("ms"))
@@ -70,7 +70,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["track"] as? String == "master")
     #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
 }
@@ -91,7 +91,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     let reason = obj["reason"] as? String ?? ""
     #expect(reason.hasPrefix("echo_timeout_"),
             "expected echo_timeout_<ms>ms post-v3.1.3, got \(reason)")
@@ -123,7 +123,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     #expect(result.isSuccess, "stale-only hit stays State B — the envelope is still success:true")
     let obj = decodeJSON(result.message)
     #expect(
-        obj["verified"] as? Bool == false,
+        !((obj["verified"] as? Bool)!),
         "stale cache must not be reported as a fresh Logic echo"
     )
     let reason = obj["reason"] as? String ?? ""
@@ -148,7 +148,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
 }
 

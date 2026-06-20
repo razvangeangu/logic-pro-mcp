@@ -43,8 +43,8 @@ import Testing
     let obj = try! JSONSerialization.jsonObject(with: text.data(using: .utf8)!) as! [String: Any]
     #expect(obj["error"] as? String == "verified_op_in_progress")
     #expect(obj["state"] as? String == "C")
-    #expect(obj["safe_to_retry"] as? Bool == true)
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect((obj["safe_to_retry"] as? Bool)!)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 @Test func testGetInventoryNotGatedByVerifiedOpLock() async {

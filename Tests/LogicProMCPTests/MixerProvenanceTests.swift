@@ -70,11 +70,11 @@ import Testing
         // data_source present and fresh (just polled).
         #expect(json["data_source"] as? String == "ax_poll")
         // Full MCU triplet (parity with write envelopes).
-        #expect(json["mcu_connected"] as? Bool == true)
-        #expect(json["mcu_registered"] as? Bool == true)
+        #expect((json["mcu_connected"] as? Bool)!)
+        #expect((json["mcu_registered"] as? Bool)!)
         #expect(json["mcu_last_feedback_age_ms"] is Int || json["mcu_last_feedback_age_ms"] is Double)
         // `registered` retained as a one-release alias of mcu_registered.
-        #expect(json["registered"] as? Bool == true)
+        #expect((json["registered"] as? Bool)!)
         #expect((json["registered"] as? Bool) == (json["mcu_registered"] as? Bool))
         #expect((json["strips"] as? [[String: Any]])?.count == 1)
     }

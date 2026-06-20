@@ -208,8 +208,8 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
 
     #expect(!(result.isError!))
     let object = recordSequenceJSONObject(result)
-    #expect(object["success"] as? Bool == true)
-    #expect(object["verified"] as? Bool == true)
+    #expect((object["success"] as? Bool)!)
+    #expect((object["verified"] as? Bool)!)
     #expect(object["created_track"] as? Int == 1)
     #expect(object["recorded_to_track"] as? Int == 1)
     #expect(object["target_track_index"] as? Int == 1)

@@ -112,7 +112,7 @@ private func makeFakeAXChannel() -> (AccessibilityChannel, FakeAXRuntimeBuilder)
     // It reached the real implementation and produced inventory JSON.
     let obj = sharedObject(result)
     #expect(obj?["operation"] as? String == "logic_plugins.get_inventory")
-    #expect(obj?["complete"] as? Bool == true)
+    #expect((obj?["complete"] as? Bool)!)
 }
 
 @Test func testPluginSetParamVerifiedReachesChannelExecute() async {

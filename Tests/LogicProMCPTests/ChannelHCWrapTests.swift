@@ -31,12 +31,12 @@ private func parseEnvelope(_ message: String) -> [String: Any]? {
         Issue.record("CGEvent response is not valid JSON")
         return
     }
-    #expect(env["success"] as? Bool == true)
-    #expect(env["verified"] as? Bool == false)
+    #expect((env["success"] as? Bool)!)
+    #expect(!((env["verified"] as? Bool)!))
     #expect(env["reason"] as? String == "readback_unavailable")
     #expect(env["operation"] as? String == "transport.play")
     #expect(env["method"] as? String == "cgevent")
-    #expect(env["sent"] as? Bool == true)
+    #expect((env["sent"] as? Bool)!)
 }
 
 @Test func testCGEventGotoPositionReturnsHCEnvelopeWithPosition() async {
@@ -61,7 +61,7 @@ private func parseEnvelope(_ message: String) -> [String: Any]? {
     #expect(env["operation"] as? String == "transport.goto_position")
     #expect(env["position"] as? String == "5.1.1.1")
     #expect(env["method"] as? String == "cgevent")
-    #expect(env["verified"] as? Bool == false)
+    #expect(!((env["verified"] as? Bool)!))
 }
 
 @Test func testCGEventErrorPathStaysFreeText() async {
@@ -94,8 +94,8 @@ private func parseEnvelope(_ message: String) -> [String: Any]? {
         Issue.record("MIDI key command response is not valid JSON")
         return
     }
-    #expect(env["success"] as? Bool == true)
-    #expect(env["verified"] as? Bool == false)
+    #expect((env["success"] as? Bool)!)
+    #expect(!((env["verified"] as? Bool)!))
     #expect(env["reason"] as? String == "readback_unavailable")
     #expect(env["operation"] as? String == "edit.undo")
     #expect(env["method"] as? String == "midi_key_command")

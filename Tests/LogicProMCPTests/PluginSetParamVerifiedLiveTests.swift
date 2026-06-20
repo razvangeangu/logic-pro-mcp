@@ -203,8 +203,8 @@ private func thresholdParams(
     let obj = await runLive(fixture: fixture, params: thresholdParams(value: "60"))
 
     #expect(obj["state"] as? String == "A")
-    #expect(obj["verified"] as? Bool == true)
-    #expect(obj["success"] as? Bool == true)
+    #expect((obj["verified"] as? Bool)!)
+    #expect((obj["success"] as? Bool)!)
     #expect(obj["hc_schema"] as? Int == 2)
     #expect(obj["requested_normalized"] as? Double == 60)
     #expect(obj["observed_normalized"] as? Double == 60)
@@ -238,15 +238,15 @@ private func thresholdParams(
 
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "readback_mismatch")
-    #expect(obj["verified"] as? Bool == false)
-    #expect(obj["write_attempted"] as? Bool == true)
+    #expect(!((obj["verified"] as? Bool)!))
+    #expect((obj["write_attempted"] as? Bool)!)
     #expect(obj["requested_normalized"] as? Double == 60)
     #expect(obj["observed_normalized"] as? Double == 40)
     #expect(obj["tolerance"] as? Double == 1.0)
     // Rollback re-set to the before value (51). Because the slider is forced to
     // 40 on every write, the re-read returns 40, so rollback is attempted but
     // does not confirm — the honest report says attempted:true, succeeded:false.
-    #expect(obj["rollback_attempted"] as? Bool == true)
+    #expect((obj["rollback_attempted"] as? Bool)!)
     #expect(obj["rollback_to"] as? Double == 51)
 }
 
@@ -266,8 +266,8 @@ private func thresholdParams(
     )
     let obj = try! JSONSerialization.jsonObject(with: result.message.data(using: .utf8)!) as! [String: Any]
     #expect(obj["error"] as? String == "readback_mismatch")
-    #expect(obj["rollback_attempted"] as? Bool == true)
-    #expect(obj["rollback_succeeded"] as? Bool == true, "the rollback write to 51 lands and is confirmed")
+    #expect((obj["rollback_attempted"] as? Bool)!)
+    #expect((obj["rollback_succeeded"] as? Bool)!, "the rollback write to 51 lands and is confirmed")
     #expect(fixture.currentSliderValue == 51)
 }
 
@@ -278,7 +278,7 @@ private func thresholdParams(
     let obj = await runLive(fixture: fixture, params: thresholdParams())
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "window_open_failed")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 @Test func testOpenerFallbackProducesStateA() async {
@@ -336,7 +336,7 @@ private func thresholdParams(
     )
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "param_control_not_found")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 // MARK: - State C: track not selectable → track_selection_failed
@@ -347,7 +347,7 @@ private func thresholdParams(
     let obj = await runLive(fixture: fixture, params: thresholdParams())
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "track_selection_failed")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 // MARK: - State C: target insert empty → incomplete_inventory
@@ -359,7 +359,7 @@ private func thresholdParams(
     let obj = await runLive(fixture: fixture, params: thresholdParams(insert: 5))
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "incomplete_inventory")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 // MARK: - Other parameter (Gain) stays unsupported (no write)
@@ -372,7 +372,7 @@ private func thresholdParams(
         "project_expected_path": expectedPath,
     ])
     #expect(obj["error"] as? String == "unsupported_param_readback")
-    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
 }
 
 // MARK: - Precedence: wrong unit / out-of-range still beat the live write

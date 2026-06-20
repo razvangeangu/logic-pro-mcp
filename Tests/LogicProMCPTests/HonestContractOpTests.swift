@@ -43,8 +43,8 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     let result = await channel.execute(operation: "track.select", params: ["index": "1"])
     let obj = decodeJSON(result.message)
     #expect(result.isSuccess)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["requested"] as? Int == 1)
     #expect(obj["observed"] as? Int == 1)
 }
@@ -71,7 +71,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     let result = await channel.execute(operation: "track.select", params: ["index": "5"])
     #expect(!result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "element_not_found")
     #expect(obj["hint"] != nil)
 }
@@ -104,7 +104,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     let result = await channel.execute(operation: "track.select", params: ["index": "1"])
     #expect(result.isSuccess, "mismatch is State B (success:true, verified:false)")
     let obj = decodeJSON(result.message)
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     // v3.1.0 (Ralph-2 / P2-2) — mismatch is readback_mismatch, not
     // retry_exhausted. The latter is reserved for selectionMetadataUnavailable.
     #expect(obj["reason"] as? String == "readback_mismatch")
@@ -152,14 +152,14 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(!res.isSuccess, "No transport bar + no fallback → structured State C")
     let obj = decodeJSON(res.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "not_implemented")
     #expect(obj["operation"] as? String == "transport.set_cycle_range")
     #expect(obj["method"] as? String == "ax_cycle_locator_text_fields")
     #expect(obj["requested"] as? [String: Any] != nil)
     #expect(obj["observed"] as? [String: Any] != nil)
     #expect(obj["scanned_landmarks"] as? [String: Any] != nil)
-    #expect(obj["safe_to_retry"] as? Bool == false)
+    #expect(!((obj["safe_to_retry"] as? Bool)!))
 }
 
 @Test func testSetCycleRangeOsascriptFallbackFailsClosedWithoutReadback() {
@@ -177,10 +177,10 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     )
     #expect(!res.isSuccess)
     let obj = decodeJSON(res.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "readback_unavailable")
     #expect(obj["method"] as? String == "osascript_set_locators_dialog")
-    #expect(obj["write_attempted"] as? Bool == true)
+    #expect((obj["write_attempted"] as? Bool)!)
     #expect(obj["observed"] as? [String: Any] != nil)
 }
 
@@ -199,7 +199,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     let result = await channel.execute(operation: "track.rename", params: ["index": "0"])
     #expect(!result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "invalid_params")
     #expect(obj["hint"] != nil)
 }
@@ -274,7 +274,7 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     // canonical `not_implemented` error code + a hint.
     #expect(!result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "not_implemented")
     let hint = obj["hint"] as? String ?? ""
     #expect(hint.contains("Track color"), "expected hint to mention Track color, got: \(hint)")
@@ -355,8 +355,8 @@ private func axSizeHC(_ w: CGFloat, _ h: CGFloat) -> AXValue {
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
     // State A envelope contract.
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["reason"] == nil, "State A must not carry a reason field")
     #expect(obj["error"] == nil, "State A must not carry an error field")
     // Pre/post diff fields the contract requires.
@@ -427,8 +427,8 @@ private func axSizeHC(_ w: CGFloat, _ h: CGFloat) -> AXValue {
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
     // State A envelope contract.
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["reason"] == nil)
     #expect(obj["error"] == nil)
     #expect(obj["expected_name"] as? String == "B")

@@ -100,7 +100,7 @@ import Foundation
     if let obj = try? JSONSerialization.jsonObject(
         with: Data(result.message.utf8)
     ) as? [String: Any] {
-        #expect(obj["success"] as? Bool == false)
+        #expect(!((obj["success"] as? Bool)!))
         #expect(obj["error"] as? String == "channels_exhausted")
         #expect(obj["operation"] as? String == "mixer.set_volume")
     } else {

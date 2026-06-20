@@ -151,12 +151,12 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     #expect(envelope["fetched_at"] != nil)
     let json = envelope["data"] as! [String: Any]
     let state = json["state"] as! [String: Any]
-    #expect(state["isPlaying"] as? Bool == true)
-    #expect(state["isCycleEnabled"] as? Bool == true)
+    #expect((state["isPlaying"] as? Bool)!)
+    #expect((state["isCycleEnabled"] as? Bool)!)
     #expect(state["tempo"] as? Double == 128.5)
     #expect(state["position"] as? String == "9.1.1.1")
     #expect(state["timePosition"] as? String == "00:01:23.456")
-    #expect(json["has_document"] as? Bool == true)
+    #expect((json["has_document"] as? Bool)!)
 }
 
 @Test func testTransportStateResourceRefreshesLiveStateBeforeServingCache() async {
@@ -179,9 +179,9 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
 
     #expect(await channel.executedOperations() == ["transport.get_state"])
     #expect(envelope["source"] as? String == "ax_live")
-    #expect(state["isPlaying"] as? Bool == false)
+    #expect(!((state["isPlaying"] as? Bool)!))
     #expect(state["tempo"] as? Double == 90.5)
-    #expect(state["isCycleEnabled"] as? Bool == true)
+    #expect((state["isCycleEnabled"] as? Bool)!)
     let cached = await cache.getTransport()
     #expect(cached.isPlaying == false)
     #expect(cached.tempo == 90.5)
@@ -211,13 +211,13 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     let state = json["state"] as! [String: Any]
 
     #expect(envelope["source"] as? String == "cache")
-    #expect(envelope["unverified"] as? Bool == true)
-    #expect(envelope["stale"] as? Bool == true)
+    #expect((envelope["unverified"] as? Bool)!)
+    #expect((envelope["stale"] as? Bool)!)
     #expect(envelope["refresh_error"] as? String == "element_not_found")
     #expect((envelope["recovery_hint"] as? String)?.contains("refresh_cache") == true)
     #expect((envelope["cache_age_sec"] as? Double ?? 0) > 0)
-    #expect(state["isPlaying"] as? Bool == true)
-    #expect(state["isRecording"] as? Bool == true)
+    #expect((state["isPlaying"] as? Bool)!)
+    #expect((state["isRecording"] as? Bool)!)
     #expect(state["position"] as? String == "96.1.1.1")
 }
 
@@ -237,9 +237,9 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     // sentinel). The envelope helper collapses to cache_age_sec:null in that case.
     let json = envelope["data"] as! [String: Any]
     let state = json["state"] as! [String: Any]
-    #expect(state["isPlaying"] as? Bool == false)
+    #expect(!((state["isPlaying"] as? Bool)!))
     #expect(state["tempo"] as? Double == 120.0)
-    #expect(json["has_document"] as? Bool == false)
+    #expect(!((json["has_document"] as? Bool)!))
 }
 
 @Test func testMixerResponseIncludesMCUStatus() async {
@@ -255,8 +255,8 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
 
     let result = try! await ResourceHandlers.read(uri: "logic://mixer", cache: cache, router: router)
     let json = try! sharedParseJSON(resourceText(result)) as! [String: Any]
-    #expect(json["mcu_connected"] as? Bool == true)
-    #expect(json["registered"] as? Bool == true)
+    #expect((json["mcu_connected"] as? Bool)!)
+    #expect((json["registered"] as? Bool)!)
     #expect((json["strips"] as? [[String: Any]])?.count == 1)
 }
 
@@ -462,9 +462,9 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     })
 
     #expect(byName["MIDIKeyCommands"]?["verification_status"] as? String == "manual_validation_required")
-    #expect(byName["MIDIKeyCommands"]?["ready"] as? Bool == false)
+    #expect(!((byName["MIDIKeyCommands"]?["ready"] as? Bool)!))
     #expect(byName["Scripter"]?["verification_status"] as? String == "manual_validation_required")
-    #expect(byName["Scripter"]?["ready"] as? Bool == false)
+    #expect(!((byName["Scripter"]?["ready"] as? Bool)!))
 }
 
 @Test func testSystemHealthToolMatchesResource() async {

@@ -19,8 +19,8 @@ private func decode(_ json: String) -> [String: Any] {
         "operation": "logic_plugins.set_param_verified",
         "observed_display": -4.02,
     ]))
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["state"] as? String == "A")
     #expect(obj["hc_schema"] as? Int == 2)
     #expect(obj["observed_display"] as? Double == -4.02)
@@ -39,12 +39,12 @@ private func decode(_ json: String) -> [String: Any] {
             "safe_to_retry": true,
         ]
     ))
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["state"] as? String == "B")
     #expect(obj["hc_schema"] as? Int == 2)
     #expect(obj["reason"] as? String == "readback_unavailable")
-    #expect(obj["safe_to_retry"] as? Bool == true)
+    #expect((obj["safe_to_retry"] as? Bool)!)
     #expect(obj["error"] == nil, "State B must not carry error")
 }
 
@@ -60,12 +60,12 @@ private func decode(_ json: String) -> [String: Any] {
             "safe_to_retry": true,
         ]
     ))
-    #expect(obj["success"] as? Bool == false)
-    #expect(obj["verified"] as? Bool == false, "v2 State C carries explicit verified:false (unlike v1)")
+    #expect(!((obj["success"] as? Bool)!))
+    #expect(!((obj["verified"] as? Bool)!), "v2 State C carries explicit verified:false (unlike v1)")
     #expect(obj["state"] as? String == "C")
     #expect(obj["hc_schema"] as? Int == 2)
     #expect(obj["error"] as? String == "readback_mismatch")
-    #expect(obj["write_attempted"] as? Bool == true)
+    #expect((obj["write_attempted"] as? Bool)!)
     #expect(obj["reason"] == nil, "State C must not carry reason")
 }
 

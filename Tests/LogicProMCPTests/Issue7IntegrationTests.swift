@@ -133,7 +133,7 @@ func S2_MixerPanelFocused_TracksFallbackToFileCount() async throws {
     let tracksData = tracksEnv["data"] as? [[String: Any]] ?? []
     #expect(tracksData.count == 31)
     #expect(tracksData[0]["name"] as? String == "Track 1")
-    #expect((tracksData[0]["placeholder"] as? Bool) == true)
+    #expect((tracksData[0]["placeholder"] as? Bool)!)
 
     // Project info: should sourced from file
     let projectResult = try await ResourceHandlers.read(

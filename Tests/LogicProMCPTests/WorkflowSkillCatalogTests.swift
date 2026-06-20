@@ -486,11 +486,11 @@ struct WorkflowSkillResourceTests {
         let list = try await workflowResourceObject("logic://workflow-skills")
         #expect(list["schema_version"] as? Int == 1)
         #expect(list["workflow_count"] as? Int ?? 0 >= 6)
-        #expect((list["validation"] as? [String: Any])?["is_valid"] as? Bool == true)
+        #expect(((list["validation"] as? [String: Any])?["is_valid"] as? Bool)!)
 
         let detail = try await workflowResourceObject("logic://workflow-skills/logic.workflow.readiness.project")
         #expect((detail["workflow"] as? [String: Any])?["id"] as? String == "logic.workflow.readiness.project")
-        #expect((detail["workflow"] as? [String: Any])?["dependencies_resolved"] as? Bool == true)
+        #expect(((detail["workflow"] as? [String: Any])?["dependencies_resolved"] as? Bool)!)
 
         let stockDetail = try await workflowResourceObject("logic://workflow-skills/logic.workflow.plugins.stock_insert_gain_live_verified")
         let stockSurfacePresent = WorkflowSkillCatalog.currentStaticResourceURIs().contains("logic://stock-plugins")

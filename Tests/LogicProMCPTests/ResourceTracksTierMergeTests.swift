@@ -65,7 +65,7 @@ func cacheLive31_realNames_sourceAxLive() async throws {
     let (envelope, data) = try parseTracksEnvelope(result)
     #expect(data.count == 31)
     #expect(data[0]["name"] as? String == "Bass 0")
-    #expect((data[0]["placeholder"] as? Bool) == false)
+    #expect(data[0]["placeholder"] == nil)  // real AX-live track omits the placeholder key
     #expect(envelope["source"] as? String == "ax_live")
 }
 
@@ -93,7 +93,7 @@ func cacheEmpty_fileCount31_emits31Placeholders() async throws {
     #expect(data.count == 31)
     #expect(data[0]["name"] as? String == "Track 1")
     #expect(data[30]["name"] as? String == "Track 31")
-    #expect((data[0]["placeholder"] as? Bool) == true)
+    #expect((data[0]["placeholder"] as? Bool)!)
     #expect(envelope["source"] as? String == "project_file")
 }
 
@@ -206,7 +206,7 @@ func cacheInspectorContamination_strictAllColon_dropAndFallback() async throws {
     )
     let (envelope, data) = try parseTracksEnvelope(result)
     #expect(data.count == 7, "should fall back to file placeholder count")
-    #expect((data[0]["placeholder"] as? Bool) == true)
+    #expect((data[0]["placeholder"] as? Bool)!)
     #expect(envelope["source"] as? String == "ax_live_with_file_count")
 }
 

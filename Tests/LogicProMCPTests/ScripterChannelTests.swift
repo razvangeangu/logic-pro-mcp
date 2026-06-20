@@ -51,8 +51,8 @@ private func decodeScripterJSON(_ s: String) -> [String: Any] {
     )
     #expect(result.isSuccess)
     let obj = decodeScripterJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_unavailable")
     #expect(obj["param"] as? Int == 0)
     #expect(obj["insert"] as? Int == 0)
@@ -109,7 +109,7 @@ private func decodeScripterJSON(_ s: String) -> [String: Any] {
 
     #expect(!result.isSuccess)
     let obj = decodeScripterJSON(result.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "not_implemented")
     #expect((obj["hint"] as? String)?.contains("only handles plugin.set_param") == true)
 }
@@ -126,7 +126,7 @@ private func decodeScripterJSON(_ s: String) -> [String: Any] {
 
     #expect(!result.isSuccess)
     let obj = decodeScripterJSON(result.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "port_unavailable")
     #expect((obj["hint"] as? String)?.contains("Failed to send Scripter param 1") == true)
 }

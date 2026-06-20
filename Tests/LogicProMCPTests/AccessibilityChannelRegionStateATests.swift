@@ -135,8 +135,8 @@ private func makeRegionFixture(
 
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["pre_start_bar"] as? Int == 1)
     #expect(obj["post_start_bar"] as? Int == 9)
     #expect(obj["playhead_bar"] as? Int == 9)
@@ -177,8 +177,8 @@ private func makeRegionFixture(
 
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_mismatch")
     #expect(obj["pre_start_bar"] as? Int == 1)
     #expect(obj["post_start_bar"] as? Int == 5)
@@ -209,8 +209,8 @@ private func makeRegionFixture(
 
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_mismatch")
     #expect(obj["pre_start_bar"] as? Int == 4)
     #expect(obj["post_start_bar"] as? Int == 4)
@@ -242,8 +242,8 @@ private func makeRegionFixture(
 
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_unavailable")
 }
 
@@ -260,7 +260,7 @@ private func makeRegionFixture(
     )
     #expect(!result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "ax_write_failed")
 }
 
@@ -300,8 +300,8 @@ private func makeRegionFixture(
 
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["expected_name"] as? String == "RegionB")
     #expect(obj["selected_name"] as? String == "RegionB")
     #expect(obj["expected_start_bar"] as? Int == 5)
@@ -340,8 +340,8 @@ private func makeRegionFixture(
 
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_mismatch")
     #expect(obj["expected_name"] as? String == "RegionB")
     #expect(obj["selected_name"] as? String == "RegionA")
@@ -369,8 +369,8 @@ private func makeRegionFixture(
 
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == false)
+    #expect((obj["success"] as? Bool)!)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_unavailable")
     #expect(obj["expected_name"] as? String == "RegionA")
 }
@@ -390,7 +390,7 @@ private func makeRegionFixture(
 
     #expect(!result.isSuccess)
     let obj = decodeJSON(result.message)
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "element_not_found")
 }
 

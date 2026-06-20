@@ -260,7 +260,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     }
     #expect(obj["operation"] as? String == "mixer.set_volume")
     if obj["success"] as? Bool == true {
-        #expect(obj["verified"] as? Bool == true)
+        #expect((obj["verified"] as? Bool)!)
         #expect(obj["verify_source"] as? String == "ax_slider")
         #expect(obj["target_identity"] is [String: Any])
         #expect(obj["observed_before"] != nil)
@@ -285,7 +285,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     }
     #expect(obj["operation"] as? String == "mixer.set_pan")
     if obj["success"] as? Bool == true {
-        #expect(obj["verified"] as? Bool == true)
+        #expect((obj["verified"] as? Bool)!)
         #expect(obj["verify_source"] as? String == "ax_slider")
         #expect(obj["target_identity"] is [String: Any])
         #expect(obj["observed_before"] != nil)
@@ -308,7 +308,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
         Issue.record("set_master_volume Shape A must be structured HC JSON, got: \(text)")
         return
     }
-    #expect(obj["success"] as? Bool == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "channels_exhausted")
     #expect(obj["operation"] as? String == "mixer.set_master_volume")
     #expect(obj["hint"] != nil)
@@ -789,7 +789,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     let detailJSON = e2eJSON(e2eResourceText(detail))
     let searchJSON = e2eJSON(e2eResourceText(search))
     #expect(listJSON?["schema_version"] as? Int == 1)
-    #expect((listJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool == true)
+    #expect(((listJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool)!)
     #expect((detailJSON?["entry"] as? [String: Any])?["availability_state"] != nil)
     #expect((searchJSON?["entries"] as? [[String: Any]])?.isEmpty == false)
 }
@@ -804,7 +804,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     let detailJSON = e2eJSON(e2eResourceText(detail))
     let schemaJSON = e2eJSON(e2eResourceText(schema))
     #expect(listJSON?["workflow_count"] as? Int ?? 0 >= 6)
-    #expect((listJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool == true)
+    #expect(((listJSON?["validation"] as? [String: Any])?["is_valid"] as? Bool)!)
     #expect((detailJSON?["workflow"] as? [String: Any])?["mutation_kind"] as? String == "read_only")
     #expect((schemaJSON?["evidence_levels"] as? [String])?.contains("live_verified") == true)
 }

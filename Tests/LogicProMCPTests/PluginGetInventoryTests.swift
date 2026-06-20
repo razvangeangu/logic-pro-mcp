@@ -44,21 +44,21 @@ private func slot(
 
     // read_status:"ok" — name + plugin_id (canonical match) + bypassed present.
     #expect(items[0]["read_status"] as? String == "ok")
-    #expect(items[0]["occupied"] as? Bool == true)
+    #expect((items[0]["occupied"] as? Bool)!)
     #expect(items[0]["name"] as? String == "Gain")
     #expect(items[0]["plugin_id"] as? String == "logic.stock.effect.gain")
-    #expect(items[0]["bypassed"] as? Bool == false)
+    #expect(!((items[0]["bypassed"] as? Bool)!))
 
     // read_status:"empty" — name/plugin_id/bypassed are explicit null.
     #expect(items[1]["read_status"] as? String == "empty")
-    #expect(items[1]["occupied"] as? Bool == false)
+    #expect(!((items[1]["occupied"] as? Bool)!))
     #expect(items[1]["name"] is NSNull)
     #expect(items[1]["plugin_id"] is NSNull)
     #expect(items[1]["bypassed"] is NSNull)
 
     // read_status:"unreadable" — occupied:true, but name/plugin_id/bypassed null.
     #expect(items[2]["read_status"] as? String == "unreadable")
-    #expect(items[2]["occupied"] as? Bool == true)
+    #expect((items[2]["occupied"] as? Bool)!)
     #expect(items[2]["name"] is NSNull)
     #expect(items[2]["plugin_id"] is NSNull)
     #expect(items[2]["bypassed"] is NSNull)
@@ -74,7 +74,7 @@ private func slot(
     #expect(complete == true)
     #expect(items[0]["name"] as? String == "Drum Machine Designer")
     #expect(items[0]["plugin_id"] is NSNull)
-    #expect(items[0]["bypassed"] as? Bool == true)
+    #expect((items[0]["bypassed"] as? Bool)!)
 }
 
 @Test func testInventoryAllEmptyIsComplete() {
@@ -163,10 +163,10 @@ private func makeMixerFixture(
     let obj = decodeObject(result.message)
 
     #expect(obj["state"] as? String == "A")
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["hc_schema"] as? Int == 2)
-    #expect(obj["complete"] as? Bool == false)
+    #expect(!((obj["complete"] as? Bool)!))
     #expect(obj["plugins_source"] as? String == "ax")
     #expect(obj["plugins_unknown_reason"] is NSNull)
     #expect(obj["operation"] as? String == "logic_plugins.get_inventory")
@@ -178,7 +178,7 @@ private func makeMixerFixture(
     #expect(plugins[0]["plugin_id"] as? String == "logic.stock.effect.gain")
     #expect(plugins[1]["read_status"] as? String == "empty")
     #expect(plugins[2]["read_status"] as? String == "unreadable")
-    #expect(plugins[2]["occupied"] as? Bool == true)
+    #expect((plugins[2]["occupied"] as? Bool)!)
     #expect(plugins[2]["name"] is NSNull)
 }
 
@@ -215,10 +215,10 @@ private func makeMixerFixture(
     let result = await AccessibilityChannel.defaultGetPluginInventory(params: ["track": "0"], runtime: runtime)
     let obj = decodeObject(result.message)
     #expect(obj["state"] as? String == "A")
-    #expect(obj["success"] as? Bool == true)
-    #expect(obj["verified"] as? Bool == true)
+    #expect((obj["success"] as? Bool)!)
+    #expect((obj["verified"] as? Bool)!)
     #expect(obj["hc_schema"] as? Int == 2)
-    #expect(obj["complete"] as? Bool == true)
+    #expect((obj["complete"] as? Bool)!)
     let plugins = obj["plugins"] as! [[String: Any]]
     #expect(plugins[0]["plugin_id"] as? String == "logic.stock.effect.noise_gate")
 }
@@ -234,7 +234,7 @@ private func makeMixerFixture(
     #expect(result.isSuccess) // State B is success:true, verified:false
     let obj = decodeObject(result.message)
     #expect(obj["state"] as? String == "B")
-    #expect(obj["verified"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
     #expect(obj["reason"] as? String == "readback_unavailable")
     #expect(obj["plugins_unknown_reason"] as? String == "ax_subtree_unreadable")
     #expect(obj["hc_schema"] as? Int == 2)
@@ -290,7 +290,7 @@ private func makeMixerFixture(
     #expect(result.isSuccess)
     let obj = decodeObject(result.message)
     #expect(obj["state"] as? String == "A")
-    #expect(obj["mixer_reveal_attempted"] as? Bool == true)
+    #expect((obj["mixer_reveal_attempted"] as? Bool)!)
     #expect((obj["mixer_reveal_strategies"] as? [String]) == ["ax_menu_view_show_mixer"])
     let plugins = obj["plugins"] as? [[String: Any]]
     #expect(plugins?.count == 1)
@@ -329,9 +329,9 @@ private func makeMixerFixture(
     #expect(obj["state"] as? String == "B")
     #expect(obj["reason"] as? String == "readback_unavailable")
     #expect(obj["plugins_unknown_reason"] as? String == "mixer_not_visible")
-    #expect(obj["mixer_reveal_attempted"] as? Bool == true)
-    #expect(obj["mixer_reveal_menu_item_found"] as? Bool == true)
-    #expect(obj["mixer_reveal_menu_clicked"] as? Bool == true)
-    #expect(obj["mixer_reveal_key_sent"] as? Bool == true)
+    #expect((obj["mixer_reveal_attempted"] as? Bool)!)
+    #expect((obj["mixer_reveal_menu_item_found"] as? Bool)!)
+    #expect((obj["mixer_reveal_menu_clicked"] as? Bool)!)
+    #expect((obj["mixer_reveal_key_sent"] as? Bool)!)
     #expect((obj["recovery_hint"] as? String)?.contains("Show Mixer") == true)
 }

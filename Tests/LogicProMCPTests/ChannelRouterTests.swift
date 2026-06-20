@@ -392,14 +392,14 @@ private func verifiedReadbackMismatchEnvelope() -> String {
     #expect(obj["error"] as? String == "readback_mismatch", "must NOT be rewritten to channels_exhausted")
     #expect(obj["state"] as? String == "C")
     #expect(obj["hc_schema"] as? Int == 2)
-    #expect(obj["verified"] as? Bool == false)
-    #expect(obj["write_attempted"] as? Bool == true)
-    #expect(obj["rollback_attempted"] as? Bool == true)
-    #expect(obj["rollback_succeeded"] as? Bool == false)
+    #expect(!((obj["verified"] as? Bool)!))
+    #expect((obj["write_attempted"] as? Bool)!)
+    #expect((obj["rollback_attempted"] as? Bool)!)
+    #expect(!((obj["rollback_succeeded"] as? Bool)!))
     #expect(obj["rollback_to"] as? Double == 51)
     #expect(obj["requested_normalized"] as? Double == 60)
     #expect(obj["observed_normalized"] as? Double == 40)
-    #expect(obj["safe_to_retry"] as? Bool == false)
+    #expect(!((obj["safe_to_retry"] as? Bool)!))
     #expect(obj["target_identity"] is [String: Any], "target_identity must be preserved")
     // The exhaustion-only fields must be absent — confirms no wrapping occurred.
     #expect(obj["last_error"] == nil, "channels_exhausted wrapper must not be applied")
@@ -434,7 +434,7 @@ private func verifiedReadbackMismatchEnvelope() -> String {
         return
     }
     #expect(obj["error"] as? String == "ax_write_failed")
-    #expect(obj["write_attempted"] as? Bool == true)
+    #expect((obj["write_attempted"] as? Bool)!)
     #expect(obj["hc_schema"] as? Int == 2)
     #expect(obj["last_error"] == nil)
 }

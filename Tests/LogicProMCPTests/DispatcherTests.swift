@@ -485,11 +485,11 @@ private func liveTransportJSON(
 
     #expect(!result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == true)
+    #expect((object["verified"] as? Bool)!)
     #expect(object["verification_source"] as? String == "transport_state")
-    #expect(object["previous_enabled"] as? Bool == false)
-    #expect(object["requested_enabled"] as? Bool == true)
-    #expect(object["observed_enabled"] as? Bool == true)
+    #expect(!((object["previous_enabled"] as? Bool)!))
+    #expect((object["requested_enabled"] as? Bool)!)
+    #expect((object["observed_enabled"] as? Bool)!)
 }
 
 @Test func testTransportDispatcherGotoPositionReturnsErrorWhenTransportReadbackDoesNotMatch() async throws {
@@ -518,7 +518,7 @@ private func liveTransportJSON(
 
     #expect(result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == false)
+    #expect(!((object["verified"] as? Bool)!))
     #expect(object["reason"] as? String == "readback_mismatch")
     #expect(object["verification_source"] as? String == "transport_state")
     #expect(object["requested"] as? String == "9.1.1.1")
@@ -2722,7 +2722,7 @@ private actor SelectiveFailChannel: Channel {
 
     #expect(!result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == true)
+    #expect((object["verified"] as? Bool)!)
     #expect(object["verification_source"] as? String == "transport_state")
     #expect(object["observed"] as? String == "17.1.1.1")
 }
@@ -2758,7 +2758,7 @@ private actor SelectiveFailChannel: Channel {
 
     #expect(!result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == true)
+    #expect((object["verified"] as? Bool)!)
     #expect(object["verification_source"] as? String == "logic://markers")
     #expect(object["marker_count_before"] as? Int == 1)
     #expect(object["marker_count_after"] as? Int == 2)
@@ -2796,7 +2796,7 @@ private actor SelectiveFailChannel: Channel {
 
     #expect(result.isError!)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["verified"] as? Bool == false)
+    #expect(!((object["verified"] as? Bool)!))
     #expect(object["reason"] as? String == "readback_mismatch")
     #expect(object["requested_name"] as? String == "Bridge")
     #expect(object["observed_marker_name"] as? String == "Marker 2")
@@ -3279,10 +3279,10 @@ private actor TransportStateSequenceChannel: Channel {
 
     let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
     #expect(!(result.isError!))
-    #expect(json["verified"] as? Bool == true)
+    #expect((json["verified"] as? Bool)!)
     #expect(json["verify_source"] as? String == "ax_transport_state")
-    #expect(json["observed_isPlaying"] as? Bool == false)
-    #expect(json["observed_isRecording"] as? Bool == false)
+    #expect(!((json["observed_isPlaying"] as? Bool)!))
+    #expect(!((json["observed_isRecording"] as? Bool)!))
     #expect(json["observed_position"] as? String == "9.1.1.1")
     #expect(await ax.executedOps.map(\.0) == ["transport.get_state", "transport.stop", "transport.get_state"])
     #expect(await mcu.executedOps.map(\.0) == ["transport.stop"])
@@ -3356,10 +3356,10 @@ private actor TransportStateSequenceChannel: Channel {
     let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
     #expect(result.isError!)
     #expect(json["error"] as? String == "readback_mismatch")
-    #expect(json["observed_isPlaying"] as? Bool == true)
-    #expect(json["observed_isRecording"] as? Bool == true)
+    #expect((json["observed_isPlaying"] as? Bool)!)
+    #expect((json["observed_isRecording"] as? Bool)!)
     #expect(json["observed_position"] as? String == "96.1.1.1")
-    #expect(json["safe_to_retry"] as? Bool == true)
+    #expect((json["safe_to_retry"] as? Bool)!)
 
     let cached = await cache.getTransport()
     #expect(cached.isPlaying == true)
