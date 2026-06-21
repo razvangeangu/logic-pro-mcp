@@ -3241,9 +3241,18 @@ actor AccessibilityChannel: Channel {
         params: [String: String],
         runtime: AXLogicProElements.Runtime = .production
     ) -> ChannelResult {
+        // Malformed input fails closed as terminal State C: a bad level must NOT
+        // fall through to the key-command channel (which doesn't validate and
+        // would fire a generic zoom). Mirrors gotoPositionViaBarSlider's guard.
         guard let levelStr = params["level"], let level = Int(levelStr), (1...10).contains(level) else {
-            return .error("nav.set_zoom_level requires 'level' (Int 1..10)")
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "nav.set_zoom_level requires 'level' (Int 1..10)",
+                extras: ["operation": "nav.set_zoom"]
+            ))
         }
+        // Slider absent is NOT terminal: plain error lets the router fall back to
+        // the key-command / CGEvent channels.
         guard let slider = AXLogicProElements.findHorizontalZoomSlider(runtime: runtime) else {
             return .error("Horizontal Zoom slider not found — falling back to key command")
         }

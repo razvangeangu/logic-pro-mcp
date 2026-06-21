@@ -79,4 +79,33 @@ struct Issue109ZoomTests {
         #expect(chain?.first == .accessibility)
         #expect(chain?.contains(.midiKeyCommands) == true)
     }
+
+    @Test(
+        "set_zoom_level rejects malformed level with TERMINAL State C invalid_params",
+        arguments: [
+            ["level": "0"],     // below range
+            ["level": "11"],    // above range
+            ["level": "-1"],    // negative
+            ["level": "abc"],   // non-numeric
+            ["level": ""],      // empty
+            [:],                // missing entirely
+        ]
+    )
+    func zoomInvalidParamsAreTerminal(params: [String: String]) throws {
+        let f = zoomFixture(start: 0.5)
+        let result = AccessibilityChannel.defaultSetZoomLevel(
+            params: params, runtime: f.builder.makeLogicRuntime(appElement: f.app)
+        )
+        #expect(!result.isSuccess)
+        let o = try #require(obj(result))
+        #expect(!((o["success"] as? Bool)!))
+        #expect(o["error"] as? String == "invalid_params")
+        // Terminal → the router MUST suppress fallback to the key-command
+        // channel (which doesn't validate and would fire a generic zoom).
+        #expect(HonestContract.isTerminalStateC(result.message))
+        // Guard must fire before any slider write: the fixture slider is untouched.
+        let stored = (f.builder.attributeValue(f.slider, kAXValueAttribute as String) as? NSNumber)?.doubleValue
+            ?? (f.builder.attributeValue(f.slider, kAXValueAttribute as String) as? Double)
+        #expect(abs((stored ?? -9) - 0.5) < 0.001)
+    }
 }
