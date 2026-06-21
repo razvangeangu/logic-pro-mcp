@@ -65,6 +65,34 @@ These are read-only classifiers (which AX container is which); none gate a
 State-A success. This closes the previously-listed `looksLikeTransportContainer`
 keyword aggregate and the marker-ruler keyword fallback below.
 
+## Phase 4 (issue #60) — mixer/plugin + region classifier bags centralized
+
+The remaining read-only mixer/inspector/channel-strip/plugin-slot classifiers
+(surface #3) and region/track-content/track-type classifiers (surface #5) moved
+from inline literals into `AXLocalePolicy`, behavior-preserving (each LabelSet
+pins the EXACT prior token set, order, and match mode — `.containsAny` for the
+`text.contains(token)` `||` chains over an already-lowercased aggregate;
+`.labels.contains(normalized)` for the normalized `==` predicates; `.matches(_:
+mode: .exactStrict)` for the verbatim guards). Deterministic EN+KO coverage +
+functional tests in `Issue60LocalePhase4Tests` (the token-coverage guard fails
+on any drift). LabelSets added:
+
+- Mixer/plugin: `mixerInspectorContext`, `mixerNamedElement`, `sliderSendHint`,
+  `sliderZoomHint`, `sliderVolumeHint`, `sliderPanHint`, `pluginBypassControl`,
+  `pluginOpenOrListControl`, `pluginAutomationLabelExact`,
+  `pluginAutomationLabelSubstring`, `audioPluginSlotLabel`, `sendOrIOControlLabel`,
+  `nonInsertButtonText`, `headerPanHint`, `trackHeadersDescription`,
+  `projectPickerWindow`, `transportTextFieldHint`.
+- Region: `trackContentExplicit`, `trackContentGeneric`, `regionKindDrummer`,
+  `regionKindMidi`, `regionKindAudio`, `regionHelpKeyword`.
+
+None gate a State-A success. Not migrated (out of Phase-4 scope): the
+`parseRegionBars` regex literals (`리전은…마디…시작…끝` / `region…starts…at…bar`)
+are regex fragments, not token bags; AppleScript menu literals (surface #1) and
+write-path mutation gates (`pluginInsertSpec` switch-map, `findAudioPluginRootMenu`,
+`defaultSetCycleRange` locator, track-create/delete/save-as menu paths) are
+separate behavior-changing migrations.
+
 ## Known Remaining Surfaces
 
 The locale-agnostic epic (#60) is **not closed** (its acceptance criterion 5
@@ -85,18 +113,20 @@ Logic Pro to confirm State A on their respective paths:
    — **centralized in Phase 3** (`transportContainerMetadata`,
    `transportContainerControlKeywords`, `transportSliderHints`). Behavior
    preserved; EN+KO tested. Still pending live KO confirmation.
-3. **Mixer / inspector / channel-strip metadata keyword scans**
-   (`AXLogicProElements`: send/입력/출력/그룹/채널 모드/볼륨/패닝/바이패스/오토메이션
-   etc.) — large heuristic token bags used for classification and disambiguation.
-   These are read-only but interdependent; a careful, separately-tested pass is
-   required to avoid changing which strips/controls are recognized.
+3. ~~**Mixer / inspector / channel-strip metadata keyword scans**~~
+   — **centralized in Phase 4** (`sliderSendHint`/`sliderVolumeHint`/`sliderPanHint`,
+   `pluginBypassControl`, `audioPluginSlotLabel`, `sendOrIOControlLabel`,
+   `nonInsertButtonText`, `mixerNamedElement`, `mixerInspectorContext`, …).
+   Behavior preserved; EN+KO tested. Still pending live KO confirmation.
 4. **Marker-list / cell placeholder keywords** (`AXLogicProElements`:
    `셀`/`Cell`, marker-list window-title suffixes) — read-only scraping fallbacks
    for old Logic versions; pending. (The marker-*ruler* keyword fallback
    `마커`/`marker` was centralized in Phase 3 as `markerContainerKeywords`.)
-5. **Region / track-content / track-type description keywords**
-   (`AccessibilityChannel`: `리전`/region, `트랙 콘텐츠`/Track Content,
-   드러머/세션 플레이어/오디오 etc.) — read-only classification, pending.
+5. ~~**Region / track-content / track-type description keywords**~~
+   — **centralized in Phase 4** (`trackContentExplicit`/`trackContentGeneric`,
+   `regionKindDrummer`/`regionKindMidi`/`regionKindAudio`, `regionHelpKeyword`).
+   Behavior preserved; EN+KO tested. The `parseRegionBars` regex literals remain
+   inline (regex fragments, not a token bag). Still pending live KO confirmation.
 
 **Live verification still required** for the surfaces centralized in this pass:
 each read-only locator/extractor was verified headless with injected fake

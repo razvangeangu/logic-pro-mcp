@@ -77,14 +77,21 @@ enum AXLocalePolicy {
             }
         }
 
-        /// True if `haystack` contains ANY label as a case-insensitive substring.
-        /// Preserves the existing `combined.contains(token)` control flow where a
-        /// pre-built, already-lowercased aggregate string is scanned for any of a
-        /// set of localized tokens. The caller keeps its own AX traversal and
-        /// structural ordering; only the token list moves into policy.
+        /// True if `haystack` contains ANY label as a substring.
+        ///
+        /// Faithfully mirrors the inline `combined.contains(token)` control flow
+        /// it replaced: Swift's `String.contains` is case-sensitive,
+        /// **diacritic-sensitive**, and canonical-equivalence aware. We use
+        /// `.caseInsensitive` (inert on the already-lowercased aggregates the
+        /// callers pass, and required for the one raw-string site) but
+        /// deliberately do NOT add `.diacriticInsensitive` — folding accents
+        /// (e.g. "ínspector" → "inspector") would WIDEN matching beyond the
+        /// original and risk misclassifying accented-Latin AX text in non-EN/KO
+        /// locales. Omitting `.literal` keeps Hangul NFC/NFD canonical matching,
+        /// matching `String.contains`.
         func containsAny(in haystack: String) -> Bool {
             labels.contains { label in
-                haystack.range(of: label, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+                haystack.range(of: label, options: [.caseInsensitive]) != nil
             }
         }
     }
@@ -334,6 +341,167 @@ enum AXLocalePolicy {
         canonical: "tempo",
         variants: ["bpm", "position", "템포", "재생헤드 위치", "마디", "비트"],
         rationale: "Classifies tempo/position sliders inside the transport container; read-only."
+    )
+
+    // MARK: - Read-only classifier token bags (Phase 4, issue #60)
+    //
+    // Mixer / inspector / channel-strip / plugin-slot classifiers (surface #3)
+    // and region / track-content / track-type classifiers (surface #5). All back
+    // read-only predicates/locators — they decide "what kind of element/region is
+    // this", never gate a State-A success. Each preserves its call site's EXACT
+    // token list, source order, and match semantics (`.containsAny` for the
+    // `text.contains(token)` || chains over an already-lowercased aggregate;
+    // `.labels.contains(normalized)` for the normalized `==` predicates). Write
+    // paths, AppleScript menu literals, and the region-bar regex are deliberately
+    // NOT centralized here (separate, behavior-changing migrations).
+
+    /// Inspector-context marker — prunes inspector ancestors from mixer scans.
+    static let mixerInspectorContext = LabelSet(
+        canonical: "inspector",
+        variants: ["인스펙터"],
+        rationale: "Marks an inspector ancestor so mixer-area detection skips it; read-only classifier."
+    )
+
+    /// Mixer container id/desc/title exact match (normalized lowercase equality).
+    static let mixerNamedElement = LabelSet(
+        canonical: "mixer",
+        variants: ["믹서"],
+        rationale: "Identifies the mixer container by exact normalized name; read-only classifier."
+    )
+
+    /// Slider type hints (mutually exclusive groups in `sliderText`).
+    static let sliderSendHint = LabelSet(
+        canonical: "send",
+        variants: ["센드"],
+        rationale: "Classifies a slider as a send control; read-only."
+    )
+    static let sliderZoomHint = LabelSet(
+        canonical: "zoom",
+        variants: ["확대"],
+        rationale: "Classifies a slider as a zoom control; read-only."
+    )
+    static let sliderVolumeHint = LabelSet(
+        canonical: "volume",
+        variants: ["fader", "볼륨"],
+        rationale: "Classifies a slider as a volume fader; read-only."
+    )
+    static let sliderPanHint = LabelSet(
+        canonical: "pan",
+        variants: ["panning", "패닝", "밸런스"],
+        rationale: "Classifies a slider as a pan control; read-only."
+    )
+
+    /// Plugin-slot child control locators.
+    static let pluginBypassControl = LabelSet(
+        canonical: "bypass",
+        variants: ["바이패스"],
+        rationale: "Locates a plugin-slot bypass control by label; read-only locator (structural fallback exists)."
+    )
+    static let pluginOpenOrListControl = LabelSet(
+        canonical: "open",
+        variants: ["열기", "list", "목록"],
+        rationale: "Locates a plugin-slot open/list control by label; read-only locator (structural fallback exists)."
+    )
+
+    /// Automation-mode labels that must NOT be read as a plugin display name.
+    static let pluginAutomationLabelExact = LabelSet(
+        canonical: "읽기, 오토메이션이 활성화됨",
+        variants: ["read"],
+        rationale: "Rejects automation-mode slot labels (exact) when extracting a plugin display name; read-only filter."
+    )
+    static let pluginAutomationLabelSubstring = LabelSet(
+        canonical: "automation",
+        variants: ["오토메이션"],
+        rationale: "Rejects automation-mode slot labels (substring) when extracting a plugin display name; read-only filter."
+    )
+
+    /// Empty audio-plugin insert-slot button classification.
+    static let audioPluginSlotLabel = LabelSet(
+        canonical: "audio plugin",
+        variants: ["audio effect", "오디오 플러그인", "오디오 이펙트"],
+        rationale: "Classifies an empty audio-plugin insert-slot button; read-only (structural fallback exists)."
+    )
+    static let sendOrIOControlLabel = LabelSet(
+        canonical: "send",
+        variants: ["센드", "input", "output", "입력", "출력"],
+        rationale: "Excludes send/IO buttons from empty audio-plugin slot detection; read-only."
+    )
+
+    /// Negative-case table: button labels that are NOT empty insert slots.
+    static let nonInsertButtonText = LabelSet(
+        canonical: "send",
+        variants: [
+            "센드", "input", "입력", "output", "출력", "group", "그룹",
+            "channel mode", "채널 모드", "eq", "setting", "설정",
+            "gain reduction", "게인 축소", "mute", "음소거", "solo", "record", "녹음",
+            "monitor", "모니터링", "volume", "볼륨", "fader", "페이더",
+            "pan", "패닝", "밸런스",
+        ],
+        rationale: "Negative-case table excluding non-insert channel-strip buttons from empty-slot enumeration; read-only."
+    )
+
+    /// Track-header pan slider locator (header-level).
+    static let headerPanHint = LabelSet(
+        canonical: "pan",
+        variants: ["팬", "밸런스"],
+        rationale: "Locates the track-header pan slider by child description; read-only locator (structural fallback exists)."
+    )
+
+    /// Track-header rail description (normalized exact match).
+    static let trackHeadersDescription = LabelSet(
+        canonical: "track headers",
+        variants: ["track header", "tracks header", "tracks headers", "트랙 헤더"],
+        rationale: "Identifies the track-header rail by normalized description; read-only classifier (structural detection preferred)."
+    )
+
+    /// Choose-Project picker window title markers.
+    static let projectPickerWindow = LabelSet(
+        canonical: "프로젝트 선택",
+        variants: ["choose a project", "choose project", "new from template"],
+        rationale: "Distinguishes the Choose-Project picker window from a real project; read-only classifier."
+    )
+
+    /// Transport text-field description hints (tempo/position fields).
+    static let transportTextFieldHint = LabelSet(
+        canonical: "tempo",
+        variants: ["bpm", "position", "템포", "재생헤드 위치"],
+        rationale: "Classifies transport tempo/position text fields inside the control bar; read-only."
+    )
+
+    /// Region container "Track Content" group (normalized exact match).
+    static let trackContentExplicit = LabelSet(
+        canonical: "트랙 콘텐츠",
+        variants: ["track content", "track contents", "tracks content", "tracks contents"],
+        rationale: "Identifies the arrange Track-Content group by normalized description; read-only classifier."
+    )
+    static let trackContentGeneric = LabelSet(
+        canonical: "콘텐츠",
+        variants: ["content", "contents"],
+        rationale: "Generic content-group fallback by normalized description; read-only classifier."
+    )
+
+    /// Region-kind classification by name+help substring.
+    static let regionKindDrummer = LabelSet(
+        canonical: "drummer",
+        variants: ["session player", "드러머", "세션 플레이어"],
+        rationale: "Classifies a region as drummer/session-player content; read-only."
+    )
+    static let regionKindMidi = LabelSet(
+        canonical: "midi",
+        variants: [],
+        rationale: "Classifies a region as MIDI content; read-only."
+    )
+    static let regionKindAudio = LabelSet(
+        canonical: "audio",
+        variants: ["오디오"],
+        rationale: "Classifies a region as audio content; read-only."
+    )
+
+    /// Region detection by AXHelp keyword.
+    static let regionHelpKeyword = LabelSet(
+        canonical: "region",
+        variants: ["리전"],
+        rationale: "Detects an arrange region by its AXHelp string; read-only classifier."
     )
 
     static let showMixerMenuPath = MenuPath(bar: viewMenuBar, item: showMixerMenuItem)
