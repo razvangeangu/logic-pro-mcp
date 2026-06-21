@@ -208,25 +208,28 @@ enum AXValueExtractors {
         return 1.0
     }
 
-    /// Set a Logic mixer fader using the public 0.0...1.0 contract value. When
-    /// Logic exposes the raw 0...233 AX range, interpolate through the observed
-    /// taper first so write and readback use the same contract space.
-    @discardableResult
-    static func setLogicMixerFaderValue(
-        _ element: AXUIElement,
-        _ value: Double,
-        runtime: AXHelpers.Runtime = .production
-    ) -> Bool {
-        let clamped = min(max(value, 0.0), 1.0)
-        guard let range = extractSliderRange(element, runtime: runtime),
-              range.max > range.min else {
-            return setSliderValue(element, clamped, runtime: runtime)
-        }
+    /// #107: target raw AX value for a desired public mixer volume contract,
+    /// for the `AXIncrement`/`AXDecrement` nudge writer (Logic ignores `AXValue`
+    /// writes on its faders). Mirrors `setLogicMixerFaderValue`'s contract→raw
+    /// math without performing the (ineffective) write.
+    static func logicMixerFaderContractToRaw(_ contract: Double, range: SliderRange) -> Double {
+        let clamped = min(max(contract, 0.0), 1.0)
         let position = isLogicMixerRawFaderRange(range)
             ? logicMixerFaderContractToPosition(clamped)
             : clamped
-        let raw = range.min + position * (range.max - range.min)
-        return setSliderValue(element, raw, runtime: runtime)
+        return range.min + position * (range.max - range.min)
+    }
+
+    /// #107: read a unipolar Logic track-header pan slider (live range 0...127,
+    /// electrical center at the midpoint) as the public -1.0...1.0 pan contract.
+    /// The header pan slider's `AXMinValue` is 0 (not negative), so the bipolar
+    /// `extractCenteredSliderValue` can't be used here.
+    static func headerPanContract(_ element: AXUIElement, range: SliderRange, runtime: AXHelpers.Runtime = .production) -> Double? {
+        guard let raw = extractSliderValue(element, runtime: runtime) else { return nil }
+        let center = (range.min + range.max) / 2.0
+        let half = (range.max - range.min) / 2.0
+        guard half > 0 else { return nil }
+        return min(max((raw - center) / half, -1.0), 1.0)
     }
 
     /// Normalize a bipolar Logic AX slider to -1.0...1.0. Pan knobs in Logic
@@ -249,31 +252,6 @@ enum AXValueExtractors {
         return min(value / range.max, 1.0)
     }
 
-    /// Set a centered slider using the public -1.0...1.0 contract. Logic 12.2
-    /// pan knobs expose an asymmetric integer AX range (-64...63), so map the
-    /// negative and positive sides independently to preserve true center.
-    @discardableResult
-    static func setCenteredSliderValue(
-        _ element: AXUIElement,
-        _ value: Double,
-        runtime: AXHelpers.Runtime = .production
-    ) -> Bool {
-        let clamped = min(max(value, -1.0), 1.0)
-        guard let range = extractSliderRange(element, runtime: runtime),
-              range.min < 0.0,
-              range.max > 0.0 else {
-            return setSliderValue(element, clamped, runtime: runtime)
-        }
-        let raw: Double
-        if clamped < 0.0 {
-            raw = clamped * abs(range.min)
-        } else if clamped > 0.0 {
-            raw = clamped * range.max
-        } else {
-            raw = 0.0
-        }
-        return setSliderValue(element, raw, runtime: runtime)
-    }
 
     /// Read a track header and extract its basic state.
     static func extractTrackState(

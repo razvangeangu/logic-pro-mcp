@@ -3641,148 +3641,123 @@ actor AccessibilityChannel: Channel {
             "track_index": index,
             "control": label,
         ]
-        guard let mixer = AXLogicProElements.getMixerArea(runtime: runtime) else {
-            return .error(HonestContract.encodeStateC(
-                error: .elementNotFound,
-                hint: "Cannot locate visible mixer for \(operation)",
-                extras: [
-                    "operation": operation,
-                    "track": index,
-                    "requested": value,
-                    "target_identity": targetIdentity,
-                    "recovery_hint": "Open View > Show Mixer in Logic Pro and retry the mixer write.",
-                ]
-            ))
-        }
-        let strips = AXLogicProElements.mixerChannelStrips(in: mixer, runtime: runtime.ax)
-        guard index >= 0 && index < strips.count else {
-            return .error(HonestContract.encodeStateC(
-                error: .elementNotFound,
-                hint: "track index \(index) is not present in the visible mixer",
-                extras: [
-                    "operation": operation,
-                    "track": index,
-                    "requested": value,
-                    "target_identity": targetIdentity,
-                    "visible_strips": strips.count,
-                ]
-            ))
-        }
-        let strip = strips[index]
+
+        // #107: target the per-track fader/pan slider in the track HEADER. It is
+        // the same channel parameter as the mixer-strip control but identity-safe
+        // (it belongs to exactly track `index`, so we can never write the wrong
+        // strip the way positional indexing into a 2-strip Inspector mixer could)
+        // and is available without the Mixer being visible. Logic ignores AXValue
+        // writes on these sliders entirely (live-confirmed: `set 0.5` leaves a
+        // 0.76 fader unmoved) — only AXIncrement/AXDecrement detents move them,
+        // in deterministic ~10-raw-unit steps. We converge to the nearest
+        // representable detent and read back every step.
         let slider: AXUIElement?
         switch target {
-        case .volume:
-            slider = AXLogicProElements.findVolumeFader(in: strip, runtime: runtime.ax)
-        case .pan:
-            slider = AXLogicProElements.findPanControl(in: strip, runtime: runtime.ax)
+        case .volume: slider = AXLogicProElements.findTrackHeaderVolumeFader(at: index, runtime: runtime)
+        case .pan:    slider = AXLogicProElements.findTrackHeaderPanControl(at: index, runtime: runtime)
         }
         guard let slider else {
             return .error(HonestContract.encodeStateC(
                 error: .elementNotFound,
-                hint: "Cannot locate \(label) control for visible mixer track \(index)",
+                hint: "Cannot locate \(label) control for track \(index)",
                 extras: [
                     "operation": operation,
                     "track": index,
                     "requested": value,
                     "target_identity": targetIdentity,
-                    "visible_strips": strips.count,
+                    "recovery_hint": "Ensure track \(index) exists and the Tracks area is shown.",
+                ]
+            ))
+        }
+        guard let range = AXValueExtractors.extractSliderRange(slider, runtime: runtime.ax),
+              range.max > range.min else {
+            return .error(HonestContract.encodeStateC(
+                error: .readbackUnavailable,
+                hint: "\(label) slider for track \(index) exposes no AX range",
+                extras: [
+                    "operation": operation, "track": index, "requested": value,
+                    "target_identity": targetIdentity, "verify_source": "ax_slider",
                 ]
             ))
         }
 
-        let tolerance = 0.01
-        let observedBefore = mixerControlValue(from: slider, target: target, runtime: runtime.ax)
-        var observedAfter = observedBefore
-        var writeAttempts = 0
-        var stagnantSteps = 0
-        let maxWriteAttempts = 128
-        while writeAttempts < maxWriteAttempts {
-            guard setMixerControlValue(slider, target: target, requested: value, runtime: runtime.ax) else {
-                if writeAttempts == 0 {
-                    return .error(HonestContract.encodeStateC(
-                        error: .axWriteFailed,
-                        hint: "AX write failed for \(label) on visible mixer track \(index)",
-                        extras: [
-                            "operation": operation,
-                            "track": index,
-                            "requested": value,
-                            "target_identity": targetIdentity,
-                            "observed_before": observedBefore ?? NSNull(),
-                            "verify_source": "ax_slider",
-                        ]
-                    ))
-                }
-                break
+        func readContract() -> Double? {
+            switch target {
+            case .volume: return AXValueExtractors.extractLogicMixerFaderValue(slider, runtime: runtime.ax)
+            case .pan:    return AXValueExtractors.headerPanContract(slider, range: range, runtime: runtime.ax)
             }
-            writeAttempts += 1
-            usleep(10_000)
-            let nextObserved = mixerControlValue(from: slider, target: target, runtime: runtime.ax)
-            if let nextObserved, abs(nextObserved - value) < tolerance {
-                observedAfter = nextObserved
-                break
-            }
-            if nextObserved == observedAfter {
-                stagnantSteps += 1
-                if stagnantSteps >= 5 {
-                    observedAfter = nextObserved
-                    break
-                }
-            } else {
-                stagnantSteps = 0
-            }
-            observedAfter = nextObserved
+        }
+        let observedBefore = readContract()
+
+        // Desired raw AX value for the requested contract value.
+        let targetRaw: Double
+        switch target {
+        case .volume:
+            targetRaw = AXValueExtractors.logicMixerFaderContractToRaw(value, range: range)
+        case .pan:
+            let center = (range.min + range.max) / 2.0
+            let half = (range.max - range.min) / 2.0
+            targetRaw = center + min(max(value, -1.0), 1.0) * half
         }
 
-        let baseExtras: [String: Any] = [
+        // Closed-loop AXIncrement/AXDecrement nudge toward `targetRaw`. Stops on
+        // reaching/crossing the target (landing on the nearer detent) or when no
+        // detent moves the value (rail / unresponsive).
+        var current = AXValueExtractors.extractSliderValue(slider, runtime: runtime.ax)
+        var steps = 0
+        var stagnant = 0
+        let maxSteps = 64
+        while let cur = current, steps < maxSteps {
+            if abs(cur - targetRaw) < 0.5 { break }
+            let goingUp = cur < targetRaw
+            _ = AXHelpers.performAction(slider, goingUp ? kAXIncrementAction : kAXDecrementAction, runtime: runtime.ax)
+            steps += 1
+            usleep(25_000)
+            guard let next = AXValueExtractors.extractSliderValue(slider, runtime: runtime.ax) else { break }
+            let crossed = (cur < targetRaw && next >= targetRaw) || (cur > targetRaw && next <= targetRaw)
+            if crossed {
+                // Land on whichever of cur/next is closer to the target.
+                if abs(cur - targetRaw) < abs(next - targetRaw) {
+                    _ = AXHelpers.performAction(slider, goingUp ? kAXDecrementAction : kAXIncrementAction, runtime: runtime.ax)
+                    usleep(25_000)
+                }
+                break
+            }
+            if next == cur { stagnant += 1; if stagnant >= 2 { break } } else { stagnant = 0 }
+            current = next
+        }
+
+        let observedRaw = AXValueExtractors.extractSliderValue(slider, runtime: runtime.ax)
+        let observedAfter = readContract()
+        // One detent is ~10 raw units; "verified" means we converged to the
+        // nearest AX-representable detent (within ~half a detent of target).
+        let convergedToNearestDetent = observedRaw.map { abs($0 - targetRaw) <= 6.0 } ?? false
+
+        var baseExtras: [String: Any] = [
             "operation": operation,
             "track": index,
             "control": label,
             "requested": value,
             "target_identity": targetIdentity,
-            "visible_strips": strips.count,
             "observed_before": observedBefore ?? NSNull(),
             "observed_after": observedAfter ?? NSNull(),
             "observed": observedAfter ?? NSNull(),
+            "observed_raw": observedRaw ?? NSNull(),
+            "target_raw": targetRaw,
+            "detent_raw_step": 10,
             "verify_source": "ax_slider",
-            "write_attempted": true,
-            "write_attempts": writeAttempts,
+            "write_method": "ax_increment_decrement",
+            "nudge_steps": steps,
+            "quantization_note": "Logic exposes this fader to AX in ~10-raw-unit detents; observed is the nearest representable level to requested.",
         ]
-        if let actual = observedAfter, abs(actual - value) < tolerance {
-            return .success(HonestContract.encodeStateA(
-                extras: baseExtras.merging(["observed": actual]) { _, new in new }
-            ))
+        if convergedToNearestDetent, let actual = observedAfter {
+            baseExtras["observed"] = actual
+            return .success(HonestContract.encodeStateA(extras: baseExtras))
         }
         return .success(HonestContract.encodeStateB(
             reason: observedAfter == nil ? .readbackUnavailable : .readbackMismatch,
             extras: baseExtras
         ))
-    }
-
-    private static func mixerControlValue(
-        from slider: AXUIElement,
-        target: MixerTarget,
-        runtime: AXHelpers.Runtime
-    ) -> Double? {
-        switch target {
-        case .volume:
-            return AXValueExtractors.extractLogicMixerFaderValue(slider, runtime: runtime)
-        case .pan:
-            return AXValueExtractors.extractCenteredSliderValue(slider, runtime: runtime)
-        }
-    }
-
-    private static func setMixerControlValue(
-        _ slider: AXUIElement,
-        target: MixerTarget,
-        requested: Double,
-        runtime: AXHelpers.Runtime
-    ) -> Bool {
-        switch target {
-        case .volume:
-            return AXValueExtractors.setLogicMixerFaderValue(slider, requested, runtime: runtime)
-        case .pan:
-            return AXValueExtractors.setCenteredSliderValue(slider, requested, runtime: runtime)
-        }
     }
 
     // MARK: - Regions

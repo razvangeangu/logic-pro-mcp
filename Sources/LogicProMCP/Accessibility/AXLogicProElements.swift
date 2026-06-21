@@ -570,6 +570,41 @@ enum AXLogicProElements {
             .element
     }
 
+    /// #107: the per-track volume fader inside the track HEADER (an AXSlider
+    /// whose value-indicator reads "Volume"). Same channel parameter as the
+    /// mixer-strip fader, but identity-safe — it belongs to exactly track
+    /// `index` — and always present without the Mixer being visible. Logic
+    /// ignores AXValue writes on it, so callers drive it with
+    /// AXIncrement/AXDecrement detents.
+    static func findTrackHeaderVolumeFader(at index: Int, runtime: Runtime = .production) -> AXUIElement? {
+        guard let header = findTrackHeader(at: index, runtime: runtime) else { return nil }
+        return findVolumeFader(in: header, runtime: runtime.ax)
+    }
+
+    /// #107: the per-track pan slider inside the track HEADER. Its own
+    /// description is empty; the "Pan"/"팬" label lives on its
+    /// `AXValueIndicator` child. Falls back to the non-volume slider.
+    static func findTrackHeaderPanControl(at index: Int, runtime: Runtime = .production) -> AXUIElement? {
+        guard let header = findTrackHeader(at: index, runtime: runtime) else { return nil }
+        return findPanControlInHeader(header, runtime: runtime.ax)
+    }
+
+    /// Header-level pan-slider selection (split out for deterministic testing).
+    static func findPanControlInHeader(_ header: AXUIElement, runtime: AXHelpers.Runtime = .production) -> AXUIElement? {
+        let sliders = AXHelpers.findAllDescendants(of: header, role: kAXSliderRole, maxDepth: 4, runtime: runtime)
+        if let pan = sliders.first(where: { slider in
+            AXHelpers.getChildren(slider, runtime: runtime).contains { child in
+                let desc = (AXHelpers.getDescription(child, runtime: runtime) ?? "").lowercased()
+                return desc.contains("pan") || desc.contains("팬") || desc.contains("밸런스")
+            }
+        }) {
+            return pan
+        }
+        // Fallback: the slider that is NOT the volume fader.
+        let volume = findVolumeFader(in: header, runtime: runtime)
+        return sliders.first { volume == nil || !CFEqual($0, volume!) }
+    }
+
     /// Find a volume fader for a specific track index within the mixer.
     static func findFader(trackIndex: Int, runtime: Runtime = .production) -> AXUIElement? {
         guard let mixer = getMixerArea(runtime: runtime) else { return nil }

@@ -167,6 +167,68 @@ private func makeAXBackedAccessibilityChannel(
     return AccessibilityChannel(runtime: runtime)
 }
 
+/// #107: a logic runtime whose AXIncrement/AXDecrement move a slider by one
+/// ~10-raw-unit detent (clamped to AXMin/AXMax), so the closed-loop nudge
+/// writer (`mixer.set_volume`/`set_pan`) converges against a fake AX tree.
+private func nudgeResponsiveLogicRuntime(_ builder: FakeAXRuntimeBuilder, app: AXUIElement) -> AXLogicProElements.Runtime {
+    builder.makeLogicRuntime(
+        appElement: app,
+        setAttributeHandler: nil,
+        performActionHandler: { element, action in
+            let number: @Sendable (String) -> Double? = { attr in
+                if let n = builder.attributeValue(element, attr) as? NSNumber { return n.doubleValue }
+                return builder.attributeValue(element, attr) as? Double
+            }
+            let delta: Double = (action == (kAXIncrementAction as String)) ? 10
+                : ((action == (kAXDecrementAction as String)) ? -10 : 0)
+            guard delta != 0, let cur = number(kAXValueAttribute as String) else { return true }
+            let lo = number(kAXMinValueAttribute as String) ?? -1e9
+            let hi = number(kAXMaxValueAttribute as String) ?? 1e9
+            builder.setAttribute(element, kAXValueAttribute as String, Swift.min(Swift.max(cur + delta, lo), hi))
+            return true
+        }
+    )
+}
+
+/// #107: build a Logic-12-style track-header rail (AXList id="Track Headers")
+/// with one header carrying a "Volume" fader (range/value) and a pan slider
+/// (empty desc, "0 Pan" value-indicator child). Returns the fader + pan.
+@discardableResult
+private func attachTrackHeaderRail(
+    _ builder: FakeAXRuntimeBuilder,
+    window: AXUIElement,
+    siblings: [AXUIElement],
+    baseID: Int,
+    volume: (value: Double, min: Double, max: Double),
+    pan: (value: Double, min: Double, max: Double)
+) -> (volume: AXUIElement, pan: AXUIElement) {
+    let rail = builder.element(baseID)
+    builder.setAttribute(rail, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setAttribute(rail, kAXIdentifierAttribute as String, "Track Headers")
+    let header = builder.element(baseID + 1)
+    builder.setAttribute(header, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+    let volumeSlider = builder.element(baseID + 2)
+    builder.setAttribute(volumeSlider, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(volumeSlider, kAXDescriptionAttribute as String, "Volume")
+    builder.setAttribute(volumeSlider, kAXValueAttribute as String, volume.value)
+    builder.setAttribute(volumeSlider, kAXMinValueAttribute as String, volume.min)
+    builder.setAttribute(volumeSlider, kAXMaxValueAttribute as String, volume.max)
+    let panSlider = builder.element(baseID + 3)
+    builder.setAttribute(panSlider, kAXRoleAttribute as String, kAXSliderRole as String)
+    builder.setAttribute(panSlider, kAXDescriptionAttribute as String, "")
+    builder.setAttribute(panSlider, kAXValueAttribute as String, pan.value)
+    builder.setAttribute(panSlider, kAXMinValueAttribute as String, pan.min)
+    builder.setAttribute(panSlider, kAXMaxValueAttribute as String, pan.max)
+    let panIndicator = builder.element(baseID + 4)
+    builder.setAttribute(panIndicator, kAXRoleAttribute as String, "AXValueIndicator")
+    builder.setAttribute(panIndicator, kAXDescriptionAttribute as String, "0 Pan")
+    builder.setChildren(panSlider, [panIndicator])
+    builder.setChildren(header, [volumeSlider, panSlider])
+    builder.setChildren(rail, [header])
+    builder.setChildren(window, siblings + [rail])
+    return (volumeSlider, panSlider)
+}
+
 private func makeSetInstrumentFixture() -> (
     builder: FakeAXRuntimeBuilder,
     app: AXUIElement,
@@ -1736,7 +1798,6 @@ private func makeSetInstrumentFixture() -> (
 
     builder.setAttribute(app, kAXMainWindowAttribute as String, window)
     builder.setAttribute(window, kAXTitleAttribute as String, "Song.logicx")
-    builder.setChildren(window, [mixer])
     builder.setAttribute(mixer, kAXRoleAttribute as String, kAXGroupRole as String)
     builder.setAttribute(mixer, kAXIdentifierAttribute as String, "Mixer")
     builder.setChildren(mixer, [strip])
@@ -1745,8 +1806,16 @@ private func makeSetInstrumentFixture() -> (
     builder.setAttribute(fader, kAXValueAttribute as String, 0.8)
     builder.setAttribute(pan, kAXRoleAttribute as String, kAXSliderRole as String)
     builder.setAttribute(pan, kAXValueAttribute as String, -0.25)
+    // #107: writes target the per-track header fader/pan, not the mixer strip.
+    let headerControls = attachTrackHeaderRail(
+        builder, window: window, siblings: [mixer], baseID: 3_040,
+        volume: (value: 173, min: 0, max: 233),
+        pan: (value: 64, min: 0, max: 127)
+    )
 
-    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let channel = makeAXBackedAccessibilityChannel(
+        builder: builder, app: app, logicRuntime: nudgeResponsiveLogicRuntime(builder, app: app)
+    )
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
 
@@ -1769,22 +1838,20 @@ private func makeSetInstrumentFixture() -> (
     #expect((volumeObj["verified"] as? Bool)!)
     #expect(volumeObj["operation"] as? String == "mixer.set_volume")
     #expect(volumeObj["verify_source"] as? String == "ax_slider")
-    #expect(volumeObj["observed_before"] as? Double == 0.8)
-    #expect(volumeObj["observed_after"] as? Double == 0.5)
+    // Nudge converges to the nearest ~10-raw-unit detent → observed within a detent of 0.5.
+    #expect(abs((volumeObj["observed_after"] as? Double ?? -9) - 0.5) < 0.07)
     #expect((volumeObj["target_identity"] as? [String: Any])?["track_index"] as? Int == 0)
-    #expect((builder.attributeValue(fader, kAXValueAttribute as String) as? NSNumber)?.doubleValue == 0.5)
 
-    let panResult = await channel.execute(operation: "mixer.set_pan", params: ["index": "0", "value": "-0.1"])
+    let panResult = await channel.execute(operation: "mixer.set_pan", params: ["index": "0", "value": "-0.5"])
     #expect(panResult.isSuccess)
     let panObj = decodeAccessibilityJSON(panResult.message)
     #expect((panObj["success"] as? Bool)!)
     #expect((panObj["verified"] as? Bool)!)
     #expect(panObj["operation"] as? String == "mixer.set_pan")
     #expect(panObj["verify_source"] as? String == "ax_slider")
-    #expect(panObj["observed_before"] as? Double == -0.25)
-    #expect(panObj["observed_after"] as? Double == -0.1)
+    #expect(abs((panObj["observed_after"] as? Double ?? -9) - (-0.5)) < 0.07)
     #expect((panObj["target_identity"] as? [String: Any])?["control"] as? String == "pan")
-    #expect((builder.attributeValue(pan, kAXValueAttribute as String) as? NSNumber)?.doubleValue == -0.1)
+    _ = headerControls
 
     let projectResult = await channel.execute(operation: "project.get_info", params: [:])
     #expect(projectResult.isSuccess)
@@ -1840,51 +1907,40 @@ private func makeSetInstrumentFixture() -> (
 }
 
 @Test func testAccessibilityChannelMixerWritesUseLogic12RawSliderRanges() async {
+    // #107: writes are driven via the per-track header fader/pan with an
+    // AXIncrement/AXDecrement nudge (Logic ignores AXValue writes on its
+    // faders). The fake rail starts the volume fader at raw 173 (0...233) and
+    // pan at the electrical center (64 of 0...127); the responsive runtime
+    // moves each by ~10-raw-unit detents so the writer converges.
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(396)
     let window = builder.element(397)
-    let mixer = builder.element(398)
-    let strip = builder.element(399)
-    let fader = builder.element(400)
-    let pan = builder.element(401)
-
     builder.setAttribute(app, kAXMainWindowAttribute as String, window)
-    builder.setChildren(window, [mixer])
-    builder.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
-    builder.setAttribute(mixer, kAXDescriptionAttribute as String, "Mixer")
-    builder.setChildren(mixer, [strip])
-    builder.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
-    builder.setChildren(strip, [fader, pan])
-
-    builder.setAttribute(fader, kAXRoleAttribute as String, kAXSliderRole as String)
-    builder.setAttribute(fader, kAXDescriptionAttribute as String, "Volume Fader")
-    builder.setAttribute(fader, kAXValueAttribute as String, 70)
-    builder.setAttribute(fader, kAXMinValueAttribute as String, 0)
-    builder.setAttribute(fader, kAXMaxValueAttribute as String, 233)
-
-    builder.setAttribute(pan, kAXRoleAttribute as String, kAXSliderRole as String)
-    builder.setAttribute(pan, kAXDescriptionAttribute as String, "Pan")
-    builder.setAttribute(pan, kAXValueAttribute as String, 0)
-    builder.setAttribute(pan, kAXMinValueAttribute as String, -64)
-    builder.setAttribute(pan, kAXMaxValueAttribute as String, 63)
-
-    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+    let controls = attachTrackHeaderRail(
+        builder, window: window, siblings: [], baseID: 3_960,
+        volume: (value: 173, min: 0, max: 233),
+        pan: (value: 64, min: 0, max: 127)
+    )
+    let channel = makeAXBackedAccessibilityChannel(
+        builder: builder, app: app, logicRuntime: nudgeResponsiveLogicRuntime(builder, app: app)
+    )
 
     let volumeResult = await channel.execute(operation: "mixer.set_volume", params: ["index": "0", "value": "0.5"])
     #expect(volumeResult.isSuccess)
     let volumeObj = decodeAccessibilityJSON(volumeResult.message)
     #expect((volumeObj["verified"] as? Bool)!)
-    #expect(abs((volumeObj["observed_before"] as? Double ?? 0.0) - 0.4) < 0.01)
-    #expect(abs((volumeObj["observed_after"] as? Double ?? 0.0) - 0.5) < 0.01)
-    #expect(abs(((builder.attributeValue(fader, kAXValueAttribute as String) as? NSNumber)?.doubleValue ?? 0.0) - 98.0) < 0.01)
+    #expect(volumeObj["write_method"] as? String == "ax_increment_decrement")
+    #expect(abs((volumeObj["observed_after"] as? Double ?? -9) - 0.5) < 0.07)
+    // The raw fader actually moved toward the 0.5 target detent (~raw 98).
+    let faderRaw = (builder.attributeValue(controls.volume, kAXValueAttribute as String) as? NSNumber)?.doubleValue
+        ?? (builder.attributeValue(controls.volume, kAXValueAttribute as String) as? Double) ?? -1
+    #expect(faderRaw >= 90 && faderRaw <= 110, "fader raw should land near 98, got \(faderRaw)")
 
     let panResult = await channel.execute(operation: "mixer.set_pan", params: ["index": "0", "value": "-0.5"])
     #expect(panResult.isSuccess)
     let panObj = decodeAccessibilityJSON(panResult.message)
     #expect((panObj["verified"] as? Bool)!)
-    #expect(panObj["observed_before"] as? Double == 0.0)
-    #expect(abs((panObj["observed_after"] as? Double ?? 0.0) - (-0.5)) < 0.01)
-    #expect(abs(((builder.attributeValue(pan, kAXValueAttribute as String) as? NSNumber)?.doubleValue ?? 0.0) - (-32.0)) < 0.01)
+    #expect(abs((panObj["observed_after"] as? Double ?? -9) - (-0.5)) < 0.07)
 }
 
 @Test func testAccessibilityChannelMixerPopulatesAXPluginSlotsAndSource() async throws {
