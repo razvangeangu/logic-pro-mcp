@@ -219,6 +219,7 @@ actor LogicProServer {
     func makeHandlers() -> LogicProServerHandlers {
         let router = self.router
         let cache = self.cache
+        let poller = self.poller
 
         return LogicProServerHandlers(
             listTools: { _ in
@@ -231,29 +232,41 @@ actor LogicProServer {
 
                 await cache.recordToolAccess()
 
-                switch name {
-                case "logic_transport":
-                    return await TransportDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
-                case "logic_tracks":
-                    return await TrackDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
-                case "logic_mixer":
-                    return await MixerDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
-                case "logic_midi":
-                    return await MIDIDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
-                case "logic_edit":
-                    return await EditDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
-                case "logic_navigate":
-                    return await NavigateDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
-                case "logic_project":
-                    return await ProjectDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
-                case "logic_audio":
-                    return AudioDispatcher.handle(command: command, params: cmdParams)
-                case "logic_system":
-                    return await SystemDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache, poller: self.poller)
-                case "logic_plugins":
-                    return await PluginsDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
-                default:
-                    return toolTextResult("Unknown tool: \(name)", isError: true)
+                // #112: every tool dispatch runs under a server-side deadline.
+                // A wedged/occluded Logic session (modal dialog up, AX server
+                // unresponsive) makes multi-message AX operations block far past
+                // the client's tools/call timeout, surfacing as a bare "timeout"
+                // and — worse — stalling the stdio read loop so every subsequent
+                // command also hangs. The deadline converts that into a typed
+                // `operation_timeout` State C and frees the loop. Deadlines are
+                // set well above each command's healthy completion time, so a
+                // normal op can never false-trip (verified across the full live
+                // surface); only a genuine hang is bounded.
+                return await Self.runWithDeadline(tool: name, command: command) {
+                    switch name {
+                    case "logic_transport":
+                        return await TransportDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                    case "logic_tracks":
+                        return await TrackDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                    case "logic_mixer":
+                        return await MixerDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                    case "logic_midi":
+                        return await MIDIDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                    case "logic_edit":
+                        return await EditDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                    case "logic_navigate":
+                        return await NavigateDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                    case "logic_project":
+                        return await ProjectDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                    case "logic_audio":
+                        return AudioDispatcher.handle(command: command, params: cmdParams)
+                    case "logic_system":
+                        return await SystemDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache, poller: poller)
+                    case "logic_plugins":
+                        return await PluginsDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                    default:
+                        return toolTextResult("Unknown tool: \(name)", isError: true)
+                    }
                 }
             },
             listResources: { _ in
@@ -275,6 +288,74 @@ actor LogicProServer {
                 )
             }
         )
+    }
+
+    // MARK: - #112 command deadline (stdio-loop liveness backstop)
+
+    /// Commands that legitimately take many seconds against live AX: full
+    /// Library / preset tree walks, SMF import, and the guarded bounce/export
+    /// state machines. They get a much longer deadline so the backstop never
+    /// false-trips them, while still bounding a genuine hang.
+    private static let longRunningCommands: Set<String> = [
+        "scan_library", "scan_plugin_presets", "list_library", "record_sequence",
+        "import_file", "bounce", "export_run", "export_resume", "open", "save_as",
+    ]
+
+    /// Medium-cost commands that drive multi-step AX menu/library navigation.
+    private static let mediumRunningCommands: Set<String> = [
+        "set_instrument", "insert_verified", "set_param_verified",
+        "cleanup_apply", "new", "save", "close", "quit",
+    ]
+
+    /// Per-command server-side deadline in seconds. Set far above each
+    /// command's healthy completion time (sub-second for the fast tier) so a
+    /// normal op can never false-trip; only a wedged/occluded Logic session
+    /// that would otherwise hang the stdio loop is bounded.
+    static func commandDeadlineSeconds(tool: String, command: String) -> Double {
+        if longRunningCommands.contains(command) { return 300 }
+        if mediumRunningCommands.contains(command) { return 90 }
+        return 25
+    }
+
+    static func deadlineTimeoutResult(tool: String, command: String, seconds: Double) -> CallTool.Result {
+        let operation = command.isEmpty ? tool : "\(tool).\(command)"
+        let body = HonestContract.encodeStateC(
+            error: .operationTimeout,
+            hint: "\(operation) exceeded the \(Int(seconds))s server-side deadline and was abandoned so the stdio loop stays responsive.",
+            extras: [
+                "operation": operation,
+                "timeout_sec": seconds,
+                "recovery_hint": "Logic Pro may be busy, occluded, or showing a modal dialog. Dismiss any dialog and retry; check logic_system.health.",
+            ]
+        )
+        return toolTextResult(body, isError: true)
+    }
+
+    /// Race the dispatch `work` against a per-command deadline. Whichever
+    /// finishes first wins; on timeout we return a typed `operation_timeout`
+    /// State C. The orphaned synchronous AX work (if any) is left to finish and
+    /// is discarded — the point is to free the stdio loop, not to cancel a
+    /// blocking AX call (which cooperative cancellation cannot interrupt).
+    static func runWithDeadline(
+        tool: String,
+        command: String,
+        deadlineOverride: Double? = nil,
+        work: @escaping @Sendable () async -> CallTool.Result
+    ) async -> CallTool.Result {
+        let deadline = deadlineOverride ?? commandDeadlineSeconds(tool: tool, command: command)
+        return await withTaskGroup(of: CallTool.Result?.self) { group in
+            group.addTask { await work() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
+                return nil // sentinel: the deadline fired before `work` finished
+            }
+            defer { group.cancelAll() }
+            if let first = await group.next() {
+                if let result = first { return result }
+                return Self.deadlineTimeoutResult(tool: tool, command: command, seconds: deadline)
+            }
+            return Self.deadlineTimeoutResult(tool: tool, command: command, seconds: deadline)
+        }
     }
 
     private func registerTools() async {
