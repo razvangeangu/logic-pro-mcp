@@ -3878,18 +3878,12 @@ actor AccessibilityChannel: Channel {
 
     private static func isExplicitTrackContentDescription(_ description: String) -> Bool {
         let normalized = normalizeRegionGroupDescription(description)
-        return normalized == "트랙 콘텐츠"
-            || normalized == "track content"
-            || normalized == "track contents"
-            || normalized == "tracks content"
-            || normalized == "tracks contents"
+        return AXLocalePolicy.trackContentExplicit.labels.contains(normalized)
     }
 
     private static func isGenericContentDescription(_ description: String) -> Bool {
         let normalized = normalizeRegionGroupDescription(description)
-        return normalized == "콘텐츠"
-            || normalized == "content"
-            || normalized == "contents"
+        return AXLocalePolicy.trackContentGeneric.labels.contains(normalized)
     }
 
     private static func frame(
@@ -3919,16 +3913,13 @@ actor AccessibilityChannel: Channel {
 
     private static func classifyRegionKind(name: String, help: String) -> String {
         let searchable = "\(name) \(help)".lowercased()
-        if searchable.contains("drummer")
-            || searchable.contains("session player")
-            || searchable.contains("드러머")
-            || searchable.contains("세션 플레이어") {
+        if AXLocalePolicy.regionKindDrummer.containsAny(in: searchable) {
             return "drummer"
         }
-        if searchable.contains("midi") {
+        if AXLocalePolicy.regionKindMidi.containsAny(in: searchable) {
             return "midi"
         }
-        if searchable.contains("audio") || searchable.contains("오디오") {
+        if AXLocalePolicy.regionKindAudio.containsAny(in: searchable) {
             return "audio"
         }
         return "unknown"
@@ -3988,7 +3979,7 @@ actor AccessibilityChannel: Channel {
         var nonRegionCount = 0
         for item in items {
             let help = AXHelpers.getHelp(item, runtime: runtime.ax) ?? ""
-            let isRegion = help.contains("리전") || help.lowercased().contains("region")
+            let isRegion = AXLocalePolicy.regionHelpKeyword.containsAny(in: help)
             guard isRegion else { nonRegionCount += 1; continue }
             guard isVisibleArrangeRegion(item, within: window, runtime: runtime.ax) else {
                 continue

@@ -160,11 +160,7 @@ enum AXLogicProElements {
             .lowercased()
             .split { $0.isWhitespace }
             .joined(separator: " ")
-        return normalized == "track headers"
-            || normalized == "track header"
-            || normalized == "tracks header"
-            || normalized == "tracks headers"
-            || normalized == "트랙 헤더"
+        return AXLocalePolicy.trackHeadersDescription.labels.contains(normalized)
     }
 
     // MARK: - Transport
@@ -343,8 +339,7 @@ enum AXLogicProElements {
     /// bogus resource payloads and rename/mute ops that silently fail.
     static func isProjectPickerWindow(_ window: AXUIElement, runtime: Runtime) -> Bool {
         let title = (AXHelpers.getTitle(window, runtime: runtime.ax) ?? "").lowercased()
-        let pickerMarkers = ["프로젝트 선택", "choose a project", "choose project", "new from template"]
-        return pickerMarkers.contains { title.contains($0) }
+        return AXLocalePolicy.projectPickerWindow.containsAny(in: title)
     }
 
     /// Find the track header area containing individual track rows.
@@ -595,7 +590,7 @@ enum AXLogicProElements {
         if let pan = sliders.first(where: { slider in
             AXHelpers.getChildren(slider, runtime: runtime).contains { child in
                 let desc = (AXHelpers.getDescription(child, runtime: runtime) ?? "").lowercased()
-                return desc.contains("pan") || desc.contains("팬") || desc.contains("밸런스")
+                return AXLocalePolicy.headerPanHint.containsAny(in: desc)
             }
         }) {
             return pan
@@ -655,8 +650,7 @@ enum AXLogicProElements {
 
         let text = elementSearchText(element, runtime: runtime)
         let isInspector = ancestorIsInspector
-            || text.contains("inspector")
-            || text.contains("인스펙터")
+            || AXLocalePolicy.mixerInspectorContext.containsAny(in: text)
 
         if !isInspector,
            isMixerNamedElement(element, runtime: runtime),
@@ -698,7 +692,7 @@ enum AXLogicProElements {
             AXHelpers.getTitle(element, runtime: runtime)
         ]
         return candidates.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .contains { $0 == "mixer" || $0 == "믹서" }
+            .contains { AXLocalePolicy.mixerNamedElement.labels.contains($0) }
     }
 
     private static func hasDirectChannelStripChildren(
@@ -837,12 +831,10 @@ enum AXLogicProElements {
         runtime: AXHelpers.Runtime
     ) -> (text: String, isVolumeFader: Bool, isPanControl: Bool) {
         let text = elementSearchText(slider, runtime: runtime)
-        let isSend = text.contains("send") || text.contains("센드")
-        let isZoom = text.contains("zoom") || text.contains("확대")
-        let isVolume = !isSend && !isZoom
-            && (text.contains("volume") || text.contains("fader") || text.contains("볼륨"))
-        let isPan = !isSend && !isZoom
-            && (text.contains("pan") || text.contains("panning") || text.contains("패닝") || text.contains("밸런스"))
+        let isSend = AXLocalePolicy.sliderSendHint.containsAny(in: text)
+        let isZoom = AXLocalePolicy.sliderZoomHint.containsAny(in: text)
+        let isVolume = !isSend && !isZoom && AXLocalePolicy.sliderVolumeHint.containsAny(in: text)
+        let isPan = !isSend && !isZoom && AXLocalePolicy.sliderPanHint.containsAny(in: text)
         return (text, isVolume, isPan)
     }
 
@@ -861,14 +853,11 @@ enum AXLogicProElements {
         let children = AXHelpers.getChildren(element, runtime: runtime)
         let hasBypass = children.contains { child in
             let text = elementSearchText(child, runtime: runtime)
-            return text.contains("bypass") || text.contains("바이패스")
+            return AXLocalePolicy.pluginBypassControl.containsAny(in: text)
         }
         let hasOpenOrMenu = children.contains { child in
             let text = elementSearchText(child, runtime: runtime)
-            return text.contains("open")
-                || text.contains("열기")
-                || text.contains("list")
-                || text.contains("목록")
+            return AXLocalePolicy.pluginOpenOrListControl.containsAny(in: text)
         }
         if hasBypass && hasOpenOrMenu {
             return true
@@ -894,10 +883,8 @@ enum AXLogicProElements {
             return nil
         }
         let lower = description.lowercased()
-        guard lower != "읽기, 오토메이션이 활성화됨",
-              lower != "read",
-              !lower.contains("automation"),
-              !lower.contains("오토메이션") else {
+        guard !AXLocalePolicy.pluginAutomationLabelExact.matches(lower, mode: .exactStrict),
+              !AXLocalePolicy.pluginAutomationLabelSubstring.containsAny(in: lower) else {
             return nil
         }
         return description
@@ -936,16 +923,8 @@ enum AXLogicProElements {
             return false
         }
         let text = elementSearchText(element, runtime: runtime)
-        let isAudioSlot = text.contains("audio plugin")
-            || text.contains("audio effect")
-            || text.contains("오디오 플러그인")
-            || text.contains("오디오 이펙트")
-        let isSendOrIO = text.contains("send")
-            || text.contains("센드")
-            || text.contains("input")
-            || text.contains("output")
-            || text.contains("입력")
-            || text.contains("출력")
+        let isAudioSlot = AXLocalePolicy.audioPluginSlotLabel.containsAny(in: text)
+        let isSendOrIO = AXLocalePolicy.sendOrIOControlLabel.containsAny(in: text)
         if isAudioSlot && !isSendOrIO {
             return true
         }
@@ -961,7 +940,7 @@ enum AXLogicProElements {
         let children = AXHelpers.getChildren(element, runtime: runtime)
         guard let bypass = children.first(where: { child in
             let text = elementSearchText(child, runtime: runtime)
-            return text.contains("bypass") || text.contains("바이패스")
+            return AXLocalePolicy.pluginBypassControl.containsAny(in: text)
         }) ?? children.first(where: { child in
             (AXHelpers.getRole(child, runtime: runtime) ?? "") == (kAXCheckBoxRole as String)
         }) else {
@@ -1077,22 +1056,7 @@ enum AXLogicProElements {
     }
 
     private static func isKnownNonInsertButtonText(_ text: String) -> Bool {
-        [
-            "send", "센드",
-            "input", "입력",
-            "output", "출력",
-            "group", "그룹",
-            "channel mode", "채널 모드",
-            "eq",
-            "setting", "설정",
-            "gain reduction", "게인 축소",
-            "mute", "음소거",
-            "solo", "record", "녹음",
-            "monitor", "모니터링",
-            "volume", "볼륨",
-            "fader", "페이더",
-            "pan", "패닝", "밸런스",
-        ].contains { text.contains($0) }
+        AXLocalePolicy.nonInsertButtonText.containsAny(in: text)
     }
 
     private static func elementSearchText(
@@ -1675,11 +1639,7 @@ enum AXLogicProElements {
         }.contains { text in
             let description = AXHelpers.getDescription(text, runtime: runtime)?.lowercased() ?? ""
             let value = (AXValueExtractors.extractTextValue(text, runtime: runtime) ?? "").lowercased()
-            return description.contains("tempo")
-                || description.contains("bpm")
-                || description.contains("position")
-                || description.contains("템포")
-                || description.contains("재생헤드 위치")
+            return AXLocalePolicy.transportTextFieldHint.containsAny(in: description)
                 || value.contains(" bpm")
                 || value.filter({ $0 == "." }).count >= 2
                 || value.contains(":")
