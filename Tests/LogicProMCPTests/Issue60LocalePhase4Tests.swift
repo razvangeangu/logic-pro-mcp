@@ -104,6 +104,25 @@ struct Issue60LocalePhase4Tests {
         #expect(!AXLocalePolicy.pluginBypassControl.containsAny(in: "open plugin window"))
     }
 
+    @Test("containsAny is diacritic-SENSITIVE, mirroring the inline String.contains it replaced")
+    func containsAnyIsDiacriticSensitive() {
+        // Plain forms match (the actual EN/KO strings Logic emits).
+        #expect(AXLocalePolicy.mixerInspectorContext.containsAny(in: "inspector"))
+        #expect(AXLocalePolicy.sliderSendHint.containsAny(in: "send level"))
+        #expect(AXLocalePolicy.transportTextFieldHint.containsAny(in: "tempo"))
+        // Accented-Latin forms must NOT match — folding them would widen matching
+        // beyond the original `text.contains(token)` and misclassify in accented
+        // locales (French/Spanish/Portuguese Logic UIs).
+        #expect(!AXLocalePolicy.mixerInspectorContext.containsAny(in: "ínspector"))
+        #expect(!AXLocalePolicy.sliderSendHint.containsAny(in: "sénd"))
+        #expect(!AXLocalePolicy.transportTextFieldHint.containsAny(in: "témpo"))
+        #expect(!AXLocalePolicy.pluginBypassControl.containsAny(in: "bypáss"))
+        // Case-insensitivity is retained (needed for the raw-help region site).
+        #expect(AXLocalePolicy.regionHelpKeyword.containsAny(in: "Audio Region at bar 5"))
+        // Korean canonical matching is preserved.
+        #expect(AXLocalePolicy.regionKindDrummer.containsAny(in: "세션 플레이어 리전"))
+    }
+
     @Test("mixerNamedElement exact-equality semantics (normalized lowercase)")
     func mixerNamedElementExact() {
         // Mirrors the call site: candidate is trimmed + lowercased, then == label.

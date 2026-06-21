@@ -77,14 +77,21 @@ enum AXLocalePolicy {
             }
         }
 
-        /// True if `haystack` contains ANY label as a case-insensitive substring.
-        /// Preserves the existing `combined.contains(token)` control flow where a
-        /// pre-built, already-lowercased aggregate string is scanned for any of a
-        /// set of localized tokens. The caller keeps its own AX traversal and
-        /// structural ordering; only the token list moves into policy.
+        /// True if `haystack` contains ANY label as a substring.
+        ///
+        /// Faithfully mirrors the inline `combined.contains(token)` control flow
+        /// it replaced: Swift's `String.contains` is case-sensitive,
+        /// **diacritic-sensitive**, and canonical-equivalence aware. We use
+        /// `.caseInsensitive` (inert on the already-lowercased aggregates the
+        /// callers pass, and required for the one raw-string site) but
+        /// deliberately do NOT add `.diacriticInsensitive` — folding accents
+        /// (e.g. "ínspector" → "inspector") would WIDEN matching beyond the
+        /// original and risk misclassifying accented-Latin AX text in non-EN/KO
+        /// locales. Omitting `.literal` keeps Hangul NFC/NFD canonical matching,
+        /// matching `String.contains`.
         func containsAny(in haystack: String) -> Bool {
             labels.contains { label in
-                haystack.range(of: label, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+                haystack.range(of: label, options: [.caseInsensitive]) != nil
             }
         }
     }
