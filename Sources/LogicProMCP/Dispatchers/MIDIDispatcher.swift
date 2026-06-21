@@ -241,9 +241,22 @@ struct MIDIDispatcher {
                 guard (1...9999).contains(bar) else {
                     return invalidParamsResult(hint: "mmc_locate 'bar' must be in 1..9999 (got \(bar))")
                 }
-                return await routedTextResult(router, operation: "transport.goto_position", params: [
-                    "position": "\(bar).1.1.1",
-                ])
+                // #108: bar-based locate drives the same Go-To-Position path as
+                // transport.goto_position, so finalize it through the identical
+                // transport-state read-back verification. Previously mmc_locate
+                // returned the raw channel State B and could only ever report
+                // `verified:false` — it never confirmed the playhead landed.
+                let position = "\(bar).1.1.1"
+                let result = await router.route(
+                    operation: "transport.goto_position",
+                    params: ["position": position]
+                )
+                return await TransportDispatcher.finalizeGotoPositionResult(
+                    result,
+                    requestedPosition: position,
+                    router: router,
+                    cache: cache
+                )
             }
             guard let time = params["time"]?.stringValue, isValidSMPTE(time) else {
                 return invalidParamsResult(hint: "mmc_locate 'time' must be HH:MM:SS:FF")
