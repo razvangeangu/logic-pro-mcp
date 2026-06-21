@@ -1404,34 +1404,50 @@ actor AccessibilityChannel: Channel {
             return nil
         }
 
-        // Escalating strategy: each step verified by read-back. Stops on success.
-        // Logic Pro's custom AX checkboxes differ in what triggers them — some
-        // respond to AXPress, some only to direct value writes, some need a
-        // real mouse click at the button's screen position. The mouse-click
-        // last-resort fallback is intentional (see CHANGELOG v3.1.1 §retain-policy)
-        // — checkbox AX responds inconsistently across Logic 12 minor versions.
-        let strategies: [(String, () -> Void)] = [
-            ("press", { _ = AXHelpers.performAction(button, kAXPressAction, runtime: runtime.ax) }),
-            ("confirm", { _ = AXHelpers.performAction(button, kAXConfirmAction, runtime: runtime.ax) }),
-            ("value-nsnumber", {
+        // #106: Logic 12.x track-header M/S/R checkboxes are `settable=false`
+        // and ignore `AXPress`/`AXConfirm`/value writes entirely — only a real
+        // mouse click at the control toggles Logic's internal state
+        // (live-confirmed: AXPress leaves the value at 0 indefinitely; a HID
+        // click flips it to 1 within ~350 ms). The earlier fixed 50 ms
+        // read-back was also too fast for Logic to publish the new AX value
+        // after a successful click, so even the arm path (whose locator did
+        // find the checkbox) reported a false `ax_write_failed` *after*
+        // physically toggling the control — a silent malfunction. The write
+        // now polls the read-back up to a per-strategy deadline, and the
+        // mouse-click last resort brings Logic frontmost first so the synthetic
+        // click lands on the (un-occluded) track header.
+        func pollMatched(deadlineMs: Int) -> Bool {
+            let deadline = Date().addingTimeInterval(Double(deadlineMs) / 1000.0)
+            repeat {
+                if let after = readCurrent(), after == desired { return true }
+                usleep(40_000)
+            } while Date() < deadline
+            return false
+        }
+
+        let strategies: [(name: String, pollMs: Int, action: () -> Void)] = [
+            ("press", 160, { _ = AXHelpers.performAction(button, kAXPressAction, runtime: runtime.ax) }),
+            ("confirm", 160, { _ = AXHelpers.performAction(button, kAXConfirmAction, runtime: runtime.ax) }),
+            ("value-nsnumber", 160, {
                 let n: NSNumber = desired ? 1 : 0
                 AXHelpers.setAttribute(button, kAXValueAttribute, n as CFTypeRef, runtime: runtime.ax)
             }),
-            ("value-cfbool", {
+            ("value-cfbool", 160, {
                 let b: CFBoolean = desired ? kCFBooleanTrue : kCFBooleanFalse
                 AXHelpers.setAttribute(button, kAXValueAttribute, b, runtime: runtime.ax)
             }),
-            ("mouse-click", {
+            ("mouse-click", 1_000, {
+                _ = ProcessUtils.Runtime.production.activateLogicPro()
+                usleep(120_000)
                 Self.postMouseClickAt(element: button, runtime: runtime.ax)
             }),
         ]
-        for (name, action) in strategies {
-            action()
-            usleep(50_000)
-            if let after = readCurrent(), after == desired {
+        for strategy in strategies {
+            strategy.action()
+            if pollMatched(deadlineMs: strategy.pollMs) {
                 return .success(HonestContract.encodeStateA(extras: baseExtras.merging([
                     "observed": desired,
-                    "action": name
+                    "action": strategy.name
                 ]) { _, new in new }))
             }
         }
