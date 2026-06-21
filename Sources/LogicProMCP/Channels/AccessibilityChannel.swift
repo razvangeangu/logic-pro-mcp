@@ -3362,12 +3362,21 @@ actor AccessibilityChannel: Channel {
             if output.contains("DIALOG_NOT_READY") {
                 return .error("goto-position dialog did not appear within timeout")
             }
+            // #105: this State B reports only that the Go-To-Position dialog
+            // keystroke was sent; the playhead is verified independently by
+            // `TransportDispatcher.finalizeGotoPositionResult` via a transport-
+            // state read-back. Earlier this carried a `note` claiming the
+            // playhead was "not read back" — which the finalize step then
+            // contradicted by reading it back and gating `verified` on it, so a
+            // verified State A shipped a self-contradictory note. The provenance
+            // (`via:"dialog"`) plus finalize's `verification_source` /
+            // `observed` / `verified` fields describe the outcome honestly
+            // without it.
             return .success(HonestContract.encodeStateB(
                 reason: .readbackUnavailable,
                 extras: [
                     "requested": "\(bar).1.1.1",
-                    "via": "dialog",
-                    "note": "AppleScript dialog OK confirms keystroke send; resulting playhead not read back"
+                    "via": "dialog"
                 ]
             ))
         case .error(let msg):
