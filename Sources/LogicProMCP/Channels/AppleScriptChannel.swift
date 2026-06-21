@@ -14,6 +14,8 @@ actor AppleScriptChannel: Channel {
         let executeTransportAction: @Sendable (String) async -> ChannelResult
         let fileExists: @Sendable (String) -> Bool
         let fileModificationDate: @Sendable (String) -> Date?
+        // #110: front document's on-disk path, for read-back-verified save.
+        let currentDocumentPath: @Sendable () async -> String?
 
         init(
             isLogicProRunning: @escaping @Sendable () -> Bool,
@@ -23,6 +25,9 @@ actor AppleScriptChannel: Channel {
             fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
             fileModificationDate: @escaping @Sendable (String) -> Date? = {
                 (try? FileManager.default.attributesOfItem(atPath: $0)[.modificationDate]) as? Date
+            },
+            currentDocumentPath: @escaping @Sendable () async -> String? = {
+                await AppleScriptChannel.currentDocumentPath()
             }
         ) {
             self.isLogicProRunning = isLogicProRunning
@@ -31,6 +36,7 @@ actor AppleScriptChannel: Channel {
             self.executeTransportAction = executeTransportAction
             self.fileExists = fileExists
             self.fileModificationDate = fileModificationDate
+            self.currentDocumentPath = currentDocumentPath
         }
 
         static let production = Runtime(
@@ -93,8 +99,25 @@ actor AppleScriptChannel: Channel {
             return Self.wrapMutatingResult(raw, operation: operation, extras: ["saving": saving])
 
         case "project.save":
+            // #110: verify the front document's `.logicx` package was actually
+            // (re)written. The on-disk mtime is authoritative: `save front
+            // document` reliably persists even when the AppleEvent reply times
+            // out (-1712), so a successful write is confirmed by the file
+            // advancing past the save start — independent of the script's
+            // success/error verdict. An untitled document (no path) or a
+            // package whose mtime did not advance stays an honest State B and
+            // never claims a verified save an export/bounce step would trust.
+            let documentPath = await runtime.currentDocumentPath()
+            let beforeMtime = documentPath.flatMap(runtime.fileModificationDate)
+            let saveStartedAt = Date()
             let raw = await runScript(saveProjectScript())
-            return Self.wrapMutatingResult(raw, operation: operation)
+            return Self.verifiedSaveResult(
+                raw,
+                documentPath: documentPath,
+                beforeMtime: beforeMtime,
+                afterMtime: documentPath.flatMap(runtime.fileModificationDate),
+                saveStartedAt: saveStartedAt
+            )
 
         case "project.save_as":
             guard let path = params["path"] else {
@@ -181,6 +204,62 @@ actor AppleScriptChannel: Channel {
         return .success(HonestContract.encodeStateB(
             reason: .readbackUnavailable, extras: merged
         ))
+    }
+
+    /// #110: build the HC verdict for `project.save` from on-disk file
+    /// evidence. The `.logicx` package mtime is authoritative — `save front
+    /// document` persists even when the AppleEvent reply times out (-1712) —
+    /// so a write confirmed by the mtime advancing past `saveStartedAt` (or
+    /// beyond a pre-save snapshot) is verified State A regardless of `result`'s
+    /// success/error. No path (untitled) or an unchanged mtime → honest State B.
+    static func verifiedSaveResult(
+        _ result: ChannelResult,
+        documentPath: String?,
+        beforeMtime: Date?,
+        afterMtime: Date?,
+        saveStartedAt: Date
+    ) -> ChannelResult {
+        // A script body that already produced an HC envelope is passed through
+        // untouched (matches wrapMutatingResult's no-double-wrap contract).
+        if HonestContractEnvelopeDetector.isAlreadyEnvelope(result.message) {
+            return result
+        }
+
+        var extras: [String: Any] = [
+            "operation": "project.save",
+            "method": "applescript",
+            "verify_source": "file_mtime",
+            // Preserve the raw script payload verbatim, matching the prior
+            // wrapMutatingResult contract (callers/tests rely on `raw`).
+            "raw": result.message,
+        ]
+        if let documentPath { extras["document_path"] = documentPath }
+        if let afterMtime { extras["observed_mtime"] = iso8601String(afterMtime) }
+        if let beforeMtime { extras["previous_mtime"] = iso8601String(beforeMtime) }
+
+        // 1) File evidence is authoritative: a package written this save is
+        //    verified State A even if the AppleEvent reply timed out (-1712).
+        let documentExists = documentPath.map { !$0.isEmpty } ?? false
+        let wroteThisSave = documentExists && (afterMtime.map { after in
+            after >= saveStartedAt || beforeMtime.map { after > $0 } == true
+        } ?? false)
+        if wroteThisSave {
+            return .success(HonestContract.encodeStateA(extras: extras))
+        }
+        // 2) No write observed + the script itself errored → surface that error
+        //    verbatim (terminal); the router treats it as a real failure.
+        if !result.isSuccess {
+            return result
+        }
+        // 3) Script succeeded but no on-disk evidence: an untitled document has
+        //    no path to check (direct to save_as); a titled one whose mtime
+        //    didn't advance is an honest "fired but unconfirmed". Never State A.
+        guard documentExists else {
+            extras["reason_detail"] = "front document has no on-disk path (untitled); use save_as to verify"
+            return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: extras))
+        }
+        extras["reason_detail"] = "save reported success but the .logicx package mtime did not advance"
+        return .success(HonestContract.encodeStateB(reason: .readbackMismatch, extras: extras))
     }
 
     static func wrapSaveAsResult(
