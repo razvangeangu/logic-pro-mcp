@@ -425,6 +425,8 @@ struct WorkflowSkillCatalogTests {
 
 @Suite("Workflow skills pack — command census")
 struct WorkflowCommandCensusTests {
+    // Every MCP tool dispatcher. `logic_plugins` was missing before #111,
+    // which let the entire tool drift out of the census undetected.
     private static let dispatcherFiles: [String: String] = [
         "logic_transport": "TransportDispatcher.swift",
         "logic_tracks": "TrackDispatcher.swift",
@@ -435,46 +437,141 @@ struct WorkflowCommandCensusTests {
         "logic_project": "ProjectDispatcher.swift",
         "logic_system": "SystemDispatcher.swift",
         "logic_audio": "AudioDispatcher.swift",
+        "logic_plugins": "PluginsDispatcher.swift",
     ]
 
-    @Test("every census command exists as an executable case label in its dispatcher source")
-    func censusMatchesDispatcherSources() throws {
+    // Command-switch labels that intentionally execute an error-only
+    // "not exposed in the production MCP contract" stub. They are real labels
+    // but must NOT be in the public census.
+    private static let notExposedStubs: [String: Set<String>] = [
+        "logic_tracks": ["set_color"],
+        "logic_mixer": ["set_send", "set_output", "set_input", "toggle_eq", "reset_strip", "bypass_plugin"],
+    ]
+
+    // Convenience aliases that route to a censused command via the same
+    // `case "canonical", "alias":` label. The alias is not separately public.
+    private static let knownAliases: [String: Set<String>] = [
+        "logic_tracks": ["library"], // alias of list_library
+    ]
+
+    /// Extract the string labels of the top-level `switch command { ... }`
+    /// block in a dispatcher source. Isolated by indentation: the command
+    /// switch and its `case` labels sit at the same column; every nested
+    /// switch (zoom direction, view name, help category, error-code) is
+    /// indented deeper and therefore excluded. This is the single source of
+    /// truth the census is reconciled against in both directions.
+    private static func commandSwitchLabels(in source: String) throws -> Set<String> {
+        let lines = source.components(separatedBy: "\n")
+        func indent(_ line: String) -> Int { line.prefix { $0 == " " }.count }
+        let switchIndex = try #require(
+            lines.firstIndex { $0.contains("switch command {") },
+            "no `switch command {` in dispatcher source"
+        )
+        let switchIndent = indent(lines[switchIndex])
+        var labels: Set<String> = []
+        var i = switchIndex + 1
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let lineIndent = indent(line)
+            // The switch's own closing brace sits at the switch's column.
+            if trimmed == "}" && lineIndent == switchIndent { break }
+            if lineIndent == switchIndent && trimmed.hasPrefix("case ") {
+                // Pull every "literal" token from the (possibly multi-label) case.
+                var rest = Substring(trimmed)
+                while let open = rest.firstIndex(of: "\"") {
+                    let afterOpen = rest.index(after: open)
+                    guard let close = rest[afterOpen...].firstIndex(of: "\"") else { break }
+                    labels.insert(String(rest[afterOpen..<close]))
+                    rest = rest[rest.index(after: close)...]
+                }
+            }
+            i += 1
+        }
+        return labels
+    }
+
+    private func labels(forTool tool: String) throws -> Set<String> {
+        let file = try #require(Self.dispatcherFiles[tool], "no dispatcher source mapped for \(tool)")
+        let url = workflowRepoRoot
+            .appendingPathComponent("Sources/LogicProMCP/Dispatchers")
+            .appendingPathComponent(file)
+        let source = try String(contentsOf: url, encoding: .utf8)
+        return try Self.commandSwitchLabels(in: source)
+    }
+
+    @Test("every MCP tool dispatcher is mapped and censused")
+    func everyToolMappedAndCensused() {
+        // Census keys and dispatcher mappings must cover exactly the same tools.
+        let censusTools = Set(WorkflowSkillCatalog.publicCommands.keys)
+        let mappedTools = Set(Self.dispatcherFiles.keys)
+        let message = "census tools \(censusTools.sorted()) ≠ mapped dispatchers \(mappedTools.sorted())"
+        #expect(censusTools == mappedTools, "\(message)")
+    }
+
+    @Test("every census command exists as an executable command-switch label")
+    func censusCommandsAreExecutable() throws {
         for (tool, commands) in WorkflowSkillCatalog.publicCommands {
-            let file = try #require(Self.dispatcherFiles[tool], "no dispatcher source mapped for \(tool)")
+            let dispatcherLabels = try labels(forTool: tool)
+            for command in commands.sorted() {
+                #expect(dispatcherLabels.contains(command),
+                        "census command \(tool).\(command) is not a command-switch label in its dispatcher")
+            }
+            // A census command must actually execute, not degrade into a stub.
+            let file = Self.dispatcherFiles[tool]!
             let url = workflowRepoRoot
                 .appendingPathComponent("Sources/LogicProMCP/Dispatchers")
                 .appendingPathComponent(file)
             let source = try String(contentsOf: url, encoding: .utf8)
-            for command in commands {
-                guard let caseRange = source.range(of: "case \"\(command)\"") else {
-                    Issue.record("census command \(tool).\(command) not found in \(file)")
-                    continue
-                }
-                // A census command must actually execute. If the case body
-                // immediately returns a "not exposed" stub, the census lies.
-                let bodyStart = caseRange.upperBound
-                let bodyEnd = source.index(bodyStart, offsetBy: 240, limitedBy: source.endIndex) ?? source.endIndex
-                let body = source[bodyStart..<bodyEnd]
+            for command in commands.sorted() {
+                guard let caseRange = source.range(of: "case \"\(command)\"") else { continue }
+                let bodyEnd = source.index(caseRange.upperBound, offsetBy: 240, limitedBy: source.endIndex) ?? source.endIndex
+                let body = source[caseRange.upperBound..<bodyEnd]
                 #expect(!body.contains("not exposed in the production MCP contract"),
                         "census command \(tool).\(command) is a not-exposed stub in \(file)")
             }
         }
     }
 
-    @Test("not-exposed dispatcher stubs are excluded from the census")
-    func notExposedStubsExcluded() {
-        let stubs: [(String, String)] = [
-            ("logic_tracks", "set_color"),
-            ("logic_mixer", "set_send"),
-            ("logic_mixer", "set_output"),
-            ("logic_mixer", "set_input"),
-            ("logic_mixer", "toggle_eq"),
-            ("logic_mixer", "reset_strip"),
-            ("logic_mixer", "bypass_plugin"),
-        ]
-        for (tool, command) in stubs {
-            #expect(WorkflowSkillCatalog.publicCommands[tool]?.contains(command) == false,
-                    "\(tool).\(command) returns a not-exposed error and must not be in the census")
+    @Test("#111: every dispatcher command label is censused, a known stub, or a known alias")
+    func everyDispatcherLabelIsClassified() throws {
+        for tool in Self.dispatcherFiles.keys.sorted() {
+            let dispatcherLabels = try labels(forTool: tool)
+            let census = WorkflowSkillCatalog.publicCommands[tool] ?? []
+            let stubs = Self.notExposedStubs[tool] ?? []
+            let aliases = Self.knownAliases[tool] ?? []
+            let classified = census.union(stubs).union(aliases)
+            let unclassified = dispatcherLabels.subtracting(classified)
+            let message = "\(tool) exposes command label(s) \(unclassified.sorted()) that are neither in the "
+                + "public census, the not-exposed stub list, nor the known-alias list — "
+                + "classify them so the workflow census cannot silently drift (#111)"
+            #expect(unclassified.isEmpty, "\(message)")
+        }
+    }
+
+    @Test("declared not-exposed stubs exist and are excluded from the census")
+    func notExposedStubsExcluded() throws {
+        for (tool, stubs) in Self.notExposedStubs {
+            let dispatcherLabels = try labels(forTool: tool)
+            for command in stubs.sorted() {
+                #expect(dispatcherLabels.contains(command),
+                        "declared stub \(tool).\(command) is no longer a command-switch label")
+                #expect(WorkflowSkillCatalog.publicCommands[tool]?.contains(command) != true,
+                        "\(tool).\(command) returns a not-exposed error and must not be in the census")
+            }
+        }
+    }
+
+    @Test("#111 regression: logic_plugins and project export/cleanup execution commands are censused")
+    func newlyCensusedCommandsPresent() {
+        // These were missing before #111 and let the census claim to be the
+        // pinned public surface while omitting real production commands.
+        #expect(WorkflowSkillCatalog.publicCommands["logic_plugins"]
+            == ["get_inventory", "set_param_verified", "insert_verified"])
+        let project = WorkflowSkillCatalog.publicCommands["logic_project"] ?? []
+        for command in ["export_run", "export_resume", "cleanup_apply"] {
+            #expect(project.contains(command),
+                    "logic_project.\(command) executes in the dispatcher + is documented in API.md but is missing from the census")
         }
     }
 }
