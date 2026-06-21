@@ -172,6 +172,10 @@ struct ProjectDispatcher {
 
         case "save":
             audit(command, phase: .executed)
+            // #110: save is an export/bounce prerequisite. The read-back
+            // verification lives in the AppleScript channel (the reliable
+            // writer, now tried first) so it stays DI-testable like save_as;
+            // the dispatcher just routes + surfaces the channel's HC verdict.
             let result = await router.route(operation: "project.save")
             return toolTextResult(result)
 

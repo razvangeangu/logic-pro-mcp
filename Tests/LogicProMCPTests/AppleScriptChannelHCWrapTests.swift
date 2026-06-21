@@ -22,7 +22,8 @@ private func makeAppleScriptRuntime(
     isRunning: Bool = true,
     scriptRecorder: AppleScriptRecorder = AppleScriptRecorder(),
     openRecorder: OpenFileRecorder = OpenFileRecorder(),
-    transportRecorder: TransportActionRecorder = TransportActionRecorder()
+    transportRecorder: TransportActionRecorder = TransportActionRecorder(),
+    currentDocumentPath: @escaping @Sendable () async -> String? = { nil }
 ) -> AppleScriptChannel.Runtime {
     AppleScriptChannel.Runtime(
         isLogicProRunning: { isRunning },
@@ -35,7 +36,8 @@ private func makeAppleScriptRuntime(
         },
         executeTransportAction: { action in
             await transportRecorder.run(action)
-        }
+        },
+        currentDocumentPath: currentDocumentPath
     )
 }
 

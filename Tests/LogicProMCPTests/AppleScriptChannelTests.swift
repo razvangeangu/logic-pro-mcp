@@ -63,7 +63,8 @@ private func makeAppleScriptRuntime(
     openRecorder: OpenFileRecorder = OpenFileRecorder(),
     transportRecorder: TransportActionRecorder = TransportActionRecorder(),
     fileExists: @escaping @Sendable (String) -> Bool = { _ in true },
-    fileModificationDate: @escaping @Sendable (String) -> Date? = { _ in Date.distantFuture }
+    fileModificationDate: @escaping @Sendable (String) -> Date? = { _ in Date.distantFuture },
+    currentDocumentPath: @escaping @Sendable () async -> String? = { nil }
 ) -> AppleScriptChannel.Runtime {
     AppleScriptChannel.Runtime(
         isLogicProRunning: { isRunning },
@@ -80,7 +81,8 @@ private func makeAppleScriptRuntime(
             await transportRecorder.run(action)
         },
         fileExists: fileExists,
-        fileModificationDate: fileModificationDate
+        fileModificationDate: fileModificationDate,
+        currentDocumentPath: currentDocumentPath
     )
 }
 

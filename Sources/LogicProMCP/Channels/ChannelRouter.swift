@@ -207,7 +207,11 @@ actor ChannelRouter {
         // Project — AppleScript primary for new/open/close lifecycle, KeyCmd for save/bounce
         "project.new":                [.appleScript, .cgEvent],
         "project.open":               [.appleScript],
-        "project.save":               [.midiKeyCommands, .cgEvent, .appleScript],
+        // #110: AppleScript-first — the direct `save front document` is the
+        // reliable writer and lets the channel verify the .logicx package was
+        // (re)written on disk (export/bounce prerequisite). KeyCmd/CGEvent
+        // remain as fallbacks (e.g. AppleScript automation denied).
+        "project.save":               [.appleScript, .midiKeyCommands, .cgEvent],
         "project.save_as":            [.accessibility, .appleScript],
         "project.close":              [.appleScript, .cgEvent],
         "project.get_info":           [.accessibility],
