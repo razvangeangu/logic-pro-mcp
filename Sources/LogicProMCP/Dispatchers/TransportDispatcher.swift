@@ -327,6 +327,10 @@ struct TransportDispatcher {
         }
 
         var extras = honestContractExtras(from: result.message)
+        // #105: drop any channel-level "keystroke sent; not read back" note —
+        // this finalize step IS the authoritative read-back, so carrying that
+        // note forward would contradict the verified verdict below.
+        extras.removeValue(forKey: "note")
         extras["verification_source"] = "transport_state"
         extras["requested"] = requestedPosition
         extras["observed"] = observedTransport.position
