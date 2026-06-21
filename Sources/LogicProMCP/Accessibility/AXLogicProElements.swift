@@ -1299,7 +1299,8 @@ enum AXLogicProElements {
 
         // Strategy 3 — keyword fallback (oldest path).
         if rulerElement == nil {
-            let markerKeywords = ["marker", "마커"]
+            // #60: centralized marker-container keyword bag (read-only classifier).
+            let markerKeywords = AXLocalePolicy.markerContainerKeywords.labels
             let groups = AXHelpers.findAllDescendants(
                 of: arrangementArea, role: kAXGroupRole, maxDepth: 6, runtime: runtime.ax
             )
@@ -1308,7 +1309,7 @@ enum AXLogicProElements {
                 let desc = AXHelpers.getDescription(group, runtime: runtime.ax)?.lowercased() ?? ""
                 let title = AXHelpers.getTitle(group, runtime: runtime.ax)?.lowercased() ?? ""
                 let combined = "\(id) \(desc) \(title)"
-                if markerKeywords.contains(where: { combined.contains($0) }) {
+                if markerKeywords.contains(where: { combined.contains($0.lowercased()) }) {
                     rulerElement = group
                     break
                 }
@@ -1561,11 +1562,13 @@ enum AXLogicProElements {
             .compactMap { $0?.lowercased() }
             .joined(separator: " ")
 
-        if metadata.contains("transport") || metadata.contains("control bar") || metadata.contains("컨트롤 막대") {
+        // #60: centralized control-bar metadata + control-keyword token bags
+        // (read-only classifiers). Same lowercased `.contains` semantics.
+        if AXLocalePolicy.transportContainerMetadata.labels.contains(where: { metadata.contains($0.lowercased()) }) {
             return true
         }
 
-        let transportKeywords = ["play", "stop", "record", "cycle", "loop", "metronome", "rewind", "forward", "재생", "녹음", "사이클", "메트로놈", "클릭"]
+        let transportKeywords = AXLocalePolicy.transportContainerControlKeywords.labels.map { $0.lowercased() }
         let controls = AXHelpers.findAllDescendants(of: element, role: kAXButtonRole, maxDepth: 4, runtime: runtime)
             + AXHelpers.findAllDescendants(of: element, role: kAXCheckBoxRole, maxDepth: 4, runtime: runtime)
         let controlHits = controls.reduce(into: Set<String>()) { hits, control in
@@ -1584,15 +1587,11 @@ enum AXLogicProElements {
             return true
         }
 
+        // #60: centralized tempo/position slider hint token bag (read-only).
+        let sliderHintTokens = AXLocalePolicy.transportSliderHints.labels.map { $0.lowercased() }
         let sliderHits = AXHelpers.findAllDescendants(of: element, role: kAXSliderRole, maxDepth: 4, runtime: runtime).contains { slider in
             let description = AXHelpers.getDescription(slider, runtime: runtime)?.lowercased() ?? ""
-            return description.contains("tempo")
-                || description.contains("bpm")
-                || description.contains("position")
-                || description.contains("템포")
-                || description.contains("재생헤드 위치")
-                || description.contains("마디")
-                || description.contains("비트")
+            return sliderHintTokens.contains { description.contains($0) }
         }
 
         let textRoles = [kAXStaticTextRole, kAXTextFieldRole]

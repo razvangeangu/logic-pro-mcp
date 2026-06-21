@@ -49,11 +49,29 @@ These labels are allowed because each use is either best-effort cleanup/reveal, 
 - Do not infer State A from the click itself.
 - Include a failure mode that returns State B/C when readback is unavailable or ambiguous.
 
+## Phase 3 (issue #60) — read-only heuristic token bags centralized
+
+The transport/marker container *classifier* token bags moved from inline
+literals in `AXLogicProElements` into `AXLocalePolicy` compatibility-hint sets,
+behavior-preserving (same lowercased `.contains` scan + token order), with
+deterministic EN+KO tests (`Issue60LocalePhase3Tests`):
+
+- `markerContainerKeywords` (`marker` / `마커`) — marker-ruler fallback locator.
+- `transportContainerMetadata` (`transport` / `control bar` / `컨트롤 막대`).
+- `transportContainerControlKeywords` (play/stop/record/… + 재생/녹음/사이클/메트로놈/클릭).
+- `transportSliderHints` (tempo/bpm/position/… + 템포/재생헤드 위치/마디/비트).
+
+These are read-only classifiers (which AX container is which); none gate a
+State-A success. This closes the previously-listed `looksLikeTransportContainer`
+keyword aggregate and the marker-ruler keyword fallback below.
+
 ## Known Remaining Surfaces
 
-The locale-agnostic epic (#60) is **not closed**. The following localized text
-surfaces are still pending and require live EN+KO E2E against real Logic Pro to
-confirm State A on their respective paths:
+The locale-agnostic epic (#60) is **not closed** (its acceptance criterion 5
+keeps it open until a live EN **and** KO Logic UI E2E pass — the Korean-locale
+run remains environmentally blocked; see the epic thread). The following
+localized text surfaces are still pending and require live EN+KO E2E against real
+Logic Pro to confirm State A on their respective paths:
 
 1. **AppleScript / System Events menu literals** — `AccessibilityChannel`
    contains many menu-addressing strings (e.g. `트랙 → 트랙 삭제`,
@@ -63,18 +81,19 @@ confirm State A on their respective paths:
    `osascript` source and addressed by System Events text, so they cannot move to
    a Swift `LabelSet` without rewriting the menu-click mechanism — a behavior
    change, deferred. They must remain guarded by post-action readback.
-2. **`looksLikeTransportContainer` keyword aggregate** (`AXLogicProElements`) —
-   a transport-detection heuristic scanning a multi-token keyword list. It is a
-   classifier, not a State-A gate; centralizing its overlapping token bag without
-   widening needs a dedicated audit and is deferred.
+2. ~~**`looksLikeTransportContainer` keyword aggregate** (`AXLogicProElements`)~~
+   — **centralized in Phase 3** (`transportContainerMetadata`,
+   `transportContainerControlKeywords`, `transportSliderHints`). Behavior
+   preserved; EN+KO tested. Still pending live KO confirmation.
 3. **Mixer / inspector / channel-strip metadata keyword scans**
    (`AXLogicProElements`: send/입력/출력/그룹/채널 모드/볼륨/패닝/바이패스/오토메이션
    etc.) — large heuristic token bags used for classification and disambiguation.
    These are read-only but interdependent; a careful, separately-tested pass is
    required to avoid changing which strips/controls are recognized.
 4. **Marker-list / cell placeholder keywords** (`AXLogicProElements`:
-   `마커`/`marker`, `셀`/`Cell`, marker-list window-title suffixes) — read-only
-   scraping fallbacks for old Logic versions; pending.
+   `셀`/`Cell`, marker-list window-title suffixes) — read-only scraping fallbacks
+   for old Logic versions; pending. (The marker-*ruler* keyword fallback
+   `마커`/`marker` was centralized in Phase 3 as `markerContainerKeywords`.)
 5. **Region / track-content / track-type description keywords**
    (`AccessibilityChannel`: `리전`/region, `트랙 콘텐츠`/Track Content,
    드러머/세션 플레이어/오디오 etc.) — read-only classification, pending.

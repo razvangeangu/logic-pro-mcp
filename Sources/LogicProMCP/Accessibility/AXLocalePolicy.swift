@@ -290,6 +290,44 @@ enum AXLocalePolicy {
         rationale: "Identifies the plugin Setting AXPopUpButton by its value substring; read-only locator."
     )
 
+    // MARK: - Read-only heuristic token bags (Phase 3, issue #60)
+    //
+    // These back read-only *classifiers* (which AX container is the marker
+    // ruler / the transport-control bar). They are scanned with `.contains`
+    // semantics over an already-lowercased aggregate string and never gate a
+    // State-A success — purely "which region of the tree is this". Centralized
+    // here as compatibility-hint token bags so the EN/KO pairs live in one
+    // audited place; each preserves its call site's exact token list + order.
+
+    /// Marker ruler keyword fallback (oldest locator path).
+    static let markerContainerKeywords = LabelSet(
+        canonical: "marker",
+        variants: ["마커"],
+        rationale: "Last-resort marker-ruler container classifier; read-only keyword scan."
+    )
+
+    /// Control-bar / transport container metadata tokens (id/title/desc scan).
+    static let transportContainerMetadata = LabelSet(
+        canonical: "transport",
+        variants: ["control bar", "컨트롤 막대"],
+        rationale: "Classifies the transport/control-bar container by metadata substring; read-only."
+    )
+
+    /// Transport control-button label tokens (≥2 distinct hits ⇒ transport bar).
+    static let transportContainerControlKeywords = LabelSet(
+        canonical: "play",
+        variants: ["stop", "record", "cycle", "loop", "metronome", "rewind", "forward",
+                   "재생", "녹음", "사이클", "메트로놈", "클릭"],
+        rationale: "Counts distinct transport-control labels to classify the control bar; read-only."
+    )
+
+    /// Tempo/position slider description tokens inside the transport container.
+    static let transportSliderHints = LabelSet(
+        canonical: "tempo",
+        variants: ["bpm", "position", "템포", "재생헤드 위치", "마디", "비트"],
+        rationale: "Classifies tempo/position sliders inside the transport container; read-only."
+    )
+
     static let showMixerMenuPath = MenuPath(bar: viewMenuBar, item: showMixerMenuItem)
     static let hidePluginWindowsMenuPath = MenuPath(bar: windowMenuBar, item: hideAllPluginWindowsMenuItem)
     static let editUndoMenuPath = MenuPath(bar: editMenuBar, item: undoMenuItemPrefix, itemMode: .prefix)
