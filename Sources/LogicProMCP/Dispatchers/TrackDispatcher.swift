@@ -191,6 +191,12 @@ struct TrackDispatcher {
                 operation: "track.set_mute",
                 params: ["index": String(index), "enabled": String(enabled)]
             )
+            // #106: never surface an unverified channel success — a State B
+            // "success without read-back" is reported as an error so callers
+            // can't mistake a fired-but-unconfirmed toggle for a verified one.
+            if result.isSuccess, !trackToggleResultIsVerified(result) {
+                return toolTextResult(result.message, isError: true)
+            }
             return toolTextResult(result)
 
         case "solo":
@@ -212,6 +218,10 @@ struct TrackDispatcher {
                 operation: "track.set_solo",
                 params: ["index": String(index), "enabled": String(enabled)]
             )
+            // #106: same verified-only gate as mute/arm.
+            if result.isSuccess, !trackToggleResultIsVerified(result) {
+                return toolTextResult(result.message, isError: true)
+            }
             return toolTextResult(result)
 
         case "arm":
@@ -233,7 +243,7 @@ struct TrackDispatcher {
                 operation: "track.set_arm",
                 params: ["index": String(index), "enabled": String(enabled)]
             )
-            if result.isSuccess, !trackArmResultIsVerified(result) {
+            if result.isSuccess, !trackToggleResultIsVerified(result) {
                 return toolTextResult(result.message, isError: true)
             }
             return toolTextResult(result)
@@ -256,7 +266,7 @@ struct TrackDispatcher {
                 )
                 if !r.isSuccess {
                     failedDisarm.append(t.id)
-                } else if trackArmResultIsVerified(r) {
+                } else if trackToggleResultIsVerified(r) {
                     disarmed.append(t.id)
                 } else {
                     unverifiedDisarm.append(t.id)
@@ -275,7 +285,7 @@ struct TrackDispatcher {
                     isError: true
                 )
             }
-            if !trackArmResultIsVerified(armResult) {
+            if !trackToggleResultIsVerified(armResult) {
                 return toolTextResult(
                     armOnlyResponse(
                         targetIndex: index,
@@ -423,7 +433,7 @@ struct TrackDispatcher {
         }
     }
 
-    private static func trackArmResultIsVerified(_ result: ChannelResult) -> Bool {
+    private static func trackToggleResultIsVerified(_ result: ChannelResult) -> Bool {
         guard result.isSuccess else { return false }
         guard let json = trackArmEnvelope(result),
               json["success"] != nil else {

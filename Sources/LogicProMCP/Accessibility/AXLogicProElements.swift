@@ -1198,18 +1198,58 @@ enum AXLogicProElements {
 
     // MARK: - Track Controls
 
+    /// Find a track-header toggle control (Mute / Solo / Record-enable).
+    ///
+    /// #106: Logic Pro 12.x renders all three as `AXCheckBox` elements
+    /// (live-confirmed on 12.2: `desc="Mute"/"Solo"/"Record Enable"`,
+    /// `settable=false`, only `AXPress`) — NOT `AXButton`. The prior Mute/Solo
+    /// locators searched only `kAXButtonRole` and therefore returned nil on
+    /// 12.x, so `track.set_mute`/`set_solo` never reached an executable AX
+    /// write and the whole channel chain fell through to `channels_exhausted`.
+    /// Only the arm locator searched checkboxes (which is why arm at least
+    /// found its element). This unifies all three on the checkbox-first match
+    /// using the centralized `AXLocalePolicy` label sets, keeping the legacy
+    /// `AXButton` description/title fallback for build drift.
+    static func findTrackToggleControl(
+        in header: AXUIElement,
+        labels: [String],
+        legacyTitle: String,
+        runtime: Runtime = .production
+    ) -> AXUIElement? {
+        let checkboxes = AXHelpers.findAllDescendants(
+            of: header, role: kAXCheckBoxRole, maxDepth: 4, runtime: runtime.ax
+        )
+        if let match = checkboxes.first(where: { cb in
+            guard let desc = AXHelpers.getDescription(cb, runtime: runtime.ax) else { return false }
+            // Exact match preserves the historical arm locator semantics;
+            // prefix match tolerates trailing state suffixes some builds append.
+            return labels.contains(desc) || labels.contains { !$0.isEmpty && desc.hasPrefix($0) }
+        }) {
+            return match
+        }
+        // Legacy fallback: AXButton with description prefix / single-letter title.
+        for label in labels {
+            if let button = findButtonByDescriptionPrefix(in: header, prefix: label, runtime: runtime.ax) {
+                return button
+            }
+        }
+        return AXHelpers.findDescendant(of: header, role: kAXButtonRole, title: legacyTitle, runtime: runtime.ax)
+    }
+
     /// Find the mute button on a track header.
     static func findTrackMuteButton(trackIndex: Int, runtime: Runtime = .production) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex, runtime: runtime) else { return nil }
-        return findButtonByDescriptionPrefix(in: header, prefix: "Mute", runtime: runtime.ax)
-            ?? AXHelpers.findDescendant(of: header, role: kAXButtonRole, title: "M", runtime: runtime.ax)
+        return findTrackToggleControl(
+            in: header, labels: AXLocalePolicy.trackMuteButton.labels, legacyTitle: "M", runtime: runtime
+        )
     }
 
     /// Find the solo button on a track header.
     static func findTrackSoloButton(trackIndex: Int, runtime: Runtime = .production) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex, runtime: runtime) else { return nil }
-        return findButtonByDescriptionPrefix(in: header, prefix: "Solo", runtime: runtime.ax)
-            ?? AXHelpers.findDescendant(of: header, role: kAXButtonRole, title: "S", runtime: runtime.ax)
+        return findTrackToggleControl(
+            in: header, labels: AXLocalePolicy.trackSoloButton.labels, legacyTitle: "S", runtime: runtime
+        )
     }
 
     /// Find the record-arm button on a track header.
@@ -1217,22 +1257,9 @@ enum AXLogicProElements {
     /// `Record Enable` (EN) inside each track header.
     static func findTrackArmButton(trackIndex: Int, runtime: Runtime = .production) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex, runtime: runtime) else { return nil }
-        // Logic 12: per-track record-enable is an AXCheckBox
-        let checkboxes = AXHelpers.findAllDescendants(
-            of: header, role: kAXCheckBoxRole, maxDepth: 4, runtime: runtime.ax
+        return findTrackToggleControl(
+            in: header, labels: AXLocalePolicy.trackRecordEnableCheckbox.labels, legacyTitle: "R", runtime: runtime
         )
-        // Verbatim (case-sensitive) equality preserves the historical locator
-        // exactly; only the EN/KO label tokens move into AXLocalePolicy.
-        let armLabels = AXLocalePolicy.trackRecordEnableCheckbox.labels
-        for cb in checkboxes {
-            let desc = AXHelpers.getDescription(cb, runtime: runtime.ax) ?? ""
-            if armLabels.contains(desc) {
-                return cb
-            }
-        }
-        // Legacy fallback: AXButton with description / title
-        return findButtonByDescriptionPrefix(in: header, prefix: "Record", runtime: runtime.ax)
-            ?? AXHelpers.findDescendant(of: header, role: kAXButtonRole, title: "R", runtime: runtime.ax)
     }
 
     /// Find the track name text field on a header.
