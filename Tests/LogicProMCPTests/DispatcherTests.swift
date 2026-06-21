@@ -2682,6 +2682,11 @@ private actor SelectiveFailChannel: Channel {
         ("transport.goto_position", ["position": "17.1.1.1"]),
         ("transport.goto_position", ["position": "17.1.1.1"]),
         ("nav.rename_marker", ["index": "2", "name": "Big Chorus"]),
+        // #109 — set_zoom is now AX-first (writable Horizontal-Zoom slider);
+        // zoom_to_fit stays on the key-command path (no slider equivalent).
+        ("nav.set_zoom_level", ["level": "8"]),
+        ("nav.set_zoom_level", ["level": "2"]),
+        ("nav.set_zoom_level", ["level": "5"]),
     ])
     expectExecutedOps(keyCmdOps, equals: [
         // v3.1.10 — `nav.goto_marker` keycmd path is reserved for the
@@ -2690,9 +2695,6 @@ private actor SelectiveFailChannel: Channel {
         ("nav.create_marker", ["name": "Bridge"]),
         ("nav.delete_marker", ["index": "1"]),
         ("nav.zoom_to_fit", [:]),
-        ("nav.set_zoom_level", ["level": "8"]),
-        ("nav.set_zoom_level", ["level": "2"]),
-        ("nav.set_zoom_level", ["level": "5"]),
     ])
 }
 

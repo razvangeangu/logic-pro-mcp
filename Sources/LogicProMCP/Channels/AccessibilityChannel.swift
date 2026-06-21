@@ -283,6 +283,12 @@ actor AccessibilityChannel: Channel {
                 params: params, runtime: runtime.logicRuntime
             )
 
+        case "nav.set_zoom_level":
+            // #109: verified zoom via the writable Horizontal-Zoom AXSlider.
+            return AccessibilityChannel.defaultSetZoomLevel(
+                params: params, runtime: runtime.logicRuntime
+            )
+
         // MARK: - Track reads
         case "track.get_tracks":
             // v3.1.8 (Issue #7) — AX-only at the channel layer. The v3.1.5
@@ -3241,6 +3247,55 @@ actor AccessibilityChannel: Channel {
     /// 2) Control-bar 마디 slider (clamps to project length; silently stops at
     ///    end when requested bar exceeds length)
     /// Accepts `{"bar": Int}` or `{"position": "B.B.S.S"}`.
+    /// #109: set the arrange horizontal zoom to `level` (1...10) by writing the
+    /// Horizontal-Zoom AXSlider (range 0...1, level 1 = fully out, 10 = fully
+    /// in) and reading it back. Returns verified State A on a confirmed write,
+    /// State B if the read-back can't confirm it. If the slider can't be found,
+    /// returns a plain (non-terminal) error so the router falls back to the
+    /// key-command channel.
+    static func defaultSetZoomLevel(
+        params: [String: String],
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> ChannelResult {
+        // Malformed input fails closed as terminal State C: a bad level must NOT
+        // fall through to the key-command channel (which doesn't validate and
+        // would fire a generic zoom). Mirrors gotoPositionViaBarSlider's guard.
+        guard let levelStr = params["level"], let level = Int(levelStr), (1...10).contains(level) else {
+            return .error(HonestContract.encodeStateC(
+                error: .invalidParams,
+                hint: "nav.set_zoom_level requires 'level' (Int 1..10)",
+                extras: ["operation": "nav.set_zoom"]
+            ))
+        }
+        // Slider absent is NOT terminal: plain error lets the router fall back to
+        // the key-command / CGEvent channels.
+        guard let slider = AXLogicProElements.findHorizontalZoomSlider(runtime: runtime) else {
+            return .error("Horizontal Zoom slider not found — falling back to key command")
+        }
+        let target = Double(level - 1) / 9.0
+        let before = AXValueExtractors.extractSliderValue(slider, runtime: runtime.ax)
+        _ = AXValueExtractors.setSliderValue(slider, target, runtime: runtime.ax)
+        usleep(120_000)
+        let after = AXValueExtractors.extractSliderValue(slider, runtime: runtime.ax)
+        let extras: [String: Any] = [
+            "operation": "nav.set_zoom",
+            "axis": "horizontal",
+            "level": level,
+            "requested": target,
+            "observed_before": before ?? NSNull(),
+            "observed": after ?? NSNull(),
+            "observed_after": after ?? NSNull(),
+            "verify_source": "ax_zoom_slider",
+        ]
+        if let after, abs(after - target) < 0.02 {
+            return .success(HonestContract.encodeStateA(extras: extras))
+        }
+        return .success(HonestContract.encodeStateB(
+            reason: after == nil ? .readbackUnavailable : .readbackMismatch,
+            extras: extras
+        ))
+    }
+
     private static func gotoPositionViaBarSlider(
         params: [String: String],
         runtime: AXLogicProElements.Runtime = .production
