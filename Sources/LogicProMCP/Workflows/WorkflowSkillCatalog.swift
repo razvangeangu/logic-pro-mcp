@@ -498,8 +498,12 @@ enum WorkflowSkillCatalog {
     /// the production MCP contract") are deliberately excluded — a census
     /// command must actually execute, not merely parse. Kept in lockstep with
     /// the dispatcher `case` labels by `WorkflowCommandCensusTests`, which
-    /// reads the dispatcher sources and fails when a census command
-    /// disappears or degrades into a not-exposed stub.
+    /// reads the dispatcher sources and fails in BOTH directions: when a
+    /// census command disappears or degrades into a not-exposed stub, AND
+    /// (#111) when a dispatcher's `switch command` gains a public command
+    /// label that is not in the census, a known not-exposed stub, or a known
+    /// alias. Every MCP tool must therefore appear here (including
+    /// `logic_plugins`) and stay synchronized with its dispatcher.
     static let publicCommands: [String: Set<String>] = [
         "logic_transport": [
             "play", "stop", "record", "pause", "rewind", "fast_forward",
@@ -516,6 +520,9 @@ enum WorkflowSkillCatalog {
         "logic_mixer": [
             "set_volume", "set_pan", "set_master_volume",
             "insert_plugin", "set_plugin_param",
+        ],
+        "logic_plugins": [
+            "get_inventory", "set_param_verified", "insert_verified",
         ],
         "logic_midi": [
             "send_note", "send_chord", "play_sequence", "send_cc",
@@ -534,7 +541,9 @@ enum WorkflowSkillCatalog {
         ],
         "logic_project": [
             "new", "open", "save", "save_as", "close", "bounce",
-            "is_running", "get_regions", "export_plan", "audit", "cleanup_plan", "launch", "quit",
+            "is_running", "get_regions",
+            "export_plan", "export_run", "export_resume",
+            "audit", "cleanup_plan", "cleanup_apply", "launch", "quit",
         ],
         "logic_system": [
             "health", "permissions", "refresh_cache", "help",
