@@ -3744,19 +3744,6 @@ actor AccessibilityChannel: Channel {
         ))
     }
 
-    private static func mixerControlValue(
-        from slider: AXUIElement,
-        target: MixerTarget,
-        runtime: AXHelpers.Runtime
-    ) -> Double? {
-        switch target {
-        case .volume:
-            return AXValueExtractors.extractLogicMixerFaderValue(slider, runtime: runtime)
-        case .pan:
-            return AXValueExtractors.extractCenteredSliderValue(slider, runtime: runtime)
-        }
-    }
-
     // MARK: - Regions
 
     /// Read all regions (MIDI/audio clips) currently shown in the arrange area.
