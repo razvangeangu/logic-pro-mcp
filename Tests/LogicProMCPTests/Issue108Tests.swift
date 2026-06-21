@@ -55,7 +55,7 @@ struct Issue108Tests {
         )
         #expect(result.isError != true)
         let o = try #require(obj(result))
-        #expect((o["verified"] as? Bool) == true)
+        #expect(try #require(o["verified"] as? Bool))
         #expect(o["verification_source"] as? String == "transport_state")
         #expect(o["observed"] as? String == "5.1.1.1")
     }
@@ -68,7 +68,9 @@ struct Issue108Tests {
             command: "mmc_locate", params: ["bar": .int(5)], router: router, cache: StateCache()
         )
         let o = try #require(obj(result))
-        #expect((o["verified"] as? Bool) != true)
+        // Fail-closed mismatch is a State B envelope, so `verified` is present
+        // and false (not absent) — require + negate is unambiguously effective.
+        #expect(!(try #require(o["verified"] as? Bool)))
         #expect(result.isError == true)
     }
 
