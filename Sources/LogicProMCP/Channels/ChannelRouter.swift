@@ -186,7 +186,11 @@ actor ChannelRouter {
         "nav.rename_marker":          [.accessibility],
         "nav.get_markers":            [.accessibility],
         "nav.zoom_to_fit":            [.midiKeyCommands, .cgEvent],
-        "nav.set_zoom_level":         [.midiKeyCommands, .cgEvent],
+        // #109: AX-first — the arrange Horizontal-Zoom AXSlider honours AXValue
+        // writes (unlike faders/playhead), so set_zoom now lands a verified
+        // zoom level instead of an unmappable, unverifiable key command. Keeps
+        // the key-command + CGEvent fallbacks for when the slider isn't found.
+        "nav.set_zoom_level":         [.accessibility, .midiKeyCommands, .cgEvent],
 
         // Editing — MIDIKeyCommands primary, CGEvent fallback
         "edit.undo":                  [.midiKeyCommands, .cgEvent],

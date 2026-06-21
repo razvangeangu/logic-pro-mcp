@@ -1235,6 +1235,19 @@ enum AXLogicProElements {
             ?? AXHelpers.findDescendant(of: header, role: kAXButtonRole, title: "R", runtime: runtime.ax)
     }
 
+    /// #109: the arrange Horizontal-Zoom AXSlider (range 0...1, settable).
+    /// Logic honours AXValue writes here, so `set_zoom` can drive it directly
+    /// with a verifiable read-back instead of an unmappable key command.
+    static func findHorizontalZoomSlider(runtime: Runtime = .production) -> AXUIElement? {
+        guard let window = mainWindow(runtime: runtime) else { return nil }
+        let labels = AXLocalePolicy.horizontalZoomSlider.labels
+        return AXHelpers.findAllDescendants(of: window, role: kAXSliderRole, maxDepth: 16, runtime: runtime.ax)
+            .first { slider in
+                let desc = AXHelpers.getDescription(slider, runtime: runtime.ax) ?? ""
+                return labels.contains { !$0.isEmpty && desc.contains($0) }
+            }
+    }
+
     /// Find the track name text field on a header.
     static func findTrackNameField(trackIndex: Int, runtime: Runtime = .production) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex, runtime: runtime) else { return nil }

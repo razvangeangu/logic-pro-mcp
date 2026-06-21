@@ -254,6 +254,14 @@ enum AXLocalePolicy {
         rationale: "Identifies the tempo slider in TransportState extraction; substring match without bpm; read-only."
     )
 
+    /// #109: arrange Horizontal-Zoom slider (writable AXValue). EN canonical +
+    /// KO variant; matched by description substring.
+    static let horizontalZoomSlider = LabelSet(
+        canonical: "Horizontal Zoom",
+        variants: ["가로 확대/축소", "가로 확대"],
+        rationale: "Locates the arrange horizontal-zoom AXSlider for verified set_zoom writes; description substring match."
+    )
+
     // --- Track-header read-only locators ---
 
     static let trackMuteButton = LabelSet(
