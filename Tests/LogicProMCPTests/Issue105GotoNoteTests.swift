@@ -25,11 +25,17 @@ struct Issue105GotoNoteTests {
             switch operation {
             case "transport.goto_position": return gotoResult
             case "transport.get_state":
-                return .success("""
-                {"isPlaying":false,"isRecording":false,"isPaused":false,"tempo":120.0,\
-                "position":"\(readbackPosition)","timePosition":"00:00:00.000","sampleRate":44100,\
-                "isCycleEnabled":false,"isMetronomeEnabled":false,"lastUpdated":"2026-06-21T00:00:00.000Z"}
-                """)
+                // Encode a real TransportState with the SAME .iso8601 strategy
+                // the dispatcher decodes with. A hand-written date carrying
+                // fractional seconds (".000Z") fails strict .iso8601 decoding on
+                // the CI Foundation, which made `liveTransportState` return nil
+                // and the verdict fall back to the un-stripped State B.
+                var state = TransportState()
+                state.position = readbackPosition
+                state.lastUpdated = Date(timeIntervalSince1970: 0)
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                return .success(String(decoding: (try? encoder.encode(state)) ?? Data(), as: UTF8.self))
             default: return .error("unexpected: \(operation)")
             }
         }
