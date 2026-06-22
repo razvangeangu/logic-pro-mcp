@@ -127,6 +127,28 @@ enum HonestContract {
         case rollbackFailed
         case verifiedOpInProgress
         case operationTimeout
+        /// `track.set_instrument` could not stage the Logic Library panel: it
+        /// was closed and the auto-open (⌘L / View > Show Library) did not make
+        /// it appear before the bounded re-check. The patch was never attempted.
+        /// Distinct from `.axWriteFailed` (a navigation write was rejected) and
+        /// `.elementNotFound` (a specific row absent): the whole panel UI the
+        /// op needs is not present. Recovery: open the Library (⌘L) in Logic
+        /// Pro and retry. v3.6.x (#131/#135/#141 canonical hardening).
+        case libraryPanelUnavailable
+        /// `track.set_instrument` targeted a track whose channel-strip type
+        /// cannot host a software-instrument patch (GM Device / External MIDI).
+        /// Terminal for this op — loading a Library instrument patch onto an
+        /// external-MIDI/GM-Device strip is not a supported operation. Recovery:
+        /// target a Software Instrument track (or create one and copy the
+        /// regions). v3.6.x (#131).
+        case unsupportedTrackType
+        /// `track.set_instrument` pre-resolved the requested path against the
+        /// cached Library inventory and the path does not exist. Terminal — the
+        /// op is NOT attempted (no AX navigation), distinguishing a genuine
+        /// "path does not exist" precondition from a transient "path exists but
+        /// live AX nav failed" (which still surfaces as `.axWriteFailed`).
+        /// Recovery: pick a path present in scan_library. v3.6.x (#135/#141).
+        case pathNotInLibrary
         /// The requested operation cannot be performed in the front document's
         /// current state — e.g. `project.save` on an UNTITLED document that has
         /// no on-disk path. Firing `save front document` on such a document
@@ -171,6 +193,9 @@ enum HonestContract {
             case .rollbackFailed: return "rollback_failed"
             case .verifiedOpInProgress: return "verified_op_in_progress"
             case .operationTimeout: return "operation_timeout"
+            case .libraryPanelUnavailable: return "library_panel_unavailable"
+            case .unsupportedTrackType: return "unsupported_track_type"
+            case .pathNotInLibrary: return "path_not_in_library"
             case .unsupportedState: return "unsupported_state"
             }
         }

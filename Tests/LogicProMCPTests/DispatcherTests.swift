@@ -1778,8 +1778,9 @@ private actor TrackInsertingMockChannel: Channel {
 
 @Test func testRecordSequenceCleansUpTempFileOnError() async {
     let router = ChannelRouter()
-    // Import channel fails
-    let ax = FailingExecuteChannel(id: .accessibility, message: "Import failed")
+    // Let the required playhead reset succeed, then fail the import path so
+    // this test verifies cleanup for the exact SMF file handed to import.
+    let ax = SelectiveFailChannel(id: .accessibility, failOperations: ["midi.import_file"])
     await router.register(ax)
     let cache = StateCache()
     await cache.updateDocumentState(true)
@@ -1792,14 +1793,16 @@ private actor TrackInsertingMockChannel: Channel {
     )
 
     #expect(result.isError!)
-    // Verify no orphan files in /tmp/LogicProMCP/ by checking recent mtime
-    // (best-effort assertion — the specific uuid is internal)
-    let tempDir = "/tmp/LogicProMCP"
-    if FileManager.default.fileExists(atPath: tempDir) {
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: tempDir)) ?? []
-        // Allow <= 1 file from other concurrent tests; just assert no accumulation
-        #expect(files.count <= 5, "too many orphan .mid files: \(files.count)")
-    }
+    let ops = await ax.executedOps
+    let importOps = ops.filter { $0.0 == "midi.import_file" }
+    #expect(importOps.count == 1, "expected one midi.import_file call, got \(importOps.count)")
+    let importedPath = importOps.first?.1["path"] ?? ""
+    #expect(importedPath.hasPrefix("/tmp/LogicProMCP/"))
+    #expect(importedPath.hasSuffix(".mid"))
+    #expect(
+        !FileManager.default.fileExists(atPath: importedPath),
+        "record_sequence must remove its own SMF temp file after import failure: \(importedPath)"
+    )
 }
 
 @Test func testRecordSequenceRejectsInvalidNotes() async {

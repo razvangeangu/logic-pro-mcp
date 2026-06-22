@@ -227,6 +227,31 @@ import Testing
     #expect(unknownTrack.color == nil)
 }
 
+@Test func testAXValueExtractorsClassifiesGMDeviceStripAsExternalMIDI() {
+    // #131 — Logic's multichannel SMF open creates "GM Device N" strips. The
+    // live header can carry an "audio"-shaped signal, so the gm-device check
+    // MUST win over `.audio`. Misclassifying these as `.audio` hides the
+    // silent-bounce risk (#128) before bounce.
+    let builder = FakeAXRuntimeBuilder()
+    let header = builder.element(900)
+    let name = builder.element(901)
+    let icon = builder.element(902)
+
+    builder.setChildren(header, [name, icon])
+    builder.setAttribute(header, kAXTitleAttribute as String, "GM Device 5")
+    builder.setAttribute(name, kAXRoleAttribute as String, kAXStaticTextRole as String)
+    builder.setAttribute(name, kAXValueAttribute as String, "GM Device 5")
+    // Adversarial: an "Audio" signal that would otherwise win the `.audio`
+    // branch. The gm-device branch must take precedence.
+    builder.setAttribute(icon, kAXDescriptionAttribute as String, "Audio Channel Strip")
+
+    let runtime = builder.makeAXRuntime()
+    let track = AXValueExtractors.extractTrackState(from: header, index: 5, runtime: runtime)
+
+    #expect(track.name == "GM Device 5")
+    #expect(track.type == .externalMIDI)
+}
+
 @Test func testAXValueExtractorsPreferTrackTextFieldDescriptionOverStaticText() {
     let builder = FakeAXRuntimeBuilder()
     let header = builder.element(230)

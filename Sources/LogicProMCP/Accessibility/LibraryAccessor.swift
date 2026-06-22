@@ -778,15 +778,61 @@ enum LibraryAccessor {
                 ok = selectPreset(named: seg, runtime: runtime, library: library)
             }
             if !ok { return false }
-            // Allow Logic to slide the column / update visible children.
-            // selectCategory/selectPreset already sleep internally; this is
-            // an additional settle to let column-2 AX tree rebuild before
+            // Allow Logic to slide the column / update visible children before
             // the next segment's name lookup runs.
+            //
+            // #135 — a FIXED 0.35s settle is too short on a cold Library panel:
+            // Logic's finder-column slide can exceed 350ms, so the next
+            // segment's AXStaticText is not yet realized in the AX tree and the
+            // lookup spuriously returns not-found (surfaced as the misleading
+            // "Library path not fully resolvable"). Poll for the next segment's
+            // row to appear, bounded by `settleDelay` total, instead of a single
+            // blind sleep. Falls back to the full sleep if the row never shows
+            // (the next segment's own selectCategory/selectPreset then fails
+            // honestly, preserving the State C contract).
             if idx < segments.count - 1 {
-                Thread.sleep(forTimeInterval: settleDelay)
+                let nextSeg = segments[idx + 1]
+                waitForSegmentVisible(
+                    named: nextSeg,
+                    timeout: settleDelay,
+                    runtime: runtime
+                )
             }
         }
         return true
+    }
+
+    /// #135 — bounded poll for a Library row (AXStaticText) with `name` to be
+    /// realized in the currently-visible browser, after a column slide. Polls in
+    /// short steps up to `timeout` total. Returns as soon as the row appears, or
+    /// after `timeout` elapses (the caller's next segment lookup then fails
+    /// honestly if it never appeared — no false success is introduced here).
+    static func waitForSegmentVisible(
+        named name: String,
+        timeout: TimeInterval,
+        pollInterval: TimeInterval = 0.05,
+        runtime: AXLogicProElements.Runtime = .production
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if segmentIsVisible(named: name, runtime: runtime) { return }
+            Thread.sleep(forTimeInterval: pollInterval)
+        } while Date() < deadline
+    }
+
+    /// Read-only check: is an AXStaticText whose value equals `name` present in
+    /// the currently-visible Library browser? Used by `waitForSegmentVisible`.
+    static func segmentIsVisible(
+        named name: String,
+        runtime: AXLogicProElements.Runtime = .production
+    ) -> Bool {
+        guard let browser = findLibraryBrowser(runtime: runtime) else { return false }
+        let texts = AXHelpers.findAllDescendants(
+            of: browser, role: kAXStaticTextRole, maxDepth: 6, runtime: runtime.ax
+        )
+        return texts.contains { t in
+            (AXHelpers.getAttribute(t, kAXValueAttribute, runtime: runtime.ax) as String?) == name
+        }
     }
 
     // MARK: - Private helpers

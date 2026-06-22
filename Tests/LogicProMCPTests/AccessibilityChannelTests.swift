@@ -1891,6 +1891,147 @@ private func makeSetInstrumentFixture() -> (
     #expect(!fixture.builder.actionCalls.map(\.elementID).contains(fixture.builder.elementID(fixture.preset)))
 }
 
+// MARK: - #131/#135/#141 set_instrument hardening (deterministic guards)
+
+/// Build a set_instrument fixture whose target track (index 1) carries a
+/// GM Device signal so `inferTrackType` classifies it as `.externalMIDI`.
+/// The library browser is present (panel "open") so the type guard — which
+/// runs BEFORE the panel guard — is what fires.
+private func makeGMDeviceTargetFixture() -> (builder: FakeAXRuntimeBuilder, app: AXUIElement) {
+    let fixture = makeSetInstrumentFixture()
+    // Re-label the second header (target index 1) as a GM Device strip. The
+    // live SMF-open path names these "GM Device N"; the AX header value is the
+    // type signal `inferTrackType` reads.
+    fixture.builder.setAttribute(fixture.secondHeader, kAXTitleAttribute as String, "GM Device 5")
+    fixture.builder.setAttribute(fixture.secondHeader, kAXDescriptionAttribute as String, "GM Device 5")
+    // Also retitle its name static-text child so the readback name matches.
+    let secondName = fixture.builder.element(20_006)
+    fixture.builder.setAttribute(secondName, kAXValueAttribute as String, "GM Device 5")
+    return (fixture.builder, fixture.app)
+}
+
+@Test func testSetInstrumentGMDeviceTargetReturnsUnsupportedTrackType() async throws {
+    let fixture = makeGMDeviceTargetFixture()
+    let secondHeader = fixture.builder.element(20_005)
+    let firstHeader = fixture.builder.element(20_003)
+    // Selection ladder must commit so the type guard (which runs after
+    // selection verification) is reached: mark the target selected on AXPress.
+    let runtimeWithSelect = fixture.builder.makeLogicRuntime(
+        appElement: fixture.app,
+        setAttributeHandler: { _, _, _ in true },
+        performActionHandler: { element, action in
+            guard action == kAXPressAction as String else { return true }
+            if element == secondHeader {
+                fixture.builder.setAttribute(firstHeader, kAXSelectedAttribute as String, false)
+                fixture.builder.setAttribute(secondHeader, kAXSelectedAttribute as String, true)
+            }
+            return true
+        }
+    )
+    let result = await AccessibilityChannel.setTrackInstrument(
+        params: ["index": "1", "path": "Electric Piano/Deluxe Classic"],
+        runtime: runtimeWithSelect,
+        staging: AccessibilityChannel.LibraryPanelStaging(
+            isPanelOpen: { _ in true },
+            openPanel: { _ in },
+            resolvePath: { _ in nil }
+        )
+    )
+
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["error"] as? String == "unsupported_track_type")
+    #expect(obj["observed_track_type"] as? String == "external_midi")
+    #expect(obj["precondition"] as? String == "wrong_target_type")
+    let hint = try #require(obj["hint"] as? String)
+    #expect(hint.contains("GM Device"))
+    // The misleading legacy error MUST NOT be what we returned.
+    #expect(obj["error"] as? String != "ax_write_failed")
+}
+
+@Test func testSetInstrumentPanelClosedReturnsLibraryPanelUnavailable() async throws {
+    // Standard fixture: target index 1 is a plain track (`.unknown` type), so
+    // the type guard passes and the panel precondition is what fires. Force the
+    // panel closed and make auto-open a no-op so it stays closed.
+    let fixture = makeSetInstrumentFixture()
+    let logicRuntime = fixture.builder.makeLogicRuntime(
+        appElement: fixture.app,
+        setAttributeHandler: { _, _, _ in true },
+        performActionHandler: { element, action in
+            guard action == kAXPressAction as String else { return true }
+            if element == fixture.secondHeader {
+                fixture.builder.setAttribute(fixture.firstHeader, kAXSelectedAttribute as String, false)
+                fixture.builder.setAttribute(fixture.secondHeader, kAXSelectedAttribute as String, true)
+            }
+            return true
+        }
+    )
+
+    let openAttempted = LockedFlag()
+    let result = await AccessibilityChannel.setTrackInstrument(
+        params: ["index": "1", "path": "Bass/Sub Bass"],
+        runtime: logicRuntime,
+        staging: AccessibilityChannel.LibraryPanelStaging(
+            isPanelOpen: { _ in false },          // panel never open
+            openPanel: { _ in openAttempted.set() }, // auto-open is a no-op
+            resolvePath: { _ in nil }
+        )
+    )
+
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["error"] as? String == "library_panel_unavailable")
+    #expect(obj["precondition"] as? String == "panel_closed")
+    let hint = try #require(obj["hint"] as? String)
+    #expect(hint.contains("⌘L"))
+    // Auto-open must have been attempted before failing closed.
+    #expect(openAttempted.value)
+    // Must NOT be the misleading legacy error.
+    #expect(obj["error"] as? String != "ax_write_failed")
+}
+
+@Test func testSetInstrumentPathNotInCacheReturnsPathNotInLibrary() async {
+    // Panel open, target type OK, but the injected cache resolver reports the
+    // path is ABSENT → terminal precondition `path_not_in_library` (NOT a nav
+    // attempt, NOT ax_write_failed).
+    let fixture = makeSetInstrumentFixture()
+    let logicRuntime = fixture.builder.makeLogicRuntime(
+        appElement: fixture.app,
+        setAttributeHandler: { _, _, _ in true },
+        performActionHandler: { element, action in
+            guard action == kAXPressAction as String else { return true }
+            if element == fixture.secondHeader {
+                fixture.builder.setAttribute(fixture.firstHeader, kAXSelectedAttribute as String, false)
+                fixture.builder.setAttribute(fixture.secondHeader, kAXSelectedAttribute as String, true)
+            }
+            return true
+        }
+    )
+
+    let result = await AccessibilityChannel.setTrackInstrument(
+        params: ["index": "1", "path": "Bass/Totally Fake Patch"],
+        runtime: logicRuntime,
+        staging: AccessibilityChannel.LibraryPanelStaging(
+            isPanelOpen: { _ in true },
+            openPanel: { _ in },
+            resolvePath: { _ in false }   // cache says: path does not exist
+        )
+    )
+
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["error"] as? String == "path_not_in_library")
+    #expect(obj["precondition"] as? String == "missing_path")
+    #expect(obj["error"] as? String != "ax_write_failed")
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    func set() { lock.lock(); flag = true; lock.unlock() }
+    var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+}
+
 @Test func testAccessibilityChannelAXBackedTrackErrorPaths() async {
     let emptyBuilder = FakeAXRuntimeBuilder()
     let emptyApp = emptyBuilder.element(220)
