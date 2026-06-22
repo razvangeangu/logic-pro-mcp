@@ -232,7 +232,19 @@ actor AppleScriptChannel: Channel {
     /// there is no usable name — the State-B verdict itself never changes.
     static func newProjectExtras(_ result: ChannelResult) -> [String: Any] {
         guard result.isSuccess else { return [:] }
-        let name = result.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        // runScript wraps the AppleScript value as `{"result":"<name>"}`; unwrap
+        // it so observed_name is the bare document name ("Untitled"), not the
+        // raw JSON envelope. Fall back to the trimmed message if it is not the
+        // expected wrapper shape.
+        let trimmed = result.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: String
+        if let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let unwrapped = obj["result"] as? String {
+            name = unwrapped.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            name = trimmed
+        }
         guard !name.isEmpty else { return [:] }
         return ["observed_name": name]
     }

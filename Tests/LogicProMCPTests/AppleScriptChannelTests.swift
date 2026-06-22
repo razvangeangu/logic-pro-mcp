@@ -586,4 +586,8 @@ private func makeAppleScriptRuntime(
     #expect(AppleScriptChannel.newProjectExtras(.success("  Demo  "))["observed_name"] as? String == "Demo")
     #expect(AppleScriptChannel.newProjectExtras(.success("   "))["observed_name"] == nil)
     #expect(AppleScriptChannel.newProjectExtras(.error("boom"))["observed_name"] == nil)
+    // runScript wraps the value as {"result":"<name>"}; observed_name must be the
+    // bare unwrapped name, not the raw JSON envelope.
+    #expect(AppleScriptChannel.newProjectExtras(.success("{\"result\":\"Untitled\"}"))["observed_name"] as? String == "Untitled")
+    #expect(AppleScriptChannel.newProjectExtras(.success("{\"result\":\"\"}"))["observed_name"] == nil)
 }
