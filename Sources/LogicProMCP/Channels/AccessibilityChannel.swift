@@ -4184,6 +4184,18 @@ actor AccessibilityChannel: Channel {
             tell application "Logic Pro" to activate
             delay 0.3
             tell application "System Events"
+                -- Self-heal: dismiss a stale Import open-panel left by a prior
+                -- failed run so repeated imports never stack file-open dialogs.
+                tell process "Logic Pro"
+                    repeat 4 times
+                        if (exists (first window whose name is "Import")) or (exists (first window whose name is "가져오기")) then
+                            key code 53
+                            delay 0.25
+                        else
+                            exit repeat
+                        end if
+                    end repeat
+                end tell
                 tell process "Logic Pro"
                     try
                         click menu item "MIDI 파일…" of menu 1 of menu item "가져오기" of menu 1 of menu bar item "파일" of menu bar 1
@@ -4221,32 +4233,109 @@ actor AccessibilityChannel: Channel {
                 if fileOpenSeen is false then
                     return "DIALOG_NOT_FOUND: file-open sheet did not appear"
                 end if
+                delay 0.2
+                -- Open the "Go to the folder" field, then SET its value directly.
+                -- Typing the path char-by-char proved unreliable (the field kept
+                -- only the leading "/" because the second keystroke did not land
+                -- in the freshly-opened sheet), which left the open panel stuck
+                -- and stacked dialogs on the next call. Poll the field into
+                -- existence across both window topologies Logic exposes
+                -- (sheet-on-window-1 vs standalone AXDialog) and assign AXValue.
+                tell process "Logic Pro" to set frontmost to true
+                delay 0.15
                 keystroke "/"
-                delay 0.5
-                keystroke "\(typedPath)"
-                delay 0.3
-                keystroke return
-                delay 1.5
-                tell process "Logic Pro"
-                    try
-                        set importDlg to first window whose name is "가져오기"
-                        click button "가져오기" of UI element 1 of importDlg
-                    on error
+                delay 0.4
+                set goToSet to false
+                repeat 20 times
+                    tell process "Logic Pro"
+                        -- Only accept the assignment once the field actually
+                        -- READS BACK our path, so a race that targets the wrong
+                        -- early text field cannot exit the loop prematurely.
                         try
-                            set importDlg to first window whose name is "Import"
-                            click button "Import" of UI element 1 of importDlg
-                        on error errMsg
-                            return "IMPORT_BTN_ERROR: " & errMsg
+                            set goDlg to first window whose subrole is "AXDialog"
+                            set value of text field 1 of sheet 1 of goDlg to "\(escapedPath)"
+                            if (value of text field 1 of sheet 1 of goDlg) is "\(escapedPath)" then
+                                set goToSet to true
+                            end if
                         end try
-                    end try
-                end tell
+                        if goToSet is false then
+                            try
+                                set value of text field 1 of sheet 1 of window 1 to "\(escapedPath)"
+                                if (value of text field 1 of sheet 1 of window 1) is "\(escapedPath)" then
+                                    set goToSet to true
+                                end if
+                            end try
+                        end if
+                    end tell
+                    if goToSet then exit repeat
+                    delay 0.15
+                end repeat
+                if goToSet is false then
+                    -- self-clean so we never leave a stuck panel for the next call
+                    tell process "Logic Pro"
+                        try
+                            key code 53
+                            delay 0.2
+                            key code 53
+                        end try
+                    end tell
+                    return "DIALOG_NOT_FOUND: go-to-folder field did not accept the path"
+                end if
+                delay 0.3
+                tell process "Logic Pro" to set frontmost to true
+                delay 0.15
+                keystroke return
+                -- Navigating to + selecting the file can take >1s, so poll the
+                -- Import button into an ENABLED state before clicking rather than
+                -- racing a fixed delay (clicking too early imports nothing and
+                -- leaves the panel open). ~4s (20 x 200ms).
+                set importClicked to false
+                repeat 20 times
+                    tell process "Logic Pro"
+                        try
+                            set importDlg to first window whose name is "가져오기"
+                            set ib to button "가져오기" of UI element 1 of importDlg
+                            if (enabled of ib) then
+                                click ib
+                                set importClicked to true
+                            end if
+                        end try
+                        if importClicked is false then
+                            try
+                                set importDlg to first window whose name is "Import"
+                                set ib to button "Import" of UI element 1 of importDlg
+                                if (enabled of ib) then
+                                    click ib
+                                    set importClicked to true
+                                end if
+                            end try
+                        end if
+                    end tell
+                    if importClicked then exit repeat
+                    delay 0.2
+                end repeat
+                if importClicked is false then
+                    tell process "Logic Pro"
+                        repeat 3 times
+                            if (exists (first window whose name is "Import")) or (exists (first window whose name is "가져오기")) then
+                                key code 53
+                                delay 0.2
+                            else
+                                exit repeat
+                            end if
+                        end repeat
+                    end tell
+                    return "IMPORT_BTN_ERROR: Import button never became enabled (file not selected)"
+                end if
                 -- Poll for the tempo dialog (subrole AXDialog) before dismissing
                 -- rather than a fixed delay. ~3s (15 x 200ms).
+                -- A lingering Import open-panel also has subrole AXDialog, so
+                -- exclude it by name; only a genuine tempo alert counts.
                 set tempoSeen to false
                 repeat 15 times
                     tell process "Logic Pro"
                         try
-                            if (exists (first window whose subrole is "AXDialog")) then
+                            if (exists (first window whose subrole is "AXDialog" and name is not "Import" and name is not "가져오기")) then
                                 set tempoSeen to true
                             end if
                         end try
@@ -4257,7 +4346,7 @@ actor AccessibilityChannel: Channel {
                 if tempoSeen then
                     tell process "Logic Pro"
                         try
-                            set tempoDlg to first window whose subrole is "AXDialog"
+                            set tempoDlg to first window whose subrole is "AXDialog" and name is not "Import" and name is not "가져오기"
                             try
                                 click button "아니요" of tempoDlg
                             on error
@@ -4268,6 +4357,18 @@ actor AccessibilityChannel: Channel {
                         end try
                     end tell
                 end if
+                -- Final self-heal: if an Import open-panel is somehow still up
+                -- (failed mid-flow), dismiss it so the next call starts clean.
+                tell process "Logic Pro"
+                    repeat 3 times
+                        if (exists (first window whose name is "Import")) or (exists (first window whose name is "가져오기")) then
+                            key code 53
+                            delay 0.2
+                        else
+                            exit repeat
+                        end if
+                    end repeat
+                end tell
                 if tempoSeen then
                     return "OK TEMPO_SEEN"
                 end if
