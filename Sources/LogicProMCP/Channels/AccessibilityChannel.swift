@@ -3055,6 +3055,42 @@ actor AccessibilityChannel: Channel {
         }
     }
 
+    /// One-shot, thread-safe latch so a deadline race resumes its continuation
+    /// exactly once. #131 robustness.
+    private final class DeadlineLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var claimed = false
+        func claim() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if claimed { return false }
+            claimed = true
+            return true
+        }
+    }
+
+    /// Run a blocking Library-navigation closure under a hard wall-clock
+    /// deadline. Returns the closure's result, or `nil` if the deadline elapsed
+    /// first. The closure runs on a global queue (never the cooperative pool) so
+    /// a wedged AX surface can't stall the stdio loop; if it overruns it is
+    /// abandoned (the operation still returns bounded) rather than hanging
+    /// indefinitely. #131 — set_instrument must never hang on an unresponsive
+    /// Library panel.
+    private static func runWithDeadline(
+        seconds: Double,
+        _ work: @escaping @Sendable () -> Bool
+    ) async -> Bool? {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool?, Never>) in
+            let latch = DeadlineLatch()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = work()
+                if latch.claim() { cont.resume(returning: result) }
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
+                if latch.claim() { cont.resume(returning: nil) }
+            }
+        }
+    }
+
     static func setTrackInstrument(
         params: [String: String],
         runtime: AXLogicProElements.Runtime = .production,
@@ -3297,7 +3333,29 @@ actor AccessibilityChannel: Channel {
         // For 3+ segment paths (Synthesizer/Bass/Acid Etched Bass), each
         // intermediate segment slides the Library view so the next segment's
         // column-2 lookup resolves against the correct subfolder.
-        guard LibraryAccessor.selectPath(segments: pathSegments, runtime: runtime) else {
+        // #131 robustness — bound the live Library navigation with a hard
+        // deadline. An invalid path (or a panel left in a bad state by a prior
+        // invalid attempt) can make the AX traversal stall far past any client
+        // timeout, hanging the stdio loop. Fail closed with a typed State C
+        // instead of hanging. The happy path resolves in a few seconds, well
+        // under this ceiling.
+        let navOutcome = await AccessibilityChannel.runWithDeadline(seconds: 15) {
+            LibraryAccessor.selectPath(segments: pathSegments, runtime: runtime)
+        }
+        guard let didSelect = navOutcome else {
+            return .error(HonestContract.encodeStateC(
+                error: .readbackUnavailable,
+                hint: "set_instrument Library navigation exceeded 15s and was abandoned — the Library panel's AX surface is unresponsive (a prior invalid-path attempt can leave it wedged). Re-open the Library (⌘L) and retry; restart Logic if it persists. Run scan_library first so an unknown path fails fast as path_not_in_library instead of navigating live.",
+                extras: setInstrumentBaseExtras(
+                    requestedPath: resolvedPath,
+                    category: category,
+                    preset: preset,
+                    targetTrackIndex: targetTrackIndex as Any? ?? NSNull(),
+                    targetTrackName: targetTrackName
+                ).merging(["precondition": "library_nav_timeout"]) { _, new in new }
+            ))
+        }
+        guard didSelect else {
             // v3.1.0 (T2) — `selectPath` returns false when any segment's AX
             // write failed OR the segment's AXStaticText was not found in the
             // currently-visible browser. Both are hard failures — the patch
