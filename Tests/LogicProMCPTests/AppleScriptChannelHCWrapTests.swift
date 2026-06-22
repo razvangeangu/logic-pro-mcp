@@ -98,7 +98,15 @@ private func makeAppleScriptRuntime(
     // would break the existing terminal-state detector.
     let recorder = AppleScriptRecorder()
     await recorder.setResult(.error("AppleScript error: boom"))
-    let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(scriptRecorder: recorder))
+    // #144: a titled (but non-existent on-disk) front document reaches the
+    // script — its error surfaces verbatim with no mtime evidence — instead of
+    // short-circuiting on the untitled fail-fast (which is its own typed State C).
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            currentDocumentPath: { "/Users/x/Song.logicx" }
+        )
+    )
 
     let result = await channel.execute(operation: "project.save", params: [:])
     #expect(!result.isSuccess)
@@ -113,7 +121,15 @@ private func makeAppleScriptRuntime(
     let alreadyEnveloped = HonestContract.encodeStateA(extras: ["custom": "ok"])
     let recorder = AppleScriptRecorder()
     await recorder.setResult(.success(alreadyEnveloped))
-    let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(scriptRecorder: recorder))
+    // #144: titled front document so the save reaches the script whose body
+    // already produced an HC envelope; the untitled fail-fast must not preempt
+    // the no-double-wrap passthrough being asserted here.
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            currentDocumentPath: { "/Users/x/Song.logicx" }
+        )
+    )
 
     let result = await channel.execute(operation: "project.save", params: [:])
     #expect(result.isSuccess)

@@ -111,6 +111,14 @@ enum HonestContract {
         case rollbackFailed
         case verifiedOpInProgress
         case operationTimeout
+        /// The requested operation cannot be performed in the front document's
+        /// current state — e.g. `project.save` on an UNTITLED document that has
+        /// no on-disk path. Firing `save front document` on such a document
+        /// raises Logic's modal Save sheet and the AppleEvent blocks until it is
+        /// dismissed, so the save path fails fast here instead. Terminal — no
+        /// other channel can save an untitled document without a path; the
+        /// caller must supply one via `project.save_as`. #144 (P3 hardening).
+        case unsupportedState
 
         var rawValue: String {
             switch self {
@@ -146,6 +154,7 @@ enum HonestContract {
             case .rollbackFailed: return "rollback_failed"
             case .verifiedOpInProgress: return "verified_op_in_progress"
             case .operationTimeout: return "operation_timeout"
+            case .unsupportedState: return "unsupported_state"
             }
         }
     }
@@ -305,6 +314,10 @@ enum HonestContract {
         FailureError.rollbackFailed.rawValue,
         FailureError.verifiedOpInProgress.rawValue,
         FailureError.operationTimeout.rawValue,
+        // #144: `project.save` on an untitled document fails fast as terminal
+        // State C `unsupported_state` — no fallback channel can save a document
+        // that has no on-disk path; the caller must use `project.save_as`.
+        FailureError.unsupportedState.rawValue,
     ]
 
     /// Returns true if the given message is a State-C envelope whose `error`
