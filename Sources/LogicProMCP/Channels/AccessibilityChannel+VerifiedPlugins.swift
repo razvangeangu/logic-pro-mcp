@@ -180,6 +180,12 @@ extension AccessibilityChannel {
         ]))
     }
 
+    /// Poll window for the mixer area to appear after a reveal action. #142
+    /// lengthened this from 1500ms: Logic's mixer pane slide-in can exceed 1.5s
+    /// on a cold window, so the previous timeout fail-closed to State B
+    /// `mixer_not_visible` even when the reveal eventually succeeded.
+    static let mixerRevealPollTimeoutMs = 2_500
+
     private static func ensureMixerAreaVisibleForInventory(
         runtime: AXLogicProElements.Runtime
     ) async -> (mixer: AXUIElement?, result: MixerRevealResult) {
@@ -187,25 +193,38 @@ extension AccessibilityChannel {
             return (mixer, .alreadyVisible)
         }
 
+        // #142 — reveal-reliability hardening. The deterministic AX menu-click
+        // path (View > Show Mixer) is PREFERRED and retried (it targets the
+        // exact menu item and verifies enabled-state) BEFORE the flaky
+        // cgevent key-7 fallback, which blindly posts a key with no targeting
+        // and was the dominant cause of the v43 `mixer_not_visible` State B.
+        // The AX menu path also bookends the fallback: a final menu retry runs
+        // after key-7 in case the keypress shifted focus enough for the menu to
+        // resolve. `strategies` honestly records every distinct path tried.
         var strategies: [String] = []
         _ = ProcessUtils.Runtime.production.activateLogicPro()
 
+        // Strategy 1 (preferred): AX menu-click, with retry.
         let menuAttempt = await clickTopLevelMenuItemViaAXMenuClick(
             candidates: [AXLocalePolicy.showMixerMenuPath],
             runtime: runtime,
-            maxEnabledRetries: 1,
+            maxEnabledRetries: 2,
             focusBetweenAttempts: false
         )
+        var itemFound = menuAttempt.itemFound
+        var menuClicked = menuAttempt.clicked
         if menuAttempt.clicked {
             strategies.append("ax_menu_view_show_mixer")
-            if let mixer = await pollMixerAreaVisible(runtime: runtime, timeoutMs: 1_500) {
+            if let mixer = await pollMixerAreaVisible(
+                runtime: runtime, timeoutMs: mixerRevealPollTimeoutMs
+            ) {
                 return (
                     mixer,
                     MixerRevealResult(
                         attempted: true,
                         alreadyVisible: false,
                         strategies: strategies,
-                        menuItemFound: menuAttempt.itemFound,
+                        menuItemFound: itemFound,
                         menuClicked: true,
                         keySent: false,
                         mixerVisible: true
@@ -214,21 +233,57 @@ extension AccessibilityChannel {
             }
         }
 
+        // Strategy 2 (fallback): cgevent key-7 (View > Show Mixer default key).
         var keySent = false
         if let pid = runtime.logicProPID(),
            CGEventChannel.Runtime.production.postKeyEvent(7, [], pid) {
             keySent = true
             strategies.append("cgevent_x")
-            if let mixer = await pollMixerAreaVisible(runtime: runtime, timeoutMs: 1_500) {
+            if let mixer = await pollMixerAreaVisible(
+                runtime: runtime, timeoutMs: mixerRevealPollTimeoutMs
+            ) {
                 return (
                     mixer,
                     MixerRevealResult(
                         attempted: true,
                         alreadyVisible: false,
                         strategies: strategies,
-                        menuItemFound: menuAttempt.itemFound,
-                        menuClicked: menuAttempt.clicked,
+                        menuItemFound: itemFound,
+                        menuClicked: menuClicked,
                         keySent: true,
+                        mixerVisible: true
+                    )
+                )
+            }
+        }
+
+        // Strategy 3 (final AX menu retry): the deterministic path again, in
+        // case key-7 restored focus the menu needs to resolve. Only attempted
+        // when an earlier AX click did not already land the mixer.
+        let menuRetry = await clickTopLevelMenuItemViaAXMenuClick(
+            candidates: [AXLocalePolicy.showMixerMenuPath],
+            runtime: runtime,
+            maxEnabledRetries: 1,
+            focusBetweenAttempts: true
+        )
+        itemFound = itemFound || menuRetry.itemFound
+        if menuRetry.clicked {
+            menuClicked = true
+            if !strategies.contains("ax_menu_view_show_mixer_retry") {
+                strategies.append("ax_menu_view_show_mixer_retry")
+            }
+            if let mixer = await pollMixerAreaVisible(
+                runtime: runtime, timeoutMs: mixerRevealPollTimeoutMs
+            ) {
+                return (
+                    mixer,
+                    MixerRevealResult(
+                        attempted: true,
+                        alreadyVisible: false,
+                        strategies: strategies,
+                        menuItemFound: itemFound,
+                        menuClicked: true,
+                        keySent: keySent,
                         mixerVisible: true
                     )
                 )
@@ -241,8 +296,8 @@ extension AccessibilityChannel {
                 attempted: true,
                 alreadyVisible: false,
                 strategies: strategies,
-                menuItemFound: menuAttempt.itemFound,
-                menuClicked: menuAttempt.clicked,
+                menuItemFound: itemFound,
+                menuClicked: menuClicked,
                 keySent: keySent,
                 mixerVisible: false
             )

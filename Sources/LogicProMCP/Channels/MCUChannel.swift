@@ -419,15 +419,26 @@ actor MCUChannel: Channel {
             strip: 8, target: value, timeoutMs: timeoutMs,
             requireFreshAfter: sendAt
         )
+        // #142 — the master fader has NO AX track-header equivalent (per-track
+        // set_volume/set_pan verify via findTrackHeaderVolumeFader, which the
+        // master strip does not expose), so MCU echo on strip 8 is the ONLY
+        // readback path and it is non-deterministic. Disclose the readback
+        // source on EVERY outcome, and on echo timeout attach an explicit
+        // surface_limitation note so a caller never mistakes the State B for a
+        // recoverable failure on a verifiable surface. The op stays honest:
+        // verified:true is claimed ONLY when a fresh matching echo lands.
         var extras: [String: Any] = [
             "requested": value,
             "observed": observed ?? NSNull(),
-            "track": "master"
+            "track": "master",
+            "readback_source": "mcu_echo",
         ]
         for (k, v) in await mcuConnectionExtras() { extras[k] = v }
         if let observed, abs(observed - value) <= 2.0 / 16383.0 {
             return .success(HonestContract.encodeStateA(extras: extras))
         }
+        extras["surface_limitation"] =
+            "master fader has no AX track-header equivalent; MCU echo is the only readback and is non-deterministic"
         return .success(HonestContract.encodeStateB(
             reason: .echoTimeout(ms: timeoutMs), extras: extras
         ))
