@@ -49,6 +49,28 @@ struct AXLocalePolicyTests {
         #expect(!AXLocalePolicy.undoMenuItemPrefix.matches("Redo Insert Plug-in", mode: .prefix))
     }
 
+    @Test("#60 — matches(.contains/.prefix) is diacritic-SENSITIVE (no accent-folding widening)")
+    func matchesIsDiacriticSensitive() {
+        let set = AXLocalePolicy.LabelSet(
+            canonical: "Inspector",
+            variants: ["Inspector", "인스펙터"],
+            rationale: "diacritic-sensitivity regression guard"
+        )
+        // Plain forms match — the real strings Logic emits.
+        #expect(set.matches("Inspector", mode: .contains))
+        #expect(set.matches("track inspector area", mode: .contains))
+        #expect(set.matches("Inspector — Track", mode: .prefix))
+        #expect(set.matches("인스펙터", mode: .contains))
+        // Accented-Latin forms must NOT match. Pre-#60 the `.diacriticInsensitive`
+        // option folded "ínspector" → "inspector" and matched, widening across
+        // accented-Latin locales (French/Spanish/Portuguese Logic UIs) — the
+        // exact locale collision #60 guards against. Aligns with containsAny (#122).
+        #expect(!set.matches("ínspector", mode: .contains))
+        #expect(!set.matches("Ínspector — Track", mode: .prefix))
+        // Case-insensitivity is retained.
+        #expect(set.matches("INSPECTOR", mode: .contains))
+    }
+
     @Test("menu path lookup resolves English and Korean titles through one policy")
     func menuPathLookup() {
         let builder = FakeAXRuntimeBuilder()
@@ -175,10 +197,12 @@ struct AXLocalePolicyTests {
         #expect(!AXLocalePolicy.saveConfirmationButton.matches("   "))
     }
 
-    /// Pin the `.prefix` mode's case- and diacritic-insensitive matching used
-    /// by the Undo rollback path. The anchored option means the label must be
-    /// a true prefix; case/diacritics are folded.
-    @Test("prefix mode is anchored, case- and diacritic-insensitive")
+    /// Pin the `.prefix` mode's anchored, case-insensitive, **diacritic-SENSITIVE**
+    /// matching used by the Undo rollback path. The anchored option means the
+    /// label must be a true prefix; case is folded but accents are NOT (#60 —
+    /// aligned with `containsAny`'s #122 sensitivity so accent-folding can't
+    /// widen matching across accented-Latin locales).
+    @Test("prefix mode is anchored, case-insensitive, diacritic-SENSITIVE")
     func prefixModeWidening() {
         // Real prefixes match (operation name follows the localized prefix).
         #expect(AXLocalePolicy.undoMenuItemPrefix.matches("Undo Insert Plug-in", mode: .prefix))
@@ -187,12 +211,14 @@ struct AXLocalePolicyTests {
         // Case-insensitive prefix.
         #expect(AXLocalePolicy.undoMenuItemPrefix.matches("UNDO Insert Plug-in", mode: .prefix))
 
-        // Diacritic-insensitive prefix (an accented homograph still matches).
-        #expect(AXLocalePolicy.undoMenuItemPrefix.matches("Ündo Insert Plug-in", mode: .prefix))
+        // #60 — diacritic-SENSITIVE: an accented homograph must NOT match
+        // (pre-#60 the folded "Ü" → "U" widened this).
+        #expect(!AXLocalePolicy.undoMenuItemPrefix.matches("Ündo Insert Plug-in", mode: .prefix))
 
-        // NFD vs NFC variant of an accented prefix still matches.
+        // NFD vs NFC: the decomposed accented prefix likewise must NOT match
+        // (canonical equivalence keeps NFC/NFD together, but "Ü" ≠ "U").
         let undoNFD = "U\u{0308}ndo Insert Plug-in" // U + combining diaeresis
-        #expect(AXLocalePolicy.undoMenuItemPrefix.matches(undoNFD, mode: .prefix))
+        #expect(!AXLocalePolicy.undoMenuItemPrefix.matches(undoNFD, mode: .prefix))
 
         // Anchored: a label that appears mid-string is NOT a prefix match.
         #expect(!AXLocalePolicy.undoMenuItemPrefix.matches("Redo then Undo", mode: .prefix))
