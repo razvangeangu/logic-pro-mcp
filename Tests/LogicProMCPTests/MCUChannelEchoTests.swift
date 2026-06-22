@@ -22,15 +22,26 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     let lsb = UInt8(raw & 0x7F)
     let msb = UInt8((raw >> 7) & 0x7F)
 
-    Task.detached {
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        await channel.handleFeedback(.pitchBend(channel: 0, value: (UInt16(msb) << 7) | UInt16(lsb)))
+    // Deliver the matching fader echo CONCURRENTLY with execute. The echo must
+    // land *after* the internal sendAt stamp (pollFaderEcho rejects stale
+    // values), so it can't be pre-seeded. A single timed delivery is starvable
+    // under parallel test load (a delayed background task can miss the poll
+    // window entirely → false State B). Instead deliver repeatedly at high
+    // priority until execute returns, so at least one fresh echo always lands
+    // inside the poll window regardless of scheduler pressure.
+    let echoTask = Task.detached(priority: .high) {
+        while !Task.isCancelled {
+            await channel.handleFeedback(.pitchBend(channel: 0, value: (UInt16(msb) << 7) | UInt16(lsb)))
+            try? await Task.sleep(nanoseconds: 8_000_000)
+        }
     }
+    defer { echoTask.cancel() }
 
     let result = await channel.execute(
         operation: "mixer.set_volume",
         params: ["index": "0", "volume": "\(target)"]
     )
+    echoTask.cancel()
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
     #expect((obj["success"] as? Bool)!)
