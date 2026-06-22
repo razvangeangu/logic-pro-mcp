@@ -29,6 +29,22 @@ def cliclick(*args):
     subprocess.run(["cliclick", *args], capture_output=True)
 
 
+def bounce_dialog_present():
+    """True iff a Logic window/sheet whose name contains "Bounce"/"바운스" exists.
+
+    Cmd+B opens the Bounce settings dialog asynchronously; clicking OK before it
+    appears mis-fires into the wrong window. Collect every window/sheet name (a
+    sheet is the front window's child, not a top-level window) and substring-match
+    case-insensitively so this survives Logic's locale (EN "Bounce", KO "바운스").
+    """
+    names = osa(
+        'tell application "System Events" to tell process "Logic Pro" to '
+        'return (name of windows) & (name of sheets of windows)'
+    )
+    hay = names.lower()
+    return "bounce" in hay or "바운스" in hay
+
+
 SET_ABC_SWIFT = """
 import Carbon
 import Foundation
@@ -70,7 +86,20 @@ def main():
     osa('tell application "Logic Pro" to activate')
     time.sleep(0.8)
     osa('tell application "System Events" to tell process "Logic Pro" to key code 11 using {command down}')
-    time.sleep(1.8)
+
+    # 2b. VERIFY the Bounce settings dialog actually appeared before clicking OK.
+    # A blind sleep mis-fires when the dialog is slow/absent (#127): the OK click
+    # lands on the wrong window. Bounded poll (~10x0.5s); fail fast on timeout.
+    dialog_up = False
+    for _ in range(10):
+        if bounce_dialog_present():
+            dialog_up = True
+            break
+        time.sleep(0.5)
+    if not dialog_up:
+        result["success"] = False
+        result["error"] = "bounce_dialog_did_not_appear"
+        print(json.dumps(result)); return 1
 
     # 3. OK on the (AX-accessible) settings dialog -> save panel
     osa('tell application "System Events" to tell process "Logic Pro" to click button "OK" of front window')
