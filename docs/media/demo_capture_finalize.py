@@ -93,18 +93,17 @@ def streamable_ffmpeg_movflags() -> list[str]:
 def _movflags_tokens(args: list[str]) -> set[str]:
     """Extract the set of ``-movflags`` tokens present in an ffmpeg argv.
 
-    Handles every ``-movflags <value>`` pair (the last wins in ffmpeg, but for a
-    QA membership check the union is the safe interpretation) and splits the
-    ``+a+b`` / ``a+b`` value form into individual tokens.
+    ffmpeg applies the last ``-movflags <value>`` pair, so the QA gate must do
+    the same. Splits the ``+a+b`` / ``a+b`` value form into individual tokens.
+    A dangling final ``-movflags`` is invalid and fails closed.
     """
     tokens: set[str] = set()
     for index, arg in enumerate(args):
         if arg == "-movflags" and index + 1 < len(args):
             value = args[index + 1]
-            for token in value.split("+"):
-                token = token.strip()
-                if token:
-                    tokens.add(token)
+            tokens = {token.strip() for token in value.split("+") if token.strip()}
+        elif arg == "-movflags":
+            return set()
     return tokens
 
 

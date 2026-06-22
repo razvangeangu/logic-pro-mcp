@@ -84,12 +84,28 @@ class StreamableMuxGateTests(unittest.TestCase):
         ]
         self.assertTrue(is_streamable_mux(argv))
 
+    def test_last_movflags_value_wins(self) -> None:
+        # ffmpeg applies the last -movflags occurrence. A later non-fragmented
+        # value must not be rescued by an earlier streamable value.
+        argv = [
+            "ffmpeg",
+            *streamable_ffmpeg_movflags(),
+            "-movflags",
+            "+faststart",
+            "out.mp4",
+        ]
+        self.assertFalse(is_streamable_mux(argv))
+
     def test_empty_arglist_is_not_streamable(self) -> None:
         self.assertFalse(is_streamable_mux([]))
 
     def test_dangling_movflags_flag_is_not_streamable(self) -> None:
         # A trailing -movflags with no value must not crash or pass.
         self.assertFalse(is_streamable_mux(["ffmpeg", "-c:v", "libx264", "-movflags"]))
+
+    def test_dangling_final_movflags_invalidates_prior_streamable_value(self) -> None:
+        argv = ["ffmpeg", *streamable_ffmpeg_movflags(), "-movflags"]
+        self.assertFalse(is_streamable_mux(argv))
 
     def test_published_token_tuple_covers_required_tokens(self) -> None:
         for token in ("faststart", "frag_keyframe", "empty_moov"):
