@@ -137,15 +137,24 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     let channel = MCUChannel(transport: transport, cache: cache)
 
     // Target pan 0.5 → LED ring position 8 → CC 0x30 (strip 0), value 0x08.
-    Task.detached {
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        await channel.handleFeedback(.controlChange(channel: 0, controller: 0x30, value: 0x08))
+    // Deliver the echo repeatedly at high priority until execute returns: the
+    // V-Pot echo must be fresh (after the internal sendAt stamp), so a single
+    // timed delivery is starvable under parallel load and can miss the poll
+    // window → false State B. Repeated high-priority delivery guarantees a
+    // fresh echo lands inside the window regardless of scheduler pressure.
+    let echoTask = Task.detached(priority: .high) {
+        while !Task.isCancelled {
+            await channel.handleFeedback(.controlChange(channel: 0, controller: 0x30, value: 0x08))
+            try? await Task.sleep(nanoseconds: 8_000_000)
+        }
     }
+    defer { echoTask.cancel() }
 
     let result = await channel.execute(
         operation: "mixer.set_pan",
         params: ["index": "0", "pan": "0.4"]
     )
+    echoTask.cancel()
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
     #expect((obj["success"] as? Bool)!)
