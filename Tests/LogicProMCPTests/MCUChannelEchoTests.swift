@@ -75,6 +75,67 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
 }
 
+// #142 — on echo timeout, set_master_volume must DISCLOSE that MCU echo is the
+// only readback path for the master fader (which, unlike per-track strips, has
+// no AX track-header equivalent to verify against), so a caller never mistakes
+// this State B for a recoverable failure on a verifiable surface. The envelope
+// must carry readback_source:"mcu_echo", an explicit surface_limitation note,
+// and keep observed (null here) + requested.
+@Test func testMCUSetMasterVolumeTimeoutDisclosesSurfaceLimitation() async {
+    let transport = MockMCUTransport()
+    let cache = StateCache()
+    let channel = MCUChannel(transport: transport, cache: cache)
+
+    let result = await channel.execute(
+        operation: "mixer.set_master_volume",
+        params: ["volume": "0.8"]
+    )
+    #expect(result.isSuccess)
+    let obj = decodeJSON(result.message)
+    #expect(!((obj["verified"] as? Bool)!))
+    #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
+    #expect(obj["track"] as? String == "master")
+    #expect(obj["readback_source"] as? String == "mcu_echo")
+    #expect(obj["requested"] as? Double == 0.8)
+    #expect(obj["observed"] is NSNull, "no echo landed → observed must be JSON null")
+    let limitation = obj["surface_limitation"] as? String
+    let resolvedLimitation = try! #require(limitation)
+    #expect(resolvedLimitation.contains("master fader"))
+    #expect(resolvedLimitation.contains("no AX track-header"))
+    #expect(resolvedLimitation.contains("non-deterministic"))
+}
+
+// #142 — when a fresh MCU echo DOES land, master volume is State A and still
+// discloses readback_source:"mcu_echo", but must NOT carry the surface_limitation
+// note (that note is reserved for the unverifiable timeout path).
+@Test func testMCUSetMasterVolumeStateADisclosesEchoSourceWithoutLimitation() async {
+    let transport = MockMCUTransport()
+    let cache = StateCache()
+    let channel = MCUChannel(transport: transport, cache: cache)
+
+    // Master fader echoes on pitch-bend channel 8 (MCU strip 8).
+    let target = 0.6
+    let raw = UInt16(target * 16383.0)
+    Task.detached {
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await channel.handleFeedback(.pitchBend(channel: 8, value: raw))
+    }
+
+    let result = await channel.execute(
+        operation: "mixer.set_master_volume",
+        params: ["volume": "\(target)"]
+    )
+    #expect(result.isSuccess)
+    let obj = decodeJSON(result.message)
+    #expect((obj["verified"] as? Bool)!)
+    #expect(obj["track"] as? String == "master")
+    #expect(obj["readback_source"] as? String == "mcu_echo")
+    #expect(obj["surface_limitation"] == nil, "State A must not carry the unverifiable-surface note")
+    let observed = obj["observed"] as? Double
+    let resolvedObserved = try! #require(observed)
+    #expect(abs(resolvedObserved - target) <= 0.01)
+}
+
 @Test func testMCUSetPanReturnsStateBEchoTimeoutWhenNoFeedback() async {
     // v3.1.3 (#1) — V-Pot LED-ring decoding (CC 0x30+strip) is now wired
     // into StateCache via MCUFeedbackParser. With no feedback dispatched
