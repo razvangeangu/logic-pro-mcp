@@ -494,7 +494,19 @@ actor AccessibilityChannel: Channel {
             // the strategy hierarchy.
             return runtime.markers()
         case "nav.rename_marker":
-            return .error("Marker renaming not yet implemented via AX")
+            // Issue #143 — marker renaming has no verified AX write path on
+            // Logic 12.x (the Marker List table cells are not settable via
+            // AX), so this surface is genuinely unbuilt. Return an explicit
+            // State C `not_implemented` envelope instead of a free-form string:
+            // a free-form `.error` falls through the router's single-channel
+            // chain and is re-wrapped as `channels_exhausted`, which conflates
+            // "feature not built" with "all channels failed". `not_implemented`
+            // is in `terminalErrorCodes`, so the router surfaces it verbatim,
+            // and the hint points callers at the create+delete workaround.
+            return .error(HonestContract.encodeStateC(
+                error: .notImplemented,
+                hint: "Marker renaming is not implemented via AX in Logic Pro 12.x. Workaround: nav.delete_marker the target then nav.create_marker with the new name."
+            ))
 
         // MARK: - Project
         case "project.get_info":

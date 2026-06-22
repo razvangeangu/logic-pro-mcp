@@ -443,7 +443,11 @@ private func makeSetInstrumentFixture() -> (
         ("mixer.set_output", "I/O routing not yet implemented via AX"),
         ("mixer.toggle_eq", "EQ toggle not yet implemented via AX"),
         ("mixer.reset_strip", "Strip reset not yet implemented via AX"),
-        ("nav.rename_marker", "Marker renaming not yet implemented via AX"),
+        // Issue #143: rename_marker now returns a State C envelope with
+        // `error:"not_implemented"` (+ a create+delete workaround hint)
+        // instead of a plain free-form string, so the router surfaces it
+        // verbatim instead of re-wrapping it as `channels_exhausted`.
+        ("nav.rename_marker", "\"error\":\"not_implemented\""),
         ("region.select", "Region operations not yet implemented via AX"),
         ("plugin.list", "Plugin list reading not yet implemented via AX"),
         ("automation.get_mode", "Automation mode reading not yet implemented via AX"),
@@ -456,6 +460,36 @@ private func makeSetInstrumentFixture() -> (
         #expect(!result.isSuccess)
         #expect(result.message.contains(message), "Expected \(operation) to return '\(message)'")
     }
+}
+
+// Issue #143 — `nav.rename_marker` short-circuits inside the operation
+// switch (it never touches the AX tree), so the default runtime suffices.
+// It must emit an explicit State C `not_implemented` envelope with a
+// create+delete workaround hint — NOT a free-form string that the router
+// would re-wrap as `channels_exhausted` (which conflates "feature not built"
+// with "all channels failed").
+@Test func testRenameMarkerReturnsNotImplementedEnvelope() async {
+    let channel = AccessibilityChannel(runtime: makeAccessibilityRuntime())
+
+    let result = await channel.execute(
+        operation: "nav.rename_marker",
+        params: ["index": "2", "name": "Big Chorus"]
+    )
+
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["error"] as? String == "not_implemented")
+    let hint = obj["hint"] as? String ?? ""
+    #expect(hint.contains("delete_marker"), "expected create+delete workaround hint, got: \(hint)")
+    #expect(hint.contains("create_marker"), "expected create+delete workaround hint, got: \(hint)")
+
+    // `not_implemented` is in `terminalErrorCodes`, so the router classifies
+    // this as terminal and surfaces it verbatim (no `channels_exhausted`).
+    #expect(
+        HonestContract.isTerminalStateC(result.message),
+        "rename_marker State C must be terminal so the router skips fallback"
+    )
 }
 
 @Test func testAccessibilityChannelAXBackedRegionReadReturnsParsedRegions() async throws {

@@ -2947,6 +2947,37 @@ private actor SelectiveFailChannel: Channel {
     #expect(ops.isEmpty, "Empty rename must not reach the router")
 }
 
+// Issue #143 — end-to-end through the REAL AccessibilityChannel: a valid
+// rename_marker request (index + non-empty name) must fail closed with a
+// typed State C `not_implemented` envelope and a create+delete workaround
+// hint, NOT the previous `channels_exhausted` aggregate. `nav.rename_marker`
+// short-circuits inside the channel switch (never touches the AX tree), so a
+// minimal trusted/Logic-running runtime reaches the not-implemented branch.
+@Test func testNavigateDispatcherRenameMarkerReturnsNotImplementedEndToEnd() async {
+    let router = ChannelRouter()
+    await router.register(AccessibilityChannel(runtime: .axBacked(
+        isTrusted: { true },
+        isLogicProRunning: { true }
+    )))
+
+    let result = await NavigateDispatcher.handle(
+        command: "rename_marker",
+        params: ["index": .int(2), "name": .string("Big Chorus")],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    let text = dispatcherText(result)
+    let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+    #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["error"] as? String == "not_implemented")
+    #expect((obj["error"] as? String) != "channels_exhausted")
+    let hint = obj["hint"] as? String ?? ""
+    #expect(hint.contains("delete_marker") && hint.contains("create_marker"),
+            "expected create+delete workaround hint, got: \(hint)")
+}
+
 @Test func testNavigateDispatcherToggleViewAndErrors() async {
     let router = ChannelRouter()
     let keyCmd = MockChannel(id: .midiKeyCommands)
