@@ -24,6 +24,13 @@ enum HonestContract {
         /// Retry budget exhausted without either a confirmed read-back or a
         /// hard error.
         case retryExhausted
+        /// `midi.import_file` created a new track, but the imported lane(s) are
+        /// GM Device / external-MIDI synth lanes (NOT audible software-instrument
+        /// tracks). The write landed and a region exists, but the import cannot be
+        /// claimed audible-verified: such lanes route to a General MIDI device and
+        /// may bounce silent. Downgrades State A → State B so a caller never treats
+        /// a count-delta success as an audible arrangement. v3.6.x (#128).
+        case importedAsGMDevice
 
         var rawValue: String {
             switch self {
@@ -31,6 +38,7 @@ enum HonestContract {
             case .readbackUnavailable: return "readback_unavailable"
             case .readbackMismatch: return "readback_mismatch"
             case .retryExhausted: return "retry_exhausted"
+            case .importedAsGMDevice: return "imported_as_gm_device"
             }
         }
     }
@@ -64,6 +72,14 @@ enum HonestContract {
         /// every router fallthrough was being mis-classified as
         /// `port_unavailable` regardless of root cause).
         case channelsExhausted
+        /// `midi.import_file` clicked File → Import → MIDI File but the
+        /// file-open sheet never appeared inside the bounded poll window, so the
+        /// path keystroke was never issued (no side effect). Distinct from
+        /// `.axWriteFailed` (menu click rejected) and `.readbackMismatch` (import
+        /// ran but created no track): the dialog itself was never observed, which
+        /// is the textbook occluded/unhealthy-session signature. Terminal — a
+        /// different channel cannot conjure the missing sheet. v3.6.x (#140).
+        case dialogNotFound
 
         // HC v2 (logic_plugins.* verified plugin path) — §4 error table.
         // These codes only originate from the verified-plugin surface; the
@@ -132,6 +148,7 @@ enum HonestContract {
             case .notImplemented: return "not_implemented"
             case .portUnavailable: return "port_unavailable"
             case .channelsExhausted: return "channels_exhausted"
+            case .dialogNotFound: return "dialog_not_found"
             case .unsupportedMode: return "unsupported_mode"
             case .projectPathRequired: return "project_path_required"
             case .projectIdentityMismatch: return "project_identity_mismatch"
@@ -284,6 +301,10 @@ enum HonestContract {
         FailureError.portUnavailable.rawValue,
         FailureError.readbackUnavailable.rawValue,
         FailureError.channelsExhausted.rawValue,
+        // #140 — the file-open sheet never appeared; the menu route was driven
+        // but no dialog surfaced, so no other channel can recover the missing
+        // element. Terminal, mirroring `.elementNotFound`.
+        FailureError.dialogNotFound.rawValue,
         // HC v2 verified-plugin path: every failure is terminal. The verified
         // surface routes through `[.accessibility]` alone (no fallback chain),
         // and falling back to Scripter/MCU would fabricate a false verified

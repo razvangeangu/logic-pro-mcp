@@ -699,7 +699,12 @@ struct TrackDispatcher {
             params: ["path": path]
         )
         guard importResult.isSuccess else {
-            return jsonToolTextResult([
+            // #140 — surface the import handler's dialog-seen flags at the top
+            // level (not only buried in `detail`) so callers can distinguish an
+            // occluded session (no file-open sheet ever appeared) from a real
+            // import miss. The flags originate in
+            // `AccessibilityChannel.defaultImportMIDIFile`.
+            var failure: [String: Any] = [
                 "success": false,
                 "verified": false,
                 "error": "import_failure",
@@ -709,7 +714,16 @@ struct TrackDispatcher {
                 "method": "smf_import",
                 "detail": importResult.message,
                 "hint": "record_sequence failed at midi.import_file: \(importResult.message)",
-            ], isError: true)
+            ]
+            if let inner = importMessageJSON(importResult.message) {
+                for key in ["file_open_dialog_seen", "tempo_dialog_seen", "missing_element"] {
+                    if let value = inner[key] { failure[key] = value }
+                }
+                if let innerError = inner["error"] as? String {
+                    failure["import_error"] = innerError
+                }
+            }
+            return jsonToolTextResult(failure, isError: true)
         }
 
         // Re-read live AX to confirm the new track index. Import handler has
@@ -803,6 +817,18 @@ struct TrackDispatcher {
         case verified([String: Any])
         case failed([String: Any])
         case pending
+    }
+
+    /// Parse the `midi.import_file` envelope (a JSON string carried in
+    /// `ChannelResult.message`) so record_sequence can lift specific fields
+    /// (e.g. #140 dialog-seen flags) to its own top-level envelope. Returns nil
+    /// for non-JSON/free-form messages.
+    private static func importMessageJSON(_ message: String) -> [String: Any]? {
+        guard let data = message.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object
     }
 
     private static func jsonToolTextResult(_ object: [String: Any], isError: Bool = false) -> CallTool.Result {

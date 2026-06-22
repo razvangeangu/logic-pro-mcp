@@ -179,6 +179,45 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
     )
 }
 
+@Test func testRecordSequenceSurfacesImportDialogSeenFlags() async throws {
+    // #140 — when import_file fails with the new dialog_not_found envelope, the
+    // record_sequence import_failure result must lift the dialog-seen flags to
+    // its own top level so callers can tell an occluded session (no sheet ever
+    // appeared) from a real import miss, rather than only burying them in
+    // `detail`.
+    let cache = StateCache()
+    await cache.updateDocumentState(true)
+
+    let importEnvelope = HonestContract.encodeStateC(
+        error: .dialogNotFound,
+        hint: "midi.import_file: file-open sheet did not appear",
+        extras: [
+            "requested": "/tmp/LogicProMCP/x.mid",
+            "missing_element": "file_open_sheet",
+            "file_open_dialog_seen": false,
+            "tempo_dialog_seen": false,
+        ]
+    )
+
+    let router = ChannelRouter()
+    let ax = RecordingMockChannel(id: .accessibility, importResult: .error(importEnvelope))
+    await router.register(ax)
+
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
+        params: ["notes": minimalNoteSpec(), "bar": .int(1)],
+        router: router,
+        cache: cache
+    )
+    let obj = recordSequenceJSONObject(result)
+    #expect(obj["error"] as? String == "import_failure")
+    #expect(obj["import_error"] as? String == "dialog_not_found")
+    #expect(obj["missing_element"] as? String == "file_open_sheet")
+    let fileOpenSeen = try #require(obj["file_open_dialog_seen"] as? Bool)
+    #expect(!fileOpenSeen)
+    let tempoSeen = try #require(obj["tempo_dialog_seen"] as? Bool)
+    #expect(!tempoSeen)
+}
+
 @Test func testRecordSequenceReturnsVerifiedRegionReadbackPayload() async {
     let cache = StateCache()
     await cache.updateDocumentState(true)

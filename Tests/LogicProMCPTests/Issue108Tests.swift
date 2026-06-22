@@ -105,7 +105,8 @@ struct Issue108Tests {
             path: path,
             executeScript: { _ in .success("OK") },
             trackCount: { counter.next() },
-            settle: {}
+            trackNames: { ["Studio Grand", "Imported"] },
+            deltaPoll: {}
         )
         #expect(result.isSuccess)
         let o = (try? JSONSerialization.jsonObject(with: Data(result.message.utf8))) as? [String: Any]
@@ -121,7 +122,8 @@ struct Issue108Tests {
             path: path,
             executeScript: { _ in .success("OK") },
             trackCount: { counter.next() },
-            settle: {}
+            trackNames: { [] },
+            deltaPoll: {}
         )
         #expect(!result.isSuccess)
         #expect(result.message.contains("readback_mismatch"))
@@ -135,7 +137,8 @@ struct Issue108Tests {
             path: path,
             executeScript: { _ in .success("MENU_ERROR: not found") },
             trackCount: { 1 },
-            settle: {}
+            trackNames: { [] },
+            deltaPoll: {}
         )
         #expect(!result.isSuccess)
         #expect(result.message.contains("ax_write_failed"))
@@ -147,7 +150,8 @@ struct Issue108Tests {
             path: "/tmp/LogicProMCP/does-not-exist-\(UUID().uuidString).mid",
             executeScript: { _ in .success("OK") },
             trackCount: { 1 },
-            settle: {}
+            trackNames: { [] },
+            deltaPoll: {}
         )
         #expect(!result.isSuccess)
         #expect(result.message.contains("invalid_params"))
