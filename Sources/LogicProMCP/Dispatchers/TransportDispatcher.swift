@@ -4,7 +4,7 @@ import MCP
 struct TransportDispatcher {
     static let tool = Tool(
         name: "logic_transport",
-        description: "Control Logic Pro transport. Commands: play, stop, record, pause, rewind, fast_forward, toggle_cycle, toggle_metronome, set_tempo, goto_position, set_cycle_range, toggle_count_in. Params: set_tempo -> { tempo: Float } (5.0-999.0); goto_position -> { bar: Int (1..9999) } or { position: String } where String is bar.beat.sub.tick (e.g. \"9.1.1.1\") or HH:MM:SS:FF SMPTE (e.g. \"00:00:08:12\"); set_cycle_range -> { start: Int, end: Int }; others -> {}.",
+        description: "Control Logic Pro transport. Commands: play, stop, record, pause, rewind, fast_forward, toggle_cycle, toggle_metronome, set_tempo, goto_position, set_cycle_range, toggle_count_in. Params: set_tempo -> { tempo: Float } (5.0-999.0); goto_position -> { bar: Int (1..9999) } or { position: String } where String is bar.beat.sub.tick (e.g. \"9.1.1.1\") or HH:MM:SS:FF SMPTE (e.g. \"00:00:08:12\"); set_cycle_range -> { start: Int, end: Int } (UNSUPPORTED/best-effort: Logic 12.x exposes no numeric cycle-locator fields, so this fails closed with State C not_implemented and CANNOT verify a write); others -> {}.",
         inputSchema: commandParamsToolSchema(commandDescription: "Transport command to execute")
     )
 
@@ -34,8 +34,7 @@ struct TransportDispatcher {
             )
 
         case "pause":
-            let result = await router.route(operation: "transport.pause")
-            return toolTextResult(result)
+            return await verifiedPauseResult(router: router, cache: cache, sleep: sleep)
 
         case "rewind":
             let result = await router.route(operation: "transport.rewind")
@@ -246,6 +245,92 @@ struct TransportDispatcher {
         }
 
         return toolTextResult(HonestContract.encodeStateA(extras: observedExtras))
+    }
+
+    /// Verified `pause` mirroring `verifiedStopResult`: a pause that does not
+    /// actually halt the playhead must NEVER report bare success. Logic's pause
+    /// stops the running transport, so the verified target is the same as stop —
+    /// `isPlaying == false`. Read state first, send pause, then poll
+    /// `readTransportState` up to 12x for the playhead to settle; State A only on
+    /// a verified stop, State C `readback_mismatch` if it keeps playing.
+    private static func verifiedPauseResult(
+        router: ChannelRouter,
+        cache: StateCache,
+        sleep: @escaping (UInt64) async -> Void
+    ) async -> CallTool.Result {
+        if let beforeState = await readTransportState(router: router),
+           beforeState.isPlaying == false {
+            return toolTextResult(.success(HonestContract.encodeStateA(
+                extras: [
+                    "operation": "transport.pause",
+                    "requested_state": "paused",
+                    "verify_source": "transport_state",
+                    "write_attempted": false,
+                    "unchanged": true,
+                    "observed_before": transportStateSummary(beforeState),
+                    "observed_after": transportStateSummary(beforeState)
+                ]
+            )))
+        }
+
+        let writeResult = await router.route(operation: "transport.pause")
+        let writePayload = jsonValue(from: writeResult.message)
+
+        var attempts = 0
+        var afterState: TransportState?
+        for _ in 0..<12 {
+            attempts += 1
+            if let observed = await readTransportState(router: router) {
+                afterState = observed
+                await cache.updateTransport(observed)
+                if observed.isPlaying == false {
+                    return toolTextResult(.success(HonestContract.encodeStateA(extras: [
+                        "operation": "transport.pause",
+                        "requested_state": "paused",
+                        "verify_source": "transport_state",
+                        "write_attempted": true,
+                        "poll_attempts": attempts,
+                        "observed_isPlaying": observed.isPlaying,
+                        "observed_isRecording": observed.isRecording,
+                        "observed_position": observed.position,
+                        "observed_time_position": observed.timePosition,
+                        "write_result": writePayload
+                    ])))
+                }
+            }
+            await sleep(100_000_000)
+        }
+
+        guard writeResult.isSuccess else {
+            return toolTextResult(writeResult)
+        }
+
+        var extras: [String: Any] = [
+            "operation": "transport.pause",
+            "requested_state": "paused",
+            "verify_source": "transport_state",
+            "write_attempted": true,
+            "poll_attempts": attempts,
+            "write_result": writePayload
+        ]
+        guard let afterState else {
+            return toolTextResult(HonestContract.encodeStateC(
+                error: .readbackUnavailable,
+                hint: "transport.pause executed, but live transport state could not be refreshed. Focus Logic's Tracks window, dismiss modal or plugin dialogs, then retry or run logic_system refresh_cache.",
+                extras: extras
+            ), isError: true)
+        }
+
+        extras["observed_isPlaying"] = afterState.isPlaying
+        extras["observed_isRecording"] = afterState.isRecording
+        extras["observed_position"] = afterState.position
+        extras["observed_time_position"] = afterState.timePosition
+        extras["safe_to_retry"] = true
+        return toolTextResult(HonestContract.encodeStateC(
+            error: .readbackMismatch,
+            hint: "transport.pause executed, but live transport state still reports playback",
+            extras: extras
+        ), isError: true)
     }
 
     private static func stopReadbackUnavailableExtras(

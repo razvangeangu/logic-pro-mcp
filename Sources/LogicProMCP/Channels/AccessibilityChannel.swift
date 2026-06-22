@@ -270,6 +270,10 @@ actor AccessibilityChannel: Channel {
             return runtime.toggleTransportButton("Play")
         case "transport.stop":
             return runtime.toggleTransportButton("Stop")
+        case "transport.pause":
+            // Logic has no distinct pause control; the Stop button halts the
+            // playhead in place, which is exactly the verified pause target.
+            return runtime.toggleTransportButton("Stop")
         case "transport.record":
             return runtime.toggleTransportButton("Record")
 
