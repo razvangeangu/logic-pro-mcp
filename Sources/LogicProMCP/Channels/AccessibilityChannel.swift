@@ -374,8 +374,25 @@ actor AccessibilityChannel: Channel {
                 runtime: runtime.logicRuntime, settleMs: settleMs
             )
         case "track.set_instrument":
+            // #135/#141 — wire a cache-backed pre-resolver from the live
+            // Panel-scan cache (read-only). Only the AX/panel cache counts:
+            // disk-mode scan does NOT satisfy set_instrument's live-panel
+            // requirement, so we resolve against `lastPanelScan` only. A nil
+            // cache → undecided (attempt nav), preserving prior behavior.
+            let panelScanSnapshot = self.lastPanelScan
+            let staging = AccessibilityChannel.LibraryPanelStaging(
+                isPanelOpen: { rt in LibraryAccessor.isLibraryPanelOpen(runtime: rt) },
+                openPanel: { rt in await AccessibilityChannel.openLibraryPanelViaKeyCommand(runtime: rt) },
+                resolvePath: { path in
+                    guard let root = panelScanSnapshot,
+                          let resolution = LibraryAccessor.resolvePath(path, in: root) else {
+                        return nil   // no cache → undecided, attempt nav
+                    }
+                    return resolution.exists
+                }
+            )
             let result = await AccessibilityChannel.setTrackInstrument(
-                params: params, runtime: runtime.logicRuntime
+                params: params, runtime: runtime.logicRuntime, staging: staging
             )
             // T4 Tier-A cache population: remember what we routed for future scan restore.
             // Covers both legacy {category, preset} and path-mode {path} callers.
@@ -2972,9 +2989,76 @@ actor AccessibilityChannel: Channel {
         }
     }
 
-    private static func setTrackInstrument(
-        params: [String: String],
+    /// Injectable staging seam for `setTrackInstrument`'s Library-panel
+    /// precondition + path pre-resolution. Production wires live AX reads + a
+    /// ⌘L auto-open; tests inject deterministic outcomes (panel closed/open,
+    /// path present/absent) without driving real Logic UI. #131/#135/#141.
+    struct LibraryPanelStaging: Sendable {
+        /// Read-only: is the Library panel currently open?
+        let isPanelOpen: @Sendable (AXLogicProElements.Runtime) -> Bool
+        /// Attempt to open the Library panel (⌘L / View > Show Library). Best
+        /// effort; the caller re-checks `isPanelOpen` afterwards.
+        let openPanel: @Sendable (AXLogicProElements.Runtime) async -> Void
+        /// Pre-resolve the requested path against the cached inventory WITHOUT
+        /// touching live AX. Returns:
+        ///   .some(true)  → path is known to EXIST in the cache (attempt nav)
+        ///   .some(false) → path is known to be ABSENT (fail closed, do not nav)
+        ///   nil          → no cache available / cannot decide (attempt nav)
+        let resolvePath: @Sendable (String) -> Bool?
+
+        static let production = LibraryPanelStaging(
+            isPanelOpen: { rt in LibraryAccessor.isLibraryPanelOpen(runtime: rt) },
+            openPanel: { rt in await AccessibilityChannel.openLibraryPanelViaKeyCommand(runtime: rt) },
+            // Static call site has no instance cache; the channel wires a
+            // cache-backed resolver at the dispatch site. Default = undecided.
+            resolvePath: { _ in nil }
+        )
+    }
+
+    /// Best-effort Library-panel open via ⌘L (Logic's default "Show/Hide
+    /// Library" key command). Mirrors the existing osascript keystroke pattern
+    /// used by `runTempoFallbackScript`. No verification here — the caller
+    /// re-checks `isLibraryPanelOpen` after a settle. v3.6.x (#131/#135/#141).
+    static func openLibraryPanelViaKeyCommand(
         runtime: AXLogicProElements.Runtime = .production
+    ) async {
+        _ = ProcessUtils.activateLogicPro()
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        let script = """
+        tell application "System Events"
+            tell process "Logic Pro"
+                set frontmost to true
+                delay 0.15
+                keystroke "l" using command down
+            end tell
+        end tell
+        """
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", script]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        do {
+            try task.run()
+        } catch {
+            return
+        }
+        let deadline = Date().addingTimeInterval(5.0)
+        while task.isRunning && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if task.isRunning {
+            task.terminate()
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if task.isRunning { task.interrupt() }
+            task.waitUntilExit()
+        }
+    }
+
+    static func setTrackInstrument(
+        params: [String: String],
+        runtime: AXLogicProElements.Runtime = .production,
+        staging: LibraryPanelStaging = .production
     ) async -> ChannelResult {
         // Resolve path-OR-legacy. Path wins when both provided.
         let pathParam = params["path"].flatMap { $0.isEmpty ? nil : $0 }
@@ -3129,6 +3213,83 @@ actor AccessibilityChannel: Channel {
         } else if let selectedTrack = selectedTrackIdentity(runtime: runtime) {
             targetTrackIndex = selectedTrack.index
             targetTrackName = selectedTrack.name ?? NSNull()
+        }
+
+        // #131 — TRACK-TYPE awareness. Loading a software-instrument Library
+        // patch onto a GM Device / External MIDI strip is not a supported
+        // operation: those lanes route to a General-MIDI device and bounce
+        // silent (root cause of #128). Detect the unsupported target up front
+        // and fail closed with a TYPED `unsupported_track_type` error instead
+        // of letting selectPath produce the misleading "Library path not fully
+        // resolvable". Only enforced when we have a concrete target index whose
+        // header we can read; an indeterminate target falls through unchanged.
+        if let idx = targetTrackIndex,
+           let header = AXLogicProElements.findTrackHeader(at: idx, runtime: runtime) {
+            let observedType = AXValueExtractors.extractTrackState(
+                from: header, index: idx, runtime: runtime.ax
+            ).type
+            if observedType == .externalMIDI {
+                return .error(HonestContract.encodeStateC(
+                    error: .unsupportedTrackType,
+                    hint: "Target track \(idx) is a GM Device / External MIDI strip; software-instrument Library patches cannot be loaded onto it. Target a Software Instrument track instead.",
+                    extras: setInstrumentBaseExtras(
+                        requestedPath: resolvedPath,
+                        category: category,
+                        preset: preset,
+                        targetTrackIndex: idx,
+                        targetTrackName: targetTrackName
+                    ).merging([
+                        "observed_track_type": observedType.rawValue,
+                        "precondition": "wrong_target_type"
+                    ]) { _, new in new }
+                ))
+            }
+        }
+
+        // #135/#141 — Library-panel PRECONDITION. selectPath walks AXStaticText
+        // rows in the VISIBLE Library browser; if the panel is closed those
+        // rows do not exist and selectPath fails with the misleading
+        // "Library path not fully resolvable" even when the path is valid.
+        // Mirror scan_all's guard: if the panel is closed, try to auto-open it
+        // (⌘L), settle, and re-check; if it still cannot be staged, fail closed
+        // with a TYPED `library_panel_unavailable` error and an actionable hint
+        // — NOT ax_write_failed.
+        if !staging.isPanelOpen(runtime) {
+            await staging.openPanel(runtime)
+            try? await Task.sleep(nanoseconds: 400_000_000)   // panel slide-in settle
+            if !staging.isPanelOpen(runtime) {
+                return .error(HonestContract.encodeStateC(
+                    error: .libraryPanelUnavailable,
+                    hint: "Library panel not found. Open Library (⌘L) in Logic Pro, then retry.",
+                    extras: setInstrumentBaseExtras(
+                        requestedPath: resolvedPath,
+                        category: category,
+                        preset: preset,
+                        targetTrackIndex: targetTrackIndex as Any? ?? NSNull(),
+                        targetTrackName: targetTrackName
+                    ).merging(["precondition": "panel_closed"]) { _, new in new }
+                ))
+            }
+        }
+
+        // #135/#141 — PRE-RESOLVE the requested path against the cached
+        // inventory (read-only, no live AX). This distinguishes a genuine
+        // "path does not exist" (terminal precondition — do NOT attempt nav)
+        // from "path exists but live AX nav failed" (still surfaces below as
+        // ax_write_failed, a retry/timing signal). `resolvePath` returns nil
+        // when no cache is available, in which case we attempt nav as before.
+        if staging.resolvePath(resolvedPath) == false {
+            return .error(HonestContract.encodeStateC(
+                error: .pathNotInLibrary,
+                hint: "Library path '\(resolvedPath)' was not found in the scanned inventory. Run scan_library and pick an existing path.",
+                extras: setInstrumentBaseExtras(
+                    requestedPath: resolvedPath,
+                    category: category,
+                    preset: preset,
+                    targetTrackIndex: targetTrackIndex as Any? ?? NSNull(),
+                    targetTrackName: targetTrackName
+                ).merging(["precondition": "missing_path"]) { _, new in new }
+            ))
         }
 
         // v3.0.4 — walk every segment in order. For 2-segment paths this

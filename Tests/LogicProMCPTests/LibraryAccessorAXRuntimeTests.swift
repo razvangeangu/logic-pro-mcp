@@ -80,6 +80,27 @@ private func makeLibraryPanelFixture() -> (
     #expect(LibraryAccessor.isLibraryPanelOpen(runtime: fixture.runtime) == true)
 }
 
+@Test func libraryAccessorSegmentVisibleDetectsRowInVisibleBrowser() {
+    // #135 — selectPath's segment-timing hardening polls for the next
+    // segment's AXStaticText. `segmentIsVisible` is the read-only primitive
+    // that poll uses: present rows → true, absent rows → false.
+    let fixture = makeLibraryPanelFixture()
+
+    #expect(LibraryAccessor.segmentIsVisible(named: "Sub", runtime: fixture.runtime))
+    #expect(LibraryAccessor.segmentIsVisible(named: "Bass", runtime: fixture.runtime))
+    #expect(!LibraryAccessor.segmentIsVisible(named: "Acid Etched Bass", runtime: fixture.runtime))
+}
+
+@Test func libraryAccessorWaitForSegmentReturnsPromptlyWhenAlreadyVisible() {
+    // Already-visible row must not burn the full timeout.
+    let fixture = makeLibraryPanelFixture()
+    let start = Date()
+    LibraryAccessor.waitForSegmentVisible(
+        named: "Sub", timeout: 1.0, pollInterval: 0.02, runtime: fixture.runtime
+    )
+    #expect(Date().timeIntervalSince(start) < 0.5)
+}
+
 @Test func libraryAccessorSelectionUsesInjectedSetAttributeAndActionRuntime() {
     let fixture = makeLibraryPanelFixture()
 

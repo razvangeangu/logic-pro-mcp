@@ -450,6 +450,13 @@ enum AXValueExtractors {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
 
+        // #131 — Logic's multichannel SMF open creates "GM Device N" channel
+        // strips that route to a General-MIDI device and bounce SILENT. The
+        // live AX header for these strips can carry an "audio"-shaped signal,
+        // so this check MUST precede the `.audio` branch below or GM Device
+        // strips get misclassified as audio tracks and the silent-bounce risk
+        // is hidden before bounce. They are external-MIDI lanes, not audio.
+        if combined.contains("gm device") { return .externalMIDI }
         if combined.contains("audio") || combined.contains("오디오") { return .audio }
         if combined.contains("instrument") || combined.contains("software") || combined.contains("악기") { return .softwareInstrument }
         if combined.contains("drummer") { return .drummer }
