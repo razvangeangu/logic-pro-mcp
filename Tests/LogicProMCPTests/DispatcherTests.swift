@@ -2955,9 +2955,17 @@ private actor SelectiveFailChannel: Channel {
 // minimal trusted/Logic-running runtime reaches the not-implemented branch.
 @Test func testNavigateDispatcherRenameMarkerReturnsNotImplementedEndToEnd() async {
     let router = ChannelRouter()
+    // CI runs with no Logic Pro process, so the real appRoot resolver returns
+    // nil and `healthCheck` reports the channel unavailable → the router skips
+    // it and the end-to-end result is `channels_exhausted`, not the typed
+    // `not_implemented` this test asserts. Inject a fake PID so healthCheck's
+    // appRoot smoke test passes deterministically; `nav.rename_marker`
+    // short-circuits to State C before any live AX call, so no real Logic is
+    // needed for the routing assertion.
     await router.register(AccessibilityChannel(runtime: .axBacked(
         isTrusted: { true },
-        isLogicProRunning: { true }
+        isLogicProRunning: { true },
+        logicRuntime: AXLogicProElements.Runtime(logicProPID: { 4242 }, ax: .production)
     )))
 
     let result = await NavigateDispatcher.handle(
