@@ -127,15 +127,22 @@ private func decodeJSON(_ s: String) -> [String: Any] {
     // Master fader echoes on pitch-bend channel 8 (MCU strip 8).
     let target = 0.6
     let raw = UInt16(target * 16383.0)
-    Task.detached {
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        await channel.handleFeedback(.pitchBend(channel: 8, value: raw))
+    // Mirror set_volume/set_pan State-A coverage: the echo must land after
+    // executeSetMasterVolume stamps sendAt, so a single timed delivery is
+    // starvable under full-suite parallel load and can miss the poll window.
+    let echoTask = Task.detached(priority: .high) {
+        while !Task.isCancelled {
+            await channel.handleFeedback(.pitchBend(channel: 8, value: raw))
+            try? await Task.sleep(nanoseconds: 8_000_000)
+        }
     }
+    defer { echoTask.cancel() }
 
     let result = await channel.execute(
         operation: "mixer.set_master_volume",
         params: ["volume": "\(target)"]
     )
+    echoTask.cancel()
     #expect(result.isSuccess)
     let obj = decodeJSON(result.message)
     #expect((obj["verified"] as? Bool)!)

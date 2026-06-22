@@ -4407,7 +4407,6 @@ actor AccessibilityChannel: Channel {
         let beforeCount = readTrackCount()
         let escapedPath = path.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        let typedPath = escapedPath.hasPrefix("/") ? String(escapedPath.dropFirst()) : escapedPath
         // Poll the file-open sheet into existence (mirrors the
         // `waitForControlBarCheckboxValue` / goto_position "first window whose
         // name is" pattern) instead of blindly sleeping 1.5s. ~5s budget at
