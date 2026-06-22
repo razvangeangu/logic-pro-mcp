@@ -784,8 +784,7 @@ extension ResourceHandlers {
         let axOccluded = await cache.getAXOccluded()
 
         // Inspector contamination guard.
-        if liveTracks.count >= 3,
-           liveTracks.allSatisfy({ $0.name.hasSuffix(":") }) {
+        if tracksAreInspectorContaminated(liveTracks) {
             liveTracks = []
         }
 
@@ -880,10 +879,13 @@ extension ResourceHandlers {
     ///   1. Cache (live AX poll) — preferred when `lastUpdated > .distantPast`
     ///      (poller has written real data). Source: "ax_live" if recent
     ///      (< 5s), else "cache".
-    ///   2. LogicProjectFileReader — reads MetaData.plist for tempo / tsig /
-    ///      trackCount when cache is at struct defaults. Source:
+    ///   2. Live track cache — fills `trackCount` from the same trusted
+    ///      cache used by `logic://tracks` when ProjectInfo itself is name-only
+    ///      and file metadata has no positive count.
+    ///   3. LogicProjectFileReader — reads MetaData.plist for tempo / tsig /
+    ///      trackCount when live cache is at struct defaults. Source:
     ///      "project_file" + last_saved_age_sec extra.
-    ///   3. Struct defaults (ProjectInfo()). Source: "default".
+    ///   4. Struct defaults (ProjectInfo()). Source: "default".
     ///
     /// **Critical**: this function is read-only — it MUST NOT call
     /// `cache.updateProject(...)`. The poller is the sole writer to cache
@@ -894,9 +896,12 @@ extension ResourceHandlers {
         uri: String,
         fileReader: LogicProjectFileReader.Runtime
     ) async throws -> ReadResource.Result {
-        let cached = await cache.getProject()
-        let projectFetchedAt = await cache.getProjectFetchedAt()
-        let cachedTransport = await cache.getTransport()
+        let snapshot = await cache.auditSnapshot()
+        let cached = snapshot.project
+        let projectFetchedAt = snapshot.projectFetchedAt
+        let cachedTransport = snapshot.transport
+        let cachedTracks = snapshot.tracks
+        let tracksFetchedAt = snapshot.tracksFetchedAt
         // Cache is "fresh" if either (a) the poller has timestamped a write,
         // or (b) ProjectInfo's own lastUpdated is non-default. Either signal
         // means downstream consumers wrote real data.
@@ -909,9 +914,11 @@ extension ResourceHandlers {
         // "cache fresh wins" rule would therefore mask the file's correct
         // values whenever the poller has run at least once. Instead, we:
         //   1. Start with cached values (preserves the AX-only `name`).
-        //   2. For each field, if cache is default AND file has a non-nil
-        //      value, the file fills it.
-        //   3. `source` is "ax_live"/"cache" if any non-default field came
+        //   2. Fill tempo/sample-rate from live transport when available.
+        //   3. Fill trackCount from the trusted live track cache when
+        //      ProjectInfo itself is still at its default count.
+        //   4. Fill any remaining defaults from file metadata.
+        //   5. `source` is "ax_live"/"cache" if any non-default field came
         //      from cache; otherwise "project_file"; otherwise "default".
         let metadata = await LogicProjectFileReader.read(runtime: fileReader)
 
@@ -919,13 +926,19 @@ extension ResourceHandlers {
 
         var fileContributed = false
         var cacheContributedLive = false
+        let cachedProjectReferenceDate = [cached.lastUpdated, projectFetchedAt]
+            .filter { $0 > .distantPast }
+            .max()
+        var cacheContributionDates: [Date] = []
 
         // tempo
         if cacheFresh && cached.tempo != 120.0 {
             cacheContributedLive = true
+            if let date = cachedProjectReferenceDate { cacheContributionDates.append(date) }
         } else if transportFresh {
             info.tempo = cachedTransport.tempo
             cacheContributedLive = true
+            cacheContributionDates.append(cachedTransport.lastUpdated)
         } else if let tempo = metadata?.tempo {
             info.tempo = tempo
             fileContributed = true
@@ -936,6 +949,7 @@ extension ResourceHandlers {
         // timeSignature
         if cacheFresh && cached.timeSignature != "4/4" {
             cacheContributedLive = true
+            if let date = cachedProjectReferenceDate { cacheContributionDates.append(date) }
         } else if let tsig = metadata?.timeSignatureString {
             info.timeSignature = tsig
             fileContributed = true
@@ -943,6 +957,11 @@ extension ResourceHandlers {
         // trackCount
         if cacheFresh && cached.trackCount != 0 {
             cacheContributedLive = true
+            if let date = cachedProjectReferenceDate { cacheContributionDates.append(date) }
+        } else if let trackCount = trustedLiveTrackCount(cachedTracks, fetchedAt: tracksFetchedAt) {
+            info.trackCount = trackCount
+            cacheContributedLive = true
+            cacheContributionDates.append(tracksFetchedAt)
         } else if let count = metadata?.trackCount, count > 0 {
             info.trackCount = count
             fileContributed = true
@@ -959,11 +978,9 @@ extension ResourceHandlers {
             source = "default"
         } else if cacheContributedLive {
             // Cache supplied at least one real value — promote to ax_live/cache.
-            let referenceDate = [
-                cached.lastUpdated,
-                projectFetchedAt,
-                cachedTransport.lastUpdated
-            ].filter { $0 > .distantPast }.max() ?? .distantPast
+            let referenceDate = cacheContributionDates.max()
+                ?? cachedProjectReferenceDate
+                ?? .distantPast
             let age = Date().timeIntervalSince(referenceDate)
             source = age < 5 ? "ax_live" : "cache"
         } else if fileContributed {
@@ -983,15 +1000,30 @@ extension ResourceHandlers {
         if let age = lastSavedAgeSec { extras["last_saved_age_sec"] = age }
 
         let body = encodeJSON(info)
+        let cacheReferenceDate = cacheContributionDates.max() ?? cachedProjectReferenceDate
         let envelope = wrapWithCacheEnvelope(
             bodyJSON: body,
-            fetchedAt: cacheFresh ? cached.lastUpdated : nil,
-            axOccluded: await cache.getAXOccluded(),
+            fetchedAt: (source == "ax_live" || source == "cache") ? cacheReferenceDate : nil,
+            axOccluded: snapshot.axOccluded,
             extras: extras
         )
         return ReadResource.Result(
             contents: [.text(envelope, uri: uri, mimeType: "application/json")]
         )
+    }
+
+    private static func tracksAreInspectorContaminated(_ tracks: [TrackState]) -> Bool {
+        tracks.count >= 3 && tracks.allSatisfy { $0.name.hasSuffix(":") }
+    }
+
+    private static func trustedLiveTrackCount(_ tracks: [TrackState], fetchedAt: Date) -> Int? {
+        guard fetchedAt > .distantPast,
+              !tracks.isEmpty,
+              !tracksAreInspectorContaminated(tracks),
+              tracks.allSatisfy({ $0.placeholder != true }) else {
+            return nil
+        }
+        return tracks.count
     }
 
     private static func readMIDIPorts(router: ChannelRouter, uri: String) async throws -> ReadResource.Result {

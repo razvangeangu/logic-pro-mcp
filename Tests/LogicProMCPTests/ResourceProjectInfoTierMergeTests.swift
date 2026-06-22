@@ -5,8 +5,9 @@ import Testing
 
 // v3.1.8 (Issue #7) — readProjectInfo tier merge:
 // Tier 1: cache (live AX, source "ax_live" or "cache")
-// Tier 2: LogicProjectFileReader (source "project_file" + last_saved_age_sec)
-// Tier 3: defaults (source "default")
+// Tier 2: trusted live track cache for trackCount when ProjectInfo is name-only
+// Tier 3: LogicProjectFileReader (source "project_file" + last_saved_age_sec)
+// Tier 4: defaults (source "default")
 // Critical: live cache values win when present; project file values only fill
 // fields the live cache has not observed.
 
@@ -85,7 +86,7 @@ func cacheLive_filePresent_cachePreferred_sourceAxLive() async throws {
 }
 
 @Test
-func cacheProjectNameOnly_usesLiveTransportButDoesNotPromoteVisibleTrackRowsToProjectTrackCount() async throws {
+func cacheProjectNameOnly_usesLiveTransportAndLiveTrackCacheForProjectTrackCount() async throws {
     let cache = StateCache()
 
     var liveProject = ProjectInfo()
@@ -116,9 +117,65 @@ func cacheProjectNameOnly_usesLiveTransportButDoesNotPromoteVisibleTrackRowsToPr
     }
     #expect(data["tempo"] as? Double == 127)
     #expect(data["sampleRate"] as? Int == 48_000)
-    #expect(data["trackCount"] as? Int == 0)
+    #expect(data["trackCount"] as? Int == 11)
     #expect(envelope["source"] as? String == "ax_live")
     #expect(envelope["last_saved_age_sec"] == nil)
+}
+
+@Test
+func cacheProjectNameOnly_rejectsPlaceholderTrackCacheForProjectTrackCount() async throws {
+    let cache = StateCache()
+
+    var liveProject = ProjectInfo()
+    liveProject.name = "Untitled Live"
+    liveProject.lastUpdated = Date()
+    await cache.updateProject(liveProject)
+
+    await cache.updateTracks((0..<11).map {
+        TrackState(id: $0, name: "Track \($0 + 1)", type: .unknown, placeholder: true)
+    })
+
+    let bundle = ensureFixtureBundle(at: FileManager.default.temporaryDirectory
+        .appendingPathComponent("PlaceholderSiblingCacheBundle.logicx", isDirectory: true))
+    let runtime = makeFileReaderRuntime(tempo: 120, trackCount: 0, bundlePath: bundle)
+
+    let result = try await ResourceHandlers.read(
+        uri: "logic://project/info", cache: cache, router: ChannelRouter(), fileReader: runtime
+    )
+    let envelope = try parseEnvelope(result)
+    guard let data = envelope["data"] as? [String: Any] else {
+        Issue.record("data missing"); return
+    }
+    #expect(data["trackCount"] as? Int == 0)
+}
+
+@Test
+func cacheProjectNameOnly_rejectsInspectorContaminatedTrackCacheForProjectTrackCount() async throws {
+    let cache = StateCache()
+
+    var liveProject = ProjectInfo()
+    liveProject.name = "Untitled Live"
+    liveProject.lastUpdated = Date()
+    await cache.updateProject(liveProject)
+
+    await cache.updateTracks([
+        TrackState(id: 0, name: "Region:", type: .unknown),
+        TrackState(id: 1, name: "Track:", type: .unknown),
+        TrackState(id: 2, name: "Channel Strip:", type: .unknown)
+    ])
+
+    let bundle = ensureFixtureBundle(at: FileManager.default.temporaryDirectory
+        .appendingPathComponent("InspectorSiblingCacheBundle.logicx", isDirectory: true))
+    let runtime = makeFileReaderRuntime(tempo: 120, trackCount: 0, bundlePath: bundle)
+
+    let result = try await ResourceHandlers.read(
+        uri: "logic://project/info", cache: cache, router: ChannelRouter(), fileReader: runtime
+    )
+    let envelope = try parseEnvelope(result)
+    guard let data = envelope["data"] as? [String: Any] else {
+        Issue.record("data missing"); return
+    }
+    #expect(data["trackCount"] as? Int == 0)
 }
 
 @Test

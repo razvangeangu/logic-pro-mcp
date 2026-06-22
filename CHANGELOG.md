@@ -8,7 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-No unreleased changes.
+### Fixed
+
+- **`logic://project/info.trackCount` now follows trusted live track cache** when `ProjectInfo` is name-only and saved project metadata has no positive count. This keeps `logic://project/info` consistent with `logic://tracks` for unsaved or freshly edited Logic projects, while still rejecting Inspector-contaminated or placeholder track rows and preserving the resource layer as read-only.
 
 ## [3.6.0] — 2026-06-19
 
