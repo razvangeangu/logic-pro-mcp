@@ -85,7 +85,7 @@ func cacheLive_filePresent_cachePreferred_sourceAxLive() async throws {
 }
 
 @Test
-func cacheProjectNameOnly_usesLiveTransportButDoesNotPromoteVisibleTrackRowsToProjectTrackCount() async throws {
+func cacheProjectNameOnly_usesLiveTransportAndLiveTrackCacheForProjectTrackCount() async throws {
     let cache = StateCache()
 
     var liveProject = ProjectInfo()
@@ -116,7 +116,7 @@ func cacheProjectNameOnly_usesLiveTransportButDoesNotPromoteVisibleTrackRowsToPr
     }
     #expect(data["tempo"] as? Double == 127)
     #expect(data["sampleRate"] as? Int == 48_000)
-    #expect(data["trackCount"] as? Int == 0)
+    #expect(data["trackCount"] as? Int == 11)
     #expect(envelope["source"] as? String == "ax_live")
     #expect(envelope["last_saved_age_sec"] == nil)
 }
