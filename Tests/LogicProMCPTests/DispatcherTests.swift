@@ -344,10 +344,13 @@ private func liveTransportJSON(
 // MARK: - TransportDispatcher
 
 @Test func testTransportDispatcherRoutesPrimaryCommands() async {
+    // NOTE: `pause` is intentionally absent here — it is now a verified
+    // Honest-Contract command (see verifiedPauseResult / the dedicated
+    // pause tests below) and can no longer succeed against a plain
+    // MockChannel that does not answer transport.get_state.
     let cases: [(command: String, operation: String)] = [
         ("play", "transport.play"),
         ("record", "transport.record"),
-        ("pause", "transport.pause"),
         ("rewind", "transport.rewind"),
         ("fast_forward", "transport.fast_forward"),
         ("toggle_cycle", "transport.toggle_cycle"),
@@ -358,7 +361,6 @@ private func liveTransportJSON(
     for testCase in cases {
         let router = ChannelRouter()
         let channelID: ChannelID = switch testCase.operation {
-        case "transport.pause": .coreMIDI
         case "transport.toggle_metronome", "transport.toggle_count_in": .midiKeyCommands
         default: .mcu
         }
@@ -523,6 +525,165 @@ private func liveTransportJSON(
     #expect(object["verification_source"] as? String == "transport_state")
     #expect(object["requested"] as? String == "9.1.1.1")
     #expect(object["observed"] as? String == "8.1.1.1")
+}
+
+@Test func testTransportDispatcherPauseReturnsStateAWhenPlaybackStops() async throws {
+    // #138: pause must verify via transport readback like stop, not report
+    // bare success. Routing: transport.pause -> .coreMIDI; transport.get_state
+    // -> .accessibility, so the write and the readback live on separate fakes.
+    let router = ChannelRouter()
+    let pauseWrite = FixedResultChannel(id: .coreMIDI, result: .success("MMC pause sent"))
+    let readback = SequencedTransportReadbackChannel(
+        id: .accessibility,
+        transportStates: [
+            // before: playing -> first poll: stopped
+            TransportState(isPlaying: true, position: "1.2.1.1", timePosition: "00:00:02.000", lastUpdated: Date()),
+            TransportState(isPlaying: false, position: "1.2.1.1", timePosition: "00:00:02.000", lastUpdated: Date()),
+        ]
+    )
+    await router.register(pauseWrite)
+    await router.register(readback)
+
+    let result = await TransportDispatcher.handle(
+        command: "pause",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    #expect(!result.isError!)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect((object["verified"] as? Bool)!)
+    #expect(object["operation"] as? String == "transport.pause")
+    let observedPlaying = try #require(object["observed_isPlaying"] as? Bool)
+    #expect(!observedPlaying)
+}
+
+@Test func testTransportDispatcherPauseReturnsStateCWhenPlaybackContinues() async throws {
+    // #138: if the playhead keeps running after the pause send, pause must
+    // fail closed with State C readback_mismatch — never bare success.
+    let router = ChannelRouter()
+    let pauseWrite = FixedResultChannel(id: .coreMIDI, result: .success("MMC pause sent"))
+    // 13 states: 1 "before" read + 12 polls, all still playing.
+    let stillPlaying = Array(
+        repeating: TransportState(
+            isPlaying: true,
+            position: "1.3.1.1",
+            timePosition: "00:00:03.000",
+            lastUpdated: Date()
+        ),
+        count: 13
+    )
+    let readback = SequencedTransportReadbackChannel(
+        id: .accessibility,
+        transportStates: stillPlaying
+    )
+    await router.register(pauseWrite)
+    await router.register(readback)
+
+    let result = await TransportDispatcher.handle(
+        command: "pause",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    #expect(result.isError!)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    // State C carries success:false + error (no `verified`/`reason` keys).
+    let success = try #require(object["success"] as? Bool)
+    #expect(!success)
+    #expect(object["error"] as? String == "readback_mismatch")
+    #expect(object["operation"] as? String == "transport.pause")
+    let observedPlaying = try #require(object["observed_isPlaying"] as? Bool)
+    #expect(observedPlaying)
+    let safeToRetry = try #require(object["safe_to_retry"] as? Bool)
+    #expect(safeToRetry)
+}
+
+@Test func testTransportDispatcherPauseReturnsStateAUnchangedWhenAlreadyStopped() async throws {
+    // Idempotent early-return: already stopped means no write is attempted.
+    let router = ChannelRouter()
+    let pauseWrite = FixedResultChannel(id: .coreMIDI, result: .success("MMC pause sent"))
+    let readback = SequencedTransportReadbackChannel(
+        id: .accessibility,
+        transportStates: [
+            TransportState(isPlaying: false, position: "1.1.1.1", timePosition: "00:00:00.000", lastUpdated: Date())
+        ]
+    )
+    await router.register(pauseWrite)
+    await router.register(readback)
+
+    let result = await TransportDispatcher.handle(
+        command: "pause",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    #expect(!result.isError!)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect((object["verified"] as? Bool)!)
+    let writeAttempted = try #require(object["write_attempted"] as? Bool)
+    #expect(!writeAttempted)
+    let unchanged = try #require(object["unchanged"] as? Bool)
+    #expect(unchanged)
+    // No write should have been routed to the coreMIDI pause channel.
+    let writeOps = await pauseWrite.executedOps
+    #expect(writeOps.isEmpty)
+}
+
+@Test func testTransportDispatcherPauseReturnsStateCWhenReadbackUnavailable() async throws {
+    // If no transport readback is ever available, pause must fail closed with
+    // State C readback_unavailable, never bare success.
+    let router = ChannelRouter()
+    let pauseWrite = FixedResultChannel(id: .coreMIDI, result: .success("MMC pause sent"))
+    // SequencedTransportReadbackChannel returns .error when its queue is empty,
+    // so an empty queue models a transport whose state can never be read.
+    let readback = SequencedTransportReadbackChannel(
+        id: .accessibility,
+        transportStates: []
+    )
+    await router.register(pauseWrite)
+    await router.register(readback)
+
+    let result = await TransportDispatcher.handle(
+        command: "pause",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    #expect(result.isError!)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    // State C carries success:false + error (no `verified`/`reason` keys).
+    let success = try #require(object["success"] as? Bool)
+    #expect(!success)
+    #expect(object["error"] as? String == "readback_unavailable")
+    #expect(object["operation"] as? String == "transport.pause")
+}
+
+@Test func testTransportDispatcherSetCycleRangeDocumentedUnsupported() async {
+    // #138 (2): set_cycle_range stays honest fail-closed but is demoted to a
+    // documented unsupported/best-effort surface in the tool description and
+    // the SystemDispatcher transport help.
+    let toolDescription = TransportDispatcher.tool.description ?? ""
+    #expect(toolDescription.contains("set_cycle_range"))
+    #expect(toolDescription.lowercased().contains("unsupported"))
+
+    let helpResult = await SystemDispatcher.handle(
+        command: "help",
+        params: ["category": .string("transport")],
+        router: ChannelRouter(),
+        cache: StateCache()
+    )
+    let help = dispatcherText(helpResult)
+    #expect(help.contains("set_cycle_range"))
+    #expect(help.lowercased().contains("unsupported"))
 }
 
 @Test func testTransportDispatcherRejectsMissingSemanticPayloads() async {
@@ -2945,6 +3106,45 @@ private actor SelectiveFailChannel: Channel {
     #expect(dispatcherText(result).contains("non-empty 'name'"))
     let ops = await ax.executedOps
     #expect(ops.isEmpty, "Empty rename must not reach the router")
+}
+
+// Issue #143 — end-to-end through the REAL AccessibilityChannel: a valid
+// rename_marker request (index + non-empty name) must fail closed with a
+// typed State C `not_implemented` envelope and a create+delete workaround
+// hint, NOT the previous `channels_exhausted` aggregate. `nav.rename_marker`
+// short-circuits inside the channel switch (never touches the AX tree), so a
+// minimal trusted/Logic-running runtime reaches the not-implemented branch.
+@Test func testNavigateDispatcherRenameMarkerReturnsNotImplementedEndToEnd() async {
+    let router = ChannelRouter()
+    // CI runs with no Logic Pro process, so the real appRoot resolver returns
+    // nil and `healthCheck` reports the channel unavailable → the router skips
+    // it and the end-to-end result is `channels_exhausted`, not the typed
+    // `not_implemented` this test asserts. Inject a fake PID so healthCheck's
+    // appRoot smoke test passes deterministically; `nav.rename_marker`
+    // short-circuits to State C before any live AX call, so no real Logic is
+    // needed for the routing assertion.
+    await router.register(AccessibilityChannel(runtime: .axBacked(
+        isTrusted: { true },
+        isLogicProRunning: { true },
+        logicRuntime: AXLogicProElements.Runtime(logicProPID: { 4242 }, ax: .production)
+    )))
+
+    let result = await NavigateDispatcher.handle(
+        command: "rename_marker",
+        params: ["index": .int(2), "name": .string("Big Chorus")],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    let text = dispatcherText(result)
+    let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+    #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["error"] as? String == "not_implemented")
+    #expect((obj["error"] as? String) != "channels_exhausted")
+    let hint = obj["hint"] as? String ?? ""
+    #expect(hint.contains("delete_marker") && hint.contains("create_marker"),
+            "expected create+delete workaround hint, got: \(hint)")
 }
 
 @Test func testNavigateDispatcherToggleViewAndErrors() async {

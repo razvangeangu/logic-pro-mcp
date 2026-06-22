@@ -122,4 +122,20 @@ struct RoutingAuditInvariantTests {
         let bytes = detail.utf8.count
         #expect(bytes < 1024, "manualValidationDetailSuffix is \(bytes) UTF-8 bytes; the surrounding comment claims < 1 KB.")
     }
+
+    /// #138 regression: Logic 12.x silently ignores MMC "pause", so a verified
+    /// transport.pause that routed CoreMIDI first always failed closed. The
+    /// pause chain must prefer a channel that actually halts the playhead
+    /// (AX Stop button / spacebar) BEFORE the no-op MMC fallback.
+    @Test("transport.pause routes a working stop channel before MMC")
+    func pausePrefersWorkingChannelOverMMC() throws {
+        let chain = try #require(ChannelRouter.routingTable["transport.pause"])
+        let mmcIndex = try #require(chain.firstIndex(of: .coreMIDI))
+        let axIndex = chain.firstIndex(of: .accessibility)
+        let cgIndex = chain.firstIndex(of: .cgEvent)
+        let firstWorking = [axIndex, cgIndex].compactMap { $0 }.min()
+        let working = try #require(firstWorking)
+        #expect(working < mmcIndex,
+                "transport.pause chain \(chain) must try AX/cgEvent before MMC; MMC pause is ignored by Logic 12.x")
+    }
 }

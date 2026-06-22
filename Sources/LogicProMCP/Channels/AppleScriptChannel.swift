@@ -83,8 +83,18 @@ actor AppleScriptChannel: Channel {
     func execute(operation: String, params: [String: String]) async -> ChannelResult {
         switch operation {
         case "project.new":
+            // #144 (B): `newProjectScript()` returns `name of newDocument`, so
+            // the raw script output IS the observed new-document name. Surface it
+            // as `observed_name` in the State-B envelope to make the unverified
+            // result actionable (e.g. "Untitled 17"). There is no reliable
+            // AppleScript readback for blank-active-project identity, so this
+            // stays verified:false — observed_name is evidence, not verification.
             let raw = await runScript(newProjectScript())
-            return Self.wrapMutatingResult(raw, operation: operation)
+            return Self.wrapMutatingResult(
+                raw,
+                operation: operation,
+                extras: Self.newProjectExtras(raw)
+            )
 
         case "project.open":
             guard let path = params["path"] else {
@@ -108,6 +118,16 @@ actor AppleScriptChannel: Channel {
             // package whose mtime did not advance stays an honest State B and
             // never claims a verified save an export/bounce step would trust.
             let documentPath = await runtime.currentDocumentPath()
+            // #144 fail-fast: resolving the front document's path FIRST means an
+            // UNTITLED document (no on-disk path) never reaches `save front
+            // document`, which would raise Logic's modal Save sheet and block the
+            // AppleEvent until the sheet is dismissed (observed live as a server
+            // hang to the command deadline / harness teardown). Short-circuit to a
+            // terminal State C `unsupported_state` so the caller gets an instant,
+            // honest failure with a recovery hint instead of a guaranteed hang.
+            if let failFast = Self.untitledSaveFailFast(documentPath: documentPath) {
+                return failFast
+            }
             let beforeMtime = documentPath.flatMap(runtime.fileModificationDate)
             let saveStartedAt = Date()
             let raw = await runScript(saveProjectScript())
@@ -203,6 +223,49 @@ actor AppleScriptChannel: Channel {
         for (k, v) in extras { merged[k] = v }
         return .success(HonestContract.encodeStateB(
             reason: .readbackUnavailable, extras: merged
+        ))
+    }
+
+    /// #144 (B): derive the `observed_name` extra for `project.new` from the
+    /// raw script output (`name of newDocument`). Returns an empty dictionary on
+    /// a script error or blank/whitespace name so the envelope is unchanged when
+    /// there is no usable name — the State-B verdict itself never changes.
+    static func newProjectExtras(_ result: ChannelResult) -> [String: Any] {
+        guard result.isSuccess else { return [:] }
+        // runScript wraps the AppleScript value as `{"result":"<name>"}`; unwrap
+        // it so observed_name is the bare document name ("Untitled"), not the
+        // raw JSON envelope. Fall back to the trimmed message if it is not the
+        // expected wrapper shape.
+        let trimmed = result.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: String
+        if let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let unwrapped = obj["result"] as? String {
+            name = unwrapped.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            name = trimmed
+        }
+        guard !name.isEmpty else { return [:] }
+        return ["observed_name": name]
+    }
+
+    /// #144: fail-fast guard for `project.save`. Returns a terminal State C
+    /// `unsupported_state` envelope when the front document is untitled (no
+    /// on-disk path), so the blocking `save front document` script is never
+    /// fired against a document that would raise Logic's modal Save sheet and
+    /// hang the AppleEvent. Returns `nil` for a titled document (non-empty
+    /// path) so the healthy verified-save path proceeds unchanged. Deterministic
+    /// and side-effect-free — unit-testable without driving live Logic.
+    static func untitledSaveFailFast(documentPath: String?) -> ChannelResult? {
+        let hasPath = (documentPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+        guard !hasPath else { return nil }
+        return .error(HonestContract.encodeStateC(
+            error: .unsupportedState,
+            hint: "front document is untitled (no on-disk path); use project.save_as with an absolute .logicx path to write and verify it",
+            extras: [
+                "operation": "project.save",
+                "method": "applescript",
+            ]
         ))
     }
 

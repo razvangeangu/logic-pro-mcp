@@ -85,4 +85,75 @@ struct Issue110SaveVerifyTests {
         #expect(o?["verified"] as? Bool == false)
         #expect((o?["reason_detail"] as? String)?.contains("untitled") == true)
     }
+
+    // #144 — channel-level fail-fast: driving `project.save` end-to-end through
+    // the channel on an UNTITLED document must short-circuit to a terminal State
+    // C `unsupported_state` BEFORE the blocking `save front document` script is
+    // ever recorded. This is the contract that converts a guaranteed modal
+    // Save-sheet hang into an instant honest failure. The titled-doc case below
+    // proves the healthy verified-save path is unchanged.
+    @Test("project.save on an untitled document fails fast before any script fires")
+    func untitledSaveFailsFastBeforeScript() async throws {
+        let recorder = SaveScriptRecorder()
+        let channel = AppleScriptChannel(
+            runtime: makeRuntime(recorder: recorder, documentPath: nil)
+        )
+
+        let result = await channel.execute(operation: "project.save", params: [:])
+
+        #expect(!result.isSuccess)
+        let o = try #require(obj(result))
+        let success = try #require(o["success"] as? Bool)
+        #expect(!success)
+        #expect(o["error"] as? String == "unsupported_state")
+        let hint = try #require(o["hint"] as? String)
+        #expect(hint.contains("untitled"))
+        #expect(hint.contains("save_as"))
+        // Decisive: zero scripts recorded ⇒ no modal Save sheet, no AppleEvent block.
+        let scripts = await recorder.snapshot()
+        #expect(scripts.isEmpty)
+    }
+
+    @Test("project.save on a titled document still fires the save script")
+    func titledSaveFiresScript() async throws {
+        let recorder = SaveScriptRecorder()
+        let channel = AppleScriptChannel(
+            runtime: makeRuntime(recorder: recorder, documentPath: "/Users/x/Song.logicx")
+        )
+
+        let result = await channel.execute(operation: "project.save", params: [:])
+
+        #expect(result.isSuccess)
+        let scripts = await recorder.snapshot()
+        let fired = try #require(scripts.first)
+        #expect(fired.contains("save front document"))
+    }
+
+    // Local recorder + Runtime builder so this suite is self-contained (the
+    // helper in AppleScriptChannelTests is file-private to that file).
+    private actor SaveScriptRecorder {
+        private var scripts: [String] = []
+        func run(_ source: String) -> ChannelResult {
+            scripts.append(source)
+            return .success("{\"result\":\"\"}")
+        }
+        func snapshot() -> [String] { scripts }
+    }
+
+    private func makeRuntime(
+        recorder: SaveScriptRecorder,
+        documentPath: String?
+    ) -> AppleScriptChannel.Runtime {
+        AppleScriptChannel.Runtime(
+            isLogicProRunning: { true },
+            openFile: { _ in true },
+            runScript: { source in await recorder.run(source) },
+            executeTransportAction: { _ in .success("{\"result\":\"\"}") },
+            // distantFuture mtime ⇒ titled-doc save reads back as written (State A),
+            // keeping the healthy path's success verdict for the titled test.
+            fileExists: { _ in true },
+            fileModificationDate: { _ in Date.distantFuture },
+            currentDocumentPath: { documentPath }
+        )
+    }
 }

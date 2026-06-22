@@ -62,14 +62,22 @@ enum AXLocalePolicy {
                 case .exact:
                     candidate.caseInsensitiveCompare(label) == .orderedSame
                 case .prefix:
+                    // #60 — diacritic-SENSITIVE, matching `containsAny` (made
+                    // sensitive in #122). Folding accents (e.g. "ínspector" →
+                    // "inspector") WIDENS matching beyond the stored label and
+                    // risks misclassifying accented-Latin AX text in non-EN/KO
+                    // locales — the exact locale collision #60 guards against.
+                    // The EN/KO LabelSets carry their real diacritics, so
+                    // sensitive matching is both safer and correct.
                     candidate.range(
                         of: label,
-                        options: [.anchored, .caseInsensitive, .diacriticInsensitive]
+                        options: [.anchored, .caseInsensitive]
                     ) != nil
                 case .contains:
+                    // #60 — diacritic-SENSITIVE (same rationale as `.prefix`).
                     candidate.range(
                         of: label,
-                        options: [.caseInsensitive, .diacriticInsensitive]
+                        options: [.caseInsensitive]
                     ) != nil
                 case .exactStrict:
                     candidate.caseInsensitiveCompare(label) == .orderedSame

@@ -45,7 +45,12 @@ actor ChannelRouter {
         // let the dispatcher's live readback gate decide success.
         "transport.stop":             [.accessibility, .cgEvent, .mcu, .coreMIDI, .appleScript],
         "transport.record":           [.accessibility, .mcu, .coreMIDI, .cgEvent, .appleScript],
-        "transport.pause":            [.coreMIDI, .cgEvent],
+        // Logic 12.x has no distinct "pause" — the playhead stops in place via
+        // the Stop button / spacebar. MMC "pause" (the old primary) is silently
+        // ignored by Logic, so a verified pause always failed closed. Mirror the
+        // proven transport.stop order: AX Stop-button first (frontmost-independent),
+        // spacebar next, MMC last as a best-effort fallback.
+        "transport.pause":            [.accessibility, .cgEvent, .coreMIDI],
         "transport.rewind":           [.mcu, .coreMIDI, .cgEvent],
         "transport.fast_forward":     [.mcu, .coreMIDI, .cgEvent],
         "transport.toggle_cycle":     [.accessibility, .midiKeyCommands, .cgEvent, .mcu],

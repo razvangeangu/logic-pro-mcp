@@ -297,6 +297,66 @@ private func makeMixerFixture(
     #expect(plugins?.first?["plugin_id"] as? String == "logic.stock.effect.gain")
 }
 
+// #142 — reveal-reliability hardening. The mixer pane slide-in can exceed
+// 1.5s on a cold window, so the inventory poll timeout was lengthened. This
+// guards the constant so a future edit can't silently shrink it back below
+// the observed live latency that produced the v43 `mixer_not_visible` State B.
+@Test func testMixerRevealPollTimeoutIsLengthened() {
+    #expect(
+        AccessibilityChannel.mixerRevealPollTimeoutMs >= 2_500,
+        "mixer reveal poll must allow >=2.5s for a cold mixer pane to slide in"
+    )
+}
+
+// #142 — when the reveal succeeds only on the final AX menu retry (after the
+// flaky cgevent key-7 fallback), the State A envelope must honestly surface the
+// retry strategy so a harness can see which path actually worked.
+@Test func testGetInventorySurfacesAXMenuRetryStrategyWhenRevealNeedsIt() async {
+    let b = FakeAXRuntimeBuilder()
+    let app = b.element(780)
+    let window = b.element(781)
+    let runtime = b.makeLogicRuntime(appElement: app)
+    b.setAttribute(app, kAXMainWindowAttribute as String, window)
+    b.setChildren(window, [])
+
+    let result = await AccessibilityChannel.defaultGetPluginInventory(
+        params: ["track": "0"],
+        runtime: runtime,
+        revealMixer: { _ in
+            let mixer = b.element(782)
+            let strip = b.element(783)
+            let slot = addOccupiedSlot(b, 784, name: "Gain")
+            b.setAttribute(mixer, kAXRoleAttribute as String, "AXLayoutArea")
+            b.setAttribute(mixer, kAXDescriptionAttribute as String, "Mixer")
+            b.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
+            b.setChildren(strip, [slot])
+            b.setChildren(mixer, [strip])
+            b.setChildren(window, [mixer])
+            return (
+                mixer,
+                .init(
+                    attempted: true,
+                    alreadyVisible: false,
+                    strategies: ["ax_menu_view_show_mixer", "cgevent_x", "ax_menu_view_show_mixer_retry"],
+                    menuItemFound: true,
+                    menuClicked: true,
+                    keySent: true,
+                    mixerVisible: true
+                )
+            )
+        }
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeObject(result.message)
+    #expect(obj["state"] as? String == "A")
+    let strategies = obj["mixer_reveal_strategies"] as? [String]
+    let resolvedStrategies = try! #require(strategies)
+    // The deterministic AX menu path bookends the flaky key-7 fallback.
+    #expect(resolvedStrategies.first == "ax_menu_view_show_mixer")
+    #expect(resolvedStrategies.contains("ax_menu_view_show_mixer_retry"))
+}
+
 @Test func testGetInventoryReportsMixerNotVisibleDirectlyWhenRevealFails() async {
     let b = FakeAXRuntimeBuilder()
     let app = b.element(770)

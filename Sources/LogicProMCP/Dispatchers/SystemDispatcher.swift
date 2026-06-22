@@ -248,7 +248,7 @@ struct SystemDispatcher {
                   toggle_count_in   -> {} — Toggle count-in
                   set_tempo         -> { tempo: Float } — Set BPM (5-999)
                   goto_position     -> { bar: Int (1..9999) } or { position: String } — bar.beat.sub.tick or HH:MM:SS:FF SMPTE
-                  set_cycle_range   -> { start: Int, end: Int } — Bar numbers
+                  set_cycle_range   -> { start: Int, end: Int } — Bar numbers (UNSUPPORTED/best-effort: Logic 12.x exposes no numeric cycle-locator fields; fails closed with State C not_implemented, cannot verify a write)
 
                 Read state via resource: logic://transport/state
                 """
@@ -343,7 +343,9 @@ struct SystemDispatcher {
                   goto_marker       -> { index: Int } or { name: String }
                   create_marker     -> { name: String }
                   delete_marker     -> { index: Int }
-                  rename_marker     -> { index: Int, name: String }
+                  rename_marker     -> { index: Int, name: String } (UNSUPPORTED:
+                                       not implemented; returns State C
+                                       not_implemented — delete + create to rename)
                   zoom_to_fit       -> {}
                   set_zoom          -> { level: String } ("in", "out", "fit")
                   toggle_view       -> { view: String } (mixer, piano_roll, score,

@@ -245,7 +245,15 @@ private func makeAppleScriptRuntime(
 
 @Test func testAppleScriptProjectCommandsGenerateExpectedScripts() async {
     let recorder = AppleScriptRecorder()
-    let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(scriptRecorder: recorder))
+    // #144: a titled front document keeps `project.save` on the healthy path
+    // that fires `save front document` (the untitled fail-fast is covered
+    // separately in testAppleScriptSaveOnUntitledDocumentFailsFast).
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            currentDocumentPath: { "/Users/x/Song.logicx" }
+        )
+    )
 
     let newProject = await channel.execute(operation: "project.new", params: [:])
     let saveProject = await channel.execute(operation: "project.save", params: [:])
@@ -370,7 +378,15 @@ private func makeAppleScriptRuntime(
 @Test func testAppleScriptExecutePropagatesScriptErrors() async {
     let recorder = AppleScriptRecorder()
     await recorder.setResult(.error("AppleScript error: boom"))
-    let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(scriptRecorder: recorder))
+    // #144: titled document so the save reaches the script (and propagates its
+    // error) rather than short-circuiting on the untitled fail-fast.
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            fileModificationDate: { _ in nil },
+            currentDocumentPath: { "/Users/x/Song.logicx" }
+        )
+    )
 
     let result = await channel.execute(operation: "project.save", params: [:])
     #expect(!result.isSuccess)
@@ -391,7 +407,18 @@ private func makeAppleScriptRuntime(
 @Test func testAppleScriptExecuteReturnsInjectedJSONResult() async {
     let recorder = AppleScriptRecorder()
     await recorder.setResult(.success("{\"result\":\"hello\"}"))
-    let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(scriptRecorder: recorder))
+    // #144: titled document on the healthy save path, but with a stale mtime
+    // that does NOT advance past saveStartedAt — so the verdict stays the
+    // honest State B this test asserts (script fired-but-unconfirmed), not the
+    // untitled fail-fast (which would be State C and never fire the script).
+    let stale = Date(timeIntervalSince1970: 1_000)
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            fileModificationDate: { _ in stale },
+            currentDocumentPath: { "/Users/x/Song.logicx" }
+        )
+    )
 
     let result = await channel.execute(operation: "project.save", params: [:])
 
@@ -439,4 +466,128 @@ private func makeAppleScriptRuntime(
     let script = AppleScriptChannel.currentDocumentPathScript()
     #expect(script.contains("path of front document"))
     #expect(script.contains("count of documents"))
+}
+
+// MARK: - #144 — project.save fail-fast on untitled document
+
+/// The untitled fail-fast must return State C `unsupported_state` BEFORE the
+/// blocking `save front document` script is ever fired — proving the modal
+/// Save-sheet hang is impossible. We assert the recorder captured ZERO scripts.
+@Test func testAppleScriptSaveOnUntitledDocumentFailsFastWithoutFiringScript() async throws {
+    let recorder = AppleScriptRecorder()
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            currentDocumentPath: { nil } // untitled: no on-disk path
+        )
+    )
+
+    let result = await channel.execute(operation: "project.save", params: [:])
+
+    #expect(!result.isSuccess)
+    let obj = try JSONSerialization.jsonObject(
+        with: Data(result.message.utf8), options: []
+    ) as! [String: Any]
+    let success = try #require(obj["success"] as? Bool)
+    #expect(!success)
+    #expect(obj["error"] as? String == "unsupported_state")
+    let hint = try #require(obj["hint"] as? String)
+    #expect(hint.contains("untitled"))
+    #expect(hint.contains("save_as"))
+    #expect(obj["operation"] as? String == "project.save")
+
+    // The decisive assertion: NO save script was fired, so Logic's modal Save
+    // sheet can never appear and the AppleEvent can never block.
+    let scripts = await recorder.snapshot()
+    #expect(scripts.isEmpty)
+}
+
+/// An empty-string document path (the AppleScript `""`-untitled signal) is the
+/// same untitled case and must also fail fast without firing the script.
+@Test func testAppleScriptSaveOnEmptyPathDocumentFailsFast() async throws {
+    let recorder = AppleScriptRecorder()
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            currentDocumentPath: { "   " } // whitespace-only == untitled
+        )
+    )
+
+    let result = await channel.execute(operation: "project.save", params: [:])
+
+    #expect(!result.isSuccess)
+    #expect(result.message.contains("unsupported_state"))
+    let scripts = await recorder.snapshot()
+    #expect(scripts.isEmpty)
+}
+
+/// A titled document MUST proceed to fire `save front document` (the healthy
+/// verified-save path stays unchanged) — the fail-fast only fires when untitled.
+@Test func testAppleScriptSaveOnTitledDocumentFiresSaveScript() async throws {
+    let recorder = AppleScriptRecorder()
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            scriptRecorder: recorder,
+            currentDocumentPath: { "/Users/x/Song.logicx" }
+        )
+    )
+
+    let result = await channel.execute(operation: "project.save", params: [:])
+
+    #expect(result.isSuccess)
+    let scripts = await recorder.snapshot()
+    let savedScript = try #require(scripts.first)
+    #expect(savedScript.contains("save front document"))
+}
+
+/// Deterministic, side-effect-free helper: nil / empty / whitespace → State C;
+/// any real path → nil (proceed). Each assertion can genuinely fail.
+@Test func testUntitledSaveFailFast_deterministicTriState() throws {
+    #expect(AppleScriptChannel.untitledSaveFailFast(documentPath: nil) != nil)
+    #expect(AppleScriptChannel.untitledSaveFailFast(documentPath: "") != nil)
+    #expect(AppleScriptChannel.untitledSaveFailFast(documentPath: "  \n ") != nil)
+    // Titled → no fail-fast (proceed to the verified-save path).
+    #expect(AppleScriptChannel.untitledSaveFailFast(documentPath: "/Users/x/A.logicx") == nil)
+
+    // The State C it builds is the typed, terminal envelope the router surfaces.
+    let failFast = try #require(AppleScriptChannel.untitledSaveFailFast(documentPath: nil))
+    #expect(!failFast.isSuccess)
+    #expect(HonestContract.isTerminalStateC(failFast.message))
+    #expect(HonestContract.stateCErrorCode(failFast.message) == "unsupported_state")
+}
+
+// MARK: - #144 (B) — project.new observed_name enrichment
+
+/// `project.new` carries the observed new-document name (the raw script output)
+/// into the State-B envelope, while staying verified:false (no real readback).
+@Test func testAppleScriptProjectNewAttachesObservedName() async throws {
+    let recorder = AppleScriptRecorder()
+    await recorder.setResult(.success("Untitled 17"))
+    let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(scriptRecorder: recorder))
+
+    let result = await channel.execute(operation: "project.new", params: [:])
+
+    #expect(result.isSuccess)
+    let obj = try JSONSerialization.jsonObject(
+        with: Data(result.message.utf8), options: []
+    ) as! [String: Any]
+    let success = try #require(obj["success"] as? Bool)
+    #expect(success)
+    let verified = try #require(obj["verified"] as? Bool)
+    #expect(!verified) // still unverified — observed_name is evidence, not proof
+    #expect(obj["reason"] as? String == "readback_unavailable")
+    #expect(obj["observed_name"] as? String == "Untitled 17")
+}
+
+/// newProjectExtras is the deterministic seam: a real name → observed_name; a
+/// script error or blank name → no observed_name (envelope unchanged).
+@Test func testNewProjectExtras_deterministic() {
+    #expect(AppleScriptChannel.newProjectExtras(.success("Untitled 4"))["observed_name"] as? String == "Untitled 4")
+    #expect(AppleScriptChannel.newProjectExtras(.success("  Demo  "))["observed_name"] as? String == "Demo")
+    #expect(AppleScriptChannel.newProjectExtras(.success("   "))["observed_name"] == nil)
+    #expect(AppleScriptChannel.newProjectExtras(.error("boom"))["observed_name"] == nil)
+    // runScript wraps the value as {"result":"<name>"}; observed_name must be the
+    // bare unwrapped name, not the raw JSON envelope.
+    #expect(AppleScriptChannel.newProjectExtras(.success("{\"result\":\"Untitled\"}"))["observed_name"] as? String == "Untitled")
+    #expect(AppleScriptChannel.newProjectExtras(.success("{\"result\":\"\"}"))["observed_name"] == nil)
 }

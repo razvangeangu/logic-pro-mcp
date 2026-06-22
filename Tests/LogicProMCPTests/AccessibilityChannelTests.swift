@@ -443,7 +443,11 @@ private func makeSetInstrumentFixture() -> (
         ("mixer.set_output", "I/O routing not yet implemented via AX"),
         ("mixer.toggle_eq", "EQ toggle not yet implemented via AX"),
         ("mixer.reset_strip", "Strip reset not yet implemented via AX"),
-        ("nav.rename_marker", "Marker renaming not yet implemented via AX"),
+        // Issue #143: rename_marker now returns a State C envelope with
+        // `error:"not_implemented"` (+ a create+delete workaround hint)
+        // instead of a plain free-form string, so the router surfaces it
+        // verbatim instead of re-wrapping it as `channels_exhausted`.
+        ("nav.rename_marker", "\"error\":\"not_implemented\""),
         ("region.select", "Region operations not yet implemented via AX"),
         ("plugin.list", "Plugin list reading not yet implemented via AX"),
         ("automation.get_mode", "Automation mode reading not yet implemented via AX"),
@@ -456,6 +460,36 @@ private func makeSetInstrumentFixture() -> (
         #expect(!result.isSuccess)
         #expect(result.message.contains(message), "Expected \(operation) to return '\(message)'")
     }
+}
+
+// Issue #143 — `nav.rename_marker` short-circuits inside the operation
+// switch (it never touches the AX tree), so the default runtime suffices.
+// It must emit an explicit State C `not_implemented` envelope with a
+// create+delete workaround hint — NOT a free-form string that the router
+// would re-wrap as `channels_exhausted` (which conflates "feature not built"
+// with "all channels failed").
+@Test func testRenameMarkerReturnsNotImplementedEnvelope() async {
+    let channel = AccessibilityChannel(runtime: makeAccessibilityRuntime())
+
+    let result = await channel.execute(
+        operation: "nav.rename_marker",
+        params: ["index": "2", "name": "Big Chorus"]
+    )
+
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["error"] as? String == "not_implemented")
+    let hint = obj["hint"] as? String ?? ""
+    #expect(hint.contains("delete_marker"), "expected create+delete workaround hint, got: \(hint)")
+    #expect(hint.contains("create_marker"), "expected create+delete workaround hint, got: \(hint)")
+
+    // `not_implemented` is in `terminalErrorCodes`, so the router classifies
+    // this as terminal and surfaces it verbatim (no `channels_exhausted`).
+    #expect(
+        HonestContract.isTerminalStateC(result.message),
+        "rename_marker State C must be terminal so the router skips fallback"
+    )
 }
 
 @Test func testAccessibilityChannelAXBackedRegionReadReturnsParsedRegions() async throws {
@@ -1057,7 +1091,7 @@ private func makeSetInstrumentFixture() -> (
         path: tempFile.path,
         executeScript: { _ in .success("OK") },
         trackCount: { 3 },
-        settle: {}
+        deltaPoll: {}
     )
 
     #expect(!result.isSuccess)
@@ -1084,12 +1118,167 @@ private func makeSetInstrumentFixture() -> (
         path: tempFile.path,
         executeScript: { _ in .success("OK") },
         trackCount: { counter.next() },
-        settle: {}
+        trackNames: { ["Studio Grand", "01 Felt Keys"] },
+        deltaPoll: {}
     )
 
     #expect(result.isSuccess)
     #expect(result.message.contains("\"verified\":true"))
     #expect(result.message.contains("\"observed_delta\":1"))
+}
+
+// MARK: - #128 GM Device audibility downgrade
+
+@Test func testGMDeviceLanesAmongNewTracksClassifiesOnlyNewExternalMIDILanes() {
+    // Pre-existing GM Device track must NOT trip the gate; only the newly
+    // appended lanes are inspected.
+    let preExistingGM = AccessibilityChannel.gmDeviceLanesAmongNewTracks(
+        names: ["GM Device 1", "01 Felt Keys"],
+        beforeCount: 1
+    )
+    #expect(preExistingGM.isEmpty)
+
+    // A newly appended GM Device lane IS flagged.
+    let newGM = AccessibilityChannel.gmDeviceLanesAmongNewTracks(
+        names: ["Studio Grand", "GM Device 1", "GM Device 2"],
+        beforeCount: 1
+    )
+    #expect(newGM == ["GM Device 1", "GM Device 2"])
+
+    // A Software Instrument track whose user name happens to contain "midi"
+    // (but not the literal lane tokens) must NOT be flagged.
+    let benignName = AccessibilityChannel.gmDeviceLanesAmongNewTracks(
+        names: ["Studio Grand", "MIDI Bass Lead"],
+        beforeCount: 1
+    )
+    #expect(benignName.isEmpty)
+
+    // External MIDI / External Instrument tokens are flagged too.
+    let external = AccessibilityChannel.gmDeviceLanesAmongNewTracks(
+        names: ["Studio Grand", "External MIDI 3"],
+        beforeCount: 1
+    )
+    #expect(external == ["External MIDI 3"])
+}
+
+@Test func testAccessibilityChannelImportMIDIFileDowngradesToStateBOnGMDeviceLanes() async throws {
+    let tempFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LogicProMCP-import-gmdevice-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile)
+    defer { try? FileManager.default.removeItem(at: tempFile) }
+
+    final class Counter: @unchecked Sendable {
+        var values = [1, 7]
+        func next() -> Int { values.removeFirst() }
+    }
+    let counter = Counter()
+
+    let result = await AccessibilityChannel.defaultImportMIDIFile(
+        path: tempFile.path,
+        executeScript: { _ in .success("OK TEMPO_SEEN") },
+        trackCount: { counter.next() },
+        trackNames: {
+            ["Studio Grand", "GM Device 1", "GM Device 2", "GM Device 3",
+             "GM Device 4", "GM Device 5", "GM Device 6"]
+        },
+        deltaPoll: {}
+    )
+
+    // State B: success but NOT verified — count delta alone is not audible.
+    #expect(result.isSuccess, "GM-Device import is a soft success (State B), not a hard failure")
+    let obj = decodeAccessibilityJSON(result.message)
+    let success = try #require(obj["success"] as? Bool)
+    #expect(success)
+    let verified = try #require(obj["verified"] as? Bool)
+    #expect(!verified)
+    #expect(obj["reason"] as? String == "imported_as_gm_device")
+    let audible = try #require(obj["audible"] as? Bool)
+    #expect(!audible)
+    let gmLanes = try #require(obj["gm_device_lanes"] as? [String])
+    #expect(gmLanes.count == 6)
+    let hint = try #require(obj["hint"] as? String)
+    #expect(hint.contains("GM Device"))
+    // Dialog-seen flags are surfaced even on the downgrade path.
+    let tempoSeen = try #require(obj["tempo_dialog_seen"] as? Bool)
+    #expect(tempoSeen)
+}
+
+@Test func testAccessibilityChannelImportMIDIFileStateAWhenLanesAreSoftwareInstruments() async throws {
+    let tempFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LogicProMCP-import-si-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile)
+    defer { try? FileManager.default.removeItem(at: tempFile) }
+
+    final class Counter: @unchecked Sendable {
+        var values = [1, 2]
+        func next() -> Int { values.removeFirst() }
+    }
+    let counter = Counter()
+
+    let result = await AccessibilityChannel.defaultImportMIDIFile(
+        path: tempFile.path,
+        executeScript: { _ in .success("OK") },
+        trackCount: { counter.next() },
+        trackNames: { ["Studio Grand", "01 Felt Keys"] },
+        deltaPoll: {}
+    )
+
+    #expect(result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    let verified = try #require(obj["verified"] as? Bool)
+    #expect(verified)
+    #expect(obj["reason"] == nil)
+    let fileOpenSeen = try #require(obj["file_open_dialog_seen"] as? Bool)
+    #expect(fileOpenSeen)
+}
+
+// MARK: - #140 file-open dialog poll / dialog_not_found
+
+@Test func testAccessibilityChannelImportMIDIFileReturnsDialogNotFoundWhenSheetNeverAppears() async throws {
+    let tempFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LogicProMCP-import-nodialog-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile)
+    defer { try? FileManager.default.removeItem(at: tempFile) }
+
+    final class CountSpy: @unchecked Sendable {
+        var reads = 0
+        func read() -> Int { reads += 1; return 5 }
+    }
+    let spy = CountSpy()
+
+    let result = await AccessibilityChannel.defaultImportMIDIFile(
+        path: tempFile.path,
+        executeScript: { _ in .success("DIALOG_NOT_FOUND: file-open sheet did not appear") },
+        trackCount: { spy.read() },
+        trackNames: { [] },
+        deltaPoll: {}
+    )
+
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["error"] as? String == "dialog_not_found")
+    #expect(obj["missing_element"] as? String == "file_open_sheet")
+    let fileOpenSeen = try #require(obj["file_open_dialog_seen"] as? Bool)
+    #expect(!fileOpenSeen)
+    // dialog_not_found is terminal — the router must not fall through to a
+    // vacuous next-channel success.
+    #expect(HonestContract.terminalErrorCodes.contains("dialog_not_found"))
+    // No track-count delta should be read once we know the dialog never opened:
+    // the path keystroke was never issued so there is no import to verify.
+    #expect(spy.reads == 1, "only the before-count read should occur on the dialog_not_found path")
+}
+
+@Test func testAccessibilityChannelImportMIDIFileMissingFileShortCircuits() async throws {
+    let result = await AccessibilityChannel.defaultImportMIDIFile(
+        path: "/tmp/LogicProMCP/does-not-exist-\(UUID().uuidString).mid",
+        executeScript: { _ in .success("OK") },
+        trackCount: { 0 },
+        trackNames: { [] },
+        deltaPoll: {}
+    )
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["error"] as? String == "invalid_params")
 }
 
 @Test func testAccessibilityChannelValidatedMIDIImportPathAcceptsManagedTempMID() throws {
