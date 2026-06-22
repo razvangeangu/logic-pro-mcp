@@ -343,7 +343,9 @@ struct SystemDispatcher {
                   goto_marker       -> { index: Int } or { name: String }
                   create_marker     -> { name: String }
                   delete_marker     -> { index: Int }
-                  rename_marker     -> { index: Int, name: String }
+                  rename_marker     -> { index: Int, name: String } (UNSUPPORTED:
+                                       not implemented; returns State C
+                                       not_implemented — delete + create to rename)
                   zoom_to_fit       -> {}
                   set_zoom          -> { level: String } ("in", "out", "fit")
                   toggle_view       -> { view: String } (mixer, piano_roll, score,
