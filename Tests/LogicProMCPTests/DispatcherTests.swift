@@ -2257,6 +2257,45 @@ private actor SelectiveFailChannel: Channel {
     ])
 }
 
+@Test func testProjectDispatcherBounceBlocksExternalMIDIBeforeRouting() async throws {
+    let router = ChannelRouter()
+    let keyCmd = MockChannel(id: .midiKeyCommands)
+    await router.register(keyCmd)
+
+    let cache = StateCache()
+    await cache.updateTracks([
+        TrackState(id: 0, name: "GM Device 1", type: .externalMIDI),
+    ])
+    await cache.updateRegions([
+        RegionState(
+            id: "0:1:5:Lead",
+            name: "Lead",
+            trackIndex: 0,
+            startPosition: "1 1 1 1",
+            endPosition: "5 1 1 1",
+            length: "4 0 0 0"
+        ),
+    ])
+
+    let result = await ProjectDispatcher.handle(
+        command: "bounce",
+        params: ["confirmed": .bool(true)],
+        router: router,
+        cache: cache
+    )
+
+    let isError = try #require(result.isError)
+    #expect(isError)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect(object["success"] as? Bool == false)
+    #expect(object["error"] as? String == "export_readiness_blocked")
+    #expect(object["failure_stage"] as? String == "pre_bounce_audit")
+    #expect((object["blockers"] as? [String])?.contains("external_midi_regions_bounce_risk") == true)
+
+    let routedOps = await keyCmd.executedOps
+    #expect(routedOps.isEmpty)
+}
+
 @Test func testProjectDispatcherCloseHonoursSavingParameter() async {
     let router = ChannelRouter()
     let appleScript = MockChannel(id: .appleScript)

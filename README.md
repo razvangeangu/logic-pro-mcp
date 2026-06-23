@@ -241,6 +241,7 @@ Live E2E defaults to the release binary. Protocol/security assertions run on any
 - **Exact-slot plugin insertion** — `logic_plugins.insert_verified` targets the physical insert index returned by `get_inventory`, verifies the popup is anchored to that slot, and confirms success only by post-write inventory diff.
 - **Target-faithful navigation** — `goto_marker` returns `element_not_found` on a cold cache instead of advancing to the next marker.
 - **1-based MIDI channel** — `send_note`, `send_cc`, and `record_sequence` `ch` values accept 1..16 to match Logic's UI.
+- **Audible-bounce guardrails** — `record_sequence` refuses unverified GM Device / External MIDI imports, `logic://project/audit` marks External MIDI tracks with MIDI regions as export blockers, and `logic_project.bounce` refuses those blockers before opening the Bounce dialog.
 - **Audit phase split** — audit logs distinguish rejected calls, confirmation prompts, and executed route invocations.
 - **Verified project saves** — `project.save_as` verifies the target `.logicx` package exists and that existing packages advance modification time.
 - **Live project metadata** — `logic://project/info` promotes live transport tempo/sample-rate when available and falls back per-field to saved project metadata.
@@ -260,6 +261,7 @@ The repository ships `server.json` for the official MCP Registry metadata path. 
 
 - **Tempo typing**: `transport.set_tempo` falls back to slider increments when Logic's tempo display cannot accept text input; sub-10-BPM precision may require setting tempo manually once in Logic.
 - **MIDI region padding**: `record_sequence` regions start at bar 1 and extend to the target bar using inaudible padding; note timing inside the region is exact, but the region can look longer than the phrase.
+- **External MIDI bounce readiness**: MIDI regions on GM Device / External MIDI tracks are not accepted as audible-bounce evidence by project audit or `logic_project.bounce`. Move or recreate the material on Software Instrument tracks before claiming a verified Logic Bounce.
 - **MIDI Key Commands**: Logic 12.2 does not accept the legacy `.plist` Key Commands import; manual MIDI Learn remains required for keycmd-only operations.
 - **Markers**: `logic://markers` returns `[]` honestly when the Marker List window is closed on Logic 12.2; auto-opening that window is not shipped because it changes focus.
 - **Plugin parameter readback**: `logic_plugins.set_param_verified` live-verifies Compressor `threshold` through the open plugin window; arbitrary plugin parameters remain future work and fail closed with `unsupported_param_readback`.

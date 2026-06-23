@@ -11,7 +11,7 @@ struct ProjectDispatcher {
 
     static let tool = commandTool(
         name: "logic_project",
-        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions, export_plan, export_run, export_resume, audit, cleanup_plan, cleanup_apply. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); export_plan -> { projects: [absolute .logicx], output_root: String, artifacts?: [bounce|stem|preview|variant], collision_policy?: fail_if_exists|skip_existing } dry-run only; export_run -> { ...same as export_plan, confirmed: Bool } GUARDED execution (re-plans, opens, verifies project identity by readback, bounces, verifies each artifact on disk via logic_audio, records logic_pro_mcp_export_run.v1 with HC State A/B/C; never overwrites under fail_if_exists); export_resume -> { ...same as export_run } idempotent resume (skips already-present+verified artifacts, produces the rest); audit -> read-only project/session audit JSON; cleanup_plan -> read-only serializable cleanup plan JSON; cleanup_apply -> { step_id: String, confirmed: Bool, names?: \"newA,newB\" (CSV aligned to the step's target track indices) | new_name?: String (single target) } executes ONE supported mutating cleanup-plan step (currently rename_* only) through the existing track.rename path so it inherits AX readback + Honest Contract State A/B/C. Fails closed (State C) when confirmed!=true, the step is unknown/unsupported/non-mutating, the audit shows stale/occluded inventory or a track readback gap, or rename names are missing/mismatched. Deletion steps are unsupported by construction and are always refused; others -> {}.",
+        description: "Project lifecycle + read-only project state in Logic Pro. Commands: new, open, save, save_as, close, bounce, launch, quit, get_regions, export_plan, export_run, export_resume, audit, cleanup_plan, cleanup_apply. Params: open -> { path: String }; save_as -> { path: String }; close -> { saving?: \"yes\"|\"no\"|\"ask\" }; bounce/launch/quit -> {}; bounce requires confirmation and runs a pre-bounce project audit, returning `export_readiness_blocked` before opening the Bounce dialog if blockers such as `external_midi_regions_bounce_risk` are present; get_regions -> {} (returns JSON array of { name, trackIndex, startBar, endBar, kind, rawHelp } parsed from Logic's arrange area via AX); export_plan -> { projects: [absolute .logicx], output_root: String, artifacts?: [bounce|stem|preview|variant], collision_policy?: fail_if_exists|skip_existing } dry-run only; export_run -> { ...same as export_plan, confirmed: Bool } GUARDED execution (re-plans, opens, verifies project identity by readback, bounces, verifies each artifact on disk via logic_audio, records logic_pro_mcp_export_run.v1 with HC State A/B/C; never overwrites under fail_if_exists); export_resume -> { ...same as export_run } idempotent resume (skips already-present+verified artifacts, produces the rest); audit -> read-only project/session audit JSON; cleanup_plan -> read-only serializable cleanup plan JSON; cleanup_apply -> { step_id: String, confirmed: Bool, names?: \"newA,newB\" (CSV aligned to the step's target track indices) | new_name?: String (single target) } executes ONE supported mutating cleanup-plan step (currently rename_* only) through the existing track.rename path so it inherits AX readback + Honest Contract State A/B/C. Fails closed (State C) when confirmed!=true, the step is unknown/unsupported/non-mutating, the audit shows stale/occluded inventory or a track readback gap, or rename names are missing/mismatched. Deletion steps are unsupported by construction and are always refused; others -> {}.",
         commandDescription: "Project command to execute"
     )
 
@@ -235,6 +235,11 @@ struct ProjectDispatcher {
             if !confirmation.confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
+            }
+            let preflight = await ProjectSessionAudit.buildAudit(cache: cache)
+            if let block = bouncePreflightBlock(preflight) {
+                audit(command, phase: .rejected, reason: "export readiness blocked")
+                return block
             }
             audit(command, phase: .executed)
             let result = await router.route(operation: "project.bounce")
@@ -589,6 +594,42 @@ struct ProjectDispatcher {
         let command = (step.command ?? "").lowercased()
         if command.contains("delete") || command.contains("remove") { return true }
         return step.proposedOperation.lowercased().contains("delete ")
+    }
+
+    private static func bouncePreflightBlock(
+        _ report: ProjectSessionAudit.AuditReport
+    ) -> CallTool.Result? {
+        let blockers = report.evidence.exportReadiness.blockers
+        guard !blockers.isEmpty else { return nil }
+        let blockerFindings = report.findings
+            .filter { $0.severity == .blocker }
+            .map {
+                [
+                    "id": $0.id,
+                    "category": $0.category,
+                    "summary": $0.summary,
+                    "resource": $0.evidence.resource,
+                    "target": $0.evidence.target ?? "",
+                ]
+            }
+        let payload: [String: Any] = [
+            "success": false,
+            "verified": false,
+            "error": "export_readiness_blocked",
+            "failure_stage": "pre_bounce_audit",
+            "status": report.evidence.exportReadiness.status,
+            "blockers": blockers,
+            "blocker_findings": blockerFindings,
+            "hint": "logic_project.bounce refused before opening the Bounce dialog because project audit export readiness is blocked. Resolve blockers, then re-run logic_project.audit and bounce.",
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+            return toolTextResult(
+                "{\"success\":false,\"verified\":false,\"error\":\"export_readiness_blocked\",\"failure_stage\":\"pre_bounce_audit\"}",
+                isError: true
+            )
+        }
+        return toolTextResult(String(decoding: data, as: UTF8.self), isError: true)
     }
 
     /// Parse `tracks:0,1,2` (the plan's `target_identifier` form) into sorted,

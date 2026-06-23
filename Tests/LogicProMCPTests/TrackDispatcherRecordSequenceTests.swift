@@ -218,6 +218,70 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
     #expect(!tempoSeen)
 }
 
+@Test func testRecordSequenceFailsClosedOnGMDeviceImportDowngrade() async throws {
+    // #128 regression: PR #150 correctly downgraded the lower-level
+    // `midi.import_file` result to State B when Logic created GM Device lanes,
+    // but `record_sequence` only checked `importResult.isSuccess`. It then
+    // verified region readback and re-promoted the take to success, allowing a
+    // visually valid but external-MIDI arrangement to reach a silent Bounce.
+    let cache = StateCache()
+    await cache.updateDocumentState(true)
+
+    let importEnvelope = HonestContract.encodeStateB(
+        reason: .importedAsGMDevice,
+        extras: [
+            "requested": "/tmp/LogicProMCP/seq.mid",
+            "track_count_before": 1,
+            "track_count_after": 2,
+            "observed_delta": 1,
+            "audible": false,
+            "gm_device_lanes": ["GM Device 1"],
+            "imported_lanes": ["GM Device 1"],
+            "file_open_dialog_seen": true,
+            "tempo_dialog_seen": true,
+        ]
+    )
+
+    let router = ChannelRouter()
+    let ax = RecordingMockChannel(id: .accessibility, importResult: .success(importEnvelope))
+    await router.register(ax)
+
+    let trackCounts = SequentialIntBox([1, 2])
+    let regionReads = SequentialRegionReadBox([
+        .success([]),
+        .success([makeRegion(trackIndex: 1, startBar: 1, endBar: 2)]),
+    ])
+
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
+        params: ["notes": minimalNoteSpec(), "bar": .int(1)],
+        router: router,
+        cache: cache,
+        trackHeaderCount: { trackCounts.next() },
+        trackNameAt: { $0 == 1 ? "GM Device 1" : nil },
+        readRegions: { regionReads.next() },
+        settleReadback: {}
+    )
+
+    let isError = try #require(result.isError)
+    #expect(isError)
+
+    let object = recordSequenceJSONObject(result)
+    let success = try #require(object["success"] as? Bool)
+    #expect(!success)
+    let verified = try #require(object["verified"] as? Bool)
+    #expect(!verified)
+    #expect(object["error"] as? String == "audibility_unverified")
+    #expect(object["failure_stage"] as? String == "midi.import_file")
+    #expect(object["import_reason"] as? String == "imported_as_gm_device")
+    #expect(object["audible"] as? Bool == false)
+    #expect(object["gm_device_lanes"] as? [String] == ["GM Device 1"])
+    // No success-provenance leakage: region readback cannot override the
+    // lower-level audible-routing downgrade.
+    #expect(object["created_track"] == nil)
+    #expect(object["verify_source"] == nil)
+    #expect(object["recorded_to_track"] == nil)
+}
+
 @Test func testRecordSequenceReturnsVerifiedRegionReadbackPayload() async {
     let cache = StateCache()
     await cache.updateDocumentState(true)

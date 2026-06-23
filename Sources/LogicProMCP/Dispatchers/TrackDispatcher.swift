@@ -4,7 +4,7 @@ import MCP
 struct TrackDispatcher {
     static let tool = Tool(
         name: "logic_tracks",
-        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment; SMF end <= 3,600,000 ms), tempo?: Float } v3.0.8 SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call, then verifies the imported region by AX readback. Successful responses include `created_track`, `target_track_index`, `target_track_name`, `region_name`, `start_bar`, `end_bar`, `note_count`, and `verify_source`; structured error JSON distinguishes `import_failure`, `wrong_track_import`, `timing_mismatch`, and `unreadable_readback`. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`. The new track keeps Logic's default Software Instrument (Studio Grand piano on a fresh project); callers that want a specific patch must follow up with an explicit `set_instrument` AFTER ensuring the intended track is selected. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
+        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment; SMF end <= 3,600,000 ms), tempo?: Float } SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call, then verifies the imported region by AX readback. Successful responses include `created_track`, `target_track_index`, `target_track_name`, `region_name`, `start_bar`, `end_bar`, `note_count`, and `verify_source`; structured error JSON distinguishes `import_failure`, `audibility_unverified`, `import_unverified`, `wrong_track_import`, `timing_mismatch`, and `unreadable_readback`. If Logic imports GM Device / External MIDI lanes, record_sequence fails closed instead of promoting region readback to audible success. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`; callers that want a specific patch must follow up with explicit `set_instrument` on a Software Instrument track. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
         inputSchema: commandParamsToolSchema(commandDescription: "Track command to execute")
     )
 
@@ -722,6 +722,39 @@ struct TrackDispatcher {
                 if let innerError = inner["error"] as? String {
                     failure["import_error"] = innerError
                 }
+            }
+            return jsonToolTextResult(failure, isError: true)
+        }
+
+        if let inner = importMessageJSON(importResult.message),
+           (inner["verified"] as? Bool) == false {
+            let reason = (inner["reason"] as? String) ?? "import_unverified"
+            let audibilityDowngrade = reason == HonestContract.UncertainReason.importedAsGMDevice.rawValue
+            var failure: [String: Any] = [
+                "success": false,
+                "verified": false,
+                "error": audibilityDowngrade ? "audibility_unverified" : "import_unverified",
+                "failure_stage": "midi.import_file",
+                "import_reason": reason,
+                "bar": bar,
+                "note_count": events.count,
+                "method": "smf_import",
+                "detail": importResult.message,
+                "hint": audibilityDowngrade
+                    ? "record_sequence imported GM Device / external-MIDI lane(s); region readback cannot prove audible routing, so the take is blocked before a silent Logic Bounce can be claimed."
+                    : "record_sequence import returned an unverified State B result; refusing to promote it to a verified take.",
+            ]
+            for key in [
+                "audible",
+                "gm_device_lanes",
+                "imported_lanes",
+                "track_count_before",
+                "track_count_after",
+                "observed_delta",
+                "file_open_dialog_seen",
+                "tempo_dialog_seen",
+            ] {
+                if let value = inner[key] { failure[key] = value }
             }
             return jsonToolTextResult(failure, isError: true)
         }
