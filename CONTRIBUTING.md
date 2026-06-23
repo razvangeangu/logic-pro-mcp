@@ -52,7 +52,7 @@ git clone https://github.com/MongLong0214/logic-pro-mcp.git
 cd logic-pro-mcp
 
 swift build              # debug
-swift test               # 1396 unit + integration tests on current v3.6.0 source
+swift test               # 1743 unit + integration tests on current v3.7.0 source
 swift build -c release   # release binary at .build/release/LogicProMCP
 ```
 
@@ -87,7 +87,7 @@ Live E2E is not required for docs-only PRs or unit-test-only PRs. If an issue re
 ```
 Sources/LogicProMCP/
 ├── Channels/          7 native channels (MCU, AX, AppleScript, CoreMIDI, CGEvent, MIDIKeyCmds, Scripter)
-├── Dispatchers/       9 MCP tool handlers (Transport, Tracks, Mixer, Plugins, MIDI, Edit, Navigate, Project, System)
+├── Dispatchers/       10 MCP tool handlers (Transport, Tracks, Mixer, Plugins, MIDI, Edit, Navigate, Project, Audio, System)
 ├── MIDI/              Protocol layer (MCU, MMC, SMF, NoteSequenceParser)
 ├── Accessibility/     AX helpers (AXHelpers, AXLogicProElements, AXValueExtractors)
 ├── State/             StateCache actor + StatePoller + models
@@ -95,7 +95,7 @@ Sources/LogicProMCP/
 ├── Server/            LogicProServer + ServerConfig
 └── Utilities/         DestructivePolicy, AppleScriptSafety, Logger, PermissionChecker
 
-Tests/LogicProMCPTests/  1396 tests across the Swift test target on the v3.6.0 source
+Tests/LogicProMCPTests/  1743 tests across the Swift test target on the v3.7.0 source
 Scripts/                 install / uninstall / live E2E / Scripter JS
 docs/                    SETUP, API, ARCHITECTURE, TROUBLESHOOTING, MAINTAINERS, live verification notes
 artifacts/               generated local artifacts; only final v4 MIDI-only package is allowed in git
@@ -152,7 +152,7 @@ If you cannot run a required gate, say so in the PR and explain why. Do not mark
 ## Pull Request Checklist
 
 - [ ] `swift build` clean
-- [ ] `swift test` green (all 1396 tests on current v3.6.0 source)
+- [ ] `swift test` green (all 1743 tests on current v3.7.0 source)
 - [ ] New behavior covered by at least one unit test
 - [ ] Changed production code keeps the global coverage floor green (`region >=70%`, `line >=78%`); high-risk Logic-facing changes target about 90% line coverage on the touched surface or document the live/manual evidence that substitutes for direct measurement
 - [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`; new MCP tools also require README, `docs/API.md`, `docs/ARCHITECTURE.md`, and release-note updates

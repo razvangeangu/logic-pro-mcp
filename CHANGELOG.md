@@ -8,9 +8,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [3.7.0] — 2026-06-23
+
+**Accumulated production hardening after v3.6.0.** This release publishes the full 10-tool / 18-resource / 11-template source tree after closing the v43 demo QA backlog, the issue #60 EN/KO locale-agnostic UI epic, and every open GitHub issue. It includes setup doctor/lifecycle surfaces, audio artifact analysis, project audit/export/session workflows, stock instrument and Session Player catalogs, stronger project/track/mixer/transport verification, fail-closed demo/render gates, and strict fresh live close-gate evidence in English and Korean.
+
+### Added
+
+- **Setup support surfaces** — `LogicProMCP doctor` / `doctor --json` expose read-only install, permission, MCP registration, Logic readiness, quarantine, and release-signature diagnostics with stable remediation anchors.
+- **Setup lifecycle plans** — install/update/uninstall dry-run commands now return serializable lifecycle plans instead of pretending to execute mutating setup work from the binary.
+- **Audio artifact analysis** — `logic_audio.analyze_file` verifies bounced/exported audio files for existence, format, duration, level, silence, and clipping before demo/render workflows can claim success.
+- **Project audit and cleanup planning** — `logic://project/audit`, `logic://project/cleanup-plan`, and guarded `cleanup_apply` provide project evidence, deterministic findings, export readiness, and reversible cleanup actions.
+- **Project export workflows** — export dry-run, `export_run`, and `export_resume` add manifest-backed export execution with guarded bounce integration.
+- **Planning catalogs** — stock instrument intelligence, Session Player catalog entries, workflow skills, and `logic://workflow-plans/session?prompt={prompt}` give agents read-only planning context without mutating Logic.
+- **Locale policy layer** — `AXLocalePolicy` centralizes EN/KO menu, dialog, control-bar, track, transport, mixer, plugin, region, and confirmation label matching.
+- **Demo/render safety tooling** — render asset guards, bounce guard, capture finalize policy, timeout policies, contact sheet/evidence manifests, and run-local issue coverage prevent silent or non-Logic demo output from being published as verified.
+- **GitHub project hygiene** — issue templates, PR template, label taxonomy, contributor onboarding, CI badge, registry metadata, and MCP publishing workflow metadata were added.
+
+### Changed
+
+- **Public surface synchronized to 10 tools / 18 resources / 11 templates** across `ServerConfig`, manifest, registry metadata, README, API, architecture, setup, security, maintainer, and version-consistency tests.
+- **Mixer volume and pan writes now route through Accessibility** with same-surface readback instead of MCU-only echo dependence; MCU remains for master/send style paths.
+- **Project save/new/open paths are more honest**: `project.save` verifies file evidence, `project.save` fails fast on untitled docs, and `project.new` unwraps observed names from AppleScript JSON envelopes.
+- **Transport and navigation outcomes are more explicit**: `pause` routes through working stop channels before MMC, `set_cycle_range` is demoted when unsupported, and `goto_position` / `goto_bar` no longer carry self-contradictory readback notes.
+- **Live E2E harness contract refreshed** to cover 341 strict fresh live checks per locale with zero skipped cases and without relying on System Events bootstrap permissions.
+- **MCP registry metadata updated** to publish current tool/resource/template counts, GitHub release URL, Homebrew instructions, icon, discovery tags, and runtime client config.
+
 ### Fixed
 
-- **`logic://project/info.trackCount` now follows trusted live track cache** when `ProjectInfo` is name-only and saved project metadata has no positive count. This keeps `logic://project/info` consistent with `logic://tracks` for unsaved or freshly edited Logic projects, while still rejecting Inspector-contaminated or placeholder track rows and preserving the resource layer as read-only.
+- `logic://project/info.trackCount` now follows trusted live track cache when saved project metadata is name-only or lacks a positive track count, while rejecting placeholder/Inspector-contaminated rows.
+- Track mutation commands now report honest State B/C when an occluded UI prevents verified readback.
+- Track mute/solo/arm now use AX checkbox locators with read-back-polled writes.
+- `set_instrument` now stops on Library panel preconditions, GM Device / External MIDI track-type mismatches, and bounded navigation deadlines instead of hanging or claiming repair.
+- MIDI import now tolerates `/private/tmp` aliases, polls file-open dialogs, returns `dialog_not_found` State C when appropriate, and downgrades GM-device audibility to State B when readback cannot prove sound.
+- `record_sequence` no longer reports false success after import failure.
+- `mixer.set_master_volume` reports honest State B with `surface_limitation` and uses AX-first mixer reveal where appropriate.
+- Plugin inventory reads recover hidden-mixer visibility more reliably.
+- `nav.rename_marker` returns typed `not_implemented` State C rather than misleading `channels_exhausted`.
+- Bounce/dialog paths verify the Bounce settings dialog appeared before clicking OK and reject "no record-enabled track" as a false precondition for shipped bounce paths.
+- Fresh Logic project bootstrap handles localized/free-tempo/don't-save dialogs, project picker confirmation, first software-instrument track creation, and no-System-Events UI readiness.
+- Demo render paths fail closed on failed bounce guards, stale issue coverage, invalid raw MP4s, non-Logic crops, streamability mux issues, and silent output.
+- MCU echo tests are deterministic under parallel load.
+- AX label matching is diacritic-sensitive for `.contains` and `.prefix`, preventing unsafe matches like accented `Undo` variants.
+
+### Tests
+
+- v3.7.0 release-tree local gates: `python3 Scripts/logic_session_bootstrap_test.py` -> `14` passed; `python3 Scripts/logic_free_tempo_modal_test.py` passed; `python3 -m py_compile Scripts/live-e2e-test.py Scripts/logic_session_bootstrap.py Scripts/logic_session_bootstrap_test.py Scripts/logic_free_tempo_modal.py Scripts/logic_free_tempo_modal_test.py` passed; `ruby -c Formula/logic-pro-mcp.rb` passed; `swift build -c release` passed; `swift test --no-parallel` -> `1743` passed.
+- Issue #60 close gate: `swift test --filter Issue60LocalePhase --no-parallel` -> `19` passed; `swift test --filter AXLocalePolicy --no-parallel` -> `25` passed; `swift test --filter AXLogicProElements --no-parallel` -> `24` passed.
+- Strict fresh live close gate: English `LOGIC_PRO_MCP_STRICT_LIVE=1 LOGIC_PRO_MCP_BOOTSTRAP_FRESH=1 LOGIC_PRO_MCP_BOOTSTRAP_LANGUAGE=en python3 Scripts/live-e2e-test.py` -> `341` passed / `0` skipped; Korean equivalent -> `341` passed / `0` skipped.
+- GitHub CI for PR #166 passed on build/test/coverage; main push CI after merge was in progress at release-prep start and is recorded in `docs/live-verify-v3.7.0.md`.
+
+Full exhaustive PR and issue listing lives in `docs/releases/v3.7.0.md`.
 
 ## [3.6.0] — 2026-06-19
 

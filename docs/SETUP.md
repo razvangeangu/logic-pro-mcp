@@ -9,7 +9,7 @@ Complete installation, Logic Pro integration, and verification. Should take ~10 
 - GitHub Actions/Homebrew release assets are universal (`arm64` + `x86_64`); historical local ADHOC prerelease cuts may still be arm64-only, so audit a specific tag via `RELEASE-METADATA.json` when needed
 - Claude Code or Claude Desktop
 
-2026-06-19 release note: `v3.6.0` is the current published stable GitHub Release. It includes PR #24 verified plugin apply-back and the Logic 12.2 AX readback fixes. Copy pins from the `v3.6.0` release's `SHA256SUMS.txt` and `RELEASE-METADATA.json` for the fail-closed installer path.
+2026-06-23 release note: `v3.7.0` is the current published stable GitHub Release. It includes the 10-tool / 18-resource / 11-template source tree, setup doctor/lifecycle commands, audio artifact analysis, project audit/export workflows, EN/KO locale hardening, and the v43 demo QA closure set. Copy pins from the `v3.7.0` release's `SHA256SUMS.txt` and `RELEASE-METADATA.json` for the fail-closed installer path.
 
 ---
 
@@ -30,7 +30,7 @@ Homebrew pins both the release tarball URL and its SHA256 in the formula, and Ho
 The installer is **fail-closed by default**: it refuses to run without explicit SHA256 + Team ID pins. Inspect the script first, verify the hash from the release's `SHA256SUMS.txt`, then execute:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.6.0/Scripts/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.7.0/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
 LOGIC_PRO_MCP_SHA256=<hex from release SHA256SUMS.txt> \
 LOGIC_PRO_MCP_TEAM_ID=<team_id from RELEASE-METADATA.json> \
@@ -41,7 +41,7 @@ If you knowingly accept same-origin provenance (hash + Team ID fetched from the 
 
 ```bash
 LOGIC_PRO_MCP_ALLOW_SAME_ORIGIN=1 \
-bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.6.0/Scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.7.0/Scripts/install.sh)
 ```
 
 See [SECURITY.md §Installer trust model](../SECURITY.md#installer-trust-model) for the threat model.
@@ -324,7 +324,7 @@ These can be MIDI-Learned but no `logic_*` tool dispatches to them today. Tracke
 
 ---
 
-## 5. Verified Plugin Apply-Back (`logic_plugins`, v3.6.0)
+## 5. Verified Plugin Apply-Back (`logic_plugins`, v3.6.0+)
 
 `logic_plugins` is the verified plugin surface for duplicate-project apply-back workflows. It does **not** replace the MCU setup above, but it is the go-forward path for verified stock plugin insert and Compressor threshold write/readback.
 
@@ -453,7 +453,7 @@ Scripts/install.sh
 Refresh the installed binary to the version this build targets. Re-run the installer with a pinned version:
 
 ```bash
-LOGIC_PRO_MCP_VERSION=v3.6.0 Scripts/install.sh
+LOGIC_PRO_MCP_VERSION=v3.7.0 Scripts/install.sh
 ```
 
 <a id="lifecycle-binaryremove"></a>

@@ -1,6 +1,6 @@
 # PRD — v3.2 Sub-Bar Navigation (NG10) + Marker Provenance (Boomer P2-3)
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved implementation context.
 
 **Status**: Draft (v0.4 — boomer round 3 P1+P2 integrated)
 **Size**: L

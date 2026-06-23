@@ -73,7 +73,7 @@ Decision table for harnesses on State B `echo_timeout_<ms>ms`:
 | `true` | high (e.g. > 5000) | MCU pairing went stale mid-session. |
 | `true` | low (sub-second) | Connection healthy, but this specific fader/V-Pot echo didn't land — points at a Logic-build regression or bank-offset mismatch. |
 
-## HC v2 (`logic_plugins.*`, v3.6.0)
+## HC v2 (`logic_plugins.*`, v3.6.0+)
 
 The verified plugin apply-back surface uses a stricter envelope so clients can distinguish legacy best-effort plugin writes from readback-gated apply-back operations.
 
@@ -96,7 +96,7 @@ State C always includes `verified:false`, and mutating failures include `write_a
 | `logic_plugins.insert_verified` | The requested stock plugin is observed by post-write inventory diff at the requested physical insert slot. | Track selection, incomplete inventory, occupied slot, unanchored popup, exact leaf miss, wrong-slot mount, rollback failure, or timeout returns State C. |
 | `logic_plugins.set_param_verified` | The target AX slider is written and read back within tolerance. | Unsupported params fail before writing; post-write mismatch attempts rollback and returns State C `readback_mismatch`. |
 
-HC v2 is currently scoped to the `logic_plugins` tool only. The existing 8-tool surface keeps HC v1 wire shapes so legacy clients do not see a surprise schema change.
+HC v2 is currently scoped to the `logic_plugins` tool only. The other public tools keep HC v1 or legacy wire shapes so clients do not see a surprise schema change.
 
 ## Which operations return the 3-state contract
 
@@ -176,3 +176,4 @@ Violations:
 - **v3.1.0** — Initial Honest Contract introduced. T2–T8 tickets completed.
 - **v3.1.0 Ralph-2 fix** — MCU `pollFaderEcho` stale-cache false-positive blocked (send-time freshness stamp introduced); `track.select` mismatch reclassified as `readback_mismatch` (previously `retry_exhausted`); `scan_library {mode:both}` also updates `lastPanelScan`; `track.set_instrument` / `transport.set_cycle_range` State C `.error(...)` wrapping unified; resource envelope (`{cache_age_sec, fetched_at, data}` / `{source, root}`) correctly declared as a breaking change in CHANGELOG.
 - **v3.6.0** — `logic_plugins.*` introduces HC v2 for verified plugin apply-back: physical insert inventory, exact-slot stock plugin insertion, and Compressor threshold write/readback.
+- **v3.7.0** — keeps HC v2 scoped to `logic_plugins.*` while hardening project, track, mixer, transport, MIDI import, demo, and locale-gated behaviors around the existing State A/B/C boundary.

@@ -59,7 +59,7 @@ Legend — `↕` bidirectional, `↑` read, `↓` write.
 |-------|---------------|------|-----------|
 | **Transport** | MCP JSON-RPC framing via `swift-sdk` | stdio | Task-isolated |
 | **Server** | `LogicProServer` — composition root, handler wiring, lifecycle | `actor` | Actor |
-| **Dispatchers** | 9 MCP tool structs — argument coercion, destructive-policy / verified-op gating | `struct` | Immutable |
+| **Dispatchers** | 10 MCP tool structs — argument coercion, destructive-policy / verified-op gating | `struct` | Immutable |
 | **Routing** | `ChannelRouter` — priority chain selection, fallback, health checks | `actor` | Actor |
 | **Channels** | 7 communication channels, each wrapping one macOS API | `actor` | Actor per channel |
 | **State** | `StateCache` (store) + `StatePoller` (3s AX refresh) | `actor` | Actor |
@@ -131,8 +131,8 @@ The complete table is `ChannelRouter.v2RoutingTable` (90+ entries). Excerpt:
 |-----------|---------|----------------|-------|
 | `transport.play` | MCU | CoreMIDI → CGEvent | Bidirectional MCU preferred |
 | `transport.stop` | MCU | CoreMIDI → CGEvent → AppleScript | AppleScript whitelisted |
-| `mixer.set_volume` | **MCU** | *(none)* | **Requires MCU registration** |
-| `mixer.set_pan` | MCU | *(none)* | MCU-only |
+| `mixer.set_volume` | Accessibility | *(none)* | AX fader write + same-surface readback |
+| `mixer.set_pan` | Accessibility | *(none)* | AX pan write + same-surface readback |
 | `mixer.get_state` | MCU | Accessibility | AX fallback for read |
 | `plugin.get_inventory` | Accessibility | *(none)* | HC v2, physical insert inventory, no write |
 | `plugin.insert_verified` | Accessibility | *(none)* | HC v2, exact-slot popup + inventory diff |

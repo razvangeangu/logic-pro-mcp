@@ -1,6 +1,6 @@
 # Pipeline Status: v3.2 Sub-Bar Nav (NG10) + Marker Provenance
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved implementation context.
 
 **PRD**: docs/prd/PRD-v32-sub-bar-nav.md (v0.4 — Boomer ALL PASS round 4)
 **Size**: L

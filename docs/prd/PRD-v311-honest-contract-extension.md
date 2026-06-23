@@ -1,6 +1,6 @@
 # PRD — Logic Pro MCP v3.1.1 "Honest Contract" Extension + GUI-Click Elimination
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved implementation context.
 
 **Status**: Draft v0.2 (post-strategist REVISE)
 **Author**: Isaac (via Claude orchestrator)

@@ -17,7 +17,7 @@
       ]
     }
   ],
-  "version": "3.6.0",
+  "version": "3.7.0",
   "_meta": {
     "io.modelcontextprotocol.registry/publisher-provided": {
       "distribution": {
@@ -31,7 +31,7 @@
             "brew install logic-pro-mcp"
           ]
         },
-        "release": "https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.6.0"
+        "release": "https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.7.0"
       },
       "discovery": {
         "categories": [
@@ -77,9 +77,9 @@
         ]
       },
       "capabilities": {
-        "tools": 9,
-        "resources": 14,
-        "resourceTemplates": 7,
+        "tools": 10,
+        "resources": 18,
+        "resourceTemplates": 11,
         "controlChannels": [
           "MCU",
           "Accessibility",

@@ -90,7 +90,7 @@ The production census can only produce `inferred` and `manifested` (see `product
 
 `known_presets` stays empty unless preset names have provenance. For `manifested` entries it lists factory preset filenames harvested from the probed settings folder (capped at `preset_name_cap`, currently 12; the full set remains on disk at the provenance `source_path`).
 
-Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Insert paths are menu hints unless their own state says otherwise. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced. Entries with `safe_write_capabilities: "insert_only"` (Gain, Compressor, Channel EQ) match the `logic_plugins.insert_verified` allowlist for the v3.6.0 release line; everything else is discovery-only.
+Clients should prefer stable `id` values and treat `display_name` as user-facing text, not identity. Insert paths are menu hints unless their own state says otherwise. Parameter metadata remains conservative: no parameter is `verified` unless a readback path is evidenced. Entries with `safe_write_capabilities: "insert_only"` (Gain, Compressor, Channel EQ) match the `logic_plugins.insert_verified` allowlist for the v3.7.0 release line; everything else is discovery-only.
 
 ### Stock Instrument and Session Player Intelligence
 
@@ -369,7 +369,7 @@ If the primary arm fails, or if any disarm fails, the command returns `isError: 
 
 ## logic_plugins
 
-Verified plugin apply-back surface, added in `v3.6.0`. All three commands use **HC v2** (`hc_schema: 2`) — every response carries `state` (`"A"` / `"B"` / `"C"`), `hc_schema: 2`, and (for State C) `verified: false`. This tool routes exclusively through the Accessibility channel; there is no fallback chain. All HC v2 error codes are terminal.
+Verified plugin apply-back surface, added in `v3.6.0` and retained in `v3.7.0`. All three commands use **HC v2** (`hc_schema: 2`) — every response carries `state` (`"A"` / `"B"` / `"C"`), `hc_schema: 2`, and (for State C) `verified: false`. This tool routes exclusively through the Accessibility channel; there is no fallback chain. All HC v2 error codes are terminal.
 
 ### Commands
 

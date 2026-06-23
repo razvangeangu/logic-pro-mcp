@@ -1,6 +1,6 @@
 # Live Verification Runbook — v3.1.11 (Issue #9)
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved implementation context.
 
 **Verification timing**: Immediately before v3.1.11 release + for reproducing on user reports.
 **Target fix**: `parseMarkerListPosition` strict 4 + trailing punctuation strip + 1-based + ASCII narrow + mixed separator reject.

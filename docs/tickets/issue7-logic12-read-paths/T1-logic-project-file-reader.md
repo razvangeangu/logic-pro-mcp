@@ -1,6 +1,6 @@
 # T1: LogicProjectFileReader (plist parser + path hardening)
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue7-logic12-read-paths > US-1, US-2 (foundation)
 **Priority**: P1 (High)

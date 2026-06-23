@@ -107,7 +107,7 @@ The implementation should converge both paths around one shared lifecycle engine
   "schema": "logic_pro_mcp_doctor.v1",
   "overall": "ok|warn|fail|manual",
   "version": {
-    "installed": "v3.6.0",
+    "installed": "v3.7.0",
     "source": "homebrew|release|source|unknown",
     "path": "/usr/local/bin/LogicProMCP",
     "release_metadata": "ok|missing|mismatch|not_checked"

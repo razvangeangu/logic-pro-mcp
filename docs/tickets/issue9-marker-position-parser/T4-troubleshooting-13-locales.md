@@ -1,6 +1,6 @@
 # T4: TROUBLESHOOTING — 13 locales + missing Window menu entry
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue9 > AC-3.1 (Boomer P1-2)
 **Priority**: P1

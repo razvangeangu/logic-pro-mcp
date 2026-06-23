@@ -1,6 +1,6 @@
 # Verification Evidence — mixer-verification-honesty / Issues #10-13
 
-> Historical record for the v3.4.5/v3.4.6 mixer-verification cycle. Current release-candidate evidence lives in `docs/live-verify-v3.6.0.md`; published stable evidence lives in `docs/live-verify-v3.5.0.md`.
+> Historical record for the v3.4.5/v3.4.6 mixer-verification cycle. Current stable evidence lives in `docs/live-verify-v3.7.0.md`; previous stable evidence lives in `docs/live-verify-v3.6.0.md`.
 
 Date: 2026-06-09 KST
 Repo: `/Users/isaac/projects/logic-pro-mcp`

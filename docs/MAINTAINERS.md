@@ -37,8 +37,8 @@ Revoke whenever the preset is removed, the Scripter instance is removed, or the 
 ### ADHOC release (no Apple Developer Program)
 
 ```bash
-Scripts/release-stable.sh v3.6.0
-Scripts/release.sh v3.6.0-rc1
+Scripts/release-stable.sh v3.7.0
+Scripts/release.sh v3.7.0-rc1
 ```
 
 Apple Developer ID is optional for this project. `Scripts/release-stable.sh` publishes a stable tag after clean-main, duplicate tag/release, test, and build preflight. `.github/workflows/release.yml` then builds a universal binary, ADHOC-signs it when Developer ID credentials are absent, publishes both tarball aliases, writes `RELEASE-METADATA.json` with `team_id:"ADHOC"` / `signing:"adhoc"`, and runs installer validation on macOS 14 and macOS 15.
@@ -60,7 +60,7 @@ If Developer ID credentials are ever configured, the same workflow automatically
 Release:
 
 ```bash
-Scripts/release-stable.sh v3.6.0
+Scripts/release-stable.sh v3.7.0
 ```
 
 Do not push stable tags manually. `Scripts/release-stable.sh` verifies a clean `main` branch matching `origin/main`, absent local/remote tags, absent GitHub Release, and local deterministic gates before it creates and pushes the stable tag.
@@ -80,7 +80,7 @@ For new or changed production code, treat the global gate as a regression floor,
 After the GitHub release is published, verify that the Homebrew formula points at the published universal tarball SHA256. If it still points at the old hash, update it:
 
 ```bash
-VERSION=v3.6.0
+VERSION=v3.7.0
 curl -fsSL "https://github.com/MongLong0214/logic-pro-mcp/releases/download/$VERSION/SHA256SUMS.txt" \
     | awk '$2 == "LogicProMCP-macOS-universal.tar.gz" {print $1}'
 # copy the hex into Formula/logic-pro-mcp.rb `sha256 "…"`

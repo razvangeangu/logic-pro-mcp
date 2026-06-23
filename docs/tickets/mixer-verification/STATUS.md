@@ -1,6 +1,6 @@
 # Pipeline Status: mixer-verification-honesty (Issues #10–13 → v3.4.6)
 
-> **Historical record (v3.4.6 cycle, closed 2026-06-09).** Counts and coverage figures below are as-of-then evidence; current release-candidate verification figures live in `README.md` § Verification and `docs/live-verify-v3.6.0.md`.
+> **Historical record (v3.4.6 cycle, closed 2026-06-09).** Counts and coverage figures below are as-of-then evidence; current stable verification figures live in `README.md` § Verification and `docs/live-verify-v3.7.0.md`.
 
 **PRD**: docs/prd/PRD-mixer-verification-honesty.md (v0.2 Approved)
 **Tickets**: docs/tickets/mixer-verification/TICKETS.md

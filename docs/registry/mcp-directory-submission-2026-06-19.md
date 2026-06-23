@@ -2,18 +2,18 @@
 
 Date: 2026-06-19
 Repo: https://github.com/MongLong0214/logic-pro-mcp
-Version: v3.6.0
-Status: Official MCP Registry published; downstream directories pending ingestion or review.
+Version: v3.7.0
+Status: Official MCP Registry v3.6.0 published; v3.7.0 metadata refresh staged through release workflow; downstream directories pending ingestion or review.
 
 This is the reusable listing package for MCP discovery surfaces: the Official MCP Registry, GitHub MCP Registry, Glama, PulseMCP, and curated lists such as awesome-mcp-servers.
 
 ## Current Submission Status
 
-Checked: 2026-06-19 17:40 KST
+Checked: 2026-06-23 release prep
 
 | Surface | Status | Verification |
 |---------|--------|--------------|
-| Official MCP Registry | Published and active | `GET https://registry.modelcontextprotocol.io/v0/servers?search=io.github.MongLong0214%2Flogic-pro-mcp` returns one active latest `3.6.0` record with `publishedAt: 2026-06-19T08:01:15.103494Z`. A same-version metadata refresh after adding icon/discovery fields was rejected as a duplicate version, so those metadata improvements are staged for the next release publication. |
+| Official MCP Registry | v3.6.0 published; v3.7.0 refresh staged | `GET https://registry.modelcontextprotocol.io/v0/servers?search=io.github.MongLong0214%2Flogic-pro-mcp` returned one active latest `3.6.0` record with `publishedAt: 2026-06-19T08:01:15.103494Z`. Root `server.json` is now staged for `3.7.0`; `.github/workflows/publish-mcp.yml` publishes metadata on GitHub Release publication. |
 | GitHub MCP Registry | Not visible yet | `https://github.com/mcp?search=Logic+Pro+MCP` shows no matching MCPs. GitHub's public docs/blog describe this surface as curated; after official publication, the listed inclusion path is an email request to `partnerships@github.com`. |
 | Glama | Not visible yet | `https://glama.ai/mcp/servers?query=logic%20pro%20mcp` does not show this server, and `https://glama.ai/mcp/servers/MongLong0214/logic-pro-mcp` returns 404. The unauthenticated submit endpoint redirects to sign-up, and the UI sign-up path is protected by reCAPTCHA. |
 | PulseMCP | Existing community listing; official registry ingest pending | `https://www.pulsemcp.com/servers/monglong-logic-pro` is live, but still uses `com.pulsemcp.mirror/monglong-logic-pro`. PulseMCP's submit page says official-registry entries are ingested daily and processed weekly; listing adjustments go through `hello@pulsemcp.com`. |
@@ -25,21 +25,21 @@ Checked: 2026-06-19 17:40 KST
 - Registry name: `io.github.MongLong0214/logic-pro-mcp`
 - One-line description: Local MCP server for stateful, fail-closed Logic Pro control and live project readback.
 - Repository: https://github.com/MongLong0214/logic-pro-mcp
-- Release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.6.0
+- Release: https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v3.7.0
 - License: MIT
 - Platform: macOS 14+
 - Logic Pro: 12.0.1+
 - MCP transport: stdio
 - Command: `LogicProMCP`
 - Stable install path: Homebrew tap plus pinned GitHub release artifact
-- Surface: 9 tools, 14 resources, 7 resource templates, 7 native macOS control channels
+- Surface: 10 tools, 18 resources, 11 resource templates, 7 native macOS control channels
 - Icon: https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/main/docs/media/logic-pro-mcp-thumbnail.png
 
 ## Official MCP Registry
 
-Root `server.json` has been published to the Official MCP Registry for `io.github.MongLong0214/logic-pro-mcp` version `3.6.0`.
+Root `server.json` has been published to the Official MCP Registry for `io.github.MongLong0214/logic-pro-mcp` version `3.6.0`; v3.7.0 metadata is staged in this repo and should publish from the release workflow.
 
-The registry rejects duplicate publication of the same version, so `3.6.0` cannot be republished just to refresh metadata fields. Icon/discovery metadata added after the first `3.6.0` publish should go out with the next release version.
+The registry rejects duplicate publication of the same version, so `3.6.0` cannot be republished just to refresh metadata fields. Icon/discovery metadata added after the first `3.6.0` publish is now carried by the v3.7.0 staged metadata.
 
 Important fit note: the official registry package types currently cover npm, PyPI, NuGet, Cargo, OCI, and MCPB. This project is currently distributed as a macOS Homebrew formula plus GitHub release tarball. Because Homebrew/GitHub release tarballs are not first-class official package types, the current `server.json` is intentionally metadata-only: it uses `websiteUrl`, `repository`, and publisher-provided install metadata instead of a `packages` entry.
 
@@ -124,7 +124,7 @@ Safety notes:
 - Requires macOS Accessibility and Automation permissions.
 - Destructive project operations require confirmation metadata.
 - High-risk operations use Honest Contract envelopes: confirmed, uncertain, or failed.
-- Published v3.6.0 artifacts are universal macOS binaries with release SHA evidence.
+- Published v3.7.0 artifacts are universal macOS binaries with release SHA evidence.
 
 ## Awesome List Entry
 
@@ -135,7 +135,7 @@ Safety notes:
 ## Glama / PulseMCP Submission Text
 
 ```text
-Logic Pro MCP is a local macOS MCP server for controlling Logic Pro from Claude, Cursor, and other MCP clients. It exposes 9 action tools, 14 read resources, and 7 resource templates across native macOS control channels, with an explicit honest-contract model for confirmed, uncertain, and failed operations. Use it when an agent needs to inspect or operate Logic sessions without pretending that fragile UI automation is verified state.
+Logic Pro MCP is a local macOS MCP server for controlling Logic Pro from Claude, Cursor, and other MCP clients. It exposes 10 tools, 18 read resources, and 11 resource templates across native macOS control channels, with an explicit honest-contract model for confirmed, uncertain, and failed operations. Use it when an agent needs to inspect or operate Logic sessions without pretending that fragile UI automation is verified state.
 ```
 
 PulseMCP note: PulseMCP's submit page says it ingests the Official MCP Registry daily and processes entries weekly; direct manual server submissions should use email only after a week or for listing adjustments.
@@ -153,5 +153,5 @@ Logic Pro MCP connects MCP clients to Logic Pro through a local stdio server. It
 - Confirm root `server.json` remains valid against the official schema.
 - Keep repository topics aligned with the tags above.
 - Keep README top section aligned with the directory short description.
-- Verify the v3.6.0 release URL and Homebrew formula SHA before publishing.
+- Verify the v3.7.0 release URL and Homebrew formula SHA before publishing.
 - Verify downstream directory ingestion by searching GitHub MCP Registry, Glama, and PulseMCP for `Logic Pro MCP`.

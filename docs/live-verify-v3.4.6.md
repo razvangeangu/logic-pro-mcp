@@ -1,6 +1,6 @@
 # Live Verification — v3.4.6
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved release evidence for v3.4.6.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved release evidence for v3.4.6.
 
 Date: 2026-06-09 KST
 Scope: stable `v3.4.6` release tag, then-current mainline source, local deterministic gates, published GitHub Release artifacts, and carried Logic Pro 12.2 live evidence from the final v3.4.6-cycle mixer attestation.

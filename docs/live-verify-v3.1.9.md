@@ -1,6 +1,6 @@
 # Live Verification Runbook — v3.1.9 (Logic Pro 12.2 markers)
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved implementation context.
 
 This runbook captures the **manual + automated verification matrix** used to ship v3.1.9 (Issue #8 follow-up to v3.1.8 #7 fix). Use it after every release that touches `enumerateMarkers`, `LogicProjectFileReader`, `ResourceHandlers.readMarkers/readTracks/readProjectInfo`, or the `StateCache.update*` invariants.
 

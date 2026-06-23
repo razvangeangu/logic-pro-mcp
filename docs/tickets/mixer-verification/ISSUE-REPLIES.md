@@ -1,6 +1,6 @@
 # Issue replies — #10–13 final status (v3.4.5, superseded by v3.4.6 evidence sync)
 
-> Historical state: `v3.4.6` was the evidence/packaging alignment release after `v3.4.5`; issues #10-#13 remain closed as completed after final verification. Published stable evidence now lives in `docs/live-verify-v3.5.0.md`; current release-candidate evidence lives in `docs/live-verify-v3.6.0.md`. Artifacts are ADHOC-signed when Developer ID credentials are absent and are accompanied by `SHA256SUMS.txt` plus `RELEASE-METADATA.json`.
+> Historical state: `v3.4.6` was the evidence/packaging alignment release after `v3.4.5`; issues #10-#13 remain closed as completed after final verification. Current stable evidence lives in `docs/live-verify-v3.7.0.md`; previous stable evidence lives in `docs/live-verify-v3.6.0.md`. Artifacts are ADHOC-signed when Developer ID credentials are absent and are accompanied by `SHA256SUMS.txt` plus `RELEASE-METADATA.json`.
 
 Source tag: https://github.com/MongLong0214/logic-pro-mcp/tree/v3.4.5
 Commit: https://github.com/MongLong0214/logic-pro-mcp/commit/22c7d39fb4f5eadd5c9b6dc6518831f45bbdebd7

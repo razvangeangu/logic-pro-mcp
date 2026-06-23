@@ -4,7 +4,7 @@ This guide covers the `logic_plugins` tool — the verified apply-back surface f
 
 **Audience:** Thomas apply_moves workflow and any caller that needs to read a plugin's insert state and write back a parameter value to a duplicate project.
 
-**Release line:** `logic_plugins` is the `v3.6.0` release-targeted public tool surface. Published `v3.5.0` installs do not include this tool.
+**Release line:** `logic_plugins` was introduced in the `v3.6.0` public tool surface and remains current in `v3.7.0`. Published `v3.5.0` installs do not include this tool.
 
 ---
 

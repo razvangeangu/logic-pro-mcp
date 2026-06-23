@@ -1,6 +1,6 @@
 # T4: ChannelRouter `bypassReadinessOps` + available==false `.portUnavailable` branch
 
-> Historical record. Current release-candidate evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.6.0.md`; published stable evidence remains in `docs/live-verify-v3.5.0.md`; this file remains preserved implementation context.
+> Historical record. Current stable evidence is in `README.md`, `CHANGELOG.md`, and `docs/live-verify-v3.7.0.md`; previous stable evidence remains in `docs/live-verify-v3.6.0.md`; this file remains preserved implementation context.
 
 **PRD Ref**: PRD-issue1-keycmd-port-routing > §3 AC-1.7, §4.1 step 6-7, §5 E7
 **Priority**: P0 (Blocker — core fix for Issue #1, breaks the KeyCmd seeding chicken-and-egg lock-in)

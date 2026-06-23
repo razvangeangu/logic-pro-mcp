@@ -58,7 +58,7 @@ head -40 /tmp/mcp-stderr.txt
 Look for lines like:
 - `MIDIPortManager started` — CoreMIDI initialized
 - `Accessibility channel started` — AX ready
-- `Starting logic-pro-mcp v3.5.0 — 8 tools, 14 resources, 7 channels` — composition complete
+- `Starting logic-pro-mcp v3.7.0 — 10 tools, 18 resources, 7 channels` — composition complete
 
 If you see `AccessibilityError.notTrusted`, grant Accessibility permission.
 
@@ -229,7 +229,7 @@ This is separate from placeholder mode. Current builds scan both the track-heade
 
 ---
 
-## Verified Plugin Apply-Back (`logic_plugins`, v3.6.0)
+## Verified Plugin Apply-Back (`logic_plugins`, v3.6.0+)
 
 ### `logic_plugins.get_inventory` returns State B `readback_unavailable`
 
