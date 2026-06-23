@@ -7,6 +7,7 @@ from logic_session_bootstrap import (
     UISnapshot,
     detect_language,
     evaluate_fresh_session,
+    _ui_snapshot_from_native_payload,
 )
 
 
@@ -29,6 +30,7 @@ def make_ui(**overrides):
         logic_window_names=["Untitled 1 - Tracks"],
         logic_menu_items=["File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "Window", "Help"],
         detected_language="en",
+        system_events_error=None,
         project_picker_visible=False,
         new_track_dialog_visible=False,
     )
@@ -172,6 +174,70 @@ class EvaluateFreshSessionTests(unittest.TestCase):
             config=make_config(),
         )
         self.assert_reason(assessment, "existing_regions_present")
+
+    def test_blocks_system_events_probe_failure_before_frontmost(self):
+        assessment = evaluate_fresh_session(
+            ui=make_ui(
+                frontmost_app=None,
+                logic_window_names=[],
+                logic_menu_items=[],
+                detected_language=None,
+                system_events_error="osascript_exit_1: Not authorized to send Apple events to System Events. (-1743)",
+            ),
+            health=make_health(),
+            project_payload=make_project(track_count=1),
+            tracks_payload=make_tracks(count=1),
+            region_count=0,
+            config=make_config(),
+        )
+        self.assert_reason(assessment, "system_events_unavailable")
+        self.assertIn("System Events", assessment.hint or "")
+
+    def test_native_ui_snapshot_payload_maps_language_and_modal_markers(self):
+        snapshot = _ui_snapshot_from_native_payload(
+            {
+                "frontmost_app": "Logic Pro",
+                "frontmost_bundle_id": "com.apple.logic10",
+                "logic_window_names": ["Untitled 1 - Tracks", "New Tracks"],
+                "logic_menu_items": ["Apple", "Logic Pro", "File", "Edit", "Track", "Navigate"],
+                "error": None,
+            }
+        )
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.detected_language, "en")
+        self.assertTrue(snapshot.new_track_dialog_visible)
+        self.assertFalse(snapshot.project_picker_visible)
+        self.assertIsNone(snapshot.system_events_error)
+
+    def test_native_ui_snapshot_payload_surfaces_ax_error(self):
+        snapshot = _ui_snapshot_from_native_payload(
+            {
+                "frontmost_app": "Logic Pro",
+                "frontmost_bundle_id": "com.apple.logic10",
+                "logic_window_names": [],
+                "logic_menu_items": [],
+                "error": "accessibility_not_trusted",
+            }
+        )
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.system_events_error, "accessibility_not_trusted")
+
+    def test_native_ui_snapshot_payload_normalizes_logic_bundle_frontmost_name(self):
+        snapshot = _ui_snapshot_from_native_payload(
+            {
+                "frontmost_app": "Logic\u00a0Pro",
+                "frontmost_bundle_id": "com.apple.logic10",
+                "logic_window_names": ["프로젝트 선택"],
+                "logic_menu_items": ["Apple", "Logic\u00a0Pro", "파일", "편집", "트랙"],
+                "error": None,
+            }
+        )
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.frontmost_app, "Logic Pro")
+        self.assertEqual(snapshot.detected_language, "ko")
 
 
 if __name__ == "__main__":
