@@ -25,6 +25,8 @@ Published artifact hashes and workflow IDs are recorded in `docs/releases/v3.7.0
 | Full Swift suite | PASS | `swift test --no-parallel` -> `1743` passed, `0` failed. |
 | PR #166 CI | PASS | GitHub Actions CI build/test/coverage for PR #166 succeeded. |
 | Stable release workflow | PASS | Release run `27997558936` passed build plus macOS 14/15 install validation. |
+| MCP Registry metadata publish | PASS | `Publish MCP Registry Metadata` run `27997872931` passed publisher download, metadata validation, GitHub OIDC login, and publish. |
+| Latest main CI | PASS | CI run `27997866679` on commit `56d711b2fa2669ff35872877adf3a64fcd9affda` passed build, tests, and coverage report. |
 
 ## Focused Close Gates
 
@@ -62,3 +64,4 @@ After `v3.7.0` tag publication:
 - Published assets include `LogicProMCP`, `LogicProMCP-macOS-universal.tar.gz`, `LogicProMCP-macOS-arm64.tar.gz`, `SHA256SUMS.txt`, and `RELEASE-METADATA.json`.
 - `RELEASE-METADATA.json` reports `version:"v3.7.0"` and `architectures:["x86_64","arm64"]`.
 - Formula SHA is synced from the published universal tarball SHA: `61a13ef9c59e95c2ac39803acc48019259abeba7e45a0e475ce24b9678b6be79`.
+- MCP Registry metadata publish passed after fixing the publisher latest-release URL.

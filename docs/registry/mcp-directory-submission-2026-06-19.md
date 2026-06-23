@@ -3,17 +3,17 @@
 Date: 2026-06-19
 Repo: https://github.com/MongLong0214/logic-pro-mcp
 Version: v3.7.0
-Status: Official MCP Registry v3.6.0 published; v3.7.0 metadata refresh staged through release workflow; downstream directories pending ingestion or review.
+Status: Official MCP Registry metadata refresh for v3.7.0 published via GitHub OIDC workflow; downstream directories pending ingestion or review.
 
 This is the reusable listing package for MCP discovery surfaces: the Official MCP Registry, GitHub MCP Registry, Glama, PulseMCP, and curated lists such as awesome-mcp-servers.
 
 ## Current Submission Status
 
-Checked: 2026-06-23 release prep
+Checked: 2026-06-23 v3.7.0 release
 
 | Surface | Status | Verification |
 |---------|--------|--------------|
-| Official MCP Registry | v3.6.0 published; v3.7.0 refresh staged | `GET https://registry.modelcontextprotocol.io/v0/servers?search=io.github.MongLong0214%2Flogic-pro-mcp` returned one active latest `3.6.0` record with `publishedAt: 2026-06-19T08:01:15.103494Z`. Root `server.json` is now staged for `3.7.0`; `.github/workflows/publish-mcp.yml` publishes metadata on GitHub Release publication. |
+| Official MCP Registry | v3.7.0 metadata publish workflow passed | Publish workflow run `27997872931` completed successfully: publisher download, metadata validation, GitHub OIDC login, and publish all passed. Root `server.json` is `3.7.0`. A prior manual run exposed a bad `releases/download/latest` publisher URL; commit `56d711b` fixed it to `releases/latest/download`. |
 | GitHub MCP Registry | Not visible yet | `https://github.com/mcp?search=Logic+Pro+MCP` shows no matching MCPs. GitHub's public docs/blog describe this surface as curated; after official publication, the listed inclusion path is an email request to `partnerships@github.com`. |
 | Glama | Not visible yet | `https://glama.ai/mcp/servers?query=logic%20pro%20mcp` does not show this server, and `https://glama.ai/mcp/servers/MongLong0214/logic-pro-mcp` returns 404. The unauthenticated submit endpoint redirects to sign-up, and the UI sign-up path is protected by reCAPTCHA. |
 | PulseMCP | Existing community listing; official registry ingest pending | `https://www.pulsemcp.com/servers/monglong-logic-pro` is live, but still uses `com.pulsemcp.mirror/monglong-logic-pro`. PulseMCP's submit page says official-registry entries are ingested daily and processed weekly; listing adjustments go through `hello@pulsemcp.com`. |
@@ -37,7 +37,7 @@ Checked: 2026-06-23 release prep
 
 ## Official MCP Registry
 
-Root `server.json` has been published to the Official MCP Registry for `io.github.MongLong0214/logic-pro-mcp` version `3.6.0`; v3.7.0 metadata is staged in this repo and should publish from the release workflow.
+Root `server.json` has been published to the Official MCP Registry for `io.github.MongLong0214/logic-pro-mcp`; v3.7.0 metadata publish workflow run `27997872931` passed on 2026-06-23.
 
 The registry rejects duplicate publication of the same version, so `3.6.0` cannot be republished just to refresh metadata fields. Icon/discovery metadata added after the first `3.6.0` publish is now carried by the v3.7.0 staged metadata.
 
