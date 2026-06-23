@@ -18,6 +18,7 @@ import time
 import uuid
 from pathlib import Path
 
+from logic_controller_learn_mode import DEFAULT_CONTROLLER_LEARN_MODE_POLICY, guard_controller_learn_mode
 from logic_session_bootstrap import bootstrap_fresh_logic_session
 from logic_free_tempo_modal import DEFAULT_FREE_TEMPO_POLICY, detect_free_tempo_modal, resolve_free_tempo_modal
 
@@ -354,6 +355,8 @@ def tool_text(resp):
 
 
 def is_error(resp):
+    if isinstance(resp, dict) and "gate" in resp:
+        return True
     try: return resp["result"].get("isError", False)
     except: return "error" in resp
 
@@ -372,6 +375,41 @@ def safe_json(text):
 def tool_json(resp):
     value = safe_json(tool_text(resp))
     return value if isinstance(value, dict) else None
+
+
+def controller_learn_guard_is_clear(result):
+    return isinstance(result, dict) and result.get("status") == "clear"
+
+
+def controller_learn_guard_reason(result):
+    if not isinstance(result, dict):
+        return "controller assignments Learn Mode guard returned no result"
+    status = result.get("status", "unknown")
+    reason = result.get("reason", status)
+    return f"controller assignments Learn Mode guard {status}: {reason}"
+
+
+def guarded_live_tool_call(client, tool, command, params=None, *, ready, reason, timeout=None):
+    if not ready:
+        return {
+            "gate": reason,
+            "policy_id": DEFAULT_CONTROLLER_LEARN_MODE_POLICY["policy_id"],
+            "tool": tool,
+            "command": command,
+        }
+    return call_tool(client, tool, command, params, timeout=timeout)
+
+
+def guarded_live_midi_call(client, command, params=None, *, ready, reason, timeout=None):
+    return guarded_live_tool_call(
+        client,
+        "logic_midi",
+        command,
+        params,
+        ready=ready,
+        reason=reason,
+        timeout=timeout,
+    )
 
 
 def verified_or_explicitly_unverified(resp):
@@ -796,6 +834,37 @@ def main():
     r = call_tool(client, "logic_system", "refresh_cache")
     T("system.refresh_cache succeeds", r, lambda _: not is_error(r))
 
+    controller_learn_guard = {
+        "status": "skipped",
+        "policy_id": DEFAULT_CONTROLLER_LEARN_MODE_POLICY["policy_id"],
+        "reason": "Logic Pro + Accessibility are required",
+    }
+    controller_learn_clear = False
+    controller_learn_reason = "Logic Pro + Accessibility are required"
+    if live_logic_ready:
+        controller_learn_guard = guard_controller_learn_mode()
+        controller_learn_clear = controller_learn_guard_is_clear(controller_learn_guard)
+        controller_learn_reason = (
+            "controller assignments Learn Mode guard clear"
+            if controller_learn_clear
+            else controller_learn_guard_reason(controller_learn_guard)
+        )
+
+    T_LIVE(
+        "controller assignments Learn Mode guard is clear",
+        {"result": controller_learn_guard},
+        lambda _: controller_learn_clear,
+        live_logic_ready,
+        controller_learn_reason,
+    )
+
+    midi_live_execute_ready = midi_live_ready and controller_learn_clear
+    midi_live_execute_reason = (
+        controller_learn_reason
+        if midi_live_ready and not controller_learn_clear
+        else "Logic Pro + CoreMIDI are required"
+    )
+
     # ═══════════════════════════════════════════════════════════════
     # §3 Transport Live Operations (20 tests)
     # ═══════════════════════════════════════════════════════════════
@@ -996,6 +1065,12 @@ def main():
         fresh_transport_live_ready, fresh_transport_reason = fresh_transport_bootstrap_status(client)
         if not fresh_transport_live_ready:
             fresh_transport_reason = f"fresh bootstrap not detected: {fresh_transport_reason}"
+    fresh_transport_execute_ready = fresh_transport_live_ready and controller_learn_clear
+    fresh_transport_execute_reason = (
+        controller_learn_reason
+        if fresh_transport_live_ready and not controller_learn_clear
+        else fresh_transport_reason
+    )
 
     select_for_record = {"gate": fresh_transport_reason}
     arm_for_record = {"gate": fresh_transport_reason}
@@ -1024,7 +1099,7 @@ def main():
     disarm_after_transport = {"gate": fresh_transport_reason}
     disarm_track = None
 
-    if fresh_transport_live_ready:
+    if fresh_transport_execute_ready:
         select_for_record = call_tool(client, "logic_tracks", "select", {"index": 0})
         arm_for_record = call_tool(client, "logic_tracks", "arm", {"index": 0, "enabled": True})
         arm_track = wait_for_track_arm(client, 0, True)
@@ -1036,7 +1111,13 @@ def main():
             lambda state: state.get("isPlaying") is False and state.get("isRecording") is False,
         )
 
-        record_resp = call_tool(client, "logic_transport", "record")
+        record_resp = guarded_live_tool_call(
+            client,
+            "logic_transport",
+            "record",
+            ready=fresh_transport_execute_ready,
+            reason=fresh_transport_execute_reason,
+        )
         record_env = tool_json(record_resp)
         record_state = wait_for_transport_state(
             client,
@@ -1090,18 +1171,25 @@ def main():
         fresh_transport_reason,
     )
     T_LIVE(
+        "controller assignments Learn Mode guard is clear before transport record",
+        {"result": controller_learn_guard},
+        lambda _: controller_learn_clear,
+        fresh_transport_live_ready,
+        fresh_transport_execute_reason,
+    )
+    T_LIVE(
         "transport record prep selects track 0",
         select_for_record,
         lambda _: not is_error(select_for_record),
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport record prep arms track 0",
         arm_for_record,
         lambda _: not is_error(arm_for_record) and isinstance(arm_track, dict) and arm_track.get("isArmed") is True,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport.stop returns verified unchanged when already stopped",
@@ -1113,8 +1201,8 @@ def main():
         and isinstance(stop_unchanged_state, dict)
         and stop_unchanged_state.get("isPlaying") is False
         and stop_unchanged_state.get("isRecording") is False,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport.record reaches verified recording state",
@@ -1125,8 +1213,8 @@ def main():
         and isinstance(record_state, dict)
         and record_state.get("isPlaying") is True
         and record_state.get("isRecording") is True,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport.stop reaches verified stopped state after record",
@@ -1137,8 +1225,8 @@ def main():
         and isinstance(stop_after_record_state, dict)
         and stop_after_record_state.get("isPlaying") is False
         and stop_after_record_state.get("isRecording") is False,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport.stop stays verified unchanged after record stop",
@@ -1150,8 +1238,8 @@ def main():
         and isinstance(stop_after_record_unchanged_state, dict)
         and stop_after_record_unchanged_state.get("isPlaying") is False
         and stop_after_record_unchanged_state.get("isRecording") is False,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport.play reaches verified playback state",
@@ -1162,8 +1250,8 @@ def main():
         and isinstance(play_state, dict)
         and play_state.get("isPlaying") is True
         and play_state.get("isRecording") is False,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport.play stays verified unchanged while already playing",
@@ -1175,8 +1263,8 @@ def main():
         and isinstance(play_unchanged_state, dict)
         and play_unchanged_state.get("isPlaying") is True
         and play_unchanged_state.get("isRecording") is False,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport.stop reaches verified stopped state after play",
@@ -1187,15 +1275,15 @@ def main():
         and isinstance(final_stop_state, dict)
         and final_stop_state.get("isPlaying") is False
         and final_stop_state.get("isRecording") is False,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
     T_LIVE(
         "transport record prep disarms track 0 after transport checks",
         disarm_after_transport,
         lambda _: not is_error(disarm_after_transport) and isinstance(disarm_track, dict) and disarm_track.get("isArmed") is False,
-        fresh_transport_live_ready,
-        fresh_transport_reason,
+        fresh_transport_execute_ready,
+        fresh_transport_execute_reason,
     )
 
     r = call_tool(client, "logic_transport", "toggle_count_in")
@@ -1643,76 +1731,181 @@ def main():
 
     # Note range
     for note in [0, 21, 60, 108, 127]:
-        r = call_tool(client, "logic_midi", "send_note", {"note": note, "velocity": 80, "duration_ms": 30})
-        T_LIVE(f"midi.send_note({note}) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+        r = guarded_live_midi_call(
+            client,
+            "send_note",
+            {"note": note, "velocity": 80, "duration_ms": 30},
+            ready=midi_live_execute_ready,
+            reason=midi_live_execute_reason,
+        )
+        T_LIVE(f"midi.send_note({note}) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Velocity range
     for vel in [1, 64, 127]:
-        r = call_tool(client, "logic_midi", "send_note", {"note": 60, "velocity": vel, "duration_ms": 30})
-        T_LIVE(f"midi.send_note vel={vel} succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+        r = guarded_live_midi_call(
+            client,
+            "send_note",
+            {"note": 60, "velocity": vel, "duration_ms": 30},
+            ready=midi_live_execute_ready,
+            reason=midi_live_execute_reason,
+        )
+        T_LIVE(f"midi.send_note vel={vel} succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Channel range
     for ch in [1, 8, 16]:
-        r = call_tool(client, "logic_midi", "send_note", {"note": 60, "channel": ch, "duration_ms": 30})
-        T_LIVE(f"midi.send_note ch={ch} succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+        r = guarded_live_midi_call(
+            client,
+            "send_note",
+            {"note": 60, "channel": ch, "duration_ms": 30},
+            ready=midi_live_execute_ready,
+            reason=midi_live_execute_reason,
+        )
+        T_LIVE(f"midi.send_note ch={ch} succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Chord
-    r = call_tool(client, "logic_midi", "send_chord", {"notes": "60,64,67", "duration_ms": 30})
-    T_LIVE("midi.send_chord C major succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_chord",
+        {"notes": "60,64,67", "duration_ms": 30},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.send_chord C major succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
-    r = call_tool(client, "logic_midi", "send_chord", {"notes": "60,63,67,70", "duration_ms": 30})
-    T_LIVE("midi.send_chord Cm7 succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_chord",
+        {"notes": "60,63,67,70", "duration_ms": 30},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.send_chord Cm7 succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # CC range
     for cc in [1, 7, 10, 11, 64, 120, 123]:
-        r = call_tool(client, "logic_midi", "send_cc", {"controller": cc, "value": 64})
-        T_LIVE(f"midi.send_cc({cc}) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+        r = guarded_live_midi_call(
+            client,
+            "send_cc",
+            {"controller": cc, "value": 64},
+            ready=midi_live_execute_ready,
+            reason=midi_live_execute_reason,
+        )
+        T_LIVE(f"midi.send_cc({cc}) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Program change
-    r = call_tool(client, "logic_midi", "send_program_change", {"program": 0})
-    T_LIVE("midi.send_program_change(0) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_program_change",
+        {"program": 0},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.send_program_change(0) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
-    r = call_tool(client, "logic_midi", "send_program_change", {"program": 127})
-    T_LIVE("midi.send_program_change(127) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_program_change",
+        {"program": 127},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.send_program_change(127) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Pitch bend
-    r = call_tool(client, "logic_midi", "send_pitch_bend", {"value": 8192})
-    T_LIVE("midi.send_pitch_bend(center) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_pitch_bend",
+        {"value": 8192},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.send_pitch_bend(center) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
-    r = call_tool(client, "logic_midi", "send_pitch_bend", {"value": 16383})
-    T_LIVE("midi.send_pitch_bend(max) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_pitch_bend",
+        {"value": 16383},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.send_pitch_bend(max) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Aftertouch
-    r = call_tool(client, "logic_midi", "send_aftertouch", {"value": 100})
-    T_LIVE("midi.send_aftertouch succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_aftertouch",
+        {"value": 100},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.send_aftertouch succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # MMC
-    r = call_tool(client, "logic_midi", "mmc_play")
-    T_LIVE("midi.mmc_play succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
-    call_tool(client, "logic_midi", "mmc_stop")  # restore
+    r = guarded_live_midi_call(
+        client,
+        "mmc_play",
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.mmc_play succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    guarded_live_midi_call(
+        client,
+        "mmc_stop",
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )  # restore
 
-    r = call_tool(client, "logic_midi", "mmc_stop")
-    T_LIVE("midi.mmc_stop succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "mmc_stop",
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.mmc_stop succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
-    r = call_tool(client, "logic_midi", "mmc_locate", {"bar": 1})
+    r = guarded_live_midi_call(
+        client,
+        "mmc_locate",
+        {"bar": 1},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
     T_LIVE(
         "midi.mmc_locate(bar=1) verifies or reports readback mismatch",
         r,
         lambda _: verified_or_readback_mismatch(r),
-        live_logic_ready,
-        "Logic Pro + Accessibility are required",
+        midi_live_execute_ready,
+        midi_live_execute_reason,
     )
 
     # Step input
-    r = call_tool(client, "logic_midi", "step_input", {"note": 60, "duration": "1/4"})
-    T_LIVE("midi.step_input(1/4) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "step_input",
+        {"note": 60, "duration": "1/4"},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.step_input(1/4) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
-    r = call_tool(client, "logic_midi", "step_input", {"note": 60, "duration": "1/8"})
-    T_LIVE("midi.step_input(1/8) succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "step_input",
+        {"note": 60, "duration": "1/8"},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.step_input(1/8) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Duration cap (our P2 fix)
-    r = call_tool(client, "logic_midi", "send_note", {"note": 60, "duration_ms": 50})
-    T_LIVE("midi.send_note small duration succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_note",
+        {"note": 60, "duration_ms": 50},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("midi.send_note small duration succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # ═══════════════════════════════════════════════════════════════
     # §7 Edit Commands (14 tests)
@@ -1996,10 +2189,22 @@ def main():
     # 20 MIDI notes in rapid succession on main client
     rapid_ok = 0
     for i in range(20):
-        r = call_tool(client, "logic_midi", "send_note", {"note": 60 + (i % 12), "duration_ms": 20})
+        r = guarded_live_midi_call(
+            client,
+            "send_note",
+            {"note": 60 + (i % 12), "duration_ms": 20},
+            ready=midi_live_execute_ready,
+            reason=midi_live_execute_reason,
+        )
         if r and not is_error(r):
             rapid_ok += 1
-    T_LIVE(f"20 rapid MIDI notes: {rapid_ok}/20 ok", "ok", lambda _: rapid_ok >= 18, midi_live_ready, "Logic Pro + CoreMIDI are required")
+    T_LIVE(
+        f"20 rapid MIDI notes: {rapid_ok}/20 ok",
+        "ok",
+        lambda _: rapid_ok >= 18,
+        midi_live_execute_ready,
+        midi_live_execute_reason,
+    )
 
     # 20 concurrent resource reads
     def read_n_times(n):
@@ -2131,8 +2336,20 @@ def main():
 
     # Large duration should be capped to 30s (our P2 fix) — test with shorter value
     # to verify the capping logic doesn't hang the actor
-    r = call_tool(client, "logic_midi", "send_note", {"note": 60, "duration_ms": 100})
-    T_LIVE("midi.send_note short duration ok", r, lambda _: r is not None and not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_note",
+        {"note": 60, "duration_ms": 100},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE(
+        "midi.send_note short duration ok",
+        r,
+        lambda _: r is not None and not is_error(r),
+        midi_live_execute_ready,
+        midi_live_execute_reason,
+    )
 
     # MIDI port name edge case
     r = call_tool(client, "logic_midi", "create_virtual_port", {"name": "a" * 200})
@@ -2187,8 +2404,14 @@ def main():
         T_LIVE("LogicProMCP-Scripter virtual port visible", "ok", lambda _: "Scripter" in all_ports or "LogicProMCP" in all_ports, core_midi_ready, "CoreMIDI virtual ports are unavailable")
 
     # Send a full MIDI sequence (chord)
-    r = call_tool(client, "logic_midi", "send_chord", {"notes": "60,64,67,72", "duration_ms": 30})
-    T_LIVE("send chord (4 notes) completes", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    r = guarded_live_midi_call(
+        client,
+        "send_chord",
+        {"notes": "60,64,67,72", "duration_ms": 30},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
+    T_LIVE("send chord (4 notes) completes", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # ═══════════════════════════════════════════════════════════════
     # §17b Fresh Record Modal Guard (7 tests)
@@ -2197,11 +2420,13 @@ def main():
 
     fresh_record_live_ready = False
     fresh_record_reason = "fresh Logic bootstrap with 1 track and 0 regions is required"
-    if live_logic_ready and midi_live_ready and has_document:
+    if live_logic_ready and midi_live_execute_ready and has_document:
         call_tool(client, "logic_system", "refresh_cache", timeout=3)
         fresh_record_live_ready, fresh_record_reason = fresh_record_bootstrap_status(client)
         if not fresh_record_live_ready:
             fresh_record_reason = f"fresh bootstrap not detected: {fresh_record_reason}"
+    elif live_logic_ready and midi_live_ready and has_document and not controller_learn_clear:
+        fresh_record_reason = controller_learn_reason
 
     preflight_modal = {"status": "skipped", "policy_id": DEFAULT_FREE_TEMPO_POLICY["policy_id"]}
     select_for_record = {"gate": fresh_record_reason}
@@ -2227,12 +2452,19 @@ def main():
             select_for_record = call_tool(client, "logic_tracks", "select", {"index": 0})
             arm_for_record = call_tool(client, "logic_tracks", "arm", {"index": 0, "enabled": True})
             arm_track = wait_for_track_arm(client, 0, True)
-            record_resp = call_tool(client, "logic_transport", "record")
-            midi_record_pass = call_tool(
+            record_resp = guarded_live_tool_call(
                 client,
-                "logic_midi",
+                "logic_transport",
+                "record",
+                ready=midi_live_execute_ready,
+                reason=midi_live_execute_reason,
+            )
+            midi_record_pass = guarded_live_midi_call(
+                client,
                 "play_sequence",
                 {"notes": "60,0,180,104;64,250,180,100;67,500,240,108"},
+                ready=midi_live_execute_ready,
+                reason=midi_live_execute_reason,
                 timeout=20,
             )
             stop_after_record = call_tool(client, "logic_transport", "stop")
@@ -2254,6 +2486,13 @@ def main():
         lambda _: fresh_record_live_ready,
         fresh_record_live_ready,
         fresh_record_reason,
+    )
+    T_LIVE(
+        "controller assignments Learn Mode guard is clear before fresh MIDI record",
+        {"result": controller_learn_guard},
+        lambda _: controller_learn_clear,
+        live_logic_ready and midi_live_ready and has_document,
+        controller_learn_reason,
     )
     T_LIVE(
         "free tempo modal policy is recorded for fresh record flow",
@@ -2354,9 +2593,21 @@ def main():
 
     # MIDI send should be fast
     t0 = time.time()
-    r = call_tool(client, "logic_midi", "send_cc", {"controller": 7, "value": 100})
+    r = guarded_live_midi_call(
+        client,
+        "send_cc",
+        {"controller": 7, "value": 100},
+        ready=midi_live_execute_ready,
+        reason=midi_live_execute_reason,
+    )
     elapsed = time.time() - t0
-    T_LIVE(f"MIDI CC send < 0.5s ({elapsed:.3f}s)", r, lambda _: elapsed < 0.5 and not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
+    T_LIVE(
+        f"MIDI CC send < 0.5s ({elapsed:.3f}s)",
+        r,
+        lambda _: elapsed < 0.5 and not is_error(r),
+        midi_live_execute_ready,
+        midi_live_execute_reason,
+    )
 
     # ═══════════════════════════════════════════════════════════════
     # §19 Memory & Stability (3 tests)
