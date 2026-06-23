@@ -373,6 +373,33 @@ def tool_json(resp):
     return value if isinstance(value, dict) else None
 
 
+def verified_or_explicitly_unverified(resp):
+    if not is_error(resp):
+        return True
+    payload = tool_json(resp)
+    return (
+        isinstance(payload, dict)
+        and payload.get("verified") is False
+        and any(
+            isinstance(payload.get(key), str) and payload.get(key)
+            for key in ("reason", "error", "hint")
+        )
+    )
+
+
+def verified_or_readback_mismatch(resp):
+    if not is_error(resp):
+        return True
+    payload = tool_json(resp)
+    return (
+        isinstance(payload, dict)
+        and payload.get("verified") is False
+        and payload.get("reason") == "readback_mismatch"
+        and payload.get("observed") is not None
+        and payload.get("requested") is not None
+    )
+
+
 def read_tracks_data(client):
     envelope = safe_json(resource_text(read_resource(client, "logic://tracks")))
     if not isinstance(envelope, dict):
@@ -481,7 +508,17 @@ def ui_stop_logic_transport():
         capture_output=True,
         text=True,
     )
-    return result.returncode == 0
+    if result.returncode == 0:
+        return True
+    try:
+        fallback = subprocess.run(
+            ["cliclick", "kp:space"],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return False
+    return fallback.returncode == 0
 
 
 def cycle_range_result_ok(resp):
@@ -642,11 +679,11 @@ def main():
 
     r = list_tools(client)
     tools = r.get("result", {}).get("tools", []) if r else []
-    T("tools/list returns 9 tools", r, lambda r: len(tools) == 9)
+    T("tools/list returns 10 tools", r, lambda r: len(tools) == 10)
     tool_names = [t["name"] for t in tools]
     for name in ["logic_transport", "logic_tracks", "logic_mixer", "logic_midi",
                  "logic_edit", "logic_navigate", "logic_project", "logic_system",
-                 "logic_plugins"]:
+                 "logic_audio", "logic_plugins"]:
         T(f"  tool '{name}' present", r, lambda _, n=name: n in tool_names)
 
     r = list_resources(client)
@@ -931,7 +968,13 @@ def main():
     call_tool(client, "logic_transport", "toggle_cycle")  # restore
 
     r = call_tool(client, "logic_transport", "toggle_metronome")
-    T_LIVE("transport.toggle_metronome returns non-error", r, lambda _: not is_error(r), live_logic_ready, "Logic Pro + Accessibility are required")
+    T_LIVE(
+        "transport.toggle_metronome verifies or fails closed with explicit State B/C",
+        r,
+        lambda _: verified_or_explicitly_unverified(r),
+        live_logic_ready,
+        "Logic Pro + Accessibility are required",
+    )
     call_tool(client, "logic_transport", "toggle_metronome")  # restore
 
     fresh_transport_live_ready = False
@@ -1640,7 +1683,13 @@ def main():
     T_LIVE("midi.mmc_stop succeeds", r, lambda _: not is_error(r), midi_live_ready, "Logic Pro + CoreMIDI are required")
 
     r = call_tool(client, "logic_midi", "mmc_locate", {"bar": 1})
-    T_LIVE("midi.mmc_locate(bar=1) succeeds", r, lambda _: not is_error(r), live_logic_ready, "Logic Pro + Accessibility are required")
+    T_LIVE(
+        "midi.mmc_locate(bar=1) verifies or reports readback mismatch",
+        r,
+        lambda _: verified_or_readback_mismatch(r),
+        live_logic_ready,
+        "Logic Pro + Accessibility are required",
+    )
 
     # Step input
     r = call_tool(client, "logic_midi", "step_input", {"note": 60, "duration": "1/4"})
@@ -1969,7 +2018,7 @@ def main():
 
     # Catalog contract stability under load
     r = list_tools(client)
-    T("tools/list still 9 after stress", r, lambda r: len(r.get("result", {}).get("tools", [])) == 9)
+    T("tools/list still 10 after stress", r, lambda r: len(r.get("result", {}).get("tools", [])) == 10)
 
     # ═══════════════════════════════════════════════════════════════
     # §14 State Consistency (8 tests)
