@@ -261,6 +261,70 @@ private func messySnapshot(
     #expect(report.evidence.exportReadiness.blockers.contains("external_midi_regions_bounce_risk"))
 }
 
+@Test func testProjectAuditBlocksSoftwareInstrumentRegionsWithoutPluginEvidenceBeforeExportClaim() throws {
+    // #174 regression: a MIDI-import demo can show software-instrument tracks
+    // plus visible regions but still render a silent Logic Bounce when no
+    // instrument/plugin evidence is readable. Track/region readback alone is
+    // not export-ready audibility evidence.
+    let tracks = [
+        TrackState(id: 0, name: "Imported Keys", type: .softwareInstrument),
+    ]
+    let regions = [
+        RegionState(
+            id: "0:1:33:Imported Keys",
+            name: "Imported Keys",
+            trackIndex: 0,
+            startPosition: "1 1 1 1",
+            endPosition: "33 1 1 1",
+            length: "32 0 0 0"
+        ),
+    ]
+    var strip = ChannelStripState(trackIndex: 0)
+    strip.plugins = []
+    strip.pluginsSource = "ax"
+    let report = ProjectSessionAudit.buildAudit(
+        snapshot: makeAuditSnapshot(tracks: tracks, regions: regions, channelStrips: [strip])
+    )
+
+    let finding = try #require(report.findings.first {
+        $0.id == "software_instrument_regions_without_audible_plugin"
+    })
+    #expect(finding.severity == .blocker)
+    #expect(finding.category == "export")
+    #expect(finding.evidence.target == "0")
+    #expect(finding.evidence.values.contains("track=0,name=Imported Keys,regions=1,plugins=0"))
+    #expect(report.status == .failed)
+    #expect(report.evidence.exportReadiness.status == "blocked")
+    #expect(report.evidence.exportReadiness.blockers.contains("software_instrument_regions_without_audible_plugin"))
+}
+
+@Test func testProjectAuditAllowsSoftwareInstrumentRegionsWithPluginEvidence() throws {
+    let tracks = [
+        TrackState(id: 0, name: "Imported Keys", type: .softwareInstrument),
+    ]
+    let regions = [
+        RegionState(
+            id: "0:1:9:Imported Keys",
+            name: "Imported Keys",
+            trackIndex: 0,
+            startPosition: "1 1 1 1",
+            endPosition: "9 1 1 1",
+            length: "8 0 0 0"
+        ),
+    ]
+    var strip = ChannelStripState(trackIndex: 0)
+    strip.plugins = [PluginSlotState(index: 0, name: "Studio Grand", isBypassed: false)]
+    strip.pluginsSource = "ax"
+    let report = ProjectSessionAudit.buildAudit(
+        snapshot: makeAuditSnapshot(tracks: tracks, regions: regions, channelStrips: [strip])
+    )
+
+    #expect(!report.findings.contains {
+        $0.id == "software_instrument_regions_without_audible_plugin"
+    })
+    #expect(!report.evidence.exportReadiness.blockers.contains("software_instrument_regions_without_audible_plugin"))
+}
+
 @Test func testProjectAuditAndCleanupPlanResourcesAndCommandsReturnJSON() async throws {
     let cache = StateCache()
     var project = ProjectInfo()

@@ -596,6 +596,25 @@ enum ProjectSessionAudit {
             ))
         }
 
+        let softwareInstrumentAudibilityRisks = softwareInstrumentAudibilityRisks(snapshot)
+        if !softwareInstrumentAudibilityRisks.isEmpty {
+            findings.append(finding(
+                "software_instrument_regions_without_audible_plugin",
+                .blocker,
+                "export",
+                "Software Instrument tracks contain regions but have no readable instrument/plugin evidence; track and region readback alone do not prove audible Logic Bounce routing.",
+                "logic://mixer",
+                softwareInstrumentAudibilityRisks.map { String($0.track.id) }.joined(separator: ","),
+                softwareInstrumentAudibilityRisks.flatMap {
+                    [
+                        "track=\($0.track.id),name=\($0.track.name),regions=\($0.regionCount),plugins=\($0.pluginCount)",
+                        "track=\($0.track.id),plugins_source=\($0.pluginsSource),plugins_read_error=\($0.pluginsReadError)",
+                    ]
+                } + ["risk=silent_logic_bounce"],
+                "ax_live"
+            ))
+        }
+
         if !tracks.soloedIndices.isEmpty {
             findings.append(finding(
                 "soloed_tracks_present",
@@ -921,6 +940,49 @@ enum ProjectSessionAudit {
             }
             .sorted { $0.id < $1.id }
             .map { ($0, regionCounts[$0.id] ?? 0) }
+    }
+
+    private struct SoftwareInstrumentAudibilityRisk {
+        let track: TrackState
+        let regionCount: Int
+        let pluginCount: Int
+        let pluginsSource: String
+        let pluginsReadError: String
+    }
+
+    private static func softwareInstrumentAudibilityRisks(
+        _ snapshot: Snapshot
+    ) -> [SoftwareInstrumentAudibilityRisk] {
+        guard snapshot.regionsFetchedAt > .distantPast else { return [] }
+        let regionCounts = Dictionary(grouping: snapshot.regions, by: \.trackIndex).mapValues(\.count)
+        let stripsByTrack = Dictionary(grouping: snapshot.channelStrips, by: \.trackIndex).mapValues { strips in
+            strips.sorted { $0.trackIndex < $1.trackIndex }.first
+        }
+        return snapshot.tracks
+            .filter { track in
+                track.type == .softwareInstrument && (regionCounts[track.id] ?? 0) > 0
+            }
+            .compactMap { track in
+                let strip = stripsByTrack[track.id] ?? nil
+                if let strip, hasAudiblePluginEvidence(strip) {
+                    return nil
+                }
+                return SoftwareInstrumentAudibilityRisk(
+                    track: track,
+                    regionCount: regionCounts[track.id] ?? 0,
+                    pluginCount: strip?.plugins.count ?? 0,
+                    pluginsSource: strip?.pluginsSource ?? "<nil>",
+                    pluginsReadError: strip?.pluginsReadError ?? "<nil>"
+                )
+            }
+            .sorted { $0.track.id < $1.track.id }
+    }
+
+    private static func hasAudiblePluginEvidence(_ strip: ChannelStripState) -> Bool {
+        guard strip.pluginsSource == "ax", strip.pluginsReadError == nil else { return false }
+        return strip.plugins.contains { plugin in
+            !plugin.isBypassed && !plugin.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     private static func isExternalMIDIAudibilityRisk(_ track: TrackState) -> Bool {
