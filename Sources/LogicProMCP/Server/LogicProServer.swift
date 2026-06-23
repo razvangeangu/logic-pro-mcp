@@ -253,7 +253,13 @@ actor LogicProServer {
                             dialogPresent: dialogPresent
                         )
                     case "logic_tracks":
-                        return await TrackDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                        return await TrackDispatcher.handle(
+                            command: command,
+                            params: cmdParams,
+                            router: router,
+                            cache: cache,
+                            dialogPresent: dialogPresent
+                        )
                     case "logic_mixer":
                         return await MixerDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
                     case "logic_midi":

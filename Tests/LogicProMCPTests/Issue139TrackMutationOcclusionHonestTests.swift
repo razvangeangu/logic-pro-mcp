@@ -47,6 +47,10 @@ struct Issue139TrackMutationOcclusionHonestTests {
             return results[operation] ?? .error("unexpected operation: \(operation)")
         }
 
+        func operations() -> [(String, [String: String])] {
+            executedOps
+        }
+
         func healthCheck() async -> ChannelHealth {
             // The channel itself is reachable — occlusion shows up in the
             // *result* (read-back unavailable / dialog never appeared), not in
@@ -73,6 +77,34 @@ struct Issue139TrackMutationOcclusionHonestTests {
     }
 
     // MARK: - State B (occluded read-back) must NOT become a false State A
+
+    @Test("create_instrument refuses while a blocking Logic dialog is present")
+    func createInstrumentRefusesBlockingDialogBeforeRouting() async throws {
+        let router = ChannelRouter()
+        let ax = OccludedToggleChannel(
+            id: .accessibility,
+            results: ["track.create_instrument": .success("should not execute")]
+        )
+        await router.register(ax)
+
+        let result = await TrackDispatcher.handle(
+            command: "create_instrument",
+            params: [:],
+            router: router,
+            cache: StateCache(),
+            dialogPresent: { true }
+        )
+
+        let isError = try #require(result.isError)
+        #expect(isError)
+        let json = try #require(sharedJSONObject(sharedToolText(result)))
+        #expect(json["error"] as? String == "unsupported_state")
+        #expect(json["operation"] as? String == "track.create_instrument")
+        #expect(json["failure_stage"] as? String == "preflight_blocking_dialog")
+        #expect(json["blocking_dialog_present"] as? Bool == true)
+        #expect(json["write_attempted"] as? Bool == false)
+        #expect(await ax.operations().isEmpty)
+    }
 
     @Test("mute under occluded read-back fails closed to State B, not a false State A")
     func muteOccludedStateB() async throws {
