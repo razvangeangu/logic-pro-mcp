@@ -112,6 +112,7 @@ class UISnapshot:
     logic_window_names: list[str]
     logic_menu_items: list[str]
     detected_language: str | None
+    system_events_error: str | None
     project_picker_visible: bool
     new_track_dialog_visible: bool
 
@@ -230,6 +231,12 @@ def evaluate_fresh_session(
             "logic_window_not_visible",
             "Bring a Logic Pro document window on-screen before continuing.",
         )
+    if ui.system_events_error:
+        return FreshSessionAssessment(
+            False,
+            "system_events_unavailable",
+            f"System Events UI probe failed; grant Automation access to this harness runner. {ui.system_events_error}",
+        )
     if ui.frontmost_app != LOGIC_APP_NAME:
         return FreshSessionAssessment(
             False,
@@ -327,7 +334,13 @@ def evaluate_fresh_session(
     )
 
 
-def _run_osascript(lines: Sequence[str], timeout_sec: float = 3.0) -> str | None:
+@dataclass(frozen=True)
+class AppleScriptProbe:
+    output: str | None
+    error: str | None
+
+
+def _run_osascript_probe(lines: Sequence[str], timeout_sec: float = 3.0) -> AppleScriptProbe:
     args = ["/usr/bin/osascript"]
     for line in lines:
         args.extend(["-e", line])
@@ -339,11 +352,21 @@ def _run_osascript(lines: Sequence[str], timeout_sec: float = 3.0) -> str | None
             timeout=timeout_sec,
             check=False,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
+    except FileNotFoundError:
+        return AppleScriptProbe(None, "osascript_not_found")
+    except subprocess.TimeoutExpired:
+        return AppleScriptProbe(None, "osascript_timeout")
     if result.returncode != 0:
-        return None
-    return result.stdout.strip()
+        detail = (result.stderr or result.stdout or "").strip()
+        if len(detail) > 240:
+            detail = detail[:237] + "..."
+        suffix = f": {detail}" if detail else ""
+        return AppleScriptProbe(None, f"osascript_exit_{result.returncode}{suffix}")
+    return AppleScriptProbe(result.stdout.strip(), None)
+
+
+def _run_osascript(lines: Sequence[str], timeout_sec: float = 3.0) -> str | None:
+    return _run_osascript_probe(lines, timeout_sec=timeout_sec).output
 
 
 def _split_lines(output: str | None) -> list[str]:
@@ -380,15 +403,16 @@ def _send_return_key() -> bool:
     return output is not None
 
 
-def _frontmost_application() -> str | None:
-    return _run_osascript(
+def _frontmost_application_probe() -> tuple[str | None, str | None]:
+    result = _run_osascript_probe(
         ['tell application "System Events" to get name of first application process whose frontmost is true'],
         timeout_sec=2.0,
     )
+    return result.output, result.error
 
 
-def _logic_window_names() -> list[str]:
-    output = _run_osascript(
+def _logic_window_names_probe() -> tuple[list[str], str | None]:
+    result = _run_osascript_probe(
         [
             'tell application "System Events"',
             f'if not (exists application process "{LOGIC_APP_NAME}") then return ""',
@@ -400,11 +424,11 @@ def _logic_window_names() -> list[str]:
         ],
         timeout_sec=2.0,
     )
-    return _split_lines(output)
+    return _split_lines(result.output), result.error
 
 
-def _logic_menu_items() -> list[str]:
-    output = _run_osascript(
+def _logic_menu_items_probe() -> tuple[list[str], str | None]:
+    result = _run_osascript_probe(
         [
             'tell application "System Events"',
             f'tell application process "{LOGIC_APP_NAME}"',
@@ -415,17 +439,20 @@ def _logic_menu_items() -> list[str]:
         ],
         timeout_sec=2.0,
     )
-    return _split_lines(output)
+    return _split_lines(result.output), result.error
 
 
 def collect_ui_snapshot() -> UISnapshot:
-    window_names = _logic_window_names()
-    menu_items = _logic_menu_items()
+    window_names, window_error = _logic_window_names_probe()
+    menu_items, menu_error = _logic_menu_items_probe()
+    frontmost_app, frontmost_error = _frontmost_application_probe()
+    probe_errors = [error for error in (window_error, menu_error, frontmost_error) if error]
     return UISnapshot(
-        frontmost_app=_frontmost_application(),
+        frontmost_app=frontmost_app,
         logic_window_names=window_names,
         logic_menu_items=menu_items,
         detected_language=detect_language(menu_items),
+        system_events_error="; ".join(probe_errors) if probe_errors else None,
         project_picker_visible=_contains_marker(window_names, PROJECT_PICKER_MARKERS),
         new_track_dialog_visible=_contains_marker(window_names, NEW_TRACK_DIALOG_MARKERS),
     )

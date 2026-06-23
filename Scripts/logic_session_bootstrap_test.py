@@ -29,6 +29,7 @@ def make_ui(**overrides):
         logic_window_names=["Untitled 1 - Tracks"],
         logic_menu_items=["File", "Edit", "Track", "Navigate", "Record", "Mix", "View", "Window", "Help"],
         detected_language="en",
+        system_events_error=None,
         project_picker_visible=False,
         new_track_dialog_visible=False,
     )
@@ -172,6 +173,24 @@ class EvaluateFreshSessionTests(unittest.TestCase):
             config=make_config(),
         )
         self.assert_reason(assessment, "existing_regions_present")
+
+    def test_blocks_system_events_probe_failure_before_frontmost(self):
+        assessment = evaluate_fresh_session(
+            ui=make_ui(
+                frontmost_app=None,
+                logic_window_names=[],
+                logic_menu_items=[],
+                detected_language=None,
+                system_events_error="osascript_exit_1: Not authorized to send Apple events to System Events. (-1743)",
+            ),
+            health=make_health(),
+            project_payload=make_project(track_count=1),
+            tracks_payload=make_tracks(count=1),
+            region_count=0,
+            config=make_config(),
+        )
+        self.assert_reason(assessment, "system_events_unavailable")
+        self.assertIn("System Events", assessment.hint or "")
 
 
 if __name__ == "__main__":
