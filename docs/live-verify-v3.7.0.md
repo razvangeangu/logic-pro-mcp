@@ -5,9 +5,9 @@ Scope: release-tree evidence for the accumulated v3.6.0 -> v3.7.0 feature and bu
 
 ## Claim Boundary
 
-This document verifies the v3.7.0 release tree on the local macOS / Logic Pro 12.2 environment and GitHub CI surfaces available at release prep. It is not a notarization claim and not coverage for every Logic Pro version, locale, project shape, MCP parent-app TCC context, clean host, or future macOS update.
+This document verifies the v3.7.0 release tree on the local macOS / Logic Pro 12.2 environment, GitHub CI surfaces available at release prep, and the published GitHub Release workflow. It is not a notarization claim and not coverage for every Logic Pro version, locale, project shape, MCP parent-app TCC context, clean host, or future macOS update.
 
-Published artifact hashes and workflow IDs are recorded in `docs/releases/v3.7.0.md` after the GitHub Release workflow publishes assets. Previous stable evidence remains in `docs/live-verify-v3.6.0.md`.
+Published artifact hashes and workflow IDs are recorded in `docs/releases/v3.7.0.md`. Previous stable evidence remains in `docs/live-verify-v3.6.0.md`.
 
 ## Deterministic Gates
 
@@ -24,6 +24,7 @@ Published artifact hashes and workflow IDs are recorded in `docs/releases/v3.7.0
 | Release build | PASS | `swift build -c release` passed on the v3.7.0 release tree. |
 | Full Swift suite | PASS | `swift test --no-parallel` -> `1743` passed, `0` failed. |
 | PR #166 CI | PASS | GitHub Actions CI build/test/coverage for PR #166 succeeded. |
+| Stable release workflow | PASS | Release run `27997558936` passed build plus macOS 14/15 install validation. |
 
 ## Focused Close Gates
 
@@ -53,11 +54,11 @@ Published artifact hashes and workflow IDs are recorded in `docs/releases/v3.7.0
 
 ## Release Publication Gate
 
-After `v3.7.0` tag publication, verify:
+After `v3.7.0` tag publication:
 
-- GitHub Release workflow build job passes.
-- `validate-install (macos-14)` passes.
-- `validate-install (macos-15)` passes.
+- GitHub Release workflow build job passed.
+- `validate-install (macos-14)` passed.
+- `validate-install (macos-15)` passed.
 - Published assets include `LogicProMCP`, `LogicProMCP-macOS-universal.tar.gz`, `LogicProMCP-macOS-arm64.tar.gz`, `SHA256SUMS.txt`, and `RELEASE-METADATA.json`.
 - `RELEASE-METADATA.json` reports `version:"v3.7.0"` and `architectures:["x86_64","arm64"]`.
-- Formula SHA is synced from the published universal tarball SHA.
+- Formula SHA is synced from the published universal tarball SHA: `61a13ef9c59e95c2ac39803acc48019259abeba7e45a0e475ce24b9678b6be79`.
