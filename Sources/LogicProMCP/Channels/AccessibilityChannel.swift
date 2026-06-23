@@ -1360,7 +1360,7 @@ actor AccessibilityChannel: Channel {
         case .selectionMetadataUnavailable:
             // Ralph-2 / W1 (guardian iter2) — retry budget exhausted: the
             // read-back metadata never surfaced across 6×100ms attempts.
-            // Docs (README, CHANGELOG, HONEST-CONTRACT.md, PRD) consistently
+            // Docs (README, CHANGELOG, API.md, PRD) consistently
             // promise `retry_exhausted` for this case; emitting
             // `readback_unavailable` here would make the enum an orphan.
             return .success(HonestContract.encodeStateB(
@@ -1370,7 +1370,7 @@ actor AccessibilityChannel: Channel {
         case .mismatch(let selectedIndex):
             // v3.1.0 (Ralph-2 / P2-2) — read-back succeeded but returned a
             // different index. That's the textbook `readback_mismatch` case
-            // per docs/HONEST-CONTRACT.md §3 (State B taxonomy).
+            // per docs/API.md (State B taxonomy).
             // `retry_exhausted` stays reserved for
             // `.selectionMetadataUnavailable` — read-back metadata never
             // appeared across the retry budget. Clients switching on

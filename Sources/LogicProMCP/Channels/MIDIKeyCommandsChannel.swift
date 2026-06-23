@@ -538,7 +538,7 @@ actor MIDIKeyCommandsChannel: Channel {
         "Manual MIDI Learn required — see docs/SETUP.md §4. " +
         "Effectively keycmd-only (no working non-keycmd fallback on Logic 12.2): " +
         "edit.duplicate, edit.normalize, edit.toggle_step_input, " +
-        "nav.goto_marker, nav.delete_marker, nav.set_zoom_level, " +
+        "nav.goto_marker, nav.delete_marker, " +
         "project.bounce, transport.capture_recording. " +
         "Other preset ops have an AX/MCU/AppleScript/CGEvent fallback and do not require keycmd binding. " +
         "Orphans (in mappingTable + routingTable but no MCP tool exposes a call path): " +

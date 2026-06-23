@@ -97,9 +97,15 @@ Sources/LogicProMCP/
 
 Tests/LogicProMCPTests/  1743 tests across the Swift test target on the v3.7.0 source
 Scripts/                 install / uninstall / live E2E / Scripter JS
-docs/                    SETUP, API, ARCHITECTURE, TROUBLESHOOTING, MAINTAINERS, live verification notes
-artifacts/               generated local artifacts; only final v4 MIDI-only package is allowed in git
+docs/                    minimal public setup, API, troubleshooting, and README media
+artifacts/               generated local artifacts; only explicitly published fixtures belong in git
 ```
+
+## Documentation Policy
+
+Keep `docs/` intentionally small and public-facing. The only default text docs are `SETUP.md`, `API.md`, and `TROUBLESHOOTING.md`; README media is limited to the demo GIF/MP4 plus the registry/social thumbnail. Release detail belongs in `CHANGELOG.md` or GitHub Releases, maintainer process belongs in `CONTRIBUTING.md`, and architecture summaries belong in README/API unless they become too large.
+
+Do not commit internal PRDs, ticket boards, spike notes, private reviews, session handoffs, local workspace paths, personal identifiers, chat transcripts, or community-user provenance.
 
 ## Channel Priority
 
@@ -155,11 +161,11 @@ If you cannot run a required gate, say so in the PR and explain why. Do not mark
 - [ ] `swift test` green (all 1743 tests on current v3.7.0 source)
 - [ ] New behavior covered by at least one unit test
 - [ ] Changed production code keeps the global coverage floor green (`region >=70%`, `line >=78%`); high-risk Logic-facing changes target about 90% line coverage on the touched surface or document the live/manual evidence that substitutes for direct measurement
-- [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`; new MCP tools also require README, `docs/API.md`, `docs/ARCHITECTURE.md`, and release-note updates
+- [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`; new MCP tools also require README and `docs/API.md` updates
 - [ ] New dependency → justification in PR description
 - [ ] Security-sensitive change → update `SECURITY.md`
-- [ ] Logic-facing write/readback change → update `docs/API.md`, `docs/TROUBLESHOOTING.md`, the relevant user guide, and the current `docs/live-verify-*.md`
-- [ ] Release version change → keep published install URLs pinned to the existing stable tag until a real release exists; when publishing, bump `ServerConfig`, manifest, Formula, installer default, tests, README, SETUP, CHANGELOG, release notes, and live evidence docs together
+- [ ] Logic-facing write/readback change → update `docs/API.md`, `docs/TROUBLESHOOTING.md`, and `CHANGELOG.md` when public behavior or live evidence changes
+- [ ] Release version change → keep published install URLs pinned to the existing stable tag until a real release exists; when publishing, bump `ServerConfig`, manifest, Formula, installer default, tests, README, SETUP, API, and CHANGELOG together
 
 ## Security Reports
 

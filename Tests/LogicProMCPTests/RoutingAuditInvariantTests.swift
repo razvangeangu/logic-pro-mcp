@@ -6,8 +6,9 @@ import Testing
 ///
 /// v3.1.6 SETUP.md §4.1 shipped an incorrect "audited coverage matrix" that
 /// listed only `transport.capture_recording` as effectively-keycmd-only. The
-/// real list is the eight ops below plus seven orphans — verified by the
-/// /loop verification pass that produced this file.
+/// v3.7.x's effective list is the seven ops below plus nine orphans. The list
+/// removes `nav.set_zoom_level` because `logic_navigate.set_zoom` now has an
+/// Accessibility slider path.
 ///
 /// `expectedKeycmdOnlyOps` is the single source of truth for:
 /// - SETUP.md §4.1 "Effectively-keycmd-only" enumeration
@@ -39,9 +40,12 @@ struct RoutingAuditInvariantTests {
         "edit.toggle_step_input",         // logic_edit.toggle_step_input
         "nav.goto_marker",                // logic_navigate.goto_marker (with index)
         "nav.delete_marker",              // logic_navigate.delete_marker
-        "nav.set_zoom_level",             // logic_navigate.set_zoom_level
         "project.bounce",                 // logic_project.bounce
-        "transport.capture_recording",    // logic_transport.capture_recording
+
+        // Channel-only router op — no public MCP tool command exposes it, but
+        // it remains a real mappingTable/routingTable path if a future surface
+        // promotes it.
+        "transport.capture_recording",
 
         // Orphans — present in mappingTable + routingTable but no MCP tool
         // currently routes to them. They stay here so the moment a future

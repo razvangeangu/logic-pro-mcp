@@ -3,7 +3,7 @@ import Foundation
 /// Honest Contract (v3.1.0+): every mutating operation returns one of three
 /// states so that a client (LLM agent) can distinguish confirmed success,
 /// uncertain success, and hard failure without heuristically parsing free-form
-/// text. See `docs/HONEST-CONTRACT.md`.
+/// text. See `docs/API.md`.
 ///
 /// This module is the single place responsible for producing the JSON that is
 /// wrapped in `ChannelResult.success` / `.error`. Every new mutating op should

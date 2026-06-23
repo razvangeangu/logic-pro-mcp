@@ -9,7 +9,7 @@ import Foundation
 /// and `PluginWindowRuntime` for deterministic testing without a live Logic Pro.
 ///
 /// Interaction mechanism (AXPress vs CGEvent) is T0-gated; see
-/// `docs/spikes/F2-T0-plugin-menu-probe-result.md` for the empirical verdict.
+/// current public release evidence for the empirical verdict.
 
 // MARK: - T1 types (PRD §4.2)
 

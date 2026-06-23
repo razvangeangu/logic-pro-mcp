@@ -928,7 +928,7 @@ enum WorkflowSkillCatalog {
             verification: WorkflowVerification(
                 evidence: ["catalog_entry", "confirmation_required_gate", "ax_plugin_slot_readback"],
                 successFields: ["verified", "observed_plugin_name", "verify_source"],
-                liveEvidenceFile: "docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md"
+                liveEvidenceFile: "CHANGELOG.md"
             ),
             failureModes: [
                 "catalog validation failed",
