@@ -15,7 +15,7 @@ class LogicProMcp < Formula
   # LogicProMCP-macOS-universal.tar.gz.
   on_macos do
     url "https://github.com/MongLong0214/logic-pro-mcp/releases/download/v#{version}/LogicProMCP-macOS-universal.tar.gz"
-    sha256 "61a13ef9c59e95c2ac39803acc48019259abeba7e45a0e475ce24b9678b6be79"
+    sha256 "a5833040ca47c928fa04a8e334e50af166640523b1067e5a52ae3a4804aa77b8"
   end
 
   depends_on :macos => :sonoma
