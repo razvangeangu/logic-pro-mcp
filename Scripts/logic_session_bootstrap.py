@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Reusable fresh-session bootstrap helper for Logic Pro live/demo runs.
 
-This helper uses MCP-visible truth for project/document state and System Events
-only for UI readiness signals such as frontmost app, window titles, and menu
-language. It never relies on coordinate clicks.
+This helper uses MCP-visible truth for project/document state and a native
+AX/NSWorkspace probe for UI readiness signals such as frontmost app, window
+titles, and menu language. It never relies on coordinate clicks.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import os
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 LOGIC_APP_NAME = "Logic Pro"
@@ -396,6 +397,21 @@ def _hide_application(name: str) -> bool:
 
 
 def _send_return_key() -> bool:
+    native_key_script = Path(__file__).with_name("logic_key_event.swift")
+    if native_key_script.exists():
+        try:
+            result = subprocess.run(
+                ["/usr/bin/swift", str(native_key_script), "return"],
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
     output = _run_osascript(
         ['tell application "System Events" to key code 36'],
         timeout_sec=2.0,
@@ -442,11 +458,76 @@ def _logic_menu_items_probe() -> tuple[list[str], str | None]:
     return _split_lines(result.output), result.error
 
 
+def _ui_snapshot_from_native_payload(payload: Any) -> UISnapshot | None:
+    if not isinstance(payload, dict):
+        return None
+    frontmost_app = payload.get("frontmost_app")
+    frontmost_bundle_id = payload.get("frontmost_bundle_id")
+    window_names = payload.get("logic_window_names")
+    menu_items = payload.get("logic_menu_items")
+    if frontmost_app is not None and not isinstance(frontmost_app, str):
+        return None
+    if frontmost_bundle_id is not None and not isinstance(frontmost_bundle_id, str):
+        return None
+    if frontmost_bundle_id == "com.apple.logic10":
+        frontmost_app = LOGIC_APP_NAME
+    if not isinstance(window_names, list) or not all(isinstance(item, str) for item in window_names):
+        return None
+    if not isinstance(menu_items, list) or not all(isinstance(item, str) for item in menu_items):
+        return None
+    error = payload.get("error")
+    if error is not None and not isinstance(error, str):
+        return None
+    return UISnapshot(
+        frontmost_app=frontmost_app,
+        logic_window_names=window_names,
+        logic_menu_items=menu_items,
+        detected_language=detect_language(menu_items),
+        system_events_error=error,
+        project_picker_visible=_contains_marker(window_names, PROJECT_PICKER_MARKERS),
+        new_track_dialog_visible=_contains_marker(window_names, NEW_TRACK_DIALOG_MARKERS),
+    )
+
+
+def _native_ui_snapshot() -> tuple[UISnapshot | None, str | None]:
+    script = Path(__file__).with_name("logic_ui_snapshot.swift")
+    if not script.exists():
+        return None, "native_snapshot_script_missing"
+    try:
+        result = subprocess.run(
+            ["/usr/bin/swift", str(script)],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None, "swift_not_found"
+    except subprocess.TimeoutExpired:
+        return None, "native_snapshot_timeout"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if len(detail) > 240:
+            detail = detail[:237] + "..."
+        if detail:
+            return None, f"native_snapshot_exit_{result.returncode}: {detail}"
+        return None, f"native_snapshot_exit_{result.returncode}"
+    payload = _safe_json(result.stdout.strip())
+    snapshot = _ui_snapshot_from_native_payload(payload)
+    if snapshot is None:
+        return None, "native_snapshot_invalid_json"
+    return snapshot, None
+
+
 def collect_ui_snapshot() -> UISnapshot:
+    native_snapshot, native_error = _native_ui_snapshot()
+    if native_snapshot is not None:
+        return native_snapshot
+
     window_names, window_error = _logic_window_names_probe()
     menu_items, menu_error = _logic_menu_items_probe()
     frontmost_app, frontmost_error = _frontmost_application_probe()
-    probe_errors = [error for error in (window_error, menu_error, frontmost_error) if error]
+    probe_errors = [error for error in (native_error, window_error, menu_error, frontmost_error) if error]
     return UISnapshot(
         frontmost_app=frontmost_app,
         logic_window_names=window_names,
@@ -581,11 +662,17 @@ def bootstrap_fresh_logic_session(
         wait_for(lambda: (_activate_logic() or True) and collect_ui_snapshot().frontmost_app == LOGIC_APP_NAME, 2.0)
         ui = collect_ui_snapshot()
 
-    if health.get("logic_pro_has_document") is not True:
+    if health.get("logic_pro_has_document") is not True or ui.project_picker_visible:
         if not config.allow_new_project:
+            reason = "project_picker_visible" if ui.project_picker_visible else "no_document_open"
+            hint = (
+                "The Choose Project picker is visible and auto-new-project is disabled."
+                if ui.project_picker_visible
+                else "No Logic document is open and auto-new-project is disabled."
+            )
             return blocked(
-                "no_document_open",
-                "No Logic document is open and auto-new-project is disabled.",
+                reason,
+                hint,
                 health=health,
                 ui=ui,
             )
@@ -603,7 +690,8 @@ def bootstrap_fresh_logic_session(
         actions.append("logic_system.refresh_cache")
 
         deadline = time.time() + config.timeout_sec
-        sent_return = False
+        sent_project_picker_return = False
+        sent_new_track_return = False
         while time.time() < deadline:
             time.sleep(config.poll_interval_sec)
             _activate_logic()
@@ -612,9 +700,29 @@ def bootstrap_fresh_logic_session(
                 continue
             ui = collect_ui_snapshot()
             if (
+                ui.project_picker_visible
+                and config.confirm_new_track_dialog
+                and not sent_project_picker_return
+            ):
+                permissions = health.get("permissions", {})
+                if permissions.get("post_event_access") is not True:
+                    return blocked(
+                        "post_event_access_denied",
+                        "Need CGEvent post-event access to confirm Logic's project picker.",
+                        health=health,
+                        ui=ui,
+                    )
+                if _send_return_key():
+                    actions.append("confirm_project_picker:return")
+                    sent_project_picker_return = True
+                    call_tool("logic_system", "refresh_cache", None, 5.0)
+                    actions.append("logic_system.refresh_cache")
+                    continue
+
+            if (
                 ui.new_track_dialog_visible
                 and config.confirm_new_track_dialog
-                and not sent_return
+                and not sent_new_track_return
             ):
                 permissions = health.get("permissions", {})
                 if permissions.get("post_event_access") is not True:
@@ -626,7 +734,7 @@ def bootstrap_fresh_logic_session(
                     )
                 if _send_return_key():
                     actions.append("confirm_new_track_dialog:return")
-                    sent_return = True
+                    sent_new_track_return = True
                     call_tool("logic_system", "refresh_cache", None, 5.0)
                     actions.append("logic_system.refresh_cache")
                     continue
@@ -690,6 +798,45 @@ def bootstrap_fresh_logic_session(
             project=project_payload,
             ui=ui,
         )
+
+    if not _track_rows(tracks_payload) and config.allow_new_project:
+        log("  [bootstrap] creating one fresh software-instrument track")
+        response = call_tool("logic_tracks", "create_instrument", None, 10.0)
+        actions.append("logic_tracks.create_instrument")
+        if _response_is_error(response):
+            return blocked(
+                "fresh_track_create_failed",
+                tool_text(response) or "logic_tracks.create_instrument failed",
+                health=health,
+                project=project_payload,
+                tracks=tracks_payload,
+                ui=ui,
+            )
+        deadline = time.time() + config.timeout_sec
+        while time.time() < deadline:
+            call_tool("logic_system", "refresh_cache", None, 5.0)
+            actions.append("logic_system.refresh_cache")
+            time.sleep(config.poll_interval_sec)
+            _, health_latest = fetch_health()
+            if health_latest is not None:
+                health = health_latest
+            _, _, project_latest = _resource_json(read_resource, resource_text, "logic://project/info")
+            if isinstance(project_latest, dict):
+                project_payload = project_latest
+            _, _, tracks_latest = _resource_json(read_resource, resource_text, "logic://tracks")
+            if isinstance(tracks_latest, dict):
+                tracks_payload = tracks_latest
+                if _track_rows(tracks_payload):
+                    break
+        else:
+            return blocked(
+                "fresh_track_unavailable",
+                "The fresh project did not expose a live track after track creation.",
+                health=health,
+                project=project_payload,
+                tracks=tracks_payload,
+                ui=ui,
+            )
 
     region_count = 0
     if _track_rows(tracks_payload):

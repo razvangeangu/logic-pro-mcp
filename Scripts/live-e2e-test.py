@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from logic_session_bootstrap import bootstrap_fresh_logic_session
 from logic_free_tempo_modal import DEFAULT_FREE_TEMPO_POLICY, detect_free_tempo_modal, resolve_free_tempo_modal
@@ -496,6 +497,17 @@ def wait_for_transport_state(client, predicate, timeout=6.0, interval=0.2):
 
 
 def ui_stop_logic_transport():
+    native_key_script = Path(__file__).with_name("logic_key_event.swift")
+    if native_key_script.exists():
+        native = subprocess.run(
+            ["/usr/bin/swift", str(native_key_script), "space"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+        if native.returncode == 0:
+            return True
+
     script = """
     tell application "Logic Pro" to activate
     delay 0.1
