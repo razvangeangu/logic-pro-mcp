@@ -444,6 +444,31 @@ private func liveTransportJSON(
     ])
 }
 
+@Test func testTransportDispatcherRefusesWritesWhenBlockingDialogPresent() async throws {
+    let router = ChannelRouter()
+    let ax = FixedResultChannel(id: .accessibility, result: .success("should not execute"))
+    await router.register(ax)
+
+    let result = await TransportDispatcher.handle(
+        command: "set_tempo",
+        params: ["tempo": .double(78)],
+        router: router,
+        cache: StateCache(),
+        dialogPresent: { true }
+    )
+
+    #expect(result.isError!)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect(object["error"] as? String == "unsupported_state")
+    #expect(object["operation"] as? String == "transport.set_tempo")
+    #expect(object["failure_stage"] as? String == "preflight_blocking_dialog")
+    #expect(object["blocking_dialog_present"] as? Bool == true)
+    #expect(object["write_attempted"] as? Bool == false)
+
+    let executed = await ax.executedOps
+    #expect(executed.isEmpty)
+}
+
 @Test func testTransportDispatcherToggleMetronomeVerifiesViaTransportStateReadback() async throws {
     let router = ChannelRouter()
     let ax = SequencedTransportReadbackChannel(
