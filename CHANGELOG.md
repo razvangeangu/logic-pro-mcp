@@ -8,7 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-No unreleased changes.
+### Fixed
+
+- `record_sequence` no longer re-promotes a lower-level `midi.import_file` State B GM Device / External MIDI audibility downgrade into verified success; it now fails closed with `audibility_unverified` before a silent Bounce can be claimed.
+- `logic://project/audit` now reports `external_midi_regions_bounce_risk` as an export blocker when MIDI regions sit on GM Device / External MIDI tracks, preventing track/region readback from being mistaken for audible-routing evidence.
+- `logic_project.bounce` now runs the audit preflight and refuses `export_readiness_blocked` before opening the Bounce dialog when export blockers are present.
 
 ## [3.7.1] — 2026-06-23
 

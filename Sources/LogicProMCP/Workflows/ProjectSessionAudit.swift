@@ -580,6 +580,22 @@ enum ProjectSessionAudit {
             ))
         }
 
+        let externalMIDIRisks = externalMIDIRegionRisks(snapshot)
+        if !externalMIDIRisks.isEmpty {
+            findings.append(finding(
+                "external_midi_regions_bounce_risk",
+                .blocker,
+                "export",
+                "MIDI regions are placed on GM Device / External MIDI tracks; track and region readback do not prove audible Logic Bounce routing.",
+                "logic://tracks",
+                externalMIDIRisks.map { String($0.track.id) }.joined(separator: ","),
+                externalMIDIRisks.map {
+                    "track=\($0.track.id),name=\($0.track.name),regions=\($0.regionCount)"
+                } + ["risk=silent_logic_bounce"],
+                "ax_live"
+            ))
+        }
+
         if !tracks.soloedIndices.isEmpty {
             findings.append(finding(
                 "soloed_tracks_present",
@@ -891,6 +907,28 @@ enum ProjectSessionAudit {
             .filter { !tracksWithRegions.contains($0.id) }
             .map(\.id)
             .sorted()
+    }
+
+    private static func externalMIDIRegionRisks(
+        _ snapshot: Snapshot
+    ) -> [(track: TrackState, regionCount: Int)] {
+        guard snapshot.regionsFetchedAt > .distantPast else { return [] }
+        let regionCounts = Dictionary(grouping: snapshot.regions, by: \.trackIndex).mapValues(\.count)
+        return snapshot.tracks
+            .filter { track in
+                let hasRegions = (regionCounts[track.id] ?? 0) > 0
+                return hasRegions && isExternalMIDIAudibilityRisk(track)
+            }
+            .sorted { $0.id < $1.id }
+            .map { ($0, regionCounts[$0.id] ?? 0) }
+    }
+
+    private static func isExternalMIDIAudibilityRisk(_ track: TrackState) -> Bool {
+        if track.type == .externalMIDI { return true }
+        let lowerName = track.name.lowercased()
+        return ["gm device", "general midi", "external midi", "external instrument"].contains {
+            lowerName.contains($0)
+        }
     }
 
     private static func occupiedPluginSlots(_ strips: [ChannelStripState]) -> [PluginSlotEvidence] {

@@ -230,6 +230,37 @@ private func messySnapshot(
     #expect(!report.findings.contains { $0.id == "track_readback_gap" })
 }
 
+@Test func testProjectAuditBlocksExternalMIDIRegionsBeforeExportClaim() throws {
+    // #128 regression: a score opened from MIDI can look healthy in
+    // logic://tracks + project.get_regions while every lane is a GM Device /
+    // external-MIDI strip. That state is not audible-bounce verified, so audit
+    // must flag it before a workflow treats track/region counts as export-ready.
+    let tracks = [
+        TrackState(id: 0, name: "GM Device 1", type: .externalMIDI),
+        TrackState(id: 1, name: "Felt Keys", type: .softwareInstrument),
+    ]
+    let regions = [
+        RegionState(
+            id: "0:1:33:Imported",
+            name: "Imported",
+            trackIndex: 0,
+            startPosition: "1 1 1 1",
+            endPosition: "33 1 1 1",
+            length: "32 0 0 0"
+        ),
+    ]
+    let report = ProjectSessionAudit.buildAudit(snapshot: makeAuditSnapshot(tracks: tracks, regions: regions))
+
+    let finding = try #require(report.findings.first { $0.id == "external_midi_regions_bounce_risk" })
+    #expect(finding.severity == .blocker)
+    #expect(finding.category == "export")
+    #expect(finding.evidence.target == "0")
+    #expect(finding.evidence.values.contains("track=0,name=GM Device 1,regions=1"))
+    #expect(report.status == .failed)
+    #expect(report.evidence.exportReadiness.status == "blocked")
+    #expect(report.evidence.exportReadiness.blockers.contains("external_midi_regions_bounce_risk"))
+}
+
 @Test func testProjectAuditAndCleanupPlanResourcesAndCommandsReturnJSON() async throws {
     let cache = StateCache()
     var project = ProjectInfo()

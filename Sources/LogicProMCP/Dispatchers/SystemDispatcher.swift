@@ -270,10 +270,11 @@ struct SystemDispatcher {
                   arm_only          -> { index: Int } — disarms others, arms target; returns error on partial disarm failure
                   record_sequence   -> { bar?: Int, notes: "pitch,offsetMs,durMs[,vel[,ch]];...", tempo?: Float }
                                        v3.0.8 SMF-import: generates a MIDI file, forces playhead to bar 1, imports via AX menu.
-                                       Creates a new track per call with Logic's default Software Instrument.
+                                       Creates a new track per call; if Logic imports GM Device / External MIDI lanes,
+                                       returns audibility_unverified instead of claiming audible success.
                                        Response: { created_track, recorded_to_track, instrument }. `instrument` is always
                                        `"not-attempted"` (or `"ignored:<legacy instrument_path>"` for clients still sending the
-                                       removed param). Callers that want a specific patch call set_instrument separately — see
+                                       removed param). Callers that want a specific patch call set_instrument separately on a Software Instrument track — see
                                        CHANGELOG v3.0.8 for the selectTrackViaAX limitation on fresh SMF-created tracks.
                   set_automation    -> { index: Int, mode: String } (read/write/touch/latch/trim/off)
                   set_instrument    -> { index: Int, path: String } OR { index: Int, category: String, preset: String }
@@ -360,7 +361,8 @@ struct SystemDispatcher {
                   save              -> {} — Save current project
                   save_as           -> { path: String } — Save to new path
                   close             -> {} — Close project
-                  bounce            -> {} — Open bounce dialog
+                  bounce            -> {} — Open bounce dialog after audit preflight;
+                                       export blockers return export_readiness_blocked
                   get_regions       -> {} — Read arrange regions
                   export_plan       -> { projects, output_root, artifacts? } — Dry-run export manifest plan
                   launch            -> {} — Launch Logic Pro
