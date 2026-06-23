@@ -30,6 +30,7 @@ struct ProjectDispatcher {
             await executeAppleScript(script)
         },
         sleep: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) },
+        dialogPresent: @escaping @Sendable () -> Bool = { false },
         // #27 Phase 2 — injectable export-execution seams (identity readback,
         // audio analysis, file polling). Defaults to the live wiring; tests
         // inject fakes so the guarded state machine is unit-testable headless.
@@ -99,6 +100,10 @@ struct ProjectDispatcher {
                 audit(command, phase: .rejected, reason: "invalid export plan")
                 return toolTextResult("\(command) invalid_params: \(error)", isError: true)
             }
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.\(command)")
+            }
             // The destructive confirmation is enforced INSIDE the executor (it
             // must be checked per-run before any open/bounce). Audit the
             // execution intent here; the executor's confirmed:false path returns
@@ -131,6 +136,10 @@ struct ProjectDispatcher {
             }
 
         case "new":
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.new")
+            }
             audit(command, phase: .executed)
             let result = await router.route(operation: "project.new")
             // v3.1.2 (P0-3) — clear cache on lifecycle success so the next
@@ -161,6 +170,10 @@ struct ProjectDispatcher {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.open")
+            }
             audit(command, phase: .executed)
             let result = await router.route(
                 operation: "project.open",
@@ -171,6 +184,10 @@ struct ProjectDispatcher {
             return toolTextResult(result)
 
         case "save":
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.save")
+            }
             audit(command, phase: .executed)
             // #110: save is an export/bounce prerequisite. The read-back
             // verification lives in the AppleScript channel (the reliable
@@ -195,6 +212,10 @@ struct ProjectDispatcher {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.save_as")
+            }
             audit(command, phase: .executed)
             let result = await router.route(
                 operation: "project.save_as",
@@ -218,6 +239,10 @@ struct ProjectDispatcher {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
             }
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.close")
+            }
             audit(command, phase: .executed)
             let result = await router.route(
                 operation: "project.close",
@@ -235,6 +260,10 @@ struct ProjectDispatcher {
             if !confirmation.confirmed, let response = DestructivePolicy.confirmationResponse(command: command) {
                 audit(command, phase: .confirmationRequired)
                 return toolTextResult(response)
+            }
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.bounce")
             }
             let preflight = await ProjectSessionAudit.buildAudit(cache: cache)
             if let block = bouncePreflightBlock(preflight) {
@@ -281,6 +310,10 @@ struct ProjectDispatcher {
             }
 
         case "cleanup_apply":
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.cleanup_apply")
+            }
             return await handleCleanupApply(params: params, router: router, cache: cache)
 
         case "launch":
@@ -310,6 +343,10 @@ struct ProjectDispatcher {
                 audit(command, phase: .rejected, reason: "not running")
                 return toolTextResult("Logic Pro is not running")
             }
+            if dialogPresent() {
+                audit(command, phase: .rejected, reason: "blocking dialog")
+                return blockingDialogResult(operation: "project.quit")
+            }
             audit(command, phase: .executed)
             return await runLifecycleScript(
                 script: "tell application \"Logic Pro\" to quit",
@@ -327,6 +364,23 @@ struct ProjectDispatcher {
                 isError: true
             )
         }
+    }
+
+    private static func blockingDialogResult(operation: String) -> CallTool.Result {
+        toolTextResult(
+            HonestContract.encodeStateC(
+                error: .unsupportedState,
+                hint: "Refusing \(operation) while a blocking Logic dialog/sheet is present. Dismiss crash, save, bounce, import, or other modal dialogs, then retry.",
+                extras: [
+                    "operation": operation,
+                    "failure_stage": "preflight_blocking_dialog",
+                    "blocking_dialog_present": true,
+                    "write_attempted": false,
+                    "safe_to_retry": true,
+                ]
+            ),
+            isError: true
+        )
     }
 
     // MARK: - cleanup_apply (#28) — guarded execution of a cleanup-plan step

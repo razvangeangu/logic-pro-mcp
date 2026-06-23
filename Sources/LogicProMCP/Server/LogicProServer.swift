@@ -269,7 +269,13 @@ actor LogicProServer {
                     case "logic_navigate":
                         return await NavigateDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
                     case "logic_project":
-                        return await ProjectDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                        return await ProjectDispatcher.handle(
+                            command: command,
+                            params: cmdParams,
+                            router: router,
+                            cache: cache,
+                            dialogPresent: dialogPresent
+                        )
                     case "logic_audio":
                         return AudioDispatcher.handle(command: command, params: cmdParams)
                     case "logic_system":
