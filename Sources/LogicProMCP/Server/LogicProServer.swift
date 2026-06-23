@@ -245,7 +245,13 @@ actor LogicProServer {
                 return await Self.runWithDeadline(tool: name, command: command) {
                     switch name {
                     case "logic_transport":
-                        return await TransportDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                        return await TransportDispatcher.handle(
+                            command: command,
+                            params: cmdParams,
+                            router: router,
+                            cache: cache,
+                            dialogPresent: dialogPresent
+                        )
                     case "logic_tracks":
                         return await TrackDispatcher.handle(
                             command: command,

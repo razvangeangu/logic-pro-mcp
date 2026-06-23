@@ -20,6 +20,10 @@ struct TrackDispatcher {
         cache: StateCache,
         dialogPresent: @escaping @Sendable () -> Bool = { false }
     ) async -> CallTool.Result {
+        if let operation = modalGuardedTrackOperation(for: command), dialogPresent() {
+            return blockingDialogResult(operation: operation)
+        }
+
         switch command {
         case "select":
             // Prefer index (accepts int/double/string), else match by name. If
@@ -443,6 +447,26 @@ struct TrackDispatcher {
                 "Unknown track command: \(command). Available: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets",
                 isError: true
             )
+        }
+    }
+
+    private static func modalGuardedTrackOperation(for command: String) -> String? {
+        switch command {
+        case "select": return "track.select"
+        case "create_audio": return "track.create_audio"
+        case "create_instrument": return "track.create_instrument"
+        case "create_drummer": return "track.create_drummer"
+        case "create_external_midi": return "track.create_external_midi"
+        case "delete": return "track.delete"
+        case "duplicate": return "track.duplicate"
+        case "rename": return "track.rename"
+        case "mute": return "track.set_mute"
+        case "solo": return "track.set_solo"
+        case "arm": return "track.set_arm"
+        case "arm_only": return "track.arm_only"
+        case "record_sequence": return "track.record_sequence"
+        case "set_automation": return "track.set_automation"
+        default: return nil
         }
     }
 

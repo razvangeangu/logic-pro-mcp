@@ -13,8 +13,13 @@ struct TransportDispatcher {
         params: [String: Value],
         router: ChannelRouter,
         cache: StateCache,
-        sleep: @escaping (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }
+        sleep: @escaping (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) },
+        dialogPresent: @escaping @Sendable () -> Bool = { false }
     ) async -> CallTool.Result {
+        if let operation = modalGuardedTransportOperation(for: command), dialogPresent() {
+            return blockingDialogResult(operation: operation)
+        }
+
         switch command {
         case "play":
             return await handleVerifiedTransportCommand(
@@ -185,6 +190,41 @@ struct TransportDispatcher {
                 isError: true
             )
         }
+    }
+
+    private static func modalGuardedTransportOperation(for command: String) -> String? {
+        switch command {
+        case "play": return "transport.play"
+        case "stop": return "transport.stop"
+        case "record": return "transport.record"
+        case "pause": return "transport.pause"
+        case "rewind": return "transport.rewind"
+        case "fast_forward": return "transport.fast_forward"
+        case "toggle_cycle": return "transport.toggle_cycle"
+        case "toggle_metronome": return "transport.toggle_metronome"
+        case "set_tempo": return "transport.set_tempo"
+        case "goto_position": return "transport.goto_position"
+        case "set_cycle_range": return "transport.set_cycle_range"
+        case "toggle_count_in": return "transport.toggle_count_in"
+        default: return nil
+        }
+    }
+
+    private static func blockingDialogResult(operation: String) -> CallTool.Result {
+        toolTextResult(
+            HonestContract.encodeStateC(
+                error: .unsupportedState,
+                hint: "Refusing \(operation) while a blocking Logic dialog/sheet is present. Dismiss crash, save, bounce, import, or other modal dialogs, then retry.",
+                extras: [
+                    "operation": operation,
+                    "failure_stage": "preflight_blocking_dialog",
+                    "blocking_dialog_present": true,
+                    "write_attempted": false,
+                    "safe_to_retry": true,
+                ]
+            ),
+            isError: true
+        )
     }
 
     private static func verifiedStopResult(
