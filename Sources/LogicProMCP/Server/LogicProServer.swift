@@ -216,7 +216,7 @@ actor LogicProServer {
 
     // MARK: - Tool Registration (10 dispatchers)
 
-    func makeHandlers() -> LogicProServerHandlers {
+    func makeHandlers(dialogPresent: @escaping @Sendable () -> Bool = { false }) -> LogicProServerHandlers {
         let router = self.router
         let cache = self.cache
         let poller = self.poller
@@ -245,7 +245,13 @@ actor LogicProServer {
                 return await Self.runWithDeadline(tool: name, command: command) {
                     switch name {
                     case "logic_transport":
-                        return await TransportDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
+                        return await TransportDispatcher.handle(
+                            command: command,
+                            params: cmdParams,
+                            router: router,
+                            cache: cache,
+                            dialogPresent: dialogPresent
+                        )
                     case "logic_tracks":
                         return await TrackDispatcher.handle(command: command, params: cmdParams, router: router, cache: cache)
                     case "logic_mixer":
@@ -359,7 +365,7 @@ actor LogicProServer {
     }
 
     private func registerTools() async {
-        let handlers = makeHandlers()
+        let handlers = makeHandlers(dialogPresent: { AXLogicProElements.dialogPresent() })
         await server.withMethodHandler(ListTools.self) { params in
             await handlers.listTools(params)
         }
