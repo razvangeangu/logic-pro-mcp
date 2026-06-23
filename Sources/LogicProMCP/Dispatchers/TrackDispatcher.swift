@@ -17,7 +17,8 @@ struct TrackDispatcher {
         command: String,
         params: [String: Value],
         router: ChannelRouter,
-        cache: StateCache
+        cache: StateCache,
+        dialogPresent: @escaping @Sendable () -> Bool = { false }
     ) async -> CallTool.Result {
         switch command {
         case "select":
@@ -365,6 +366,9 @@ struct TrackDispatcher {
             if !path.isEmpty { routeParams["path"] = path }
             if !category.isEmpty { routeParams["category"] = category }
             if !preset.isEmpty { routeParams["preset"] = preset }
+            if dialogPresent() {
+                return blockingDialogResult(operation: "track.set_instrument")
+            }
             let result = await router.route(
                 operation: "track.set_instrument",
                 params: routeParams
@@ -383,6 +387,9 @@ struct TrackDispatcher {
             return toolTextResult(result)
 
         case "list_library", "library":
+            if dialogPresent() {
+                return blockingDialogResult(operation: "library.list")
+            }
             let result = await router.route(operation: "library.list")
             return toolTextResult(result)
 
@@ -398,6 +405,9 @@ struct TrackDispatcher {
                     )
                 }
                 scanParams["mode"] = mode
+            }
+            if dialogPresent(), mode != "disk" {
+                return blockingDialogResult(operation: "library.scan_all")
             }
             let result = await router.route(
                 operation: "library.scan_all",
@@ -419,6 +429,9 @@ struct TrackDispatcher {
             } else {
                 settleMs = 250
             }
+            if dialogPresent() {
+                return blockingDialogResult(operation: "plugin.scan_presets")
+            }
             let result = await router.route(
                 operation: "plugin.scan_presets",
                 params: ["submenuOpenDelayMs": String(settleMs)]
@@ -431,6 +444,23 @@ struct TrackDispatcher {
                 isError: true
             )
         }
+    }
+
+    private static func blockingDialogResult(operation: String) -> CallTool.Result {
+        toolTextResult(
+            HonestContract.encodeStateC(
+                error: .unsupportedState,
+                hint: "Refusing \(operation) while a blocking Logic dialog/sheet is present. Dismiss crash, save, bounce, import, or other modal dialogs, then retry.",
+                extras: [
+                    "operation": operation,
+                    "failure_stage": "preflight_blocking_dialog",
+                    "blocking_dialog_present": true,
+                    "write_attempted": false,
+                    "safe_to_retry": true,
+                ]
+            ),
+            isError: true
+        )
     }
 
     private static func trackToggleResultIsVerified(_ result: ChannelResult) -> Bool {
