@@ -23,7 +23,7 @@ private func readRepoFile(_ relativePath: String) throws -> String {
 @Test func testServerVersionMatchesPackagingArtefacts() throws {
     let sourceVersion = ServerConfig.serverVersion
     #expect(
-        sourceVersion == "3.7.0",
+        sourceVersion == "3.7.1",
         "version surfaces must match the published stable release — bump all packaging artefacts together"
     )
 
@@ -197,9 +197,9 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     )
 }
 
-@Test func testVerifiedApplyBackGuideExists() throws {
-    // R12: the Thomas apply_moves guide must exist and document the gate + targeting.
-    let guide = try readRepoFile("docs/guides/verified-apply-back.md")
+@Test func testVerifiedApplyBackContractDocumented() throws {
+    // R12: the verified apply-back contract must stay in the minimal public API docs.
+    let guide = try readRepoFile("docs/API.md")
     #expect(
         guide.contains("duplicate_applyback"),
         "verified-apply-back guide must document the duplicate_applyback gate (R12)"

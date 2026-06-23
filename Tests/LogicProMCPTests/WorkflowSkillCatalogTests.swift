@@ -319,7 +319,7 @@ struct WorkflowSkillCatalogTests {
         #expect(liveInsert?.evidenceLevel == .liveVerified)
         #expect(liveInsert?.productionReady == true)
         #expect(liveInsert?.dependenciesResolved == stockSurfacePresent)
-        #expect(liveInsert?.verification.liveEvidenceFile == "docs/tickets/mixer-verification/VERIFICATION-2026-06-09.md")
+        #expect(liveInsert?.verification.liveEvidenceFile == "CHANGELOG.md")
         #expect(liveInsert?.requiredConfirmations.contains { $0.level == "L2" } == true)
 
         let readiness = snapshot.workflows.first { $0.id == "logic.workflow.readiness.project" }

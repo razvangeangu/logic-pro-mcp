@@ -818,9 +818,9 @@ enum StockPluginCatalog {
         ),
     ]
 
-    /// Compressor `threshold` — the FIRST verified-writable stock parameter.
-    /// Live T0 spike (2026-06-14, `docs/spikes/compressor-t0-evidence.md`)
-    /// proved a complete AX write/readback round-trip: the control is an
+    /// Compressor `threshold` — the first verified-writable stock parameter.
+    /// Current public release evidence records the AX write/readback boundary:
+    /// the control is an
     /// `AXSlider` with `AXDescription="Threshold"`, `AXValue` in a normalized
     /// 0...100 range, `AXValueDescription` "X %". `set AXValue 60` → reads back
     /// 60 ("60 %"); the value is normalized %, NOT dB (Logic AX does not expose
@@ -844,8 +844,8 @@ enum StockPluginCatalog {
                 logicVersion: nil,
                 locale: nil,
                 sourcePath: nil,
-                inferenceReason: "AX slider write/readback round-trip proven on a duplicate (T0 spike, docs/spikes/compressor-t0-evidence.md); not census-verified on this machine in this response",
-                evidence: ["parameter_write_readback", "docs/spikes/compressor-t0-evidence.md"]
+                inferenceReason: "AX slider write/readback round-trip proven on a duplicate and carried in current public release evidence; not census-verified on this machine in this response",
+                evidence: ["parameter_write_readback", "CHANGELOG.md"]
             )
         ),
     ]

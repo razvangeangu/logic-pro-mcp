@@ -1238,7 +1238,7 @@ extension ResourceHandlers {
     /// All prefixes are normalised via `URL(...).resolvingSymlinksInPath()`
     /// and are guaranteed to end in `/` so a path comparison of the form
     /// `resolved.hasPrefix(prefix)` cannot be tricked by a sibling like
-    /// `/Users/isaac/Music/Logic-evil/x.json` matching `/Users/isaac/Music/Logic`.
+    /// `/Users/example/Music/Logic-evil/x.json` matching `/Users/example/Music/Logic`.
     static func defaultLibraryInventoryAllowedPrefixes() -> [String] {
         var prefixes: [String] = []
 

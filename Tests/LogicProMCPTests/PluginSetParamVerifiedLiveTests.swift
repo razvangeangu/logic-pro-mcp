@@ -5,7 +5,7 @@ import Testing
 
 // T5 — logic_plugins.set_param_verified LIVE write/readback path (R6 steps 6-13)
 // for the FIRST verified-writable parameter, Compressor `threshold` (normalized
-// %, T0 spike docs/spikes/compressor-t0-evidence.md). Deterministic via
+// %. Deterministic via
 // FakeAXRuntimeBuilder + an injected plugin-window opener; no running Logic Pro.
 //
 // The fixture wires the full AX tree the live path walks:

@@ -19,9 +19,9 @@ body:
         - Setup or install
         - API reference
         - Troubleshooting
-        - Architecture or maintainer guide
+        - README or architecture summary
         - Security or trust model
-        - Release evidence
+        - Changelog or release evidence
         - README or marketing claim
         - Other
     validations:

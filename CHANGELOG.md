@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 No unreleased changes.
 
+## [3.7.1] — 2026-06-23
+
+### Fixed
+
+- Public documentation/runtime-surface corrections after v3.7.0: README, API, setup, troubleshooting, docs inventory, and MIDIKeyCommands health detail now reflect the shipped v3.7.x behavior for verified pause/cycle-range outcomes, marker rename refusal, `set_zoom` Accessibility readback, `project/info.trackCount` live-cache promotion, and public mixer dispatcher boundaries.
+- Public docs inventory is now minimal and repository-facing: `docs/API.md`, `docs/SETUP.md`, `docs/TROUBLESHOOTING.md`, the README demo GIF/MP4, and the registry/social thumbnail. Internal PRDs, ticket boards, spike notes, maintainer handoffs, historical live-verify notes, and generated demo harness files were removed from the public docs tree.
+- Release/version surfaces now point at v3.7.1 across `ServerConfig`, manifest metadata, official MCP `server.json`, installer defaults, Homebrew Formula version, README, setup docs, and version-consistency tests.
+
 ## [3.7.0] — 2026-06-23
 
 **Accumulated production hardening after v3.6.0.** This release publishes the full 10-tool / 18-resource / 11-template source tree after closing the v43 demo QA backlog, the issue #60 EN/KO locale-agnostic UI epic, and every open GitHub issue. It includes setup doctor/lifecycle surfaces, audio artifact analysis, project audit/export/session workflows, stock instrument and Session Player catalogs, stronger project/track/mixer/transport verification, fail-closed demo/render gates, and strict fresh live close-gate evidence in English and Korean.
@@ -57,9 +65,9 @@ No unreleased changes.
 - v3.7.0 release-tree local gates: `python3 Scripts/logic_session_bootstrap_test.py` -> `14` passed; `python3 Scripts/logic_free_tempo_modal_test.py` passed; `python3 -m py_compile Scripts/live-e2e-test.py Scripts/logic_session_bootstrap.py Scripts/logic_session_bootstrap_test.py Scripts/logic_free_tempo_modal.py Scripts/logic_free_tempo_modal_test.py` passed; `ruby -c Formula/logic-pro-mcp.rb` passed; `swift build -c release` passed; `swift test --no-parallel` -> `1743` passed.
 - Issue #60 close gate: `swift test --filter Issue60LocalePhase --no-parallel` -> `19` passed; `swift test --filter AXLocalePolicy --no-parallel` -> `25` passed; `swift test --filter AXLogicProElements --no-parallel` -> `24` passed.
 - Strict fresh live close gate: English `LOGIC_PRO_MCP_STRICT_LIVE=1 LOGIC_PRO_MCP_BOOTSTRAP_FRESH=1 LOGIC_PRO_MCP_BOOTSTRAP_LANGUAGE=en python3 Scripts/live-e2e-test.py` -> `341` passed / `0` skipped; Korean equivalent -> `341` passed / `0` skipped.
-- GitHub CI for PR #166 passed on build/test/coverage; main push CI after merge was in progress at release-prep start and is recorded in `docs/live-verify-v3.7.0.md`.
+- GitHub CI for PR #166 passed on build/test/coverage; main push CI after merge was in progress at release-prep start and is recorded in the GitHub Actions run history.
 
-Full exhaustive PR and issue listing lives in `docs/releases/v3.7.0.md`.
+Full exhaustive PR and issue listing lives in the GitHub Release and merged PR history.
 
 ## [3.6.0] — 2026-06-19
 
@@ -69,11 +77,11 @@ Full exhaustive PR and issue listing lives in `docs/releases/v3.7.0.md`.
 
 - **`logic_plugins` verified plugin apply-back surface (v3.6.0, additive — 9 tools total)** — a new `logic_plugins` tool exposes three commands backed by the HC v2 (`hc_schema: 2`) envelope for the verified plugin path. Every `logic_plugins.*` response carries `state` (`"A"` / `"B"` / `"C"`) and `hc_schema: 2`; the existing 8-tool surface is byte-identical.
   - **`get_inventory`** — drift-safe insert chain inventory for a track. Reads the physical AX insert slots directly (no mixer-cache drift); every item always carries `insert` (physical 0-based index), `read_status` (`"ok"` / `"empty"` / `"unreadable"`), `occupied`, `name`, `plugin_id` (canonical `logic.stock.effect.*` or `null`), and `bypassed`. Top-level `complete: true` when all slots are readable; `complete: false` when any slot is `unreadable`. Returns HC v2 State B `readback_unavailable` when the AX mixer subtree cannot be found at all.
-  - **`set_param_verified`** — verified AX write + readback for the Compressor `threshold` parameter (normalized %, 0–100). Executes the full 13-step R6 precedence (schema → mode → project path → identity → capability preflight → track select → inventory → plugin window → slider match → before-read → AX write → after-read → tolerance gate). Returns HC v2 State A only when the write lands **and** the readback matches within tolerance 1.0; mismatch triggers rollback and State C `readback_mismatch`. All other parameters fail closed at step 5 (capability preflight) with State C `unsupported_param_readback`; no write is attempted. **라이브 E2E 검증 완료 (Compressor threshold State A, 2026-06-14)**: Logic Pro 12.2 + 복제본 `acid-track-applyback-test.logicx`, track 5 insert 6 Compressor에서 `requested_normalized 60 → observed_normalized 60, observed_display "60 %"` State A 확인, 독립 osascript readback 교차검증. Evidence: `docs/spikes/compressor-t0-evidence.md`.
+  - **`set_param_verified`** — verified AX write + readback for the Compressor `threshold` parameter (normalized %, 0–100). Executes the full 13-step R6 precedence (schema → mode → project path → identity → capability preflight → track select → inventory → plugin window → slider match → before-read → AX write → after-read → tolerance gate). Returns HC v2 State A only when the write lands **and** the readback matches within tolerance 1.0; mismatch triggers rollback and State C `readback_mismatch`. All other parameters fail closed at step 5 (capability preflight) with State C `unsupported_param_readback`; no write is attempted. **라이브 E2E 검증 완료 (Compressor threshold State A, 2026-06-14; carried into v3.7.0)**: Logic Pro 12.2 + duplicate test project, track 5 insert 6 Compressor에서 `requested_normalized 60 -> observed_normalized 60, observed_display "60 %"` State A 확인, 독립 osascript readback 교차검증. Public evidence boundary: this changelog and the v3.7.0 GitHub Release.
   - **`insert_verified`** — live, readback-verified plugin insert via the requested insert slot's own popup menu. Enforces the pre-insert gates (schema → mode → project path → identity [insertable allowlist: Gain / Channel EQ / Compressor] → inventory `complete:true` → slot `empty`), then selects/verifies the target track, clicks the target slot center with CGEvent, proves the resulting popup is spatially anchored to that slot, chooses the stock plugin by exact leaf title from that anchored popup (direct/root item, popup search result, then recursive hover discovery), and diffs the pre/post insert inventory. **State A only when the post-insert readback observes the requested plugin newly mounted at the requested slot** — the readback diff is the sole State A path, so a false verified insert is structurally impossible. The production path does not depend on localized category names such as `Utility`/`유틸리티`, and `get_inventory` filters Logic Pro 12.2's short bottom "Audio Plug-in" append stub because live E2E showed it is not an addressable insert row. **라이브 E2E 검증 완료 (2026-06-17, exact-slot)**: `insert_verified track=6 insert=6 plugin=Gain` returned `verified:true` with `write_source:"ax_exact_slot_popup"`, `slot_popup_anchor_verified:true`, `winning_strategy:"slot_popup_direct_exact_leaf"`, and `observed_slot:6`; independent `get_inventory` readback confirmed insert 5 stayed empty while insert 6 contained Gain. If unknown Logic UI drift ever places the plugin elsewhere, the op fails closed with State C `insert_landed_at_different_slot` and rolls the stray mount back with readback confirmation. Replaces the legacy `insert_plugin` unverified path for the allowlisted stock plugins.
 - **HC v2 envelope (`logic_plugins.*` only)** — `encodeV2StateA/B/C` emit `state`/`hc_schema: 2`; `encodeV2StateC` additionally carries `verified: false`. All HC v2 error codes are terminal (router never falls back past them). The v1 encoders used by the 8-tool surface are unchanged.
 - **`VerifiedPluginCatalog`** — canonical plugin identity and parameter resolution for the verified surface. Maps caller aliases (display name `"Compressor"`, bare suffix `compressor`, or full `logic.stock.effect.compressor`) to canonical IDs; maps parameter aliases to catalog keys; gates on `ParamCapability.writeReadback` for step-5 capability preflight. Currently only `logic.stock.effect.compressor / threshold` has `.writeReadback` capability; all others return `.unsupported`.
-- **Compressor `threshold` in `StockPluginCatalog`** — `writeMethod: "ax_slider_axvalue"`, `readbackMethod: "ax_slider_axvalue"`, `unit: "normalized"`, `valueRange: 0–100`, `tolerance: 1.0`, `axDescription: "Threshold"` (T0 live spike 2026-06-14, `docs/spikes/compressor-t0-evidence.md`).
+- **Compressor `threshold` in `StockPluginCatalog`** — `writeMethod: "ax_slider_axvalue"`, `readbackMethod: "ax_slider_axvalue"`, `unit: "normalized"`, `valueRange: 0–100`, `tolerance: 1.0`, `axDescription: "Threshold"` (live proof carried in this changelog and the v3.7.0 GitHub Release).
 - **`logic_mixer.insert_plugin` deprecated** — go-forward path is `logic_plugins.insert_verified`. `insert_plugin` remains in the 8-tool surface for the current release cycle but is superseded by the verified surface for the allowlisted stock plugins (Gain / Channel EQ / Compressor).
 
 ### Changed
@@ -245,7 +253,7 @@ Dispatcher input validation is now uniformly fail-closed: values that were previ
 - `AppleScriptChannel.wrapSaveAsResult` — wraps successful `project.save_as` responses in Honest Contract State A only after observing the requested `.logicx` package. Existing package saves must show an advanced modification time; missing/stale packages return State C `readback_mismatch`.
 - `AccessibilityChannel.validatedMIDIImportPath` — resolves symlinks, standardizes the URL, rejects control characters, enforces `.mid`, and only accepts regular files under `/tmp/LogicProMCP/`.
 - `HonestContract.FailureError.readbackUnavailable` — terminal State C code for write paths that executed a fallback but could not obtain the readback required to claim success.
-- `docs/live-verify-v3.4.5-rc5.md` — rc5-era production-readiness evidence covering local tests, release build, live Logic Pro 12.2 health, tempo readback, save-as package readback, and the v4 MIDI-only composition artifact.
+- rc5-era production-readiness evidence covered local tests, release build, live Logic Pro 12.2 health, tempo readback, save-as package readback, and the v4 MIDI-only composition artifact.
 
 ### 2026-06-05 Changed
 
@@ -273,15 +281,15 @@ Dispatcher input validation is now uniformly fail-closed: values that were previ
 ### Changed
 
 - `ChannelRouter.route` — when every channel in the chain is exhausted or skipped, the response is now `HonestContract.encodeStateC(error: .channelsExhausted, hint: lastError, extras: ["operation": op, "last_error": lastError])`. The new `.channelsExhausted` enum case is **semantically distinct from `.portUnavailable`** (Boomer BOOMER-6 / U review fix): `port_unavailable` is scoped to a single channel whose specific port is unwired (e.g. KeyCmd virtual port not yet published), while `channels_exhausted` is the chain-level aggregate signal when no channel in the chain could handle the operation. The previous wrap reused `port_unavailable` for both meanings, which would have caused a harness branching on `error: "port_unavailable"` to mis-diagnose a "Logic not running" exhaustion as a port-wiring problem. The previous free-form error string forced safety harnesses into regex-based root-cause detection.
-- `HonestContract.FailureError` — new `.channelsExhausted` case (raw: `channels_exhausted`) added to `terminalErrorCodes` alongside `.portUnavailable`. Documented in `docs/HONEST-CONTRACT.md`.
+- `HonestContract.FailureError` — new `.channelsExhausted` case (raw: `channels_exhausted`) added to `terminalErrorCodes` alongside `.portUnavailable`. Documented in the API reference.
 - `MCUChannel.pollFaderEcho` / `pollPanEcho` — TOCTOU fix (Boomer BOOMER-6 / B2 review). The two functions previously read `cache.getChannelStrip(...).volume` and `cache.getFaderUpdatedAt(...)` in two separate actor turns, which left a window where a concurrent MCU feedback event could pair an old value with a new timestamp and false-positive State A on a disconnected transport. Both functions now use the new atomic `StateCache.getFaderEchoSnapshot(strip:)` / `getPanEchoSnapshot(strip:)` helpers that return `(value, updatedAt)` in a single actor turn. Closes the race the `testSetVolumeStateAIncludesMCUDiagnostics_connectedFresh` test was flagging by tolerating either State A or State B.
 - `StateCache` — new atomic snapshot helpers `getFaderEchoSnapshot(strip:) -> (volume: Double?, updatedAt: Date?)` and `getPanEchoSnapshot(strip:) -> (pan: Double?, updatedAt: Date?)`.
 
 ### Documentation
 
-- `docs/HONEST-CONTRACT.md` — new "Channel-specific extras" section documenting the `mcu_connected` / `mcu_registered` / `mcu_last_feedback_age_ms` triplet plus the decision table for harnesses on State B `echo_timeout_<ms>ms`. New `channels_exhausted` error code documented in the State C section alongside the `port_unavailable` distinction.
+- API docs — new "Channel-specific extras" section documenting the `mcu_connected` / `mcu_registered` / `mcu_last_feedback_age_ms` triplet plus the decision table for harnesses on State B `echo_timeout_<ms>ms`. New `channels_exhausted` error code documented in the State C section alongside the `port_unavailable` distinction.
 - `docs/API.md` — common-error table now references the structured `channels_exhausted` envelope instead of the legacy free-form string.
-- `docs/ARCHITECTURE.md` — three diagrams updated (router aggregate, transport routing example, and error propagation block) to reflect the new HC State C envelope.
+- Architecture docs — router aggregate, transport routing, and error propagation notes updated to reflect the new HC State C envelope.
 - `docs/SETUP.md` — MCU registration warning now references the actual rc5 wire shapes (both `channels_exhausted` and the State B `echo_timeout` shape) so users searching for either error string land on the right page.
 
 ### Honest scope
@@ -497,7 +505,7 @@ SIEM rules that grep for `[AUDIT] project.<command> executed` need to add the ne
 - **RB-6 — install/uninstall non-interactive safety.** `Scripts/install-keycmds.sh:40` backup glob now includes `*.logikcs` (Logic 12.2+ binary key-commands format) — pre-fix the glob silently skipped that extension, so a Logic 12.2 user's bindings could be clobbered without backup. `Scripts/uninstall-keycmds.sh` `read -p` prompt now gates on `[ -t 0 ]` so non-TTY contexts (MDM, fleet automation, CI) skip the prompt instead of exiting `1` under `set -euo pipefail`. The Manual MIDI Learn flow can be auto-restored via `LOGIC_PRO_MCP_KEYCMD_AUTO_RESTORE=1`. README and `Scripts/install.sh` wording corrected from "installs the Key Commands preset" to "stages the Key Commands mapping reference" — Logic 12.2+ doesn't actually import the .plist.
 - **H-1 — audit log timing.** `ProjectDispatcher.handle` no longer emits `executed` before validation. New `ProjectDispatcher.AuditPhase` enum (`rejected`, `confirmationRequired`, `executed`) drives phase-specific log lines. See BREAKING above.
 - **H-2 — `goto_marker` target-faithful.** Cold-cache fallback to CC 38 removed. See BREAKING above.
-- **H-3 — docs drift.** `docs/ARCHITECTURE.md` (`5s` → `3s` polling), `docs/TROUBLESHOOTING.md` (cache-refresh timing), `docs/API.md` (`record_sequence` 2-second cache poll → 500 ms live AX, project source freshness `5s` → `3s`), `README.md` (install URL pin `v3.1.1` → `v3.4.0`, test count `1059 (v3.1.9)` → `1110+ (v3.4.0)`). The drift was load-bearing — operators were waiting 5 seconds when the cache refreshed at 3.
+- **H-3 — docs drift.** Architecture notes (`5s` → `3s` polling), `docs/TROUBLESHOOTING.md` (cache-refresh timing), `docs/API.md` (`record_sequence` 2-second cache poll → 500 ms live AX, project source freshness `5s` → `3s`), `README.md` (install URL pin `v3.1.1` → `v3.4.0`, test count `1059 (v3.1.9)` → `1110+ (v3.4.0)`). The drift was load-bearing — operators were waiting 5 seconds when the cache refreshed at 3.
 - **H-4 — CI coverage gate re-armed.** `.github/workflows/ci.yml` Coverage step now enforces region ≥ 65% and line ≥ 72% (baseline on 2026-05-08 was 70.65% / 77.71%, so the thresholds carry ~5pp / ~6pp of slack for normal churn). Pre-fix the step ran `set +e` and `exit 0` so coverage regressions never blocked a merge. The `swift test` pass/fail signal at the prior step remains the authoritative test gate; this step adds the coverage threshold on top.
 - **H-6 — AXValue force casts hardened.** `Sources/LogicProMCP/Accessibility/AXHelpers.swift` `getPosition` and `getSize` now match the `CFGetTypeID(... AXValueGetTypeID())` guard pattern used by `LibraryAccessor`, `PluginInspector`, and `AXLogicProElements`. A malformed AX attribute (Logic build drift, plugin mock, AX timeout returning a stub) returns nil instead of crashing with `Could not cast value of type ... to 'AXValue'`.
 
@@ -528,7 +536,7 @@ SIEM rules that grep for `[AUDIT] project.<command> executed` need to add the ne
 
 ## [3.3.0] — 2026-05-08
 
-**Enterprise production-readiness P0 closure — fail-closed mutating writes + signal cleanup.** Closes 5 release blockers (RB-1.a/b/c, RB-3, RB-5) from the 2026-05-08 enterprise production review. The 2026-05-08 review (`docs/reviews/2026-05-08-enterprise-production-readiness-review.md`) verified each evidence line against the source and called the v3.2.0 ship `HARD NO-GO` until these closed. v3.3.0 closes them with 12 new regression tests; remaining P0/P1 items (RB-2 stdio launch parity, RB-4 release-workflow notarization gate, RB-6 install/uninstall non-interactive safety, H-1..H-6) tracked for follow-up.
+**Enterprise production-readiness P0 closure — fail-closed mutating writes + signal cleanup.** Closes 5 release blockers (RB-1.a/b/c, RB-3, RB-5) from the 2026-05-08 enterprise production review. The internal review verified each evidence line against the source and called the v3.2.0 ship `HARD NO-GO` until these closed. v3.3.0 closes them with 12 new regression tests; remaining P0/P1 items (RB-2 stdio launch parity, RB-4 release-workflow notarization gate, RB-6 install/uninstall non-interactive safety, H-1..H-6) tracked for follow-up.
 
 ### ⚠️ BREAKING
 
@@ -597,7 +605,7 @@ The T0 live spike (measured on 2026-05-07) invalidated the PRD assumption:
 - `AppleScript keystroke "146.4.4.240"` does not reach any segment.
 - Attempting to set the AXSlider value directly fails (the mapping between raw values (~2.27E+15) and displayed values has not been decoded).
 
-The v3.1.11 navigation behavior (navigates only the `bar` first component) is therefore preserved unchanged. v3.3 will attempt closure after reverse-engineering the slider raw value mapping in the PRD. Full spike results: `docs/live-verify-v3.2.0.md`.
+The v3.1.11 navigation behavior (navigates only the `bar` first component) is therefore preserved unchanged. v3.3 will attempt closure after reverse-engineering the slider raw value mapping in the PRD.
 
 ### Schema additions (back-compat)
 
@@ -827,7 +835,7 @@ func updateMarkers(_ newMarkers: [MarkerState]) {
 
 ### Live verification (2026-05-07, Logic Pro 12.2)
 
-E2E ran the v3.1.9 release binary against `/Users/isaac/Music/Logic/무제 15.logicx` (5 user markers created at bars 1, 1, 1, 5, 17) via stdio JSON-RPC. Captured `logic://markers` envelope:
+E2E ran the v3.1.9 release binary against a local Logic project fixture (5 user markers created at bars 1, 1, 1, 5, 17) via stdio JSON-RPC. Captured `logic://markers` envelope:
 
 **Marker List window OPEN**:
 ```json
@@ -1010,7 +1018,7 @@ The /loop verification work also folded these post-v3.1.6 commits into `main`:
 
 ### Research
 
-- `docs/research/issue1-option1-feasibility.md` — escalation note on xaexx1's "Option 1" recommendation (`LogicProMCP --install-keycmds` programmatic `.logikcs` installer). Conclusion: not autonomous-safe because Logic 12.2 stores actual key/MIDI assignments inside an undocumented base64 `LogicBinaryPreferences` blob (~840 lines of XML's body) whose layout shifts between Logic point releases.
+- Internal feasibility note on xaexx1's "Option 1" recommendation (`LogicProMCP --install-keycmds` programmatic `.logikcs` installer). Conclusion: not autonomous-safe because Logic 12.2 stores actual key/MIDI assignments inside an undocumented base64 `LogicBinaryPreferences` blob (~840 lines of XML's body) whose layout shifts between Logic point releases.
 
 ## [3.1.6] — 2026-04-30
 
@@ -1066,7 +1074,7 @@ Migration: callers that scripted against pre-v3.1.6 must shift `ch` values by +1
   2. **1-based channel display** — `logic_midi.send_cc { channel:16, port:"keycmd" }` shows `Ch 16` in Logic's UI (proves the BREAKING #1 migration is correct on the wire).
   3. **Homebrew install on CLT-only host** — `brew install logic-pro-mcp` completes on a host with `xcode-select --install`'d Command Line Tools but no full Xcode.app (proves the AC-4 dependency removal).
 
-  Evidence (screenshots or `health.detail` capture) recorded in `docs/live-verify-v3.1.6.md` or release notes evidence section before tag push.
+  Evidence (screenshots or `health.detail` capture) recorded in release notes before tag push.
 
 ### Out-of-scope (deferred follow-up — NG6)
 
@@ -1108,7 +1116,7 @@ Migration: callers that scripted against pre-v3.1.6 must shift `ch` values by +1
 
 - **Resource envelope: `ax_occluded` field added.** `wrapWithCacheEnvelope` now emits `{"cache_age_sec":…,"fetched_at":…,"ax_occluded":<bool>,"data":…}`. Clients can branch on the flag to treat occluded reads as "frozen at last non-occluded state" rather than acting on potentially-stale snapshots. Default false when the wrapper is invoked without a cache reference (e.g. file-based library inventory). The mixer resource gains the field too; library inventory keeps it false (file-mtime based, not affected by AX state).
 
-- **`LOGIC_PRO_MCP_LIBRARY_INVENTORY` path allowlist.** Previously any `.json` file the MCP server process could read was a valid override target — Keychain exports, dotfile JSON, anything under `$HOME`. The validator now requires the symlink-resolved path to sit under one of: `~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`, plus optional additive prefixes from a new `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` env var (colon-separated, tilde-expanded, symlink-resolved). Symlink escapes are rejected because resolution happens before the prefix check. Documented in `docs/MAINTAINERS.md` and `docs/API.md`.
+- **`LOGIC_PRO_MCP_LIBRARY_INVENTORY` path allowlist.** Previously any `.json` file the MCP server process could read was a valid override target — Keychain exports, dotfile JSON, anything under `$HOME`. The validator now requires the symlink-resolved path to sit under one of: `~/Library/Application Support/LogicProMCP/`, `<CWD>/Resources/`, `~/Music/Logic/`, plus optional additive prefixes from a new `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST` env var (colon-separated, tilde-expanded, symlink-resolved). Symlink escapes are rejected because resolution happens before the prefix check. Documented in the API docs and maintainer release notes.
 
 ### Flaky test eliminated
 
@@ -1176,7 +1184,7 @@ Migration: callers that scripted against pre-v3.1.6 must shift `ch` values by +1
 
 - **Build**: `swift build` clean.
 - **Tests**: 824 → **862** passing (initial 8 P0/P1 regression tests + 4 follow-up tests for P1-4 / P1-5 / P2-1 in `TrackDispatcherDeleteTests` and `HonestContractOpTests`; pre-existing `testTrackDispatcherDeleteAndDuplicateRespectSelectionFlow` updated to use a verified-select envelope mock now that `delete` enforces State A; pre-existing AX-channel set_color expectation updated to match the new `not_implemented` envelope substring).
-- **Live verification**: deferred to user-driven session — same discipline as v3.1.0 / v3.1.1 (`docs/HONEST-CONTRACT.md` §Live verification policy).
+- **Live verification**: deferred to user-driven session — same discipline as v3.1.0 / v3.1.1 (live verification policy).
 
 ### Out-of-scope (deferred)
 
@@ -1233,7 +1241,7 @@ Migration: callers that scripted against pre-v3.1.6 must shift `ch` values by +1
 
 ## [3.1.0] — 2026-04-24
 
-**Honest Contract.** Every mutating operation now returns one of three explicit states so that an LLM caller can distinguish *confirmed* writes from *unconfirmable* writes from *failed* writes without heuristically parsing free-form text. This closes the class of bug the Guardian v3.0.9 audit flagged as systemic: multiple ops returned `"success:true"` while the underlying AX write was never read back, so a mismatch between Logic's internal state and the reported state could silently propagate to callers. See [docs/HONEST-CONTRACT.md](docs/HONEST-CONTRACT.md) for the full wire contract and [docs/prd/PRD-v310-honest-contract.md](docs/prd/PRD-v310-honest-contract.md) for the motivation + design.
+**Honest Contract.** Every mutating operation now returns one of three explicit states so that an LLM caller can distinguish *confirmed* writes from *unconfirmable* writes from *failed* writes without heuristically parsing free-form text. This closes the class of bug the Guardian v3.0.9 audit flagged as systemic: multiple ops returned `"success:true"` while the underlying AX write was never read back, so a mismatch between Logic's internal state and the reported state could silently propagate to callers. See `docs/API.md` for the current wire contract.
 
 ### Wire-level contract (new)
 
@@ -1265,8 +1273,8 @@ Both enums (`reason`, `error`) are stable — callers can `switch` on them.
 ### Added
 
 - `Sources/LogicProMCP/Utilities/HonestContract.swift` — single source of truth for 3-state JSON encoding (`encodeStateA` / `encodeStateB` / `encodeStateC`) + the two stable-rawValue enums (`UncertainReason`, `FailureError`). All new mutating ops go through this module.
-- `docs/HONEST-CONTRACT.md` — client-facing guide to the 3-state contract, recommended retry patterns, and the "what not to do" list for server contributors.
-- `docs/prd/PRD-v310-honest-contract.md` — PRD recording the design + risk analysis that drove this release.
+- API docs — client-facing guide to the 3-state contract, recommended retry patterns, and the "what not to do" list for server contributors.
+- Internal PRD recorded the design + risk analysis that drove this release.
 - `MCU_ECHO_TIMEOUT_MS` environment variable — 250 / 500 / 1000ms override for the MCU fader echo poll window. Useful for slow projects / slow Logic builds where the default 500ms is too tight.
 - New test suites: `HonestContractTests.swift`, `HonestContractOpTests.swift`, `MCUChannelEchoTests.swift`, `ResourceCacheAgeTests.swift`, `ScanLibraryCacheSplitTests.swift` — 24 new test cases covering all three states per op + the cache-split + the resource `cache_age_sec` field.
 
@@ -1298,7 +1306,7 @@ Both enums (`reason`, `error`) are stable — callers can `switch` on them.
   + const firstTrackId = envelope.data[0].id;
   ```
 
-  Previous CHANGELOG wording ("additive, not breaking") was inaccurate and is corrected here; the envelope wrap is a genuine breaking change at the resource layer even though mutating-op responses remain additive. See `docs/HONEST-CONTRACT.md §State resource` for the full contract.
+  Previous CHANGELOG wording ("additive, not breaking") was inaccurate and is corrected here; the envelope wrap is a genuine breaking change at the resource layer even though mutating-op responses remain additive. See `docs/API.md` for the current contract.
 
 ### Verification
 
@@ -1585,7 +1593,7 @@ Release-path and docs-honesty hotfix on top of v3.0.0. **No runtime behavior cha
 
 ### Fixed
 
-- **Architecture claims match reality.** Locally-built ADHOC releases are `arm64`-native (produced by `swift build -c release` without Xcode); Intel Macs run the binary under Rosetta 2. The v3.0.0 release asset named `…-universal.tar.gz` was bit-identical to `…-arm64.tar.gz` — technically arm64 masquerading as universal. v3.0.1 keeps both tarball names for Homebrew-tap backward compatibility but `manifest.json`, `README.md`, `docs/SETUP.md`, `docs/MAINTAINERS.md`, and `Formula/logic-pro-mcp.rb` now all state `arm64` native + Intel via Rosetta. CI with full Xcode still produces a genuine fat binary.
+- **Architecture claims match reality.** Locally-built ADHOC releases are `arm64`-native (produced by `swift build -c release` without Xcode); Intel Macs run the binary under Rosetta 2. The v3.0.0 release asset named `…-universal.tar.gz` was bit-identical to `…-arm64.tar.gz` — technically arm64 masquerading as universal. v3.0.1 keeps both tarball names for Homebrew-tap backward compatibility but `manifest.json`, `README.md`, `docs/SETUP.md`, and `Formula/logic-pro-mcp.rb` now all state `arm64` native + Intel via Rosetta. CI with full Xcode still produces a genuine fat binary.
 - **`release.yml` is dual-mode (notarized + ADHOC).** Previously the workflow hard-required `MACOS_CERT_BASE64` and 6 other Apple-Developer secrets, so every tag push failed visibly (red X on every release since v2.3.0). v3.0.1 detects secret presence at runtime: notarized path when present, ADHOC (`codesign --sign -`) when absent. Both paths publish `RELEASE-METADATA.json` with correct `signing` field (`notarized`|`adhoc`). CI `validate-install` matrix now runs end-to-end on every release.
 - **README test-count unified.** Badge, body paragraph, and release notes now consistently cite **760 passing** (was drifting between 700 badge / 759 body / 760 notes).
 - **Migration guidance expanded.** CHANGELOG §Migration now includes before/after examples for `set_instrument` (empty-call rejection) and `goto_position` (`time` alias removed).
@@ -1593,7 +1601,7 @@ Release-path and docs-honesty hotfix on top of v3.0.0. **No runtime behavior cha
 ### Added
 
 - `Scripts/release.sh` — one-command ADHOC release that (1) builds + adhoc-codesigns the binary, (2) computes SHAs, (3) patches `Formula/logic-pro-mcp.rb` + commits Formula sync, (4) creates tag, (5) creates GitHub release with artifacts — in the right order. Prevents the v3.0.0 issue where the Formula SHA commit landed on `main` *after* the tag, leaving the tag with a stale sha256.
-- `docs/MAINTAINERS.md` now documents both release modes, the `Scripts/release.sh` wrapper, and the post-tag Homebrew SHA-sync step more clearly.
+- Maintainer docs now document both release modes, the `Scripts/release.sh` wrapper, and the post-tag Homebrew SHA-sync step more clearly.
 
 ### Security
 
@@ -1663,7 +1671,7 @@ Release-path and docs-honesty hotfix on top of v3.0.0. **No runtime behavior cha
 - **`goto_position` now fails closed on unknown param keys.** Previously a caller sending the legacy `{ "time": "…" }` alias would silently seek to `"1.1.1.1"`; now the dispatcher returns an explicit error naming the removed key and the allowed set (`bar`, `position`).
 - **`encodeJSON` fallback path uses a full JSON escape helper** (`jsonStringEscape`) covering `"`, `\`, `\b`, `\f`, `\n`, `\r`, `\t`, and U+0000-U+001F. Previous escaping missed control characters, which would have produced invalid JSON if a future Foundation error message carried them.
 - **`StatePoller.Runtime` gains an injectable `sleep` closure.** Tests can now drive the poll loop at 1 µs cadence instead of waiting out the production 3 s interval. The two lifecycle tests (`testStatePollerStartStopLifecycle` and `testLogicProServerStartCoversDefaultPortAndPollerLifecyclePaths`) used to take ~2 000 s each and were excluded from CI; with the injectable sleep + `.fastTest` runtime (which also short-circuits `hasVisibleWindow` to avoid live AX calls) they now complete in ≤ 20 ms each and are included in the default test run.
-- `docs/MAINTAINERS.md` now documents the runtime env matrix (`LOG_LEVEL`, `LOG_FORMAT`, `LOGIC_PRO_MCP_LIBRARY_INVENTORY`, installer pins) and the post-tag Homebrew `sha256` sync step.
+- Maintainer docs now document the runtime env matrix (`LOG_LEVEL`, `LOG_FORMAT`, `LOGIC_PRO_MCP_LIBRARY_INVENTORY`, installer pins) and the post-tag Homebrew `sha256` sync step.
 
 ### Migration from v2.3.x
 
@@ -1759,10 +1767,10 @@ Sending `{ "time": ... }` in v3.0.0+ returns an explicit error naming the remove
 
 ### Documentation
 
-- `docs/prd/PRD-record-sequence-smf-import.md` (v0.4) — full PRD with 3 Phase-2 review rounds, 2 Phase-6 Ralph iterations, and live OQ-1/OQ-2/OQ-3 probe results embedded.
-- `docs/tickets/record-sequence-smf-import/` — 7 dev tickets (T1-T7) with TDD specs.
-- `docs/tickets/navigate-redesign/STATUS.md` — marked Done with T1/T2/T3 evidence.
-- `docs/tickets/installer-supply-chain/` — resolution: pinned SHA256 hash in `Scripts/install.sh` (implemented in 2.3.0). See §Security below.
+- Internal record-sequence SMF import PRD (v0.4) with review rounds and live OQ-1/OQ-2/OQ-3 probe results.
+- Internal record-sequence SMF import tickets (T1-T7) with TDD specs.
+- Internal navigate-redesign status marked Done with T1/T2/T3 evidence.
+- Internal installer-supply-chain ticket resolution: pinned SHA256 hash in `Scripts/install.sh` (implemented in 2.3.0). See §Security below.
 
 ### Security
 
@@ -1798,7 +1806,7 @@ Sending `{ "time": ... }` in v3.0.0+ returns an explicit error naming the remove
 - `StateCache.clearProjectState()` now also resets `transport` so the resource stops reporting the previous project's playback state after close.
 - `MCUFeedbackParser` enforces single-track selection on every "select on" event, preventing multiple tracks from appearing selected simultaneously.
 - Distribution version aligned at **2.2.0** across `ServerConfig.serverVersion` (SSOT), `Formula/logic-pro-mcp.rb`, `manifest.json`, `Scripts/install.sh`. `VersionConsistencyTests` pins this going forward.
-- `Formula/logic-pro-mcp.rb` now installs helper assets (`docs/MCU-SETUP.md`, `Scripts/install-keycmds.sh` + siblings, `Scripts/LogicProMCP-Scripter.js`) into `pkgshare`; release workflow packs them into the tarball.
+- `Formula/logic-pro-mcp.rb` now installs helper assets (MCU setup docs, `Scripts/install-keycmds.sh` + siblings, `Scripts/LogicProMCP-Scripter.js`) into `pkgshare`; release workflow packs them into the tarball.
 - `docs/API.md` + `README.md` synced with the shipped surface (record_sequence/arm_only/get_regions documented with known-limitation callouts, navigate gaps disclosed, insert/bypass_plugin marked removed, poll interval corrected to 3 s).
 
 ### Removed
@@ -1816,8 +1824,8 @@ Sending `{ "time": ... }` in v3.0.0+ returns an explicit error naming the remove
 ### Documentation
 
 - New ticket drafts:
-  - `docs/tickets/navigate-redesign/` — T1 (goto_bar real channel), T2 (marker cache population), T3 (contract alignment).
-  - `docs/tickets/installer-supply-chain/` — same-release verification root mitigation options (awaiting Isaac's decision).
+  - Internal navigate-redesign tickets — T1 (goto_bar real channel), T2 (marker cache population), T3 (contract alignment).
+  - Internal installer-supply-chain tickets — same-release verification root mitigation options.
 
 ## [2.1.0] — 2026-04-12
 
@@ -1842,7 +1850,7 @@ Nine vulnerabilities identified and fixed during the production-readiness review
 - **E2E test suite** — `EndToEndTests.swift` (93 tests) covering tool → dispatcher → router → channel chains, resource reads, lifecycle, concurrency, and input validation.
 - **Production readiness tests** — `ProductionReadinessTests.swift` (26 tests) verifying all security fixes, duration caps, path validation, port name sanitization.
 - **Live E2E test runner** — `scripts/live-e2e-test.py` drives the actual binary against a running Logic Pro instance (229 tests across 20 sections).
-- **Comprehensive documentation** — new `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/MCU-SETUP.md`, `docs/TROUBLESHOOTING.md`.
+- **Comprehensive documentation** — new architecture notes, `docs/API.md`, MCU setup guidance, and `docs/TROUBLESHOOTING.md`.
 - **Launch agent template** — `scripts/com.logicpro.mcp.plist.template` for operators who need the MCP server available outside Claude Code sessions.
 
 ### Changed

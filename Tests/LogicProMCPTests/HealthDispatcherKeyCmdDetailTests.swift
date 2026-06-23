@@ -45,11 +45,10 @@ private func t7StartedChannel(tag: String) async throws -> ChannelHealth {
 
 @Test func testKeyCmdChannelDetailListsKeycmdOnlyOps() async throws {
     let health = try await t7StartedChannel(tag: "keycmd-only")
-    // v3.1.7: SETUP.md §4.1 audit revealed seven additional user-facing ops
-    // are also effectively keycmd-only because their nominal cgEvent
-    // fallback has no `CGEventChannel.keyMap` entry. The full set must be
-    // surfaced in the runtime health detail so an LLM agent reading the
-    // channel state knows exactly which ops will fail without a binding.
+    // The full remaining keycmd-only/channel-only set must be surfaced in the
+    // runtime health detail so an LLM agent reading channel state knows exactly
+    // which ops will fail without a binding. v3.7.x removes nav.set_zoom_level
+    // from this list because logic_navigate.set_zoom has an Accessibility path.
     #expect(health.detail.contains("Effectively keycmd-only"))
     #expect(health.detail.contains("transport.capture_recording"))
     #expect(health.detail.contains("edit.duplicate"))
@@ -57,7 +56,7 @@ private func t7StartedChannel(tag: String) async throws -> ChannelHealth {
     #expect(health.detail.contains("edit.toggle_step_input"))
     #expect(health.detail.contains("nav.goto_marker"))
     #expect(health.detail.contains("nav.delete_marker"))
-    #expect(health.detail.contains("nav.set_zoom_level"))
+    #expect(!health.detail.contains("nav.set_zoom_level"))
     #expect(health.detail.contains("project.bounce"))
 }
 

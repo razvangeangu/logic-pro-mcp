@@ -147,7 +147,7 @@ Release binaries ship in **ADHOC mode** unless Apple Developer Program credentia
 
 Without those credentials, ADHOC releases provide SHA256 + codesign verification while skipping Gatekeeper assessment.
 
-See `.github/workflows/release.yml` and `docs/MAINTAINERS.md`.
+See `.github/workflows/release.yml` and `CONTRIBUTING.md`.
 
 ### Installer trust model
 
@@ -209,7 +209,7 @@ ADHOC releases are signed with an ephemeral adhoc identity (`codesign --sign -`)
 
 **Trust model for ADHOC**: root of trust is the SHA256 hash published in `SHA256SUMS.txt` in the same GitHub release. A compromise of the release asset would change the hash and the installer would abort. Enterprise operators can supply a hash out-of-band via `LOGIC_PRO_MCP_SHA256=...`.
 
-**Known residual risk**: A compromised GitHub release can tamper with the binary, SHA256SUMS.txt, and RELEASE-METADATA.json in lockstep (see `docs/MAINTAINERS.md §Release Process`). Mitigate with **out-of-band verification**:
+**Known residual risk**: A compromised GitHub release can tamper with the binary, SHA256SUMS.txt, and RELEASE-METADATA.json in lockstep (see the release workflow and `CONTRIBUTING.md`). Mitigate with **out-of-band verification**:
 
 ```bash
 # Override with a hash obtained from a trusted second channel
