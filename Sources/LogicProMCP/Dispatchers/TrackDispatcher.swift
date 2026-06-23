@@ -17,8 +17,13 @@ struct TrackDispatcher {
         command: String,
         params: [String: Value],
         router: ChannelRouter,
-        cache: StateCache
+        cache: StateCache,
+        dialogPresent: @escaping @Sendable () -> Bool = { false }
     ) async -> CallTool.Result {
+        if let operation = modalGuardedTrackOperation(for: command), dialogPresent() {
+            return blockingDialogResult(operation: operation)
+        }
+
         switch command {
         case "select":
             // Prefer index (accepts int/double/string), else match by name. If
@@ -431,6 +436,43 @@ struct TrackDispatcher {
                 isError: true
             )
         }
+    }
+
+    private static func modalGuardedTrackOperation(for command: String) -> String? {
+        switch command {
+        case "select": return "track.select"
+        case "create_audio": return "track.create_audio"
+        case "create_instrument": return "track.create_instrument"
+        case "create_drummer": return "track.create_drummer"
+        case "create_external_midi": return "track.create_external_midi"
+        case "delete": return "track.delete"
+        case "duplicate": return "track.duplicate"
+        case "rename": return "track.rename"
+        case "mute": return "track.set_mute"
+        case "solo": return "track.set_solo"
+        case "arm": return "track.set_arm"
+        case "arm_only": return "track.arm_only"
+        case "record_sequence": return "track.record_sequence"
+        case "set_automation": return "track.set_automation"
+        default: return nil
+        }
+    }
+
+    private static func blockingDialogResult(operation: String) -> CallTool.Result {
+        toolTextResult(
+            HonestContract.encodeStateC(
+                error: .unsupportedState,
+                hint: "Refusing \(operation) while a blocking Logic dialog/sheet is present. Dismiss crash, save, bounce, import, or other modal dialogs, then retry.",
+                extras: [
+                    "operation": operation,
+                    "failure_stage": "preflight_blocking_dialog",
+                    "blocking_dialog_present": true,
+                    "write_attempted": false,
+                    "safe_to_retry": true,
+                ]
+            ),
+            isError: true
+        )
     }
 
     private static func trackToggleResultIsVerified(_ result: ChannelResult) -> Bool {
