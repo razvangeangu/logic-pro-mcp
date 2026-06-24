@@ -26,6 +26,34 @@ private func decodeIssue123JSON(_ s: String) -> [String: Any] {
     (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
 }
 
+private final class Issue123MIDIRegionReadbackSequence: @unchecked Sendable {
+    private var values: [AccessibilityChannel.MIDIImportRegionReadback]
+    private let lock = NSLock()
+
+    init(_ values: [AccessibilityChannel.MIDIImportRegionReadback]) {
+        self.values = values
+    }
+
+    func next() -> AccessibilityChannel.MIDIImportRegionReadback {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !values.isEmpty else { return .success([]) }
+        if values.count == 1 { return values[0] }
+        return values.removeFirst()
+    }
+}
+
+private func issue123MIDIRegion(trackIndex: Int) -> RegionInfo {
+    RegionInfo(
+        name: "Imported MIDI",
+        trackIndex: trackIndex,
+        startBar: 1,
+        endBar: 2,
+        kind: "midi",
+        rawHelp: nil
+    )
+}
+
 /// Write a minimal Standard MIDI File header into the managed import directory
 /// (`/private/tmp/LogicProMCP`) so the path mirrors a real, validator-eligible
 /// import target. `defaultImportMIDIFile` requires the file to EXIST before it
@@ -123,12 +151,17 @@ func testOccludedSessionFailsClosedWithDialogNotFound(sentinel: String) async th
         func next() -> Int { values.removeFirst() }
     }
     let counter = Counter()
+    let regions = Issue123MIDIRegionReadbackSequence([
+        .success([]),
+        .success([issue123MIDIRegion(trackIndex: 4)]),
+    ])
 
     let result = await AccessibilityChannel.defaultImportMIDIFile(
         path: fixture.path,
         executeScript: { _ in .success("OK") },
         trackCount: { counter.next() },
         trackNames: { ["Studio Grand", "01 Felt Keys", "02 Bass", "03 Drums", "04 Imported Lead"] },
+        regionInfos: { regions.next() },
         deltaPoll: {}
     )
 
