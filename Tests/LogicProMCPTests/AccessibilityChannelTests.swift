@@ -7,6 +7,34 @@ private func decodeAccessibilityJSON(_ s: String) -> [String: Any] {
     (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
 }
 
+private final class MIDIRegionReadbackSequence: @unchecked Sendable {
+    private var values: [AccessibilityChannel.MIDIImportRegionReadback]
+    private let lock = NSLock()
+
+    init(_ values: [AccessibilityChannel.MIDIImportRegionReadback]) {
+        self.values = values
+    }
+
+    func next() -> AccessibilityChannel.MIDIImportRegionReadback {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !values.isEmpty else { return .success([]) }
+        if values.count == 1 { return values[0] }
+        return values.removeFirst()
+    }
+}
+
+private func midiRegionForImport(trackIndex: Int) -> RegionInfo {
+    RegionInfo(
+        name: "Imported MIDI",
+        trackIndex: trackIndex,
+        startBar: 1,
+        endBar: 2,
+        kind: "midi",
+        rawHelp: nil
+    )
+}
+
 private func axPoint(_ x: CGFloat, _ y: CGFloat) -> AXValue {
     var point = CGPoint(x: x, y: y)
     return AXValueCreate(.cgPoint, &point)!
@@ -1113,12 +1141,17 @@ private func makeSetInstrumentFixture() -> (
         }
     }
     let counter = Counter()
+    let regions = MIDIRegionReadbackSequence([
+        .success([]),
+        .success([midiRegionForImport(trackIndex: 2)]),
+    ])
 
     let result = await AccessibilityChannel.defaultImportMIDIFile(
         path: tempFile.path,
         executeScript: { _ in .success("OK") },
         trackCount: { counter.next() },
         trackNames: { ["Studio Grand", "01 Felt Keys"] },
+        regionInfos: { regions.next() },
         deltaPoll: {}
     )
 
@@ -1214,12 +1247,17 @@ private func makeSetInstrumentFixture() -> (
         func next() -> Int { values.removeFirst() }
     }
     let counter = Counter()
+    let regions = MIDIRegionReadbackSequence([
+        .success([]),
+        .success([midiRegionForImport(trackIndex: 1)]),
+    ])
 
     let result = await AccessibilityChannel.defaultImportMIDIFile(
         path: tempFile.path,
         executeScript: { _ in .success("OK") },
         trackCount: { counter.next() },
         trackNames: { ["Studio Grand", "01 Felt Keys"] },
+        regionInfos: { regions.next() },
         deltaPoll: {}
     )
 

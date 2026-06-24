@@ -97,37 +97,92 @@ struct Issue108Tests {
         return path
     }
 
-    @Test("import_file returns verified State A when a new track appears")
-    func importVerifiedOnTrackDelta() async {
+    private final class RegionSnapshotBox: @unchecked Sendable {
+        private var values: [AccessibilityChannel.MIDIImportRegionReadback]
+        private let lock = NSLock()
+
+        init(_ values: [AccessibilityChannel.MIDIImportRegionReadback]) {
+            self.values = values
+        }
+
+        func next() -> AccessibilityChannel.MIDIImportRegionReadback {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !values.isEmpty else { return .success([]) }
+            if values.count == 1 { return values[0] }
+            return values.removeFirst()
+        }
+    }
+
+    private func importedRegion(trackIndex: Int = 1) -> RegionInfo {
+        RegionInfo(
+            name: "Imported MIDI",
+            trackIndex: trackIndex,
+            startBar: 1,
+            endBar: 2,
+            kind: "midi",
+            rawHelp: nil
+        )
+    }
+
+    @Test("import_file returns verified State A when a new track and MIDI region appear")
+    func importVerifiedOnTrackAndRegionDelta() async {
         let path = tempMIDIFile(); defer { try? FileManager.default.removeItem(atPath: path) }
         let counter = CallCounter([1, 2]) // before=1, after=2
+        let regions = RegionSnapshotBox([.success([]), .success([importedRegion()])])
         let result = await AccessibilityChannel.defaultImportMIDIFile(
             path: path,
             executeScript: { _ in .success("OK") },
             trackCount: { counter.next() },
             trackNames: { ["Studio Grand", "Imported"] },
+            regionInfos: { regions.next() },
             deltaPoll: {}
         )
         #expect(result.isSuccess)
         let o = (try? JSONSerialization.jsonObject(with: Data(result.message.utf8))) as? [String: Any]
         #expect(o?["observed_delta"] as? Int == 1)
         #expect(o?["track_count_after"] as? Int == 2)
+        #expect(o?["imported_region_count"] as? Int == 1)
+    }
+
+    @Test("import_file fails closed when a new track appears without a MIDI region")
+    func importFailsClosedOnTrackDeltaWithoutRegion() async {
+        let path = tempMIDIFile(); defer { try? FileManager.default.removeItem(atPath: path) }
+        let counter = CallCounter([1, 2])
+        let regions = RegionSnapshotBox([.success([]), .success([])])
+        let result = await AccessibilityChannel.defaultImportMIDIFile(
+            path: path,
+            executeScript: { _ in .success("OK") },
+            trackCount: { counter.next() },
+            trackNames: { ["Studio Grand", "Imported"] },
+            regionInfos: { regions.next() },
+            deltaPoll: {}
+        )
+        #expect(!result.isSuccess)
+        #expect(result.message.contains("readback_mismatch"))
+        #expect(result.message.contains("did not create a verifiable MIDI region"))
+        #expect(result.message.contains("\"track_count_after\":2"))
+        #expect(result.message.contains("\"region_count_after\":0"))
     }
 
     @Test("import_file fails closed when no track is created")
     func importFailsClosedOnNoDelta() async {
         let path = tempMIDIFile(); defer { try? FileManager.default.removeItem(atPath: path) }
         let counter = CallCounter([3, 3]) // before==after → no import landed
+        let regions = RegionSnapshotBox([.success([]), .success([])])
         let result = await AccessibilityChannel.defaultImportMIDIFile(
             path: path,
             executeScript: { _ in .success("OK") },
             trackCount: { counter.next() },
             trackNames: { [] },
+            regionInfos: { regions.next() },
             deltaPoll: {}
         )
         #expect(!result.isSuccess)
         #expect(result.message.contains("readback_mismatch"))
         #expect(result.message.contains("did not create a new track"))
+        #expect(result.message.contains("\"region_count_after\":0"))
+        #expect(result.message.contains("\"new_midi_region_count\":0"))
     }
 
     @Test("import_file surfaces a typed error when the import menu click fails")

@@ -4366,6 +4366,71 @@ actor AccessibilityChannel: Channel {
         }
     }
 
+    enum MIDIImportRegionReadback {
+        case success([RegionInfo])
+        case failure(String)
+    }
+
+    private static func defaultMIDIImportRegionInfos(
+        runtime: AXLogicProElements.Runtime
+    ) -> MIDIImportRegionReadback {
+        switch enumerateRegionItems(runtime: runtime) {
+        case .success(let result):
+            return .success(result.regions.map { $0.info })
+        case .failure(let error):
+            return .failure(error.message)
+        }
+    }
+
+    private static func midiImportRegionKey(_ region: RegionInfo) -> String {
+        [
+            region.name,
+            String(region.trackIndex),
+            String(region.startBar),
+            String(region.endBar),
+            region.kind,
+        ].joined(separator: "|")
+    }
+
+    private static func midiImportRegionFields(_ region: RegionInfo) -> [String: Any] {
+        var fields: [String: Any] = [
+            "name": region.name,
+            "track_index": region.trackIndex,
+            "start_bar": region.startBar,
+            "end_bar": region.endBar,
+            "kind": region.kind,
+        ]
+        if let rawHelp = region.rawHelp, !rawHelp.isEmpty {
+            fields["raw_help"] = rawHelp
+        }
+        return fields
+    }
+
+    private static func newMIDIRegionsForImport(
+        afterRegions: [RegionInfo],
+        beforeRegionKeys: Set<String>?,
+        beforeCount: Int,
+        afterCount: Int
+    ) -> [RegionInfo] {
+        afterRegions.filter { region in
+            region.kind.lowercased() == "midi"
+                && region.trackIndex >= beforeCount
+                && region.trackIndex < afterCount
+                && beforeRegionKeys?.contains(midiImportRegionKey(region)) != true
+        }
+    }
+
+    private static func addedMIDIRegionsForImport(
+        afterRegions: [RegionInfo],
+        beforeRegionKeys: Set<String>?
+    ) -> [RegionInfo] {
+        guard let beforeRegionKeys else { return [] }
+        return afterRegions.filter { region in
+            region.kind.lowercased() == "midi"
+                && !beforeRegionKeys.contains(midiImportRegionKey(region))
+        }
+    }
+
     /// Import a .mid file via Logic Pro's File → Import → MIDI File menu.
     /// Always creates a new MIDI track (Logic Pro's built-in behavior, OQ-3 confirmed).
     /// Uses osascript to coordinate the menu click, path-entry keystroke, and dialog dismissals.
@@ -4389,6 +4454,7 @@ actor AccessibilityChannel: Channel {
         executeScript: @escaping @Sendable (String) async -> ChannelResult = { await AppleScriptChannel.executeAppleScript($0) },
         trackCount: (@Sendable () -> Int)? = nil,
         trackNames: (@Sendable () -> [String])? = nil,
+        regionInfos: (@Sendable () -> MIDIImportRegionReadback)? = nil,
         deltaPoll: @escaping @Sendable () async -> Void = { try? await Task.sleep(nanoseconds: 100_000_000) }
     ) async -> ChannelResult {
         guard FileManager.default.fileExists(atPath: path) else {
@@ -4404,7 +4470,22 @@ actor AccessibilityChannel: Channel {
                 AXValueExtractors.extractTrackState(from: header, index: index, runtime: runtime.ax).name
             }
         }
+        let readRegionInfos = regionInfos ?? {
+            defaultMIDIImportRegionInfos(runtime: runtime)
+        }
         let beforeCount = readTrackCount()
+        let beforeRegionRead = readRegionInfos()
+        let beforeRegions: [RegionInfo]?
+        let beforeRegionError: String?
+        switch beforeRegionRead {
+        case .success(let regions):
+            beforeRegions = regions
+            beforeRegionError = nil
+        case .failure(let error):
+            beforeRegions = nil
+            beforeRegionError = error
+        }
+        let beforeRegionKeys = beforeRegions.map { Set($0.map(midiImportRegionKey)) }
         let escapedPath = path.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         // Poll the file-open sheet into existence (mirrors the
@@ -4659,6 +4740,49 @@ actor AccessibilityChannel: Channel {
                 "file_open_dialog_seen": fileOpenSeen,
                 "tempo_dialog_seen": tempoSeen,
             ]
+            if let beforeRegions {
+                extras["region_count_before"] = beforeRegions.count
+            }
+            if let beforeRegionError {
+                extras["region_readback_before_error"] = beforeRegionError
+            }
+            var afterRegions: [RegionInfo]?
+            var afterRegionError: String?
+            var addedRegions: [RegionInfo] = []
+            var importedRegions: [RegionInfo] = []
+            for attempt in 0..<10 {
+                switch readRegionInfos() {
+                case .success(let regions):
+                    afterRegions = regions
+                    afterRegionError = nil
+                    addedRegions = addedMIDIRegionsForImport(
+                        afterRegions: regions,
+                        beforeRegionKeys: beforeRegionKeys
+                    )
+                    importedRegions = newMIDIRegionsForImport(
+                        afterRegions: regions,
+                        beforeRegionKeys: beforeRegionKeys,
+                        beforeCount: beforeCount,
+                        afterCount: afterCount
+                    )
+                    if !importedRegions.isEmpty { break }
+                case .failure(let error):
+                    afterRegionError = error
+                }
+                if attempt < 9 {
+                    await deltaPoll()
+                }
+            }
+            if let afterRegions {
+                extras["region_count_after"] = afterRegions.count
+                extras["new_midi_region_count"] = addedRegions.count
+                extras["new_midi_regions"] = addedRegions.map(midiImportRegionFields)
+                extras["imported_region_count"] = importedRegions.count
+                extras["imported_regions"] = importedRegions.map(midiImportRegionFields)
+            }
+            if let afterRegionError {
+                extras["region_readback_after_error"] = afterRegionError
+            }
             guard afterCount > beforeCount else {
                 return .error(HonestContract.encodeStateC(
                     error: .readbackMismatch,
@@ -4679,6 +4803,20 @@ actor AccessibilityChannel: Channel {
                 extras["hint"] = "Imported SMF lanes \(gmLanes) are GM Device / external-MIDI synth lanes that route to a General MIDI device and may bounce SILENT. Assign an audible Software Instrument (e.g. create a Software Instrument track and copy the regions, or re-import onto a Software Instrument track) before relying on the bounce."
                 return .success(HonestContract.encodeStateB(
                     reason: .importedAsGMDevice,
+                    extras: extras
+                ))
+            }
+            if let afterRegionError {
+                return .error(HonestContract.encodeStateC(
+                    error: .readbackUnavailable,
+                    hint: "midi.import_file created a new track, but AX region readback was unavailable: \(afterRegionError)",
+                    extras: extras
+                ))
+            }
+            guard !importedRegions.isEmpty else {
+                return .error(HonestContract.encodeStateC(
+                    error: .readbackMismatch,
+                    hint: "midi.import_file created a new track but did not create a verifiable MIDI region",
                     extras: extras
                 ))
             }
