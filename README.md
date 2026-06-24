@@ -13,6 +13,7 @@
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-0.10-blue.svg?style=flat-square" /></a>
   <a href="https://github.com/MongLong0214/logic-pro-mcp/actions/workflows/ci.yml"><img src="https://github.com/MongLong0214/logic-pro-mcp/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
+  <a href="https://discord.gg/4M3s79DBzz"><img src="https://img.shields.io/badge/Discord-Community-5865F2.svg?style=flat-square&logo=discord&logoColor=white" /></a>
   <img src="https://img.shields.io/badge/tests-1743_passing-brightgreen.svg?style=flat-square" />
   <img src="https://img.shields.io/badge/stable-v3.7.1-blue.svg?style=flat-square" />
 </p>
@@ -58,10 +59,17 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
 | Verification line | v3.7.1 source tree: `1743` Swift tests and release build; v3.7.0 EN/KO strict fresh live close gate remains the live Logic attestation for unchanged Logic-facing behavior |
 | Release state | Published stable `v3.7.1`; previous stable `v3.7.0` remains available for pinned installs |
+| Community layer | Official Discord for setup support, release notes, reproducible bug triage, product requests, demos, and contributor discussion |
 
 If this project helps you make music with Claude, Cursor, or any MCP client, star the repo. It helps the project reach more Logic Pro users and maintainers.
 
 Want to contribute? Start with the [Contributing Guide](CONTRIBUTING.md) and the [open issues](https://github.com/MongLong0214/logic-pro-mcp/issues?q=is%3Aissue%20is%3Aopen). Many docs, examples, validation tests, and CLI-message improvements do not require Logic Pro.
+
+## Community
+
+Join the official Logic Pro MCP Discord: [https://discord.gg/4M3s79DBzz](https://discord.gg/4M3s79DBzz).
+
+Discord is the real-time community layer for setup help, release discussion, bug triage, product requests, demos, and contributor coordination. GitHub Issues remain the canonical tracker for reproducible bugs, feature requests, and decisions that need to stay searchable.
 
 ## Why It Exists
 
