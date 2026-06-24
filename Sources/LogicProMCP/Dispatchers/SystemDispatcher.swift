@@ -76,11 +76,17 @@ struct SystemDispatcher {
             let memoryMb: Double
             let cpuPercent: Double
             let uptimeSec: Int
+            let cpuPercentStatus: String
+            let cpuPercentUnits: String
+            let cpuSampleWindowSec: Double
 
             enum CodingKeys: String, CodingKey {
                 case memoryMb = "memory_mb"
                 case cpuPercent = "cpu_percent"
                 case uptimeSec = "uptime_sec"
+                case cpuPercentStatus = "cpu_percent_status"
+                case cpuPercentUnits = "cpu_percent_units"
+                case cpuSampleWindowSec = "cpu_sample_window_sec"
             }
         }
 
@@ -199,7 +205,11 @@ struct SystemDispatcher {
                 process: .init(
                     memoryMb: Double(String(format: "%.1f", process.memoryMB)) ?? process.memoryMB,
                     cpuPercent: Double(String(format: "%.1f", process.cpuPercent)) ?? process.cpuPercent,
-                    uptimeSec: process.uptimeSec
+                    uptimeSec: process.uptimeSec,
+                    cpuPercentStatus: process.cpuPercentStatus,
+                    cpuPercentUnits: process.cpuPercentUnits,
+                    cpuSampleWindowSec: Double(String(format: "%.3f", process.cpuSampleWindowSec))
+                        ?? process.cpuSampleWindowSec
                 )
             )
             let json = encodeJSON(health)

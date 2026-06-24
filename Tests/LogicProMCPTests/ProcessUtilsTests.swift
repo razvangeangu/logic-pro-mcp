@@ -68,6 +68,32 @@ private func makeBundleURL(version: String) throws -> URL {
     #expect(metrics.uptimeSec >= 0)
 }
 
+@Test func testProcessUtilsMarksZeroUptimeCPUAsWarmingUp() {
+    let metrics = ProcessUtils.processMetricsForSample(
+        cpuTimeSec: 0.144807,
+        uptimeSec: 0.001,
+        residentMemoryBytes: 18_559_795
+    )
+
+    #expect(metrics.memoryMB > 17)
+    #expect(metrics.cpuPercent == 0)
+    #expect(metrics.cpuPercentStatus == "warming_up")
+    #expect(metrics.cpuSampleWindowSec == 0)
+}
+
+@Test func testProcessUtilsReportsSampledCPUWithExplicitUnits() {
+    let metrics = ProcessUtils.processMetricsForSample(
+        cpuTimeSec: 1.5,
+        uptimeSec: 3.0,
+        residentMemoryBytes: 0
+    )
+
+    #expect(metrics.cpuPercent == 50)
+    #expect(metrics.cpuPercentStatus == "sampled")
+    #expect(metrics.cpuPercentUnits == "single_core_lifetime_average")
+    #expect(metrics.cpuSampleWindowSec == 3)
+}
+
 @Test func testProcessUtilsRuntimeControlsPIDAndRunningState() {
     let harness = ProcessRuntimeHarness()
 

@@ -45,6 +45,9 @@ enum ProcessUtils {
         let memoryMB: Double
         let cpuPercent: Double
         let uptimeSec: Int
+        let cpuPercentStatus: String
+        let cpuPercentUnits: String
+        let cpuSampleWindowSec: Double
     }
 
     private struct TimedPIDCache {
@@ -53,6 +56,7 @@ enum ProcessUtils {
     }
 
     private static let processStartDate = Date()
+    private static let minimumCPUSampleUptimeSec: TimeInterval = 1.0
     private static let subprocessTimeout: TimeInterval = 1.0
     private static let pidCacheTTL: TimeInterval = 0.5
     private static let pidCacheLock = NSLock()
@@ -358,13 +362,12 @@ enum ProcessUtils {
 
     /// Lightweight server-process metrics for diagnostics.
     static func currentProcessMetrics() -> ProcessMetrics {
-        let uptime = max(Date().timeIntervalSince(processStartDate), 0.001)
+        let uptime = max(Date().timeIntervalSince(processStartDate), 0)
 
         var usage = rusage()
         let usageResult = getrusage(RUSAGE_SELF, &usage)
         let userTime = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1_000_000
         let systemTime = Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1_000_000
-        let cpuPercent = usageResult == 0 ? ((userTime + systemTime) / uptime) * 100.0 : 0.0
 
         var taskInfo = mach_task_basic_info()
         var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info_data_t>.stride / MemoryLayout<natural_t>.stride)
@@ -373,12 +376,43 @@ enum ProcessUtils {
                 task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), reboundPointer, &count)
             }
         }
-        let memoryMB = taskInfoResult == KERN_SUCCESS ? Double(taskInfo.resident_size) / 1_048_576 : 0.0
+        let residentMemoryBytes = taskInfoResult == KERN_SUCCESS ? UInt64(taskInfo.resident_size) : 0
+        let cpuTimeSec = usageResult == 0 ? userTime + systemTime : 0
 
+        return processMetricsForSample(
+            cpuTimeSec: cpuTimeSec,
+            uptimeSec: uptime,
+            residentMemoryBytes: residentMemoryBytes
+        )
+    }
+
+    static func processMetricsForSample(
+        cpuTimeSec: Double,
+        uptimeSec: TimeInterval,
+        residentMemoryBytes: UInt64
+    ) -> ProcessMetrics {
+        let memoryMB = Double(residentMemoryBytes) / 1_048_576
+        let uptime = max(uptimeSec, 0)
+        guard uptime >= minimumCPUSampleUptimeSec,
+              cpuTimeSec.isFinite,
+              cpuTimeSec >= 0 else {
+            return ProcessMetrics(
+                memoryMB: memoryMB,
+                cpuPercent: 0,
+                uptimeSec: Int(uptime.rounded()),
+                cpuPercentStatus: "warming_up",
+                cpuPercentUnits: "single_core_lifetime_average",
+                cpuSampleWindowSec: 0
+            )
+        }
+        let cpuPercent = (cpuTimeSec / uptime) * 100.0
         return ProcessMetrics(
             memoryMB: memoryMB,
-            cpuPercent: cpuPercent,
-            uptimeSec: Int(uptime.rounded())
+            cpuPercent: max(0, cpuPercent),
+            uptimeSec: Int(uptime.rounded()),
+            cpuPercentStatus: "sampled",
+            cpuPercentUnits: "single_core_lifetime_average",
+            cpuSampleWindowSec: uptime
         )
     }
 }
