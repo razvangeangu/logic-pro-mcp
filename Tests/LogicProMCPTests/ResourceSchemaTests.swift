@@ -336,9 +336,15 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     let process = (json["process"] as? [String: Any]) ?? [:]
     let memoryMB = process["memory_mb"] as? Double
     let cpuPercent = process["cpu_percent"] as? Double
+    let cpuPercentStatus = process["cpu_percent_status"] as? String
+    let cpuPercentUnits = process["cpu_percent_units"] as? String
+    let cpuSampleWindowSec = process["cpu_sample_window_sec"] as? Double
     let uptimeSec = process["uptime_sec"] as? Int
     #expect((memoryMB ?? -1) >= 0)
     #expect((cpuPercent ?? -1) >= 0)
+    #expect(["warming_up", "sampled"].contains(cpuPercentStatus ?? ""))
+    #expect(cpuPercentUnits == "single_core_lifetime_average")
+    #expect((cpuSampleWindowSec ?? -1) >= 0)
     #expect((uptimeSec ?? -1) >= 0)
 }
 
