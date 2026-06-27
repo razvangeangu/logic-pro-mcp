@@ -22,7 +22,7 @@ jobs:
         run: swift build -c release
 
       - name: Run tests
-        run: swift test --no-parallel
+        run: swift test -Xswiftc -suppress-warnings --no-parallel
 
       - name: Coverage report
         # H-4 (2026-05-08 enterprise review) closed in v3.4.0: re-armed
@@ -50,7 +50,7 @@ jobs:
           mkdir -p "$PROFRAW_DIR"
           export LLVM_PROFILE_FILE="$PROFRAW_DIR/%m-%p.profraw"
 
-          swift test --enable-code-coverage --no-parallel 2>&1 | tee "$COVERAGE_LOG"
+          swift test --enable-code-coverage -Xswiftc -suppress-warnings --no-parallel 2>&1 | tee "$COVERAGE_LOG"
           PROFILE_WARNING_COUNT=$(grep -c "LLVM Profile Error" "$COVERAGE_LOG" || true)
           if [ "$PROFILE_WARNING_COUNT" != "0" ]; then
             echo "::warning::LLVM profile runtime reported $PROFILE_WARNING_COUNT warning(s); continuing to profdata/report validation."
