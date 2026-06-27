@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Shared System Events JXA helpers for Logic Pro UI guard scripts."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from typing import Final, List, Tuple, Union
+
+
+JsonValue = Union[str, int, float, bool, None, List["JsonValue"], dict[str, "JsonValue"]]
+
+
+SAVE_PANEL_SNAPSHOT_SOURCE: Final[str] = "\n".join([
+    "function safe(fn, fallback) {",
+    "  try {",
+    "    return fn();",
+    "  } catch (error) {",
+    "    return fallback;",
+    "  }",
+    "}",
+    "",
+    "function str(value) {",
+    "  return value === undefined || value === null ? \"\" : String(value);",
+    "}",
+    "",
+    "function walk(node, bucket, depth) {",
+    "  if (depth > 6) return;",
+    "  const role = str(safe(() => node.role(), \"\"));",
+    "  const name = str(safe(() => node.name(), \"\"));",
+    "  const value = str(safe(() => node.value(), \"\"));",
+    "  if (role === \"AXButton\" && name) bucket.button_names.push(name);",
+    "  if (role === \"AXTextField\") {",
+    "    if (name) bucket.text_field_names.push(name);",
+    "    bucket.text_field_count += 1;",
+    "  }",
+    "  if (role === \"AXStaticText\" && (name || value)) {",
+    "    bucket.static_texts.push(name || value);",
+    "  }",
+    "  const children = safe(() => node.uiElements(), []);",
+    "  for (let index = 0; index < children.length; index += 1) {",
+    "    walk(children[index], bucket, depth + 1);",
+    "  }",
+    "}",
+    "",
+    "const se = Application(\"System Events\");",
+    "const proc = se.processes.byName(\"Logic Pro\");",
+    "const win = safe(() => proc.windows[0], null);",
+    "if (!win) {",
+    "  JSON.stringify({status: \"missing_front_window\"});",
+    "} else {",
+    "  const bucket = {",
+    "    status: \"ok\",",
+    "    button_names: [],",
+    "    text_field_names: [],",
+    "    text_field_count: 0,",
+    "    static_texts: [],",
+    "  };",
+    "  walk(win, bucket, 0);",
+    "  JSON.stringify(bucket);",
+    "}",
+])
+
+
+def run_jxa(
+    source: str,
+    *,
+    timeout: float = 12.0,
+    run=subprocess.run,
+) -> subprocess.CompletedProcess[str]:
+    return run(
+        ["/usr/bin/osascript", "-l", "JavaScript"],
+        input=source,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=timeout,
+    )
+
+
+def parse_jxa_json_result(result: subprocess.CompletedProcess[str]) -> dict[str, JsonValue]:
+    try:
+        parsed = json.loads(result.stdout.strip() or "{}")
+    except json.JSONDecodeError:
+        return {
+            "status": "error",
+            "reason": "invalid_jxa_output",
+            "stderr": (result.stderr or "").strip(),
+            "stdout": (result.stdout or "").strip(),
+        }
+    return parsed if isinstance(parsed, dict) else {"status": "error", "reason": "invalid_jxa_output"}
+
+
+def ui_prelude(
+    *,
+    marker_constant: str,
+    markers: Union[List[str], Tuple[str, ...]],
+    include_menu_items: bool = False,
+) -> str:
+    markers_json = json.dumps(list(markers), ensure_ascii=False)
+    menu_item_case = (
+        '  if (roleName === "menu item") return safe(() => container.menuItems(), []);\n'
+        if include_menu_items
+        else ""
+    )
+    return f"""
+const {marker_constant} = {markers_json};
+
+function safe(fn, fallback) {{
+  try {{
+    return fn();
+  }} catch (error) {{
+    return fallback;
+  }}
+}}
+
+function str(value) {{
+  return value === undefined || value === null ? "" : String(value);
+}}
+
+function safeName(item) {{
+  const name = safe(() => item.name(), "");
+  if (name) return str(name);
+  const description = safe(() => item.description(), "");
+  if (description) return str(description);
+  return str(safe(() => item.value(), ""));
+}}
+
+function namesOf(collection) {{
+  const output = [];
+  for (let index = 0; index < collection.length; index += 1) {{
+    const name = safeName(collection[index]);
+    if (name) output.push(name);
+  }}
+  return output;
+}}
+
+function namedStates(collection) {{
+  const output = [];
+  for (let index = 0; index < collection.length; index += 1) {{
+    const item = collection[index];
+    const name = safeName(item) || "<unnamed>";
+    output.push({{ name, value: str(safe(() => item.value(), "")) }});
+  }}
+  return output;
+}}
+
+function containsMarker(values) {{
+  return values.some((value) => {marker_constant}.some((marker) => str(value).includes(marker)));
+}}
+
+function collection(container, roleName) {{
+  if (roleName === "button") return safe(() => container.buttons(), []);
+  if (roleName === "checkbox") return safe(() => container.checkboxes(), []);
+  if (roleName === "radio button") return safe(() => container.radioButtons(), []);
+  if (roleName === "static text") return safe(() => container.staticTexts(), []);
+{menu_item_case}  return [];
+}}
+"""

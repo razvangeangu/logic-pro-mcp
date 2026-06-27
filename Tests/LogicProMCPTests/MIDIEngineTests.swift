@@ -235,15 +235,22 @@ private final class MIDIEngineRuntimeHarness: @unchecked Sendable {
     let engine = MIDIEngine(runtime: harness.makeRuntime())
     try await engine.start()
 
-    await engine.sendNoteOn(channel: 0x11, note: 0xFF, velocity: 0xFE)
-    await engine.sendNoteOff(channel: 0x12, note: 61, velocity: 0)
-    await engine.sendCC(channel: 0x13, controller: 0x87, value: 0xC0)
-    await engine.sendProgramChange(channel: 0x14, program: 10)
-    await engine.sendPitchBend(channel: 0x15, value: 20_000)
-    await engine.sendAftertouch(channel: 0x16, pressure: 0xFF)
-    await engine.sendSysEx([0xF0, 0x7D, 0x01, 0xF7])
-    await engine.sendSysEx([0xF0, 0x7D, 0x80, 0xF7])
-    await engine.sendRawBytes([0xF6])
+    try await engine.sendNoteOn(channel: 0x11, note: 0xFF, velocity: 0xFE)
+    try await engine.sendNoteOff(channel: 0x12, note: 61, velocity: 0)
+    try await engine.sendCC(channel: 0x13, controller: 0x87, value: 0xC0)
+    try await engine.sendProgramChange(channel: 0x14, program: 10)
+    try await engine.sendPitchBend(channel: 0x15, value: 20_000)
+    try await engine.sendAftertouch(channel: 0x16, pressure: 0xFF)
+    try await engine.sendSysEx([0xF0, 0x7D, 0x01, 0xF7])
+    do {
+        try await engine.sendSysEx([0xF0, 0x7D, 0x80, 0xF7])
+        Issue.record("Expected invalid SysEx to throw")
+    } catch MIDIEngineError.invalidSysEx {
+        // Expected.
+    } catch {
+        Issue.record("Unexpected invalid SysEx error: \(error)")
+    }
+    try await engine.sendRawBytes([0xF6])
 
     let snapshot = harness.snapshot()
     #expect(snapshot.sentSources == Array(repeating: harness.createdSource, count: 8))
@@ -259,25 +266,38 @@ private final class MIDIEngineRuntimeHarness: @unchecked Sendable {
     ])
 }
 
-@Test func testMIDIEngineSendRawBytesDropsWhenInactive() async {
+@Test func testMIDIEngineSendRawBytesThrowsWhenInactive() async {
     let harness = MIDIEngineRuntimeHarness()
     let engine = MIDIEngine(runtime: harness.makeRuntime())
 
-    await engine.sendNoteOn(channel: 0, note: 60, velocity: 100)
-    await engine.sendSysEx([0xF0, 0x7D, 0x01, 0xF7])
-    await engine.sendRawBytes([0xF6])
+    await #expect(throws: MIDIEngineError.self) {
+        try await engine.sendNoteOn(channel: 0, note: 60, velocity: 100)
+    }
+    await #expect(throws: MIDIEngineError.self) {
+        try await engine.sendSysEx([0xF0, 0x7D, 0x01, 0xF7])
+    }
+    await #expect(throws: MIDIEngineError.self) {
+        try await engine.sendRawBytes([0xF6])
+    }
 
     let snapshot = harness.snapshot()
     #expect(snapshot.sentMessages.isEmpty)
 }
 
-@Test func testMIDIEngineSendFailureStillAttemptsDelivery() async throws {
+@Test func testMIDIEngineSendFailureThrowsAfterAttemptingDelivery() async throws {
     let harness = MIDIEngineRuntimeHarness()
     harness.sendStatus = -40
     let engine = MIDIEngine(runtime: harness.makeRuntime())
     try await engine.start()
 
-    await engine.sendCC(channel: 9, controller: 10, value: 11)
+    do {
+        try await engine.sendCC(channel: 9, controller: 10, value: 11)
+        Issue.record("Expected send failure to throw")
+    } catch MIDIEngineError.sendFailed(let status) {
+        #expect(status == -40)
+    } catch {
+        Issue.record("Unexpected send failure error: \(error)")
+    }
 
     let snapshot = harness.snapshot()
     #expect(snapshot.sentMessages == [[0xB9, 10, 11]])
@@ -372,8 +392,8 @@ private final class MIDIEngineRuntimeHarness: @unchecked Sendable {
     }
     #expect(await engine.isActive)
 
-    await engine.sendRawBytes([])
-    await engine.sendCC(channel: 0, controller: 1, value: 64)
+    try await engine.sendRawBytes([])
+    try await engine.sendCC(channel: 0, controller: 1, value: 64)
 
     await engine.stop()
     #expect(!(await engine.isActive))

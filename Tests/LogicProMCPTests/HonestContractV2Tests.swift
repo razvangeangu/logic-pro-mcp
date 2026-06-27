@@ -94,6 +94,7 @@ private func decode(_ json: String) -> [String: Any] {
         (.insertLandedAtDifferentSlot, "insert_landed_at_different_slot"),
         (.rollbackFailed, "rollback_failed"),
         (.verifiedOpInProgress, "verified_op_in_progress"),
+        (.mutatingOperationInProgress, "mutating_operation_in_progress"),
         (.operationTimeout, "operation_timeout"),
     ]
     for (err, raw) in expected {
@@ -132,7 +133,7 @@ private func decode(_ json: String) -> [String: Any] {
         .readbackLostAfterWrite, .postInsertPluginMismatch,
         .postInsertReadbackUnavailable, .insertNotAxAutomatable,
         .insertSetupFailed, .insertLandedAtDifferentSlot, .rollbackFailed, .verifiedOpInProgress,
-        .operationTimeout,
+        .mutatingOperationInProgress, .operationTimeout,
     ]
     for err in mustBeTerminal {
         #expect(HonestContract.terminalErrorCodes.contains(err.rawValue),

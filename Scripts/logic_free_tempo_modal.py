@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# noqa: SIZE_OK  — modal policy matching and JXA interaction stay co-located for one audited live Logic guard.
 """Detect and deterministically resolve Logic Pro's Free Tempo Recording modal."""
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ import time
 from copy import deepcopy
 from typing import Any
 
+from logic_ui_jxa import parse_jxa_json_result, run_jxa, ui_prelude
+
 PROCESS_NAME = "Logic Pro"
-LIST_SEPARATOR = "||"
-STATE_SEPARATOR = "::"
 MODAL_MARKERS = (
     "Free Tempo Recording",
     "프리 템포 녹음",
@@ -41,206 +42,6 @@ DEFAULT_FREE_TEMPO_POLICY: dict[str, Any] = {
 
 def _normalize_label(value: str) -> str:
     return " ".join(value.replace("…", "...").replace("\u00a0", " ").split()).casefold()
-
-
-def _escape_applescript(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _applescript_list(values: list[str] | tuple[str, ...]) -> str:
-    return "{" + ", ".join(f'"{_escape_applescript(value)}"' for value in values) + "}"
-
-
-def _script_prelude(markers: list[str] | tuple[str, ...]) -> str:
-    return f"""
-set modalMarkers to {_applescript_list(markers)}
-
-on joinList(items)
-    if (count of items) is 0 then return ""
-    set oldDelims to AppleScript's text item delimiters
-    set AppleScript's text item delimiters to "{LIST_SEPARATOR}"
-    set joined to items as text
-    set AppleScript's text item delimiters to oldDelims
-    return joined
-end joinList
-
-on safeName(uiElement)
-    try
-        return (name of uiElement) as text
-    on error
-        try
-            return (description of uiElement) as text
-        on error
-            try
-                return (value of uiElement) as text
-            on error
-                return ""
-            end try
-        end try
-    end try
-end safeName
-
-on namesOf(elements)
-    set output to {{}}
-    repeat with uiElement in elements
-        set itemName to my safeName(uiElement)
-        if itemName is not "" then set end of output to itemName
-    end repeat
-    return output
-end namesOf
-
-on namedStates(elements)
-    set output to {{}}
-    repeat with uiElement in elements
-        set itemName to my safeName(uiElement)
-        if itemName is "" then
-            set itemName to "<unnamed>"
-        end if
-        try
-            set itemValue to (value of uiElement) as text
-        on error
-            set itemValue to ""
-        end try
-        set end of output to itemName & "{STATE_SEPARATOR}" & itemValue
-    end repeat
-    return output
-end namedStates
-
-on namesForRole(containerElement, desiredRole)
-    set output to {{}}
-    try
-        set containerItems to entire contents of containerElement
-    on error
-        return output
-    end try
-    repeat with uiElement in containerItems
-        try
-            if (role of uiElement) is desiredRole then
-                set itemName to my safeName(uiElement)
-                if itemName is not "" then set end of output to itemName
-            end if
-        end try
-    end repeat
-    return output
-end namesForRole
-
-on namedStatesForRole(containerElement, desiredRole)
-    set output to {{}}
-    try
-        set containerItems to entire contents of containerElement
-    on error
-        return output
-    end try
-    repeat with uiElement in containerItems
-        try
-            if (role of uiElement) is desiredRole then
-                set itemName to my safeName(uiElement)
-                if itemName is "" then
-                    set itemName to "<unnamed>"
-                end if
-                try
-                    set itemValue to (value of uiElement) as text
-                on error
-                    set itemValue to ""
-                end try
-                set end of output to itemName & "{STATE_SEPARATOR}" & itemValue
-            end if
-        end try
-    end repeat
-    return output
-end namedStatesForRole
-
-on listContainsMarker(values, markers)
-    repeat with rawValue in values
-        set itemValue to rawValue as text
-        repeat with rawMarker in markers
-            set itemMarker to rawMarker as text
-            if itemValue contains itemMarker then return true
-        end repeat
-    end repeat
-    return false
-end listContainsMarker
-
-on modalContainer()
-    tell application "System Events"
-        if not (exists process "{_escape_applescript(PROCESS_NAME)}") then return missing value
-        tell process "{_escape_applescript(PROCESS_NAME)}"
-            repeat with candidateWindow in windows
-                set windowTitle to ""
-                try
-                    set windowTitle to (name of candidateWindow) as text
-                end try
-                if my listContainsMarker({{windowTitle}}, modalMarkers) then return candidateWindow
-                try
-                    repeat with candidateSheet in sheets of candidateWindow
-                        set candidateTexts to my namesForRole(candidateSheet, "AXStaticText")
-                        set candidateButtons to my namesOf(buttons of candidateSheet)
-                        set candidateCheckboxes to my namesOf(checkboxes of candidateSheet)
-                        set candidateRadios to my namesForRole(candidateSheet, "AXRadioButton")
-                        if my listContainsMarker(candidateTexts & candidateButtons & candidateCheckboxes & candidateRadios & {{windowTitle}}, modalMarkers) then
-                            return candidateSheet
-                        end if
-                    end repeat
-                end try
-                try
-                    set windowTexts to my namesForRole(candidateWindow, "AXStaticText")
-                    set windowButtons to my namesOf(buttons of candidateWindow)
-                    set windowCheckboxes to my namesOf(checkboxes of candidateWindow)
-                    set windowRadios to my namesForRole(candidateWindow, "AXRadioButton")
-                    if my listContainsMarker(windowTexts & windowButtons & windowCheckboxes & windowRadios & {{windowTitle}}, modalMarkers) then
-                        return candidateWindow
-                    end if
-                end try
-            end repeat
-        end tell
-    end tell
-    return missing value
-end modalContainer
-"""
-
-
-def _parse_lines(output: str) -> dict[str, str]:
-    parsed: dict[str, str] = {}
-    for line in output.splitlines():
-        if "\t" not in line:
-            continue
-        key, value = line.split("\t", 1)
-        parsed[key.strip()] = value.strip()
-    return parsed
-
-
-def _parse_named_states(value: str) -> list[dict[str, str]]:
-    if not value:
-        return []
-    parsed: list[dict[str, str]] = []
-    for item in value.split(LIST_SEPARATOR):
-        if not item:
-            continue
-        if STATE_SEPARATOR in item:
-            name, state = item.split(STATE_SEPARATOR, 1)
-        else:
-            name, state = item, ""
-        parsed.append({"name": name, "value": state})
-    return parsed
-
-
-def _parse_snapshot(output: str) -> dict[str, Any]:
-    parsed = _parse_lines(output)
-    status = parsed.get("status", "error")
-    snapshot: dict[str, Any] = {
-        "status": status,
-        "kind": parsed.get("kind", ""),
-        "title": parsed.get("title", ""),
-        "buttons": [item for item in parsed.get("buttons", "").split(LIST_SEPARATOR) if item],
-        "checkboxes": _parse_named_states(parsed.get("checkboxes", "")),
-        "radio_buttons": _parse_named_states(parsed.get("radio_buttons", "")),
-        "static_texts": [item for item in parsed.get("static_texts", "").split(LIST_SEPARATOR) if item],
-    }
-    if "reason" in parsed:
-        snapshot["reason"] = parsed["reason"]
-    if "stderr" in parsed:
-        snapshot["stderr"] = parsed["stderr"]
-    return snapshot
 
 
 def _is_truthy(value: str) -> bool:
@@ -339,6 +140,13 @@ def _build_action_plan(snapshot: dict[str, Any], policy: dict[str, Any]) -> dict
     if selection_role == "button":
         decision["confirm"] = selection["name"]
         decision["confirm_strategy"] = "selection_button"
+        steps.append(
+            {
+                "role": "button",
+                "name": selection["name"],
+                "purpose": "confirm_modal_policy",
+            }
+        )
         return {"status": "actionable", "decision": decision, "steps": steps}
 
     confirm_button = _match_named_control(
@@ -382,74 +190,13 @@ class SystemEventsFreeTempoModalRunner:
         self._run = run
 
     def _osascript(self, source: str, timeout: float = 12.0) -> subprocess.CompletedProcess[str]:
-        return self._run(
-            ["/usr/bin/osascript", "-l", "JavaScript"],
-            input=source,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=timeout,
-        )
+        return run_jxa(source, timeout=timeout, run=self._run)
 
     def _jxa_prelude(self) -> str:
-        markers_json = json.dumps(list(self.markers), ensure_ascii=False)
-        return f"""
-const MODAL_MARKERS = {markers_json};
-
-function safe(fn, fallback) {{
-  try {{
-    return fn();
-  }} catch (error) {{
-    return fallback;
-  }}
-}}
-
-function str(value) {{
-  return value === undefined || value === null ? "" : String(value);
-}}
-
-function safeName(item) {{
-  const name = safe(() => item.name(), "");
-  if (name) return str(name);
-  const description = safe(() => item.description(), "");
-  if (description) return str(description);
-  return str(safe(() => item.value(), ""));
-}}
-
-function namesOf(collection) {{
-  const output = [];
-  for (let index = 0; index < collection.length; index += 1) {{
-    const name = safeName(collection[index]);
-    if (name) output.push(name);
-  }}
-  return output;
-}}
-
-function namedStates(collection) {{
-  const output = [];
-  for (let index = 0; index < collection.length; index += 1) {{
-    const item = collection[index];
-    const name = safeName(item) || "<unnamed>";
-    output.push({{ name, value: str(safe(() => item.value(), "")) }});
-  }}
-  return output;
-}}
-
-function containsMarker(values) {{
-  return values.some((value) => MODAL_MARKERS.some((marker) => str(value).includes(marker)));
-}}
-
-function collection(container, roleName) {{
-  if (roleName === "button") return safe(() => container.buttons(), []);
-  if (roleName === "checkbox") return safe(() => container.checkboxes(), []);
-  if (roleName === "radio button") return safe(() => container.radioButtons(), []);
-  if (roleName === "static text") return safe(() => container.staticTexts(), []);
-  return [];
-}}
-
+        return ui_prelude(marker_constant="MODAL_MARKERS", markers=self.markers) + f"""
 function findModal() {{
   const systemEvents = Application("System Events");
-  const process = systemEvents.processes.byName("Logic Pro");
+  const process = systemEvents.processes.byName({json.dumps(PROCESS_NAME)});
   if (!safe(() => process.exists(), false)) return null;
   const windows = safe(() => process.windows(), []);
   for (let windowIndex = 0; windowIndex < windows.length; windowIndex += 1) {{
@@ -489,16 +236,7 @@ function findModal() {{
 """
 
     def _json_result(self, result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
-        try:
-            parsed = json.loads(result.stdout.strip() or "{}")
-        except json.JSONDecodeError:
-            return {
-                "status": "error",
-                "reason": "invalid_jxa_output",
-                "stderr": (result.stderr or "").strip(),
-                "stdout": (result.stdout or "").strip(),
-            }
-        return parsed if isinstance(parsed, dict) else {"status": "error", "reason": "invalid_jxa_output"}
+        return parse_jxa_json_result(result)
 
     def detect(self) -> dict[str, Any]:
         script = self._jxa_prelude() + """

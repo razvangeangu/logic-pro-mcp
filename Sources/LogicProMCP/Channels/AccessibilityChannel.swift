@@ -54,37 +54,17 @@ actor AccessibilityChannel: Channel {
         case both
     }
 
-    /// Parse the `mode` param for `library.scan_all`. Unknown values
-    /// (including nil, empty, typos like "AX") fall through to `.ax` —
-    /// the legacy-compatible default. v3.0.5 briefly defaulted to `.disk`
-    /// which poisoned the on-disk inventory with Panel-invalid paths;
-    /// v3.0.6 reverts that.
+    /// Parse the `mode` param for `library.scan_all`. Nil/empty/unknown values
+    /// default to `.disk`, the only unattended scanner that does not click
+    /// through Logic's live Library panel. Explicit `ax` preserves the legacy
+    /// Panel-authoritative scan for callers that can tolerate UI mutation.
     static func parseScanMode(_ raw: String?) -> ScanMode {
-        guard let raw = raw?.lowercased(), !raw.isEmpty else { return .ax }
-        return ScanMode(rawValue: raw) ?? .ax
+        guard let raw = raw?.lowercased(), !raw.isEmpty else { return .disk }
+        return ScanMode(rawValue: raw) ?? .disk
     }
 
     static func managedMIDIImportDirectoryPrefixes() -> [String] {
-        let rawRoots = [
-            "/tmp/LogicProMCP",
-            "/private/tmp/LogicProMCP",
-        ]
-
-        return Array(
-            Set(
-                rawRoots.flatMap { root in
-                    [
-                        root,
-                        URL(fileURLWithPath: root, isDirectory: true)
-                            .resolvingSymlinksInPath()
-                            .standardizedFileURL
-                            .path,
-                    ]
-                }
-            )
-        )
-        .map { $0.hasSuffix("/") ? $0 : $0 + "/" }
-        .sorted()
+        [SMFWriter.temporaryDirectoryPrefix()]
     }
 
     static func validatedMIDIImportPath(_ path: String) -> String? {
@@ -95,7 +75,7 @@ actor AccessibilityChannel: Channel {
             .standardizedFileURL
         guard requestedURL.pathExtension.lowercased() == "mid" else { return nil }
 
-        guard managedMIDIImportDirectoryPrefixes().contains(where: requestedURL.path.hasPrefix) else { return nil }
+        guard SMFWriter.isManagedTemporaryMIDIFile(requestedURL.path) else { return nil }
 
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: requestedURL.path, isDirectory: &isDirectory),
@@ -340,9 +320,9 @@ actor AccessibilityChannel: Channel {
             }
             scanInProgress = true
             defer { scanInProgress = false }
-            // v3.0.6 — "mode" selects between ax (default, legacy behavior
-            // preserved from v3.0.4), disk (filesystem-backed, Panel-taxonomy
-            // mapped), or both (diff report).
+            // "mode" selects between disk (default, filesystem-backed,
+            // Panel-taxonomy mapped), ax (legacy live Panel walk), or both
+            // (diff report).
             switch Self.parseScanMode(params["mode"]) {
             case .disk:
                 return await self.runDiskScan(runtime: runtime.logicRuntime)
@@ -496,7 +476,7 @@ actor AccessibilityChannel: Channel {
             // AX open-panel keystroke at arbitrary files on the user's
             // filesystem; the legitimate producer is TrackDispatcher.record_sequence.
             guard let safePath = AccessibilityChannel.validatedMIDIImportPath(path) else {
-                return .error("midi.import_file path must be /tmp/LogicProMCP/*.mid")
+                return .error("midi.import_file path must be a server-managed LogicProMCP temp .mid")
             }
             return await runtime.importMIDIFile(safePath)
 
@@ -579,7 +559,7 @@ actor AccessibilityChannel: Channel {
         }
     }
 
-    func healthCheck() async -> ChannelHealth {
+    nonisolated func healthCheck() async -> ChannelHealth {
         guard runtime.isTrusted() else {
             return .unavailable("Accessibility not trusted — add this process in System Preferences")
         }
@@ -953,33 +933,17 @@ actor AccessibilityChannel: Channel {
             end tell
         end tell
         """
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
-        // Route output to the shared FileHandle.nullDevice — no FD opened per
-        // invocation. Earlier attempt with FileHandle(forWritingAtPath:"/dev/null")
-        // still leaked one FD per call because it wasn't explicitly closed.
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        do {
-            try task.run()
-        } catch {
-            return false
-        }
         // 5s hard cap — script intent is < 1.5s, anything longer means Logic
         // is unresponsive (modal dialog stuck, focus lost, etc.).
-        let deadline = Date().addingTimeInterval(5.0)
-        while task.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if task.isRunning {
-            task.terminate()
-            Thread.sleep(forTimeInterval: 0.2)
-            if task.isRunning { task.interrupt() }
-            task.waitUntilExit() // reap zombie
+        guard case let .completed(output) = BoundedProcessRunner.run(
+            executable: "/usr/bin/osascript",
+            arguments: ["-e", script],
+            timeout: 5.0,
+            outputLimitBytes: 4 * 1024
+        ) else {
             return false
         }
-        return task.terminationStatus == 0
+        return output.exitCode == 0
     }
 
     static func defaultSetCycleRange(
@@ -1260,28 +1224,15 @@ actor AccessibilityChannel: Channel {
             end tell
         end tell
         """
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        // Stdout captured via Pipe (need the "ok" sentinel). Stderr discarded
-        // via nullDevice to avoid the FD leak that killed the MCP server under
-        // sustained matrix runs (sprint 51 osascript root cause).
-        let stdout = Pipe()
-        process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
+        guard case let .completed(output) = BoundedProcessRunner.run(
+            executable: "/usr/bin/osascript",
+            arguments: ["-e", script],
+            timeout: 5.0,
+            outputLimitBytes: 4 * 1024
+        ), output.exitCode == 0 else {
             return false
         }
-        guard process.terminationStatus == 0 else { return false }
-        // Read then close the pipe explicitly so its FDs release immediately
-        // rather than lingering until Pipe deinit.
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        try? stdout.fileHandleForReading.close()
-        try? stdout.fileHandleForWriting.close()
-        let result = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let result = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return result == "ok"
     }
 
@@ -2961,7 +2912,7 @@ actor AccessibilityChannel: Channel {
                 exists: true, kind: res.kind?.rawValue,
                 matchedPath: res.matchedPath, children: res.children,
                 reason: nil, source: "disk-only", loadable: false,
-                warning: "Path exists on disk but isn't exposed via Logic's Library Panel. set_instrument will fail for this entry; run scan_library without mode=disk to see Panel-loadable paths."
+                warning: "Path exists on disk but isn't exposed via Logic's Library Panel. set_instrument will fail for this entry; run scan_library with mode=ax to see Panel-loadable paths."
             ))
         }
         // Legacy fallback — use whatever cache was last populated.
@@ -3049,26 +3000,12 @@ actor AccessibilityChannel: Channel {
             end tell
         end tell
         """
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        do {
-            try task.run()
-        } catch {
-            return
-        }
-        let deadline = Date().addingTimeInterval(5.0)
-        while task.isRunning && Date() < deadline {
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-        if task.isRunning {
-            task.terminate()
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            if task.isRunning { task.interrupt() }
-            task.waitUntilExit()
-        }
+        _ = BoundedProcessRunner.run(
+            executable: "/usr/bin/osascript",
+            arguments: ["-e", script],
+            timeout: 5.0,
+            outputLimitBytes: 4 * 1024
+        )
     }
 
     /// One-shot, thread-safe latch so a deadline race resumes its continuation
@@ -4431,6 +4368,16 @@ actor AccessibilityChannel: Channel {
         }
     }
 
+    private static func normalizedAppleScriptPayload(_ output: String) -> String {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = object["result"] as? String else {
+            return trimmed
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Import a .mid file via Logic Pro's File → Import → MIDI File menu.
     /// Always creates a new MIDI track (Logic Pro's built-in behavior, OQ-3 confirmed).
     /// Uses osascript to coordinate the menu click, path-entry keystroke, and dialog dismissals.
@@ -4695,10 +4642,11 @@ actor AccessibilityChannel: Channel {
         let result = await executeScript(script)
         switch result {
         case .success(let output):
-            if output.hasPrefix("MENU_ERROR") || output.hasPrefix("IMPORT_BTN_ERROR") {
+            let scriptOutput = normalizedAppleScriptPayload(output)
+            if scriptOutput.hasPrefix("MENU_ERROR") || scriptOutput.hasPrefix("IMPORT_BTN_ERROR") {
                 return .error(HonestContract.encodeStateC(
                     error: .axWriteFailed,
-                    hint: "midi.import_file menu/button click failed: \(output)",
+                    hint: "midi.import_file menu/button click failed: \(scriptOutput)",
                     extras: [
                         "requested": path,
                         "track_count_before": beforeCount,
@@ -4707,10 +4655,10 @@ actor AccessibilityChannel: Channel {
                     ]
                 ))
             }
-            if output.hasPrefix("DIALOG_NOT_FOUND") {
+            if scriptOutput.hasPrefix("DIALOG_NOT_FOUND") {
                 return .error(HonestContract.encodeStateC(
                     error: .dialogNotFound,
-                    hint: "midi.import_file: \(output). The File → Import → MIDI File open sheet never appeared (likely an occluded or unhealthy Logic session). No path keystroke was issued.",
+                    hint: "midi.import_file: \(scriptOutput). The File → Import → MIDI File open sheet never appeared (likely an occluded or unhealthy Logic session). No path keystroke was issued.",
                     extras: [
                         "requested": path,
                         "track_count_before": beforeCount,
@@ -4721,7 +4669,7 @@ actor AccessibilityChannel: Channel {
                 ))
             }
             let fileOpenSeen = true
-            let tempoSeen = output.contains("TEMPO_SEEN")
+            let tempoSeen = scriptOutput.contains("TEMPO_SEEN")
             // Read-back via track-count delta. Logic always creates a new track
             // for MIDI import (OQ-3 confirmed). Bounded poll (5 x 100ms) for the
             // AX tree to reflect the new header, rather than a single settle.

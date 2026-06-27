@@ -62,6 +62,7 @@ struct LogicProServerHandlers: Sendable {
 }
 
 struct LogicProServerRuntimeOverrides: @unchecked Sendable {
+    var cleanupStartupArtifacts: (@Sendable () -> Void)?
     var startPorts: (@Sendable () async throws -> Void)?
     var registerChannels: (@Sendable () async -> Void)?
     var startChannels: (@Sendable () async -> ChannelRouter.StartReport)?
@@ -124,6 +125,67 @@ struct ServerRuntimePlan: @unchecked Sendable {
     }
 }
 
+final class LogicMutationGate: @unchecked Sendable {
+    /// Opaque claim returned by `tryAcquire` and required by `release`. The
+    /// `epoch` makes release idempotent and reclaim-safe: a holder that was
+    /// reclaimed for staleness cannot release a successor that happens to share
+    /// the same operation name.
+    struct Claim: Equatable, Sendable {
+        fileprivate let epoch: UInt64
+        let operation: String
+    }
+
+    private let lock = NSLock()
+    private var activeOperation: String?
+    private var acquiredAt: Date?
+    private var epoch: UInt64 = 0
+
+    /// Staleness safety valve. The #112 deadline frees the stdio loop on a hang,
+    /// but the gate is released only when the (possibly wedged) detached work
+    /// finally returns. If a mutating op's work never returns — every per-call
+    /// timeout (AX messaging 2.5s, `BoundedProcessRunner`) bounds this in
+    /// practice, but a future unbounded path could not — the gate would stay
+    /// held forever and lock out every mutation server-wide. A holder older than
+    /// this TTL is reclaimed so the server always recovers. Set far above the
+    /// longest command deadline so a healthy long-running op never trips it.
+    private let staleHolderTTL: TimeInterval
+
+    init(staleHolderTTL: TimeInterval = 360) {
+        self.staleHolderTTL = staleHolderTTL
+    }
+
+    func tryAcquire(operation: String, now: Date = Date()) -> Claim? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let active = activeOperation, let since = acquiredAt {
+            guard now.timeIntervalSince(since) >= staleHolderTTL else { return nil }
+            Log.warn(
+                "Reclaiming stale mutation gate from \(active) held \(Int(now.timeIntervalSince(since)))s (TTL \(Int(staleHolderTTL))s) — prior op may still be wedged",
+                subsystem: "server"
+            )
+        }
+        epoch &+= 1
+        activeOperation = operation
+        acquiredAt = now
+        return Claim(epoch: epoch, operation: operation)
+    }
+
+    func release(_ claim: Claim) {
+        lock.lock()
+        if epoch == claim.epoch {
+            activeOperation = nil
+            acquiredAt = nil
+        }
+        lock.unlock()
+    }
+
+    func currentOperation() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return activeOperation
+    }
+}
+
 /// Main MCP server for Logic Pro integration.
 /// Exposes 10 dispatcher tools + 18 resources + 11 templates, routing through
 /// the ChannelRouter to the appropriate macOS communication channel.
@@ -144,8 +206,12 @@ actor LogicProServer {
     private let cgEventChannel: CGEventChannel
     private let appleScriptChannel: AppleScriptChannel
     private let runtimeOverrides: LogicProServerRuntimeOverrides?
+    private let mutationGate = LogicMutationGate()
 
-    init(runtimeOverrides: LogicProServerRuntimeOverrides? = nil) {
+    init(
+        runtimeOverrides: LogicProServerRuntimeOverrides? = nil,
+        pollerRuntime: StatePoller.Runtime = .production
+    ) {
         self.runtimeOverrides = runtimeOverrides
         self.server = Server(
             name: ServerConfig.serverName,
@@ -196,7 +262,7 @@ actor LogicProServer {
             approvalStore: manualValidationStore
         )
 
-        self.poller = StatePoller(axChannel: axChannel, cache: cache)
+        self.poller = StatePoller(axChannel: axChannel, cache: cache, runtime: pollerRuntime)
     }
 
     enum StartupError: Error, CustomStringConvertible {
@@ -220,6 +286,7 @@ actor LogicProServer {
         let router = self.router
         let cache = self.cache
         let poller = self.poller
+        let mutationGate = self.mutationGate
 
         return LogicProServerHandlers(
             listTools: { _ in
@@ -242,7 +309,7 @@ actor LogicProServer {
                 // set well above each command's healthy completion time, so a
                 // normal op can never false-trip (verified across the full live
                 // surface); only a genuine hang is bounded.
-                return await Self.runWithDeadline(tool: name, command: command) {
+                return await Self.runWithDeadline(tool: name, command: command, mutationGate: mutationGate) {
                     switch name {
                     case "logic_transport":
                         return await TransportDispatcher.handle(
@@ -322,7 +389,7 @@ actor LogicProServer {
     /// Medium-cost commands that drive multi-step AX menu/library navigation.
     private static let mediumRunningCommands: Set<String> = [
         "set_instrument", "insert_verified", "set_param_verified",
-        "cleanup_apply", "new", "save", "close", "quit",
+        "cleanup_apply", "new", "save", "close", "quit", "play_sequence",
     ]
 
     /// Per-command server-side deadline in seconds. Set far above each
@@ -335,44 +402,205 @@ actor LogicProServer {
         return 25
     }
 
-    static func deadlineTimeoutResult(tool: String, command: String, seconds: Double) -> CallTool.Result {
-        let operation = command.isEmpty ? tool : "\(tool).\(command)"
+    static func deadlineTimeoutResult(
+        tool: String,
+        command: String,
+        seconds: Double,
+        mutationMayStillBeRunning: Bool = false
+    ) -> CallTool.Result {
+        let operation = operationName(tool: tool, command: command)
+        var extras: [String: Any] = [
+            "operation": operation,
+            "timeout_sec": seconds,
+            "recovery_hint": "Logic Pro may be busy, occluded, or showing a modal dialog. Dismiss any dialog and retry; check logic_system.health.",
+        ]
+        if mutationMayStillBeRunning {
+            extras["safe_to_retry"] = false
+            extras["underlying_operation_stopped"] = false
+            extras["mutation_gate"] = "held_until_underlying_operation_returns"
+        }
         let body = HonestContract.encodeStateC(
             error: .operationTimeout,
             hint: "\(operation) exceeded the \(Int(seconds))s server-side deadline and was abandoned so the stdio loop stays responsive.",
+            extras: extras
+        )
+        return toolTextResult(body, isError: true)
+    }
+
+    static func mutationInProgressResult(
+        tool: String,
+        command: String,
+        activeOperation: String?
+    ) -> CallTool.Result {
+        let operation = operationName(tool: tool, command: command)
+        let body = HonestContract.encodeStateC(
+            error: .mutatingOperationInProgress,
+            hint: "\(operation) refused because a previous mutating Logic operation has not finished yet.",
             extras: [
                 "operation": operation,
-                "timeout_sec": seconds,
-                "recovery_hint": "Logic Pro may be busy, occluded, or showing a modal dialog. Dismiss any dialog and retry; check logic_system.health.",
+                "active_operation": activeOperation as Any? ?? NSNull(),
+                "safe_to_retry": false,
+                "write_attempted": false,
             ]
         )
         return toolTextResult(body, isError: true)
     }
 
     /// Race the dispatch `work` against a per-command deadline. Whichever
-    /// finishes first wins; on timeout we return a typed `operation_timeout`
-    /// State C. The orphaned synchronous AX work (if any) is left to finish and
-    /// is discarded — the point is to free the stdio loop, not to cancel a
-    /// blocking AX call (which cooperative cancellation cannot interrupt).
+    /// finishes first resumes the caller; on timeout we return a typed
+    /// `operation_timeout` State C without waiting for non-cooperative blocking
+    /// work to unwind. The orphaned synchronous AX work (if any) is left to
+    /// finish and is discarded — the point is to free the stdio loop, not to
+    /// pretend cooperative cancellation can interrupt a blocked system call.
     static func runWithDeadline(
         tool: String,
         command: String,
         deadlineOverride: Double? = nil,
+        mutationGate: LogicMutationGate? = nil,
         work: @escaping @Sendable () async -> CallTool.Result
     ) async -> CallTool.Result {
         let deadline = deadlineOverride ?? commandDeadlineSeconds(tool: tool, command: command)
-        return await withTaskGroup(of: CallTool.Result?.self) { group in
-            group.addTask { await work() }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
-                return nil // sentinel: the deadline fired before `work` finished
+        let operation = operationName(tool: tool, command: command)
+        let heldMutationGate: LogicMutationGate?
+        let heldClaim: LogicMutationGate.Claim?
+        if isMutatingCommand(tool: tool, command: command), let mutationGate {
+            guard let claim = mutationGate.tryAcquire(operation: operation) else {
+                return mutationInProgressResult(
+                    tool: tool,
+                    command: command,
+                    activeOperation: mutationGate.currentOperation()
+                )
             }
-            defer { group.cancelAll() }
-            if let first = await group.next() {
-                if let result = first { return result }
-                return Self.deadlineTimeoutResult(tool: tool, command: command, seconds: deadline)
+            heldMutationGate = mutationGate
+            heldClaim = claim
+        } else {
+            heldMutationGate = nil
+            heldClaim = nil
+        }
+        return await withCheckedContinuation { continuation in
+            let race = DeadlineRace()
+            let timeoutHandle = DeadlineTimeoutHandle()
+            let workTask = Task.detached(priority: .userInitiated) {
+                let result = await work()
+                if let heldClaim { heldMutationGate?.release(heldClaim) }
+                let didWin = race.resume(continuation, returning: result)
+                if didWin {
+                    timeoutHandle.cancel()
+                }
             }
-            return Self.deadlineTimeoutResult(tool: tool, command: command, seconds: deadline)
+            let timeoutTask = DispatchWorkItem {
+                let didWin = race.resume(
+                    continuation,
+                    returning: Self.deadlineTimeoutResult(
+                        tool: tool,
+                        command: command,
+                        seconds: deadline,
+                        mutationMayStillBeRunning: heldMutationGate != nil
+                    )
+                )
+                if didWin {
+                    workTask.cancel()
+                }
+            }
+            timeoutHandle.set(timeoutTask)
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + deadline,
+                execute: timeoutTask
+            )
+        }
+    }
+
+    private static let mutatingCommandsByTool: [String: Set<String>] = [
+        "logic_transport": [
+            "play", "stop", "record", "pause", "rewind", "fast_forward", "toggle_cycle",
+            "toggle_metronome", "set_tempo", "goto_position", "set_cycle_range", "toggle_count_in",
+        ],
+        "logic_tracks": [
+            "select", "create_audio", "create_instrument", "create_drummer", "create_external_midi",
+            "delete", "duplicate", "rename", "mute", "solo", "arm", "arm_only", "record_sequence",
+            "set_automation", "set_instrument",
+            // NOTE: list_library / scan_library / scan_plugin_presets are read-only
+            // queries (cache/disk/AX reads that transiently move + restore AX
+            // selection but do not change project state). They intentionally stay
+            // OUT of the mutation gate so a multi-minute library scan cannot block
+            // every real write — and so a slow scan can never wedge the gate. They
+            // still carry the long-running deadline via `longRunningCommands`.
+        ],
+        "logic_mixer": [
+            "set_volume", "set_pan", "set_master_volume", "set_plugin_param", "insert_plugin",
+        ],
+        "logic_midi": [
+            "send_note", "send_chord", "send_cc", "send_program_change", "send_pitch_bend",
+            "send_aftertouch", "send_sysex", "play_sequence", "import_file", "create_virtual_port",
+            "step_input", "mmc_play", "mmc_stop", "mmc_record", "mmc_locate",
+        ],
+        "logic_edit": [
+            "undo", "redo", "cut", "copy", "paste", "delete", "select_all", "split", "join",
+            "quantize", "bounce_in_place", "normalize", "duplicate", "toggle_step_input",
+        ],
+        "logic_navigate": [
+            "goto_bar", "goto_marker", "create_marker", "delete_marker", "rename_marker",
+            "zoom_to_fit", "set_zoom", "toggle_view",
+        ],
+        "logic_project": [
+            "new", "open", "save", "save_as", "close", "bounce", "launch", "quit",
+            "export_run", "export_resume", "cleanup_apply",
+        ],
+        "logic_plugins": ["set_param_verified", "insert_verified"],
+    ]
+
+    static func isMutatingCommand(tool: String, command: String) -> Bool {
+        mutatingCommandsByTool[tool]?.contains(command) == true
+    }
+
+    private static func operationName(tool: String, command: String) -> String {
+        command.isEmpty ? tool : "\(tool).\(command)"
+    }
+
+    private final class DeadlineRace: @unchecked Sendable {
+        private let lock = NSLock()
+        private var resumed = false
+
+        @discardableResult
+        func resume(
+            _ continuation: CheckedContinuation<CallTool.Result, Never>,
+            returning result: CallTool.Result
+        ) -> Bool {
+            lock.lock()
+            if resumed {
+                lock.unlock()
+                return false
+            }
+            resumed = true
+            lock.unlock()
+            continuation.resume(returning: result)
+            return true
+        }
+    }
+
+    private final class DeadlineTimeoutHandle: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: DispatchWorkItem?
+        private var cancelled = false
+
+        func set(_ task: DispatchWorkItem) {
+            lock.lock()
+            if cancelled {
+                lock.unlock()
+                task.cancel()
+                return
+            }
+            self.task = task
+            lock.unlock()
+        }
+
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            let task = self.task
+            self.task = nil
+            lock.unlock()
+            task?.cancel()
         }
     }
 
@@ -410,7 +638,11 @@ actor LogicProServer {
     }
 
     func start() async throws {
-        SMFWriter.cleanupOrphanFiles()
+        if let cleanupStartupArtifacts = runtimeOverrides?.cleanupStartupArtifacts {
+            cleanupStartupArtifacts()
+        } else {
+            SMFWriter.cleanupStartupOrphanFiles()
+        }
         let plan = runtimePlan()
         try await plan.run()
     }
@@ -425,12 +657,12 @@ actor LogicProServer {
         if let stopPoller = runtimeOverrides?.stopPoller {
             await stopPoller()
         } else {
-            await poller.stop()
+            await poller.stopImmediately()
         }
         if let stopChannels = runtimeOverrides?.stopChannels {
             await stopChannels()
         } else {
-            await router.stopAll()
+            await router.stopAll(excluding: [.accessibility])
         }
         if let stopPorts = runtimeOverrides?.stopPorts {
             await stopPorts()
@@ -503,14 +735,14 @@ actor LogicProServer {
                 if let stopPoller = self.runtimeOverrides?.stopPoller {
                     await stopPoller()
                 } else {
-                    await poller.stop()
+                    await poller.stopImmediately()
                 }
             },
             stopChannels: {
                 if let stopChannels = self.runtimeOverrides?.stopChannels {
                     await stopChannels()
                 } else {
-                    await router.stopAll()
+                    await router.stopAll(excluding: [.accessibility])
                 }
             },
             stopPorts: {

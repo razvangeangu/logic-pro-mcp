@@ -6,6 +6,12 @@ actor CoreMIDIChannel: Channel {
     let id: ChannelID = .coreMIDI
     private let engine: any CoreMIDIEngineProtocol
     private let portManager: (any VirtualPortManaging)?
+    private static let maxSysExBytes = 1024
+    private static let maxSysExTextCharacters = maxSysExBytes * 5
+
+    private struct ValidationFailure: Error {
+        let message: String
+    }
 
     init(engine: any CoreMIDIEngineProtocol, portManager: (any VirtualPortManaging)? = nil) {
         self.engine = engine
@@ -30,12 +36,57 @@ actor CoreMIDIChannel: Channel {
         return UInt8(v)
     }
 
-    /// Parse a MIDI channel.  Accepts 0-15 (wire / zero-indexed) or 1-16
-    /// (music convention); the engine masks with 0x0F on send so channel 16
-    /// wraps to 0. Anything outside 0-16 is rejected as clearly out of range.
+    /// Parse a channel-layer MIDI wire byte. Public tool input is 1-based
+    /// and converted by `MIDIDispatcher`; direct channel calls must not accept
+    /// channel 16 and rely on the engine's `& 0x0F` masking to wrap it to 0.
     private static func midiChannel(_ s: String?) -> UInt8? {
-        guard let s, let v = Int(s), (0...16).contains(v) else { return nil }
+        guard let s, let v = Int(s), (0...15).contains(v) else { return nil }
         return UInt8(v)
+    }
+
+    private static func durationMs(_ s: String?, default defaultValue: UInt64) -> UInt64? {
+        guard let s else { return defaultValue }
+        guard let value = UInt64(s), (1...30_000).contains(value) else { return nil }
+        return value
+    }
+
+    private static func midiData7CSV(_ s: String?) -> [UInt8]? {
+        guard let s else { return nil }
+        let tokens = s
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard (1...24).contains(tokens.count) else { return nil }
+        var values: [UInt8] = []
+        for token in tokens {
+            guard let value = Int(token), (0...127).contains(value) else { return nil }
+            values.append(UInt8(value))
+        }
+        return values
+    }
+
+    private static func parseSysexHexBytes(_ raw: String) -> Result<[UInt8], ValidationFailure> {
+        guard raw.count <= maxSysExTextCharacters else {
+            return .failure(ValidationFailure(message: "SysEx payload exceeds \(maxSysExBytes)-byte limit"))
+        }
+        let tokens = raw
+            .replacingOccurrences(of: "0x", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: ",", with: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+        guard !tokens.isEmpty else {
+            return .failure(ValidationFailure(message: "SysEx bytes must contain at least one hex token"))
+        }
+        var bytes: [UInt8] = []
+        for token in tokens {
+            guard let byte = UInt8(token, radix: 16) else {
+                return .failure(ValidationFailure(message: "SysEx contains invalid hex token '\(token)'"))
+            }
+            bytes.append(byte)
+        }
+        guard bytes.count <= maxSysExBytes else {
+            return .failure(ValidationFailure(message: "SysEx payload exceeds \(maxSysExBytes)-byte limit"))
+        }
+        return .success(bytes)
     }
 
     func execute(operation: String, params: [String: String]) async -> ChannelResult {
@@ -43,37 +94,42 @@ actor CoreMIDIChannel: Channel {
         // Without this, every send returns .success even though no MIDI is
         // actually transmitted (silent failure — see prod-hardening review #5).
         if !(await engine.isActive) {
-            return .error("CoreMIDI engine not active (virtual source not published)")
+            return .error(HonestContract.encodeStateC(
+                error: .portUnavailable,
+                hint: "CoreMIDI engine not active (virtual source not published)",
+                extras: ["operation": operation, "channel": "CoreMIDI"]
+            ))
         }
-        switch operation {
+        do {
+            switch operation {
         // MARK: - Transport (MMC)
 
         case "transport.play":
-            await engine.sendSysEx(MMCCommands.play())
+            try await engine.sendSysEx(MMCCommands.play())
             return .success("MMC play sent")
 
         case "transport.stop":
-            await engine.sendSysEx(MMCCommands.stop())
+            try await engine.sendSysEx(MMCCommands.stop())
             return .success("MMC stop sent")
 
         case "transport.pause":
-            await engine.sendSysEx(MMCCommands.pause())
+            try await engine.sendSysEx(MMCCommands.pause())
             return .success("MMC pause sent")
 
         case "transport.record_strobe":
-            await engine.sendSysEx(MMCCommands.recordStrobe())
+            try await engine.sendSysEx(MMCCommands.recordStrobe())
             return .success("MMC record strobe sent")
 
         case "transport.record_exit":
-            await engine.sendSysEx(MMCCommands.recordExit())
+            try await engine.sendSysEx(MMCCommands.recordExit())
             return .success("MMC record exit sent")
 
         case "transport.fast_forward":
-            await engine.sendSysEx(MMCCommands.fastForward())
+            try await engine.sendSysEx(MMCCommands.fastForward())
             return .success("MMC fast forward sent")
 
         case "transport.rewind":
-            await engine.sendSysEx(MMCCommands.rewind())
+            try await engine.sendSysEx(MMCCommands.rewind())
             return .success("MMC rewind sent")
 
         case "transport.locate":
@@ -84,7 +140,7 @@ actor CoreMIDIChannel: Channel {
                 return .error("locate requires hours, minutes, seconds, frames")
             }
             let sf = params["subframes"].flatMap(UInt8.init) ?? 0
-            await engine.sendSysEx(MMCCommands.locate(hours: h, minutes: m, seconds: s, frames: f, subframes: sf))
+            try await engine.sendSysEx(MMCCommands.locate(hours: h, minutes: m, seconds: s, frames: f, subframes: sf))
             return .success("MMC locate sent to \(h):\(m):\(s):\(f).\(sf)")
 
         // MARK: - Note Send
@@ -103,14 +159,26 @@ actor CoreMIDIChannel: Channel {
             let channel: UInt8
             if let c = params["channel"] {
                 guard let parsed = Self.midiChannel(c) else {
-                    return .error("send_note 'channel' must be in 0-16")
+                    return .error("send_note 'channel' must be a wire byte in 0-15")
                 }
                 channel = parsed
             } else { channel = 0 }
-            let durationMs = min(params["duration_ms"].flatMap(UInt64.init) ?? 250, 30_000)
-            await engine.sendNoteOn(channel: channel, note: note, velocity: velocity)
-            try? await Task.sleep(nanoseconds: durationMs * 1_000_000)
-            await engine.sendNoteOff(channel: channel, note: note, velocity: 0)
+            guard let durationMs = Self.durationMs(params["duration_ms"], default: 500) else {
+                return .error("send_note 'duration_ms' must be in 1-30000")
+            }
+            try await engine.sendNoteOn(channel: channel, note: note, velocity: velocity)
+            do {
+                try? await Task.sleep(nanoseconds: durationMs * 1_000_000)
+                try await engine.sendNoteOff(channel: channel, note: note, velocity: 0)
+            } catch {
+                // The throwing-MIDIEngine conversion newly exposes a stuck-note
+                // path: if the note-off throws, the on already sounded. Mirror
+                // send_chord and best-effort a second note-off before rethrowing
+                // so a transient failure still silences the note (State C stays
+                // truthful via the top-level catch).
+                await bestEffortCoreMIDINoteOffs([note], channel: channel)
+                throw error
+            }
             return .success("Note \(note) on ch \(channel) vel \(velocity) dur \(durationMs)ms")
 
         case "midi.note_on":
@@ -127,11 +195,11 @@ actor CoreMIDIChannel: Channel {
             let channel: UInt8
             if let c = params["channel"] {
                 guard let parsed = Self.midiChannel(c) else {
-                    return .error("note_on 'channel' must be in 0-16")
+                    return .error("note_on 'channel' must be a wire byte in 0-15")
                 }
                 channel = parsed
             } else { channel = 0 }
-            await engine.sendNoteOn(channel: channel, note: note, velocity: velocity)
+            try await engine.sendNoteOn(channel: channel, note: note, velocity: velocity)
             return .success("Note on \(note) ch \(channel) vel \(velocity)")
 
         case "midi.note_off":
@@ -141,11 +209,11 @@ actor CoreMIDIChannel: Channel {
             let channel: UInt8
             if let c = params["channel"] {
                 guard let parsed = Self.midiChannel(c) else {
-                    return .error("note_off 'channel' must be in 0-16")
+                    return .error("note_off 'channel' must be a wire byte in 0-15")
                 }
                 channel = parsed
             } else { channel = 0 }
-            await engine.sendNoteOff(channel: channel, note: note, velocity: 0)
+            try await engine.sendNoteOff(channel: channel, note: note, velocity: 0)
             return .success("Note off \(note) ch \(channel)")
 
         // MARK: - CC
@@ -160,11 +228,11 @@ actor CoreMIDIChannel: Channel {
             let channel: UInt8
             if let c = params["channel"] {
                 guard let parsed = Self.midiChannel(c) else {
-                    return .error("send_cc 'channel' must be in 0-16")
+                    return .error("send_cc 'channel' must be a wire byte in 0-15")
                 }
                 channel = parsed
             } else { channel = 0 }
-            await engine.sendCC(channel: channel, controller: controller, value: value)
+            try await engine.sendCC(channel: channel, controller: controller, value: value)
             return .success("CC \(controller)=\(value) on ch \(channel)")
 
         // MARK: - Program Change
@@ -176,11 +244,11 @@ actor CoreMIDIChannel: Channel {
             let channel: UInt8
             if let c = params["channel"] {
                 guard let parsed = Self.midiChannel(c) else {
-                    return .error("program_change 'channel' must be in 0-16")
+                    return .error("program_change 'channel' must be a wire byte in 0-15")
                 }
                 channel = parsed
             } else { channel = 0 }
-            await engine.sendProgramChange(channel: channel, program: program)
+            try await engine.sendProgramChange(channel: channel, program: program)
             return .success("Program change \(program) on ch \(channel)")
 
         // MARK: - Pitch Bend
@@ -191,19 +259,30 @@ actor CoreMIDIChannel: Channel {
                   let value = UInt16(exactly: rawValue) else {
                 return .error("pitch_bend requires 'value' (0-16383, center=8192)")
             }
-            let channel = params["channel"].flatMap(UInt8.init) ?? 0
-            await engine.sendPitchBend(channel: channel, value: value)
+            let channel: UInt8
+            if let c = params["channel"] {
+                guard let parsed = Self.midiChannel(c) else {
+                    return .error("pitch_bend 'channel' must be a wire byte in 0-15")
+                }
+                channel = parsed
+            } else { channel = 0 }
+            try await engine.sendPitchBend(channel: channel, value: value)
             return .success("Pitch bend \(value) on ch \(channel)")
 
         // MARK: - Aftertouch
 
         case "midi.aftertouch", "midi.send_aftertouch":
-            guard let pressure = params["pressure"].flatMap(UInt8.init)
-                ?? params["value"].flatMap(UInt8.init) else {
+            guard let pressure = Self.midiData7(params["pressure"] ?? params["value"]) else {
                 return .error("aftertouch requires 'pressure' (0-127)")
             }
-            let channel = params["channel"].flatMap(UInt8.init) ?? 0
-            await engine.sendAftertouch(channel: channel, pressure: pressure)
+            let channel: UInt8
+            if let c = params["channel"] {
+                guard let parsed = Self.midiChannel(c) else {
+                    return .error("aftertouch 'channel' must be a wire byte in 0-15")
+                }
+                channel = parsed
+            } else { channel = 0 }
+            try await engine.sendAftertouch(channel: channel, pressure: pressure)
             return .success("Aftertouch \(pressure) on ch \(channel)")
 
         // MARK: - Raw SysEx
@@ -212,13 +291,14 @@ actor CoreMIDIChannel: Channel {
             guard let hexString = params["bytes"] ?? params["data"] else {
                 return .error("send_sysex requires 'bytes' (hex string, e.g. 'F0 7F 7F 06 02 F7')")
             }
-            // Support space-separated or contiguous hex, with optional 0x prefix / comma separators.
-            let normalized = hexString
-                .replacingOccurrences(of: "0x", with: "", options: .caseInsensitive)
-                .replacingOccurrences(of: ",", with: " ")
-            let bytes = normalized
-                .split(whereSeparator: { $0.isWhitespace })
-                .compactMap { UInt8(String($0), radix: 16) }
+            // Support space/comma-separated hex tokens with optional 0x prefix.
+            let bytes: [UInt8]
+            switch Self.parseSysexHexBytes(hexString) {
+            case .success(let parsed):
+                bytes = parsed
+            case .failure(let failure):
+                return .error(failure.message)
+            }
             // Valid SysEx: F0 <at least 1 data byte> F7, no internal F0/F7.
             // 0xF7 only legal at final position; 0xF0 only legal at start.
             guard bytes.count >= 3, bytes.first == 0xF0, bytes.last == 0xF7 else {
@@ -228,27 +308,18 @@ actor CoreMIDIChannel: Channel {
             if interior.contains(0xF0) || interior.contains(0xF7) {
                 return .error("SysEx contains illegal internal 0xF0/0xF7 byte")
             }
-            await engine.sendSysEx(bytes)
+            guard interior.allSatisfy({ $0 <= 0x7F }) else {
+                return .error("SysEx body bytes must be 0x00-0x7F; only first F0 and final F7 may be status bytes")
+            }
+            try await engine.sendSysEx(bytes)
             return .success("SysEx sent (\(bytes.count) bytes)")
 
         // Aliases for router operation keys
         case "midi.send_chord":
             // Chord = multiple note-ons. Parse and validate.
-            let notesStr = params["notes"] ?? ""
-            let parsed = notesStr
-                .split(separator: ",")
-                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-            // MIDI spec: notes 0-127. Reject anything outside.
-            guard parsed.allSatisfy({ (0...127).contains($0) }) else {
-                return .error("send_chord 'notes' must all be in 0-127")
+            guard let notes = Self.midiData7CSV(params["notes"]) else {
+                return .error("send_chord 'notes' must contain 1..24 MIDI notes, each integer 0..127")
             }
-            // Practical cap: a chord beyond 24 simultaneous notes is almost
-            // certainly a bug / flood attempt. 24 fits a 2-hand piano cluster
-            // plus tuplet headroom.
-            guard parsed.count > 0 && parsed.count <= 24 else {
-                return .error("send_chord 'notes' count must be 1..24 (got \(parsed.count))")
-            }
-            let notes = parsed.map { UInt8($0) }
             let vel: UInt8
             if let v = params["velocity"] {
                 guard let parsed = Self.midiData7(v) else {
@@ -259,14 +330,25 @@ actor CoreMIDIChannel: Channel {
             let ch: UInt8
             if let c = params["channel"] {
                 guard let parsed = Self.midiChannel(c) else {
-                    return .error("send_chord 'channel' must be in 0-16")
+                    return .error("send_chord 'channel' must be a wire byte in 0-15")
                 }
                 ch = parsed
             } else { ch = 0 }
-            let durMs = min(params["duration_ms"].flatMap(Int.init) ?? 500, 30_000)
-            for n in notes { await engine.sendNoteOn(channel: ch, note: n, velocity: vel) }
-            try? await Task.sleep(for: .milliseconds(durMs))
-            for n in notes { await engine.sendNoteOff(channel: ch, note: n, velocity: 0) }
+            guard let durMs = Self.durationMs(params["duration_ms"], default: 500) else {
+                return .error("send_chord 'duration_ms' must be in 1-30000")
+            }
+            var startedNotes: [UInt8] = []
+            do {
+                for n in notes {
+                    try await engine.sendNoteOn(channel: ch, note: n, velocity: vel)
+                    startedNotes.append(n)
+                }
+            } catch {
+                await bestEffortCoreMIDINoteOffs(startedNotes, channel: ch)
+                throw error
+            }
+            try? await Task.sleep(nanoseconds: durMs * 1_000_000)
+            try await sendCoreMIDINoteOffs(notes, channel: ch)
             return .success("Chord sent: \(notes.count) notes")
 
         case "midi.play_sequence":
@@ -298,20 +380,27 @@ actor CoreMIDIChannel: Channel {
                 return .error("play_sequence: \(violation)")
             }
             let startNs = DispatchTime.now().uptimeNanoseconds
+            var noteOffTasks: [Task<Void, Error>] = []
             for event in events {
                 let targetNs = startNs + UInt64(event.offsetMs) * 1_000_000
                 let nowNs = DispatchTime.now().uptimeNanoseconds
                 if targetNs > nowNs {
                     try? await Task.sleep(nanoseconds: targetNs - nowNs)
                 }
-                await engine.sendNoteOn(channel: event.channel, note: event.pitch, velocity: event.velocity)
+                do {
+                    try await engine.sendNoteOn(channel: event.channel, note: event.pitch, velocity: event.velocity)
+                } catch {
+                    await drainCoreMIDINoteOffTasks(noteOffTasks)
+                    throw error
+                }
                 let pitch = event.pitch
                 let ch = event.channel
                 let durNs = UInt64(event.durationMs) * 1_000_000
-                Task.detached { [engine] in
-                    try? await Task.sleep(nanoseconds: durNs)
-                    await engine.sendNoteOff(channel: ch, note: pitch, velocity: 0)
-                }
+                let engine = self.engine
+                noteOffTasks.append(Task {
+                    try await Task.sleep(nanoseconds: durNs)
+                    try await engine.sendNoteOff(channel: ch, note: pitch, velocity: 0)
+                })
             }
             if let lastEnd = events.map({ $0.offsetMs + $0.durationMs }).max() {
                 let endTargetNs = startNs + UInt64(lastEnd) * 1_000_000
@@ -320,15 +409,28 @@ actor CoreMIDIChannel: Channel {
                     try? await Task.sleep(nanoseconds: endTargetNs - nowNs)
                 }
             }
+            try await waitForCoreMIDINoteOffTasks(noteOffTasks)
             return .success("Sequence sent: \(events.count) events")
 
         case "midi.step_input":
-            let note = params["note"].flatMap(UInt8.init) ?? 60
-            let durationMs = stepInputDurationMs(from: params["duration"] ?? params["duration_ms"])
+            guard let note = Self.midiData7(params["note"]) else {
+                return .error("step_input requires explicit 'note' in 0-127")
+            }
+            guard let durationMs = stepInputDurationMs(from: params["duration"] ?? params["duration_ms"]) else {
+                return .error("step_input requires explicit 'duration' or 'duration_ms' in 1-30000 or 1/1..1/32")
+            }
             let vel: UInt8 = 80
-            await engine.sendNoteOn(channel: 0, note: note, velocity: vel)
-            try? await Task.sleep(for: .milliseconds(durationMs))
-            await engine.sendNoteOff(channel: 0, note: note, velocity: 0)
+            try await engine.sendNoteOn(channel: 0, note: note, velocity: vel)
+            do {
+                try? await Task.sleep(for: .milliseconds(durationMs))
+                try await engine.sendNoteOff(channel: 0, note: note, velocity: 0)
+            } catch {
+                // Same throwing-note-off stuck-note class as send_note: best-effort
+                // a second note-off before rethrowing so step input cannot leave
+                // a note sounding.
+                await bestEffortCoreMIDINoteOffs([note], channel: 0)
+                throw error
+            }
             return .success("Step input: note \(note), duration \(durationMs)ms")
 
         case "midi.list_ports":
@@ -352,26 +454,26 @@ actor CoreMIDIChannel: Channel {
             return .success("{\"active\":true}")
 
         case "transport.record":
-            await engine.sendSysEx(MMCCommands.recordStrobe())
+            try await engine.sendSysEx(MMCCommands.recordStrobe())
             return .success("MMC record strobe")
 
         case "transport.goto_position":
             return .error("CoreMIDI cannot position the playhead directly; use MCU or CGEvent fallback")
 
         case "mmc.play":
-            await engine.sendSysEx(MMCCommands.play())
+            try await engine.sendSysEx(MMCCommands.play())
             return .success("MMC play")
 
         case "mmc.stop":
-            await engine.sendSysEx(MMCCommands.stop())
+            try await engine.sendSysEx(MMCCommands.stop())
             return .success("MMC stop")
 
         case "mmc.record_strobe":
-            await engine.sendSysEx(MMCCommands.recordStrobe())
+            try await engine.sendSysEx(MMCCommands.recordStrobe())
             return .success("MMC record strobe")
 
         case "mmc.record_exit":
-            await engine.sendSysEx(MMCCommands.recordExit())
+            try await engine.sendSysEx(MMCCommands.recordExit())
             return .success("MMC record exit")
 
         case "mmc.locate":
@@ -381,7 +483,7 @@ actor CoreMIDIChannel: Channel {
             else {
                 return .error("MMC locate requires time in HH:MM:SS:FF")
             }
-            await engine.sendSysEx(
+            try await engine.sendSysEx(
                 MMCCommands.locate(
                     hours: components.hours,
                     minutes: components.minutes,
@@ -392,11 +494,79 @@ actor CoreMIDIChannel: Channel {
             return .success("MMC locate sent to \(time)")
 
         case "mmc.pause":
-            await engine.sendSysEx(MMCCommands.pause())
+            try await engine.sendSysEx(MMCCommands.pause())
             return .success("MMC pause")
 
         default:
             return .error("Unknown CoreMIDI operation: \(operation)")
+        }
+        } catch {
+            return .error(Self.coreMIDISendFailure(operation: operation, error: error))
+        }
+    }
+
+    private static func coreMIDISendFailure(operation: String, error: any Error) -> String {
+        let failure: HonestContract.FailureError
+        if let midiError = error as? MIDIEngineError {
+            switch midiError {
+            case .notRunning:
+                failure = .portUnavailable
+            case .invalidSysEx:
+                failure = .invalidParams
+            default:
+                failure = .axWriteFailed
+            }
+        } else {
+            failure = .axWriteFailed
+        }
+        return HonestContract.encodeStateC(
+            error: failure,
+            hint: "CoreMIDI send failed for \(operation): \(error)",
+            extras: ["operation": operation, "channel": "CoreMIDI"]
+        )
+    }
+
+    private func sendCoreMIDINoteOffs(_ notes: [UInt8], channel: UInt8) async throws {
+        var firstError: (any Error)?
+        for note in notes {
+            do {
+                try await engine.sendNoteOff(channel: channel, note: note, velocity: 0)
+            } catch {
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+        if let firstError {
+            throw firstError
+        }
+    }
+
+    private func bestEffortCoreMIDINoteOffs(_ notes: [UInt8], channel: UInt8) async {
+        for note in notes {
+            try? await engine.sendNoteOff(channel: channel, note: note, velocity: 0)
+        }
+    }
+
+    private func waitForCoreMIDINoteOffTasks(_ tasks: [Task<Void, Error>]) async throws {
+        var firstError: (any Error)?
+        for task in tasks {
+            do {
+                try await task.value
+            } catch {
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+        if let firstError {
+            throw firstError
+        }
+    }
+
+    private func drainCoreMIDINoteOffTasks(_ tasks: [Task<Void, Error>]) async {
+        for task in tasks {
+            _ = await task.result
         }
     }
 
@@ -423,10 +593,11 @@ actor CoreMIDIChannel: Channel {
         return (hours, minutes, seconds, frames)
     }
 
-    private func stepInputDurationMs(from rawDuration: String?) -> Int {
-        guard let rawDuration, !rawDuration.isEmpty else { return 250 }
+    private func stepInputDurationMs(from rawDuration: String?) -> Int? {
+        guard let rawDuration, !rawDuration.isEmpty else { return nil }
         if let durationMs = Int(rawDuration) {
-            return min(max(1, durationMs), 30_000)
+            guard (1...30_000).contains(durationMs) else { return nil }
+            return durationMs
         }
         switch rawDuration {
         case "1/1": return 1000
@@ -435,7 +606,7 @@ actor CoreMIDIChannel: Channel {
         case "1/8": return 125
         case "1/16": return 63
         case "1/32": return 32
-        default: return 250
+        default: return nil
         }
     }
 

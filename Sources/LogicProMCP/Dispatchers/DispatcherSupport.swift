@@ -1,21 +1,8 @@
 import Foundation
 import MCP
 
-func intParam(_ params: [String: Value], _ keys: String..., default defaultValue: Int = 0) -> Int {
-    for key in keys {
-        if let value = params[key]?.intValue {
-            return value
-        }
-        // Accept string-form integers too (client convenience).
-        if let s = params[key]?.stringValue, let value = Int(s) {
-            return value
-        }
-    }
-    return defaultValue
-}
-
-/// Like `intParam` but returns `nil` when none of the keys are present.
-/// Use for required parameters where a silent default is dangerous — e.g.
+/// Returns `nil` when none of the keys are present or when any provided value
+/// is malformed. Use for required parameters where a silent default is dangerous — e.g.
 /// `index` on mutating track commands where falling through to track 0
 /// would edit the wrong track on a malformed caller request.
 func intParamOrNil(_ params: [String: Value], _ keys: String...) -> Int? {
@@ -40,23 +27,6 @@ func intParamOrNil(_ params: [String: Value], _ keys: String...) -> Int? {
         }
     }
     return selected
-}
-
-func doubleParam(_ params: [String: Value], _ keys: String..., default defaultValue: Double = 0) -> Double {
-    for key in keys {
-        // JSON integers decode as Value.int — Value.doubleValue returns nil for those.
-        // Accept int, double, or numeric string so callers can send `{"tempo": 120}` or `120.5` or `"120"`.
-        if let value = params[key]?.doubleValue {
-            return value
-        }
-        if let value = params[key]?.intValue {
-            return Double(value)
-        }
-        if let s = params[key]?.stringValue, let value = Double(s) {
-            return value
-        }
-    }
-    return defaultValue
 }
 
 func doubleParamOrNil(_ params: [String: Value], _ keys: String...) -> Double? {
@@ -100,24 +70,6 @@ func stringParam(_ params: [String: Value], _ keys: String..., default defaultVa
     return defaultValue
 }
 
-func boolParam(_ params: [String: Value], _ keys: String..., default defaultValue: Bool = false) -> Bool {
-    for key in keys {
-        if let value = params[key]?.boolValue {
-            return value
-        }
-        // Accept canonical string ("true"/"false") and 0/1 ints — common client
-        // conveniences. Silent default on mistyped input used to bury real bugs.
-        if let s = params[key]?.stringValue?.lowercased() {
-            if s == "true" || s == "1" || s == "yes" { return true }
-            if s == "false" || s == "0" || s == "no" { return false }
-        }
-        if let value = params[key]?.intValue {
-            return value != 0
-        }
-    }
-    return defaultValue
-}
-
 func boolParamOrNil(_ params: [String: Value], _ keys: String...) -> Bool? {
     for key in keys {
         guard let raw = params[key] else { continue }
@@ -150,21 +102,6 @@ func strictBoolParam(_ params: [String: Value], _ key: String) -> StrictBoolPara
         return .invalid("'\(key)' must be a literal boolean true or false")
     }
     return .value(value)
-}
-
-func csvIntListOrStringParam(_ params: [String: Value], key: String) -> String {
-    if let array = params[key]?.arrayValue {
-        // Coerce each element through int/double/string the same way doubleParam
-        // does — silently dropping doubles/strings was a bug in the prior
-        // implementation that turned `[60, 64.0, "67"]` into just "60".
-        return array.compactMap { v -> Int? in
-            if let i = v.intValue { return i }
-            if let d = v.doubleValue { return Int(d) }
-            if let s = v.stringValue, let i = Int(s) { return i }
-            return nil
-        }.map(String.init).joined(separator: ",")
-    }
-    return params[key]?.stringValue ?? ""
 }
 
 func routedTextResult(
@@ -217,4 +154,21 @@ func toolTextResultTreatingUnverifiedAsError(_ result: ChannelResult) -> CallToo
         return toolTextResult(result.message, isError: true)
     }
     return toolTextResult(result)
+}
+
+func blockingLogicDialogResult(operation: String) -> CallTool.Result {
+    toolTextResult(
+        HonestContract.encodeStateC(
+            error: .unsupportedState,
+            hint: "Refusing \(operation) while a blocking Logic dialog/sheet is present. Dismiss crash, save, bounce, import, or other modal dialogs, then retry.",
+            extras: [
+                "operation": operation,
+                "failure_stage": "preflight_blocking_dialog",
+                "blocking_dialog_present": true,
+                "write_attempted": false,
+                "safe_to_retry": true,
+            ]
+        ),
+        isError: true
+    )
 }

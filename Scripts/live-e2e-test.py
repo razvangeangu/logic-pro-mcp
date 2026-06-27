@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SIZE_OK: Scenario harness intentionally centralizes strict live MCP/Logic E2E coverage for one ordered run.
 """Expanded Live E2E test for Logic Pro MCP server.
 Uses newline-delimited JSON-RPC stdio transport.
 Requires: Logic Pro running, accessibility + automation permissions.
@@ -17,16 +18,27 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from logic_controller_learn_mode import DEFAULT_CONTROLLER_LEARN_MODE_POLICY, guard_controller_learn_mode
-from logic_session_bootstrap import bootstrap_fresh_logic_session
+from logic_session_bootstrap import (
+    _click_safe_dialog_cancel_button,
+    _send_escape_key,
+    bootstrap_fresh_logic_session,
+    collect_ui_snapshot,
+)
 from logic_free_tempo_modal import DEFAULT_FREE_TEMPO_POLICY, detect_free_tempo_modal, resolve_free_tempo_modal
 
 BINARY = os.environ.get("LOGIC_PRO_MCP_BINARY", ".build/release/LogicProMCP")
 STRICT_LIVE = os.environ.get("LOGIC_PRO_MCP_STRICT_LIVE", "0") == "1"
 TRANSPORT = os.environ.get("LOGIC_PRO_MCP_E2E_TRANSPORT", "tmux" if STRICT_LIVE else "popen")
 FRESH_BOOTSTRAP = os.environ.get("LOGIC_PRO_MCP_BOOTSTRAP_FRESH", "1" if STRICT_LIVE else "0") == "1"
-TIMEOUT = 10
+TIMEOUT = int(os.environ.get("LOGIC_PRO_MCP_E2E_TIMEOUT", "40" if STRICT_LIVE else "10"))
+TRUSTED_CLICLICK_PATHS = (
+    "/opt/homebrew/bin/cliclick",
+    "/usr/local/bin/cliclick",
+    "/usr/bin/cliclick",
+)
 
 
 def coverage_environment():
@@ -42,6 +54,26 @@ def coverage_environment():
     return env
 
 
+def trusted_cliclick_path() -> Optional[str]:
+    candidates = (os.environ.get("LOGIC_PRO_MCP_CLICLICK"), *TRUSTED_CLICLICK_PATHS)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = os.path.abspath(os.path.expanduser(candidate))
+        if path not in TRUSTED_CLICLICK_PATHS:
+            continue
+        parent = os.path.dirname(path)
+        try:
+            parent_mode = os.stat(parent).st_mode
+        except OSError:
+            continue
+        if parent_mode & 0o022:
+            continue
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
+
 def coverage_shell_prefix():
     profile_file = coverage_environment()["LLVM_PROFILE_FILE"]
     return f"export LLVM_PROFILE_FILE={shlex.quote(profile_file)}; "
@@ -49,11 +81,13 @@ def coverage_shell_prefix():
 
 class MCPClient:
     def __init__(self):
+        self.stderr_dir = tempfile.TemporaryDirectory(prefix="logic-mcp-e2e.")
+        self.stderr_file = open(Path(self.stderr_dir.name) / "stderr.txt", "w")
         self.proc = subprocess.Popen(
             [BINARY],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=open("/tmp/mcp-live-test-stderr.txt", "w"),
+            stderr=self.stderr_file,
             bufsize=0,
             env=coverage_environment(),
         )
@@ -100,6 +134,9 @@ class MCPClient:
         except: pass
         try: self.proc.terminate(); self.proc.wait(timeout=3)
         except: self.proc.kill()
+        try: self.stderr_file.close()
+        except: pass
+        self.stderr_dir.cleanup()
 
 
 class TmuxMCPClient:
@@ -114,7 +151,8 @@ class TmuxMCPClient:
 
     def __init__(self):
         self.session = f"logic-mcp-e2e-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-        self.stderr_path = "/tmp/mcp-live-test-stderr.txt"
+        self.stderr_dir = tempfile.TemporaryDirectory(prefix="logic-mcp-e2e.")
+        self.stderr_path = str(Path(self.stderr_dir.name) / "stderr.txt")
         self.responses = {}
         self.started = False
 
@@ -183,6 +221,7 @@ class TmuxMCPClient:
 
     def close(self):
         if not self.started:
+            self.stderr_dir.cleanup()
             return
         self._tmux(["send-keys", "-t", self.session, "C-c"], check=False)
         deadline = time.time() + 3
@@ -190,10 +229,12 @@ class TmuxMCPClient:
             result = self._tmux(["has-session", "-t", self.session], check=False)
             if result.returncode != 0:
                 self.started = False
+                self.stderr_dir.cleanup()
                 return
             time.sleep(0.1)
         self._tmux(["kill-session", "-t", self.session], check=False)
         self.started = False
+        self.stderr_dir.cleanup()
 
 
 class ExternalTmuxMCPClient:
@@ -204,13 +245,34 @@ class ExternalTmuxMCPClient:
         self.capture_file = os.environ["LOGIC_PRO_MCP_E2E_CAPTURE_FILE"]
         self.writer = open(self.request_fifo, "w", buffering=1)
         self.responses = {}
+        self.capture_offset = 0
+        self.capture_remainder = ""
 
     def _capture_lines(self):
         try:
             with open(self.capture_file, "r") as file:
-                return file.read().splitlines()
+                file.seek(0, os.SEEK_END)
+                file_size = file.tell()
+                if file_size < self.capture_offset:
+                    self.capture_offset = 0
+                    self.capture_remainder = ""
+                file.seek(self.capture_offset)
+                chunk = file.read()
+                self.capture_offset = file.tell()
         except FileNotFoundError:
             return []
+        if not chunk:
+            return []
+        payload = self.capture_remainder + chunk
+        if payload.endswith("\n"):
+            self.capture_remainder = ""
+            return payload.splitlines()
+        lines = payload.splitlines()
+        if not lines:
+            self.capture_remainder = payload
+            return []
+        self.capture_remainder = lines.pop()
+        return lines
 
     def _refresh_responses(self):
         lines = self._capture_lines()
@@ -560,15 +622,36 @@ def ui_stop_logic_transport():
     )
     if result.returncode == 0:
         return True
+    cliclick_path = trusted_cliclick_path()
+    if cliclick_path is None:
+        return False
     try:
         fallback = subprocess.run(
-            ["cliclick", "kp:space"],
+            [cliclick_path, "kp:space"],
             capture_output=True,
             text=True,
         )
     except FileNotFoundError:
         return False
     return fallback.returncode == 0
+
+
+def dismiss_safe_logic_dialog():
+    try:
+        snapshot = collect_ui_snapshot()
+    except Exception:
+        return {"status": "probe_failed"}
+    if not snapshot.blocking_dialog_present:
+        return {"status": "not_present"}
+    if _click_safe_dialog_cancel_button():
+        time.sleep(0.5)
+        return {"status": "dismissed", "method": "cancel_button"}
+    if _send_escape_key():
+        time.sleep(0.5)
+        latest = collect_ui_snapshot()
+        if not latest.blocking_dialog_present:
+            return {"status": "dismissed", "method": "escape"}
+    return {"status": "blocked", "windows": snapshot.logic_window_names}
 
 
 def cycle_range_result_ok(resp):
@@ -669,6 +752,41 @@ def section(title):
     print(f"\033[0;33m{title}\033[0m")
 
 
+def fresh_bootstrap_env():
+    bootstrap_env = dict(os.environ)
+    if STRICT_LIVE:
+        bootstrap_env["LOGIC_PRO_MCP_BOOTSTRAP_FORCE_NEW"] = "1"
+        bootstrap_env["LOGIC_PRO_MCP_BOOTSTRAP_ALLOW_NEW_PROJECT"] = "1"
+    return bootstrap_env
+
+
+def run_fresh_bootstrap(client):
+    return bootstrap_fresh_logic_session(
+        call_tool=lambda tool, command, params=None, timeout=None: call_tool(
+            client, tool, command, params, timeout=timeout
+        ),
+        read_resource=lambda uri: read_resource(client, uri),
+        tool_text=tool_text,
+        resource_text=resource_text,
+        strict_live=STRICT_LIVE,
+        env=fresh_bootstrap_env(),
+    )
+
+
+def bootstrap_failure_reason(bootstrap):
+    reason = bootstrap.reason or "unknown"
+    if bootstrap.hint:
+        return f"fresh bootstrap failed: {reason} ({bootstrap.hint})"
+    return f"fresh bootstrap failed: {reason}"
+
+
+def bootstrap_status_payload(reason, bootstrap=None):
+    payload = {"result": {"bootstrap": reason}}
+    if bootstrap is not None and not bootstrap.ok:
+        payload["result"]["detail"] = bootstrap.as_dict()
+    return payload
+
+
 def main():
     print()
     print("══════════════════════════════════════════════════════")
@@ -699,15 +817,7 @@ def main():
 
     if FRESH_BOOTSTRAP:
         section("§0.5 Fresh Session Bootstrap")
-        bootstrap = bootstrap_fresh_logic_session(
-            call_tool=lambda tool, command, params=None, timeout=None: call_tool(
-                client, tool, command, params, timeout=timeout
-            ),
-            read_resource=lambda uri: read_resource(client, uri),
-            tool_text=tool_text,
-            resource_text=resource_text,
-            strict_live=STRICT_LIVE,
-        )
+        bootstrap = run_fresh_bootstrap(client)
         if bootstrap.ok:
             summary = bootstrap.as_dict()
             language = summary["ui"].get("detected_language") or "unknown"
@@ -870,6 +980,19 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     section("§3 Transport Live Operations")
 
+    transport_bootstrap = None
+    transport_live_ready = live_logic_ready and has_document
+    transport_live_reason = "Logic Pro + visible document are required"
+    if STRICT_LIVE and FRESH_BOOTSTRAP and live_logic_ready:
+        transport_bootstrap = run_fresh_bootstrap(client)
+        if transport_bootstrap.ok:
+            transport_live_ready = True
+            has_document = True
+            call_tool(client, "logic_system", "refresh_cache", timeout=3)
+        else:
+            transport_live_ready = False
+            transport_live_reason = bootstrap_failure_reason(transport_bootstrap)
+
     # P1-4 (D2): transport reads moved to the logic://transport/state resource
     # (the logic_transport get_state tool command was removed). Envelope shape:
     # { cache_age_sec, fetched_at, ax_occluded, data: { state: {...}, has_document } }.
@@ -982,7 +1105,7 @@ def main():
             and state.get("isRecording") is False
         )
 
-    stop_live_ready = live_logic_ready and has_document
+    stop_live_ready = transport_live_ready
     ui_stop_envelope = None
     ui_stop_state = None
     mcp_stop_response = None
@@ -1016,7 +1139,7 @@ def main():
             and ui_stop_state.get("isRecording") is False
         ),
         stop_live_ready,
-        "Logic Pro + visible document are required",
+        transport_live_reason,
     )
     T_LIVE(
         "logic_transport.stop returns verified success after live readback",
@@ -1027,7 +1150,7 @@ def main():
             and (safe_json(tool_text(mcp_stop_response)) or {}).get("verified") is True
         ),
         stop_live_ready,
-        "Logic Pro + visible document are required",
+        transport_live_reason,
     )
     T_LIVE(
         "transport readback reflects logic_transport.stop immediately",
@@ -1040,12 +1163,18 @@ def main():
             and mcp_stop_state.get("isRecording") is False
         ),
         stop_live_ready,
-        "Logic Pro + visible document are required",
+        transport_live_reason,
     )
 
     # Transport commands that route to MCU/CoreMIDI
     r = call_tool(client, "logic_transport", "toggle_cycle")
-    T_LIVE("transport.toggle_cycle returns non-error", r, lambda _: not is_error(r), live_logic_ready, "Logic Pro + Accessibility are required")
+    T_LIVE(
+        "transport.toggle_cycle returns non-error",
+        r,
+        lambda _: not is_error(r),
+        transport_live_ready,
+        transport_live_reason,
+    )
     call_tool(client, "logic_transport", "toggle_cycle")  # restore
 
     r = call_tool(client, "logic_transport", "toggle_metronome")
@@ -1053,18 +1182,23 @@ def main():
         "transport.toggle_metronome verifies or fails closed with explicit State B/C",
         r,
         lambda _: verified_or_explicitly_unverified(r),
-        live_logic_ready,
-        "Logic Pro + Accessibility are required",
+        transport_live_ready,
+        transport_live_reason,
     )
     call_tool(client, "logic_transport", "toggle_metronome")  # restore
 
     fresh_transport_live_ready = False
     fresh_transport_reason = "fresh Logic bootstrap with 1 track and 0 regions is required"
-    if live_logic_ready and has_document:
+    fresh_transport_payload = bootstrap_status_payload(fresh_transport_reason)
+    if transport_bootstrap is not None and not transport_bootstrap.ok:
+        fresh_transport_reason = transport_live_reason
+        fresh_transport_payload = bootstrap_status_payload(fresh_transport_reason, transport_bootstrap)
+    elif live_logic_ready and has_document:
         call_tool(client, "logic_system", "refresh_cache", timeout=3)
         fresh_transport_live_ready, fresh_transport_reason = fresh_transport_bootstrap_status(client)
         if not fresh_transport_live_ready:
             fresh_transport_reason = f"fresh bootstrap not detected: {fresh_transport_reason}"
+        fresh_transport_payload = bootstrap_status_payload(fresh_transport_reason)
     fresh_transport_execute_ready = fresh_transport_live_ready and controller_learn_clear
     fresh_transport_execute_reason = (
         controller_learn_reason
@@ -1165,7 +1299,7 @@ def main():
 
     T_LIVE(
         "fresh transport bootstrap detected",
-        {"result": {"bootstrap": fresh_transport_reason}},
+        fresh_transport_payload,
         lambda _: fresh_transport_live_ready,
         fresh_transport_live_ready,
         fresh_transport_reason,
@@ -1461,10 +1595,9 @@ def main():
           or "Accessibility not trusted" in list_library_text,
     )
 
-    # scan_library walks the full Logic Library tree. A stock Logic 12 Library
-    # can exceed 180s over live AX on Logic 12.2; avoid a client-side timeout
-    # leaving a stale large response in the tmux capture stream.
-    r = call_tool(client, "logic_tracks", "scan_library", timeout=240)
+    # Default scan_library uses the non-mutating disk scanner; explicit
+    # mode="ax" remains the legacy live Panel walk.
+    r = call_tool(client, "logic_tracks", "scan_library", timeout=60)
     scan_library_text = tool_text(r)
     scan_library_json = safe_json(scan_library_text)
     T(
@@ -1968,17 +2101,19 @@ def main():
     # Save (non-destructive — Logic Pro will show dialog if no project)
     r = call_tool(client, "logic_project", "save")
     T("project.save dispatches", r, lambda _: len(tool_text(r)) > 0)
+    dismiss_safe_logic_dialog()
 
     # Bounce
     r = call_tool(client, "logic_project", "bounce")
     T("project.bounce dispatches", r, lambda _: len(tool_text(r)) > 0)
+    dismiss_safe_logic_dialog()
 
     # Launch (already running — should succeed)
     r = call_tool(client, "logic_project", "launch")
     T("project.launch (already running) dispatches", r, lambda _: len(tool_text(r)) > 0)
 
     # ═══════════════════════════════════════════════════════════════
-    # §10 Security: Path Validation (15 tests)
+    # §10 Security: Path Validation (16 tests)
     # ═══════════════════════════════════════════════════════════════
     section("§10 Security: Path Validation")
 
@@ -2003,6 +2138,9 @@ def main():
     for path, desc in security_paths:
         r = call_tool(client, "logic_project", "open", {"path": path})
         T(f"SECURITY: blocks {desc}", r, lambda _: is_error(r))
+
+    r = call_tool(client, "logic_project", "save_as", {"path": "/tmp/project/../escape.logicx"})
+    T("SECURITY: save_as blocks absolute path traversal", r, lambda _: is_error(r))
 
     # ═══════════════════════════════════════════════════════════════
     # §11 Resource Read (28 tests)
@@ -2418,15 +2556,28 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     section("§17b Fresh Record Modal Guard")
 
+    fresh_record_bootstrap = None
+    if STRICT_LIVE and FRESH_BOOTSTRAP and live_logic_ready and midi_live_ready:
+        fresh_record_bootstrap = run_fresh_bootstrap(client)
+        if fresh_record_bootstrap.ok:
+            has_document = True
+            call_tool(client, "logic_system", "refresh_cache", timeout=3)
+
     fresh_record_live_ready = False
     fresh_record_reason = "fresh Logic bootstrap with 1 track and 0 regions is required"
-    if live_logic_ready and midi_live_execute_ready and has_document:
+    fresh_record_payload = {"result": {"reason": fresh_record_reason}}
+    if fresh_record_bootstrap is not None and not fresh_record_bootstrap.ok:
+        fresh_record_reason = bootstrap_failure_reason(fresh_record_bootstrap)
+        fresh_record_payload = {"result": {"reason": fresh_record_reason, "detail": fresh_record_bootstrap.as_dict()}}
+    elif live_logic_ready and midi_live_execute_ready and has_document:
         call_tool(client, "logic_system", "refresh_cache", timeout=3)
         fresh_record_live_ready, fresh_record_reason = fresh_record_bootstrap_status(client)
         if not fresh_record_live_ready:
             fresh_record_reason = f"fresh bootstrap not detected: {fresh_record_reason}"
+        fresh_record_payload = {"result": {"reason": fresh_record_reason}}
     elif live_logic_ready and midi_live_ready and has_document and not controller_learn_clear:
         fresh_record_reason = controller_learn_reason
+        fresh_record_payload = {"result": {"reason": fresh_record_reason}}
 
     preflight_modal = {"status": "skipped", "policy_id": DEFAULT_FREE_TEMPO_POLICY["policy_id"]}
     select_for_record = {"gate": fresh_record_reason}
@@ -2482,7 +2633,7 @@ def main():
 
     T_LIVE(
         "fresh record bootstrap detected",
-        {"result": {"reason": fresh_record_reason}},
+        fresh_record_payload,
         lambda _: fresh_record_live_ready,
         fresh_record_live_ready,
         fresh_record_reason,

@@ -284,6 +284,38 @@ private func decodeMCUJSON(_ s: String) -> [String: Any] {
     (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
 }
 
+@Test func testMCUChannelRejectsMissingOrInvalidDirectMutationParams() async {
+    let transport = MockMCUTransport()
+    let channel = MCUChannel(transport: transport, cache: StateCache())
+    let cases: [(operation: String, params: [String: String], hintFragment: String)] = [
+        ("mixer.set_volume", ["volume": "0.5"], "'index'"),
+        ("mixer.set_volume", ["index": "0"], "'volume'"),
+        ("mixer.set_volume", ["index": "0", "volume": "1.5"], "between 0.0 and 1.0"),
+        ("mixer.set_pan", ["index": "0", "pan": "2"], "between -1.0 and 1.0"),
+        ("mixer.set_master_volume", [:], "'volume'"),
+        ("track.set_solo", ["index": "3"], "'enabled'"),
+        ("track.set_arm", ["enabled": "true"], "'index'"),
+        ("track.set_mute", ["index": "3", "enabled": "yes"], "'enabled'"),
+        ("track.select", [:], "'index'"),
+        ("track.set_automation", [:], "'mode'"),
+        ("track.set_automation", ["mode": "preview"], "Unknown automation mode"),
+    ]
+
+    for item in cases {
+        let result = await channel.execute(operation: item.operation, params: item.params)
+        #expect(!result.isSuccess, "\(item.operation) should reject invalid params")
+        let obj = decodeMCUJSON(result.message)
+        #expect(obj["success"] as? Bool == false)
+        #expect(obj["error"] as? String == "invalid_params")
+        #expect(obj["operation"] as? String == item.operation)
+        #expect(obj["channel"] as? String == "MCU")
+        #expect((obj["hint"] as? String)?.contains(item.hintFragment) == true)
+    }
+
+    let sent = await transport.sentBytes
+    #expect(sent.isEmpty)
+}
+
 @Test func testStripButtonReturnsHonestContractEnvelope() async {
     let channel = MCUChannel(transport: MockMCUTransport(), cache: StateCache())
 

@@ -268,13 +268,20 @@ actor MIDIKeyCommandsChannel: Channel {
                 extras: ["operation": "midi.send_note.keycmd"]
             ))
         }
-        // Note Off uses `try?` (Phase 6 Loop 1 P2-1): if Note On succeeded
-        // the note is already sounding in Logic. A subsequent transport.send
-        // throw on Note Off would leave a stuck note while the caller sees
-        // State C — a worse failure mode than silently best-effort'ing the
-        // Note Off. Same pattern as `playSequenceDirect`.
         try? await Task.sleep(nanoseconds: durationMs * 1_000_000)
-        try? await transport.send(buildNoteOffBytes(channel: channel, note: note))
+        do {
+            try await transport.send(buildNoteOffBytes(channel: channel, note: note))
+        } catch {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport note-off send failed after note-on: \(error)",
+                extras: [
+                    "operation": "midi.send_note.keycmd",
+                    "note_off_failed": true,
+                    "note_on_sent": true,
+                ]
+            ))
+        }
         return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
             "operation": "midi.send_note.keycmd",
             "via": "midi-keycmd-direct-send",
@@ -318,13 +325,18 @@ actor MIDIKeyCommandsChannel: Channel {
                 extras: ["operation": "midi.send_chord.keycmd"]
             ))
         }
-        // Note Off pass uses `try?` (Phase 6 Loop 1 P2-1): every Note On that
-        // succeeded above is sounding in Logic. A throw mid-Note-Off-pass
-        // would leave one or more stuck notes while the caller sees State C.
-        // Best-effort the Note Offs — same pattern as `playSequenceDirect`.
         try? await Task.sleep(nanoseconds: durationMs * 1_000_000)
-        for n in notes {
-            try? await transport.send(buildNoteOffBytes(channel: channel, note: n))
+        if let failure = await sendKeyCmdNoteOffs(notes, channel: channel) {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport note-off send failed after chord note-ons: \(failure.firstError)",
+                extras: [
+                    "operation": "midi.send_chord.keycmd",
+                    "note_off_failed": true,
+                    "failed_note_off_count": failure.count,
+                    "note_on_count": notes.count,
+                ]
+            ))
         }
         return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
             "operation": "midi.send_chord.keycmd",
@@ -469,9 +481,11 @@ actor MIDIKeyCommandsChannel: Channel {
         }
 
         // Tight-rhythm scheduler — same shape as CoreMIDIChannel.play_sequence.
-        // Note Off is fired in a detached task after each note's duration.
+        // Note Off tasks are retained and awaited so send failures are visible
+        // to the caller instead of being dropped in detached `try?` work.
         let startNs = DispatchTime.now().uptimeNanoseconds
         let transport = self.transport
+        var noteOffTasks: [Task<Void, Error>] = []
         for event in events {
             let targetNs = startNs + UInt64(event.offsetMs) * 1_000_000
             let nowNs = DispatchTime.now().uptimeNanoseconds
@@ -482,6 +496,7 @@ actor MIDIKeyCommandsChannel: Channel {
             do {
                 try await transport.send(onBytes)
             } catch {
+                await drainKeyCmdNoteOffTasks(noteOffTasks)
                 return .error(HonestContract.encodeStateC(
                     error: .axWriteFailed,
                     hint: "KeyCmd transport send failed: \(error)",
@@ -492,10 +507,10 @@ actor MIDIKeyCommandsChannel: Channel {
             let ch = event.channel
             let durNs = UInt64(event.durationMs) * 1_000_000
             let offBytes = buildNoteOffBytes(channel: ch, note: pitch)
-            Task.detached {
-                try? await Task.sleep(nanoseconds: durNs)
-                try? await transport.send(offBytes)
-            }
+            noteOffTasks.append(Task {
+                try await Task.sleep(nanoseconds: durNs)
+                try await transport.send(offBytes)
+            })
         }
         if let lastEnd = events.map({ $0.offsetMs + $0.durationMs }).max() {
             let endTargetNs = startNs + UInt64(lastEnd) * 1_000_000
@@ -503,6 +518,18 @@ actor MIDIKeyCommandsChannel: Channel {
             if endTargetNs > nowNs {
                 try? await Task.sleep(nanoseconds: endTargetNs - nowNs)
             }
+        }
+        if let failure = await waitForKeyCmdNoteOffTasks(noteOffTasks) {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "KeyCmd transport note-off send failed after sequence note-ons: \(failure.firstError)",
+                extras: [
+                    "operation": "midi.play_sequence.keycmd",
+                    "note_off_failed": true,
+                    "failed_note_off_count": failure.count,
+                    "note_on_count": events.count,
+                ]
+            ))
         }
         return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
             "operation": "midi.play_sequence.keycmd",
@@ -543,6 +570,56 @@ actor MIDIKeyCommandsChannel: Channel {
         "Other preset ops have an AX/MCU/AppleScript/CGEvent fallback and do not require keycmd binding. " +
         "Orphans (in mappingTable + routingTable but no MCP tool exposes a call path): " +
         "automation.set_mode, note.up_semitone, note.up_octave, note.down_semitone, note.down_octave, " +
-        "view.toggle_smart_controls, view.toggle_plugin_windows, view.toggle_automation (CC 57; distinct from automation.toggle_view CC 85), " +
-        "track.create_stack. Tracked in NG6 follow-up."
+            "view.toggle_smart_controls, view.toggle_plugin_windows, view.toggle_automation (CC 57; distinct from automation.toggle_view CC 85), " +
+            "track.create_stack. Tracked in NG6 follow-up."
+
+    private struct KeyCmdNoteOffFailure {
+        let count: Int
+        let firstError: any Error
+    }
+
+    private func sendKeyCmdNoteOffs(
+        _ notes: [UInt8],
+        channel: UInt8
+    ) async -> KeyCmdNoteOffFailure? {
+        var failureCount = 0
+        var firstError: (any Error)?
+        for note in notes {
+            do {
+                try await transport.send(buildNoteOffBytes(channel: channel, note: note))
+            } catch {
+                failureCount += 1
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+        guard let firstError else { return nil }
+        return KeyCmdNoteOffFailure(count: failureCount, firstError: firstError)
+    }
+
+    private func waitForKeyCmdNoteOffTasks(
+        _ tasks: [Task<Void, Error>]
+    ) async -> KeyCmdNoteOffFailure? {
+        var failureCount = 0
+        var firstError: (any Error)?
+        for task in tasks {
+            do {
+                try await task.value
+            } catch {
+                failureCount += 1
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+        guard let firstError else { return nil }
+        return KeyCmdNoteOffFailure(count: failureCount, firstError: firstError)
+    }
+
+    private func drainKeyCmdNoteOffTasks(_ tasks: [Task<Void, Error>]) async {
+        for task in tasks {
+            _ = await task.result
+        }
+    }
 }

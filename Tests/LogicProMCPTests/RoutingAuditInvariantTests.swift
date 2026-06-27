@@ -142,4 +142,14 @@ struct RoutingAuditInvariantTests {
         #expect(working < mmcIndex,
                 "transport.pause chain \(chain) must try AX/cgEvent before MMC; MMC pause is ignored by Logic 12.x")
     }
+
+    @Test("transport stop and pause prefer CGEvent before AX while already running")
+    func stopLikeCommandsPreferCGEventBeforeAX() throws {
+        for operation in ["transport.stop", "transport.pause"] {
+            let chain = try #require(ChannelRouter.routingTable[operation])
+            let cgIndex = try #require(chain.firstIndex(of: .cgEvent))
+            let axIndex = try #require(chain.firstIndex(of: .accessibility))
+            #expect(cgIndex < axIndex, "\(operation) chain \(chain) must use CGEvent before AX once the dispatcher has confirmed transport is running")
+        }
+    }
 }

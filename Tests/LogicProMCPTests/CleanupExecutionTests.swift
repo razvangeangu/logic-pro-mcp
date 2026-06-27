@@ -75,13 +75,44 @@ private func seedDuplicateTracks(_ cache: StateCache) async -> String {
     return "rename_duplicate_kick_0_1"
 }
 
+@discardableResult
+private func seedEmptyTrackReviewStep(_ cache: StateCache) async -> String {
+    await cache.updateDocumentState(true)
+    await cache.updateTracks([
+        TrackState(id: 0, name: "Has Region", type: .audio),
+        TrackState(id: 1, name: "Empty One", type: .audio),
+    ])
+    await cache.updateRegions([
+        RegionState(
+            id: "0:1:5:Has Region",
+            name: "Has Region",
+            trackIndex: 0,
+            startPosition: "1 1 1 1",
+            endPosition: "5 1 1 1",
+            length: "4 0 0 0"
+        ),
+    ])
+    return "review_empty_tracks_no_delete"
+}
+
 private func routerWith(_ channel: any Channel) async -> ChannelRouter {
     let router = ChannelRouter()
     await router.register(channel)
     return router
 }
 
+private let headlessCleanupAuditFileReader = LogicProjectFileReader.Runtime(
+    currentDocumentPath: { nil },
+    now: Date.init,
+    readPlistData: { _ in nil },
+    mtime: { _ in nil },
+    sleep: { _ in }
+)
+
 // MARK: - Tests
+
+@Suite("Cleanup execution", .serialized)
+struct CleanupExecutionTests {
 
 @Test func testCleanupApplyRenameReachesStateAOnVerifiedReadback() async throws {
     let cache = StateCache()
@@ -96,6 +127,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
     #expect(step.supportedByCurrentTools)
     #expect(step.mutatesProject)
 
+    await seedDuplicateTracks(cache)
     let result = await ProjectDispatcher.handle(
         command: "cleanup_apply",
         params: [
@@ -104,7 +136,8 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
             "names": .string("Kick L,Kick R"),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError != true)
@@ -137,7 +170,8 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
             "names": .string("Kick L,Kick R"),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError!)
@@ -161,7 +195,8 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
             "names": .string("Kick L,Kick R"),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError!)
@@ -185,7 +220,8 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
             "names": .string("x,y"),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError!)
@@ -202,40 +238,28 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
     // step cleanup_apply must refuse. Seed a project with an empty track to
     // produce it.
     let cache = StateCache()
-    await cache.updateDocumentState(true)
-    await cache.updateTracks([
-        TrackState(id: 0, name: "Has Region", type: .audio),
-        TrackState(id: 1, name: "Empty One", type: .audio),
-    ])
-    await cache.updateRegions([
-        RegionState(
-            id: "0:1:5:Has Region",
-            name: "Has Region",
-            trackIndex: 0,
-            startPosition: "1 1 1 1",
-            endPosition: "5 1 1 1",
-            length: "4 0 0 0"
-        )
-    ])
+    let stepID = await seedEmptyTrackReviewStep(cache)
     let channel = FakeRenameChannel { stateARename(name: $0) }
     let router = await routerWith(channel)
 
     // Confirm the unsupported step exists before asserting it's refused.
     let plan = await ProjectSessionAudit.buildCleanupPlan(cache: cache)
     let emptyStep = try #require(
-        plan.steps.first { $0.id == "review_empty_tracks_no_delete" },
+        plan.steps.first { $0.id == stepID },
         "expected empty-track review step"
     )
     #expect(emptyStep.supportedByCurrentTools == false)
 
+    await seedEmptyTrackReviewStep(cache)
     let result = await ProjectDispatcher.handle(
         command: "cleanup_apply",
         params: [
-            "step_id": .string("review_empty_tracks_no_delete"),
+            "step_id": .string(stepID),
             "confirmed": .bool(true),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError!)
@@ -305,7 +329,8 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
             "names": .string("Kick L,Kick R"),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError!)
@@ -339,7 +364,8 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
             "names": .string("Kick L,Kick R"),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError!)
@@ -361,6 +387,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
     }
     let router = await routerWith(channel)
 
+    await seedDuplicateTracks(cache)
     let result = await ProjectDispatcher.handle(
         command: "cleanup_apply",
         params: [
@@ -369,7 +396,8 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
             "names": .string("Kick L,Kick R"),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError!)
@@ -387,6 +415,7 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
     let router = await routerWith(channel)
 
     // Two targets, one name supplied -> fail closed before any write.
+    await seedDuplicateTracks(cache)
     let result = await ProjectDispatcher.handle(
         command: "cleanup_apply",
         params: [
@@ -395,7 +424,8 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
             "names": .string("OnlyOne"),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        cleanupAuditFileReader: headlessCleanupAuditFileReader
     )
 
     #expect(result.isError!)
@@ -404,4 +434,5 @@ private func routerWith(_ channel: any Channel) async -> ChannelRouter {
     #expect(json["error"] as? String == "invalid_params")
     let calls = await channel.calls()
     #expect(calls.isEmpty)
+}
 }

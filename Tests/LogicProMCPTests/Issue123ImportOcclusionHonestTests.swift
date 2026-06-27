@@ -54,16 +54,14 @@ private func issue123MIDIRegion(trackIndex: Int) -> RegionInfo {
     )
 }
 
-/// Write a minimal Standard MIDI File header into the managed import directory
-/// (`/private/tmp/LogicProMCP`) so the path mirrors a real, validator-eligible
+/// Write a minimal Standard MIDI File header into a managed import directory
+/// so the path mirrors a real, validator-eligible
 /// import target. `defaultImportMIDIFile` requires the file to EXIST before it
 /// runs the AX flow, so the file must be on disk.
-private func makeManagedMIDIFixture() throws -> URL {
-    let managed = URL(fileURLWithPath: "/private/tmp/LogicProMCP", isDirectory: true)
-    try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
-    let file = managed.appendingPathComponent("issue123-occlusion-\(UUID().uuidString).mid")
-    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: file)
-    return file
+private func makeManagedMIDIFixture() throws -> SMFWriter.TemporaryMIDIFile {
+    let tempFile = try SMFWriter.temporaryMIDIFile()
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile.fileURL)
+    return tempFile
 }
 
 /// Spy that records how many times the track-count read-back fires. On the
@@ -84,26 +82,27 @@ private final class ImportCountSpy: @unchecked Sendable {
 // appearing, and the go-to-folder field never accepting the path. #123 must
 // hold for either occlusion shape.
 @Test(arguments: [
-    "DIALOG_NOT_FOUND: file-open sheet did not appear",
-    "DIALOG_NOT_FOUND: go-to-folder field did not accept the path",
+    #"{"result":"DIALOG_NOT_FOUND: file-open sheet did not appear"}"#,
+    #"{"result":"DIALOG_NOT_FOUND: go-to-folder field did not accept the path"}"#,
 ])
 func testOccludedSessionFailsClosedWithDialogNotFound(sentinel: String) async throws {
     let fixture = try makeManagedMIDIFixture()
-    defer { try? FileManager.default.removeItem(at: fixture) }
+    defer { SMFWriter.cleanupTemporaryMIDIFile(fixture) }
 
     // Pre-condition: the fixture really lives under the managed import dir, so
     // this is a faithful #123 scenario (a valid target, occluded session) and
     // not a missing-file short-circuit.
-    let validated = AccessibilityChannel.validatedMIDIImportPath(fixture.path)
+    let validated = AccessibilityChannel.validatedMIDIImportPath(fixture.fileURL.path)
     #expect(validated != nil, "fixture must be a managed, validator-eligible import target")
 
     let spy = ImportCountSpy(value: 9)
 
     let result = await AccessibilityChannel.defaultImportMIDIFile(
-        path: fixture.path,
+        path: fixture.fileURL.path,
         executeScript: { _ in .success(sentinel) },
         trackCount: { spy.read() },
         trackNames: { [] },
+        regionInfos: { .success([]) },
         deltaPoll: {}
     )
 
@@ -144,7 +143,7 @@ func testOccludedSessionFailsClosedWithDialogNotFound(sentinel: String) async th
 // always-failing — the occlusion fail-closed is specific to the missing sheet.
 @Test func testCleanSessionVerifiesImportStateAAndSeesDialog() async throws {
     let fixture = try makeManagedMIDIFixture()
-    defer { try? FileManager.default.removeItem(at: fixture) }
+    defer { SMFWriter.cleanupTemporaryMIDIFile(fixture) }
 
     final class Counter: @unchecked Sendable {
         var values = [4, 5]
@@ -157,7 +156,7 @@ func testOccludedSessionFailsClosedWithDialogNotFound(sentinel: String) async th
     ])
 
     let result = await AccessibilityChannel.defaultImportMIDIFile(
-        path: fixture.path,
+        path: fixture.fileURL.path,
         executeScript: { _ in .success("OK") },
         trackCount: { counter.next() },
         trackNames: { ["Studio Grand", "01 Felt Keys", "02 Bass", "03 Drums", "04 Imported Lead"] },

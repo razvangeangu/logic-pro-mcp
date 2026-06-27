@@ -7,6 +7,7 @@ Minimal install and Logic Pro integration guide for Logic Pro MCP v3.7.1.
 - macOS 14+
 - Logic Pro 12.0.1+
 - Claude Code, Claude Desktop, Cursor, or another MCP client
+- `cliclick` (`brew install cliclick`) for the bundled bounce/export helper
 - Homebrew, or Xcode/Swift if building from source
 
 ## Install
@@ -24,15 +25,17 @@ Source build:
 ```bash
 git clone https://github.com/MongLong0214/logic-pro-mcp.git
 cd logic-pro-mcp
+brew install cliclick
 swift build -c release
 ```
 
 Pinned shell installer:
 
 ```bash
+brew install cliclick
 curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.7.1/Scripts/install.sh -o install.sh
 # inspect install.sh, then copy pins from the v3.7.1 release:
-LOGIC_PRO_MCP_SHA256=<sha256> LOGIC_PRO_MCP_TEAM_ID=<team_id> bash install.sh
+LOGIC_PRO_MCP_SHA256=<sha256 for LogicProMCP-macOS-universal.tar.gz entry> LOGIC_PRO_MCP_TEAM_ID=<team_id> bash install.sh
 ```
 
 The installer trust model is in [SECURITY.md](../SECURITY.md#installer-trust-model).
@@ -216,4 +219,4 @@ Unload and remove the launch agent plist, then verify no stale process remains.
 
 <a id="lifecycle-approvalsremove"></a>
 ### `approvals.remove`
-Delete the manual-validation approval store only when you intentionally want to re-approve channels.
+Delete the manual-validation approval store and its `.lock` sidecar only when you intentionally want to re-approve channels.

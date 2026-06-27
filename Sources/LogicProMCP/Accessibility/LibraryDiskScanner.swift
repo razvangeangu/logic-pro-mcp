@@ -44,6 +44,10 @@ enum LibraryDiskScanner {
     /// the resolved-path visited set.
     static let maxDepth = 12
 
+    /// Keep diagnostics bounded even on damaged installations with many
+    /// unreadable directories.
+    static let maxScanWarnings = 64
+
     enum ScanError: Error {
         case bundleNotFound(String)
         case notADirectory(String)
@@ -181,6 +185,8 @@ enum LibraryDiskScanner {
         //    Panel taxonomy in step 4.
         var visited = Set<String>()
         var rawLeaves: [[String]] = []
+        var skippedDirectoryCount = 0
+        var scanWarnings: [String] = []
         for name in topNames {
             let childURL = bundleURL.appendingPathComponent(name)
             guard isDirectory(childURL, fileManager: fileManager) else { continue }
@@ -190,6 +196,8 @@ enum LibraryDiskScanner {
                 depth: 1,
                 visited: &visited,
                 rawLeaves: &rawLeaves,
+                skippedDirectoryCount: &skippedDirectoryCount,
+                scanWarnings: &scanWarnings,
                 fileManager: fileManager
             )
         }
@@ -250,7 +258,9 @@ enum LibraryDiskScanner {
             folderCount: counts.folders,
             root: rootNode,
             categories: categories,
-            presetsByCategory: presetsByCategory
+            presetsByCategory: presetsByCategory,
+            skippedDirectoryCount: skippedDirectoryCount,
+            scanWarnings: scanWarnings
         )
     }
 
@@ -266,6 +276,8 @@ enum LibraryDiskScanner {
         depth: Int,
         visited: inout Set<String>,
         rawLeaves: inout [[String]],
+        skippedDirectoryCount: inout Int,
+        scanWarnings: inout [String],
         fileManager: FileManager
     ) {
         // Depth cap — mirrors AX scan's 12-level bound.
@@ -298,8 +310,14 @@ enum LibraryDiskScanner {
                 .filter { !$0.hasPrefix(".") }
                 .sorted()
         } catch {
-            // Unreadable folder — skip silently so one bad dir doesn't
-            // abort the whole scan.
+            // One unreadable folder should not abort a full Library scan, but
+            // it must be visible to callers because it can explain undercounts.
+            recordSkippedDirectory(
+                url,
+                error: error,
+                skippedDirectoryCount: &skippedDirectoryCount,
+                scanWarnings: &scanWarnings
+            )
             return
         }
 
@@ -312,9 +330,25 @@ enum LibraryDiskScanner {
                 depth: depth + 1,
                 visited: &visited,
                 rawLeaves: &rawLeaves,
+                skippedDirectoryCount: &skippedDirectoryCount,
+                scanWarnings: &scanWarnings,
                 fileManager: fileManager
             )
         }
+    }
+
+    private static func recordSkippedDirectory(
+        _ url: URL,
+        error: Error,
+        skippedDirectoryCount: inout Int,
+        scanWarnings: inout [String]
+    ) {
+        skippedDirectoryCount += 1
+
+        guard scanWarnings.count < maxScanWarnings else { return }
+        scanWarnings.append(
+            "skipped_directory path=\"\(url.path)\" reason=\"\(error.localizedDescription)\""
+        )
     }
 
     /// Given a Panel category name and a list of Panel-relative leaf paths

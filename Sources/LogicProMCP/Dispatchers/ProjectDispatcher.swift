@@ -31,6 +31,7 @@ struct ProjectDispatcher {
         },
         sleep: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) },
         dialogPresent: @escaping @Sendable () -> Bool = { false },
+        cleanupAuditFileReader: LogicProjectFileReader.Runtime = .production,
         // #27 Phase 2 — injectable export-execution seams (identity readback,
         // audio analysis, file polling). Defaults to the live wiring; tests
         // inject fakes so the guarded state machine is unit-testable headless.
@@ -84,7 +85,10 @@ struct ProjectDispatcher {
                 return toolTextResult(try encodeJSONStrict(plan, compact: true))
             } catch {
                 audit(command, phase: .rejected, reason: "invalid export plan")
-                return toolTextResult("export_plan invalid_params: \(error)", isError: true)
+                return toolInvalidParamsResult(
+                    "export_plan invalid_params: \(error)",
+                    extras: ["operation": "project.export_plan"]
+                )
             }
 
         case "export_run", "export_resume":
@@ -98,23 +102,40 @@ struct ProjectDispatcher {
                 _ = try ProjectExportPlanner.plan(params: params)
             } catch {
                 audit(command, phase: .rejected, reason: "invalid export plan")
-                return toolTextResult("\(command) invalid_params: \(error)", isError: true)
+                return toolInvalidParamsResult(
+                    "\(command) invalid_params: \(error)",
+                    extras: ["operation": "project.\(command)"]
+                )
             }
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.\(command)")
+                return blockingLogicDialogResult(operation: "project.\(command)")
             }
-            // The destructive confirmation is enforced INSIDE the executor (it
-            // must be checked per-run before any open/bounce). Audit the
-            // execution intent here; the executor's confirmed:false path returns
-            // a State-C-shaped `confirmation_required` run with no side effects.
-            audit(command, phase: .executed)
-            let run = await ProjectExportExecutor.run(
-                params: params,
-                router: router,
-                resume: command == "export_resume",
-                options: exportOptions
-            )
+            let run: ProjectExportExecutor.RunResult
+            switch strictBoolParam(params, "confirmed") {
+            case .invalid(let hint):
+                audit(command, phase: .rejected, reason: "invalid confirmed")
+                return toolInvalidParamsResult(
+                    "\(command) \(hint)",
+                    extras: ["operation": "project.\(command)"]
+                )
+            case .missing, .value(false):
+                audit(command, phase: .confirmationRequired)
+                run = await ProjectExportExecutor.run(
+                    params: params,
+                    router: router,
+                    resume: command == "export_resume",
+                    options: exportOptions
+                )
+            case .value(true):
+                audit(command, phase: .executed)
+                run = await ProjectExportExecutor.run(
+                    params: params,
+                    router: router,
+                    resume: command == "export_resume",
+                    options: exportOptions
+                )
+            }
             // Lifecycle cache invalidation: a guarded run opens projects, so the
             // cache may now reflect the LAST opened project. Clear it on any run
             // that actually opened something, matching open/close semantics.
@@ -138,7 +159,7 @@ struct ProjectDispatcher {
         case "new":
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.new")
+                return blockingLogicDialogResult(operation: "project.new")
             }
             audit(command, phase: .executed)
             let result = await router.route(operation: "project.new")
@@ -158,11 +179,17 @@ struct ProjectDispatcher {
             let path = stringParam(params, "path")
             guard !path.isEmpty else {
                 audit(command, phase: .rejected, reason: "missing path")
-                return toolTextResult("open requires 'path' param", isError: true)
+                return toolInvalidParamsResult(
+                    "open requires 'path' param",
+                    extras: ["operation": "project.open"]
+                )
             }
             guard AppleScriptSafety.isValidProjectPath(path, requireExisting: true) else {
                 audit(command, phase: .rejected, reason: "invalid path")
-                return toolTextResult("open requires an existing absolute .logicx project path", isError: true)
+                return toolInvalidParamsResult(
+                    "open requires an existing absolute .logicx project path",
+                    extras: ["operation": "project.open"]
+                )
             }
             let confirmation = destructiveConfirmation(for: command)
             if let error = confirmation.error { return error }
@@ -172,7 +199,7 @@ struct ProjectDispatcher {
             }
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.open")
+                return blockingLogicDialogResult(operation: "project.open")
             }
             audit(command, phase: .executed)
             let result = await router.route(
@@ -186,7 +213,7 @@ struct ProjectDispatcher {
         case "save":
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.save")
+                return blockingLogicDialogResult(operation: "project.save")
             }
             audit(command, phase: .executed)
             // #110: save is an export/bounce prerequisite. The read-back
@@ -200,11 +227,17 @@ struct ProjectDispatcher {
             let path = stringParam(params, "path")
             guard !path.isEmpty else {
                 audit(command, phase: .rejected, reason: "missing path")
-                return toolTextResult("save_as requires 'path' param", isError: true)
+                return toolInvalidParamsResult(
+                    "save_as requires 'path' param",
+                    extras: ["operation": "project.save_as"]
+                )
             }
             guard AppleScriptSafety.isValidProjectPath(path, requireExisting: false) else {
                 audit(command, phase: .rejected, reason: "invalid path")
-                return toolTextResult("save_as requires an absolute .logicx project path", isError: true)
+                return toolInvalidParamsResult(
+                    "save_as requires an absolute .logicx project path",
+                    extras: ["operation": "project.save_as"]
+                )
             }
             let confirmation = destructiveConfirmation(for: command)
             if let error = confirmation.error { return error }
@@ -214,7 +247,7 @@ struct ProjectDispatcher {
             }
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.save_as")
+                return blockingLogicDialogResult(operation: "project.save_as")
             }
             audit(command, phase: .executed)
             let result = await router.route(
@@ -228,9 +261,9 @@ struct ProjectDispatcher {
             let saving = ["yes", "no", "ask"].contains(savingRaw) ? savingRaw : "yes"
             if savingRaw != saving {
                 audit(command, phase: .rejected, reason: "invalid saving value")
-                return toolTextResult(
+                return toolInvalidParamsResult(
                     "close 'saving' must be one of: yes, no, ask (got: \(savingRaw))",
-                    isError: true
+                    extras: ["operation": "project.close"]
                 )
             }
             let confirmation = destructiveConfirmation(for: command)
@@ -241,7 +274,7 @@ struct ProjectDispatcher {
             }
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.close")
+                return blockingLogicDialogResult(operation: "project.close")
             }
             audit(command, phase: .executed)
             let result = await router.route(
@@ -263,7 +296,7 @@ struct ProjectDispatcher {
             }
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.bounce")
+                return blockingLogicDialogResult(operation: "project.bounce")
             }
             let preflight = await ProjectSessionAudit.buildAudit(cache: cache)
             if let block = bouncePreflightBlock(preflight) {
@@ -312,9 +345,14 @@ struct ProjectDispatcher {
         case "cleanup_apply":
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.cleanup_apply")
+                return blockingLogicDialogResult(operation: "project.cleanup_apply")
             }
-            return await handleCleanupApply(params: params, router: router, cache: cache)
+            return await handleCleanupApply(
+                params: params,
+                router: router,
+                cache: cache,
+                auditFileReader: cleanupAuditFileReader
+            )
 
         case "launch":
             if isLogicProRunning() {
@@ -345,7 +383,7 @@ struct ProjectDispatcher {
             }
             if dialogPresent() {
                 audit(command, phase: .rejected, reason: "blocking dialog")
-                return blockingDialogResult(operation: "project.quit")
+                return blockingLogicDialogResult(operation: "project.quit")
             }
             audit(command, phase: .executed)
             return await runLifecycleScript(
@@ -359,28 +397,11 @@ struct ProjectDispatcher {
             )
 
         default:
-            return toolTextResult(
+            return toolInvalidParamsResult(
                 "Unknown project command: \(command). Available: new, open, save, save_as, close, bounce, is_running, launch, quit, get_regions, export_plan, export_run, export_resume, audit, cleanup_plan, cleanup_apply",
-                isError: true
+                extras: ["operation": "project.\(command)"]
             )
         }
-    }
-
-    private static func blockingDialogResult(operation: String) -> CallTool.Result {
-        toolTextResult(
-            HonestContract.encodeStateC(
-                error: .unsupportedState,
-                hint: "Refusing \(operation) while a blocking Logic dialog/sheet is present. Dismiss crash, save, bounce, import, or other modal dialogs, then retry.",
-                extras: [
-                    "operation": operation,
-                    "failure_stage": "preflight_blocking_dialog",
-                    "blocking_dialog_present": true,
-                    "write_attempted": false,
-                    "safe_to_retry": true,
-                ]
-            ),
-            isError: true
-        )
     }
 
     // MARK: - cleanup_apply (#28) — guarded execution of a cleanup-plan step
@@ -413,7 +434,8 @@ struct ProjectDispatcher {
         command: String = "cleanup_apply",
         params: [String: Value],
         router: ChannelRouter,
-        cache: StateCache
+        cache: StateCache,
+        auditFileReader: LogicProjectFileReader.Runtime = .production
     ) async -> CallTool.Result {
         let stepID = stringParam(params, "step_id", "stepId")
         guard !stepID.isEmpty else {
@@ -452,7 +474,10 @@ struct ProjectDispatcher {
         // The caller cannot pass a step body in; only its id. This guarantees
         // execution is gated on the CURRENT audit, not a snapshot the caller
         // may have cached before the project changed underneath them.
-        let auditReport = await ProjectSessionAudit.buildAudit(cache: cache)
+        let auditReport = await ProjectSessionAudit.buildAudit(
+            cache: cache,
+            fileReader: auditFileReader
+        )
         guard let step = auditReport.cleanupPlan.first(where: { $0.id == stepID }) else {
             audit(command, phase: .rejected, reason: "unknown step")
             return cleanupApplyStateC(
@@ -849,59 +874,35 @@ struct ProjectDispatcher {
         _ script: String,
         executableURL: URL = URL(fileURLWithPath: "/usr/bin/osascript")
     ) async -> LifecycleExecution {
-        let process = Process()
-        let stderr = Pipe()
-        process.executableURL = executableURL
-        process.arguments = ["-e", script]
-        process.standardError = stderr
-        // Don't hold a second Pipe for stdout — osascript output isn't read here.
-        process.standardOutput = FileHandle.nullDevice
+        let result = BoundedProcessRunner.run(
+            executable: executableURL.path,
+            arguments: ["-e", script],
+            timeout: ServerConfig.appleScriptTimeout,
+            outputLimitBytes: 32 * 1024
+        )
 
-        do {
-            try process.run()
-        } catch {
+        switch result {
+        case let .spawnFailed(message):
             return LifecycleExecution(
-                executionError: String(describing: error),
+                executionError: message,
                 timedOut: false,
                 terminationStatus: -1,
                 stderrOutput: ""
             )
-        }
-
-        let timeoutNs = UInt64(ServerConfig.appleScriptTimeout * 1_000_000_000)
-        let pollIntervalNs: UInt64 = 50_000_000
-        var waitedNs: UInt64 = 0
-
-        while process.isRunning && waitedNs < timeoutNs {
-            try? await Task.sleep(nanoseconds: pollIntervalNs)
-            waitedNs += pollIntervalNs
-        }
-
-        if process.isRunning {
-            process.terminate()
-            // Reap zombie so the stderr Pipe's file descriptors are released
-            // promptly — same class of FD leak that killed the server under
-            // sustained set_tempo stress (diagnosed via BrokenPipeError).
-            process.waitUntilExit()
+        case .timedOut:
             return LifecycleExecution(
                 executionError: nil,
                 timedOut: true,
-                terminationStatus: process.terminationStatus,
+                terminationStatus: -1,
                 stderrOutput: ""
             )
+        case let .completed(output):
+            return LifecycleExecution(
+                executionError: nil,
+                timedOut: false,
+                terminationStatus: output.exitCode,
+                stderrOutput: output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         }
-
-        let stderrOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // Release Pipe FDs explicitly — delayed deinit was a leak vector under
-        // sustained stress (same root cause as sprint 51 MCP server crash).
-        try? stderr.fileHandleForReading.close()
-        try? stderr.fileHandleForWriting.close()
-        return LifecycleExecution(
-            executionError: nil,
-            timedOut: false,
-            terminationStatus: process.terminationStatus,
-            stderrOutput: stderrOutput
-        )
     }
 }

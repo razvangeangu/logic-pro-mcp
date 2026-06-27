@@ -99,6 +99,13 @@ actor StatePoller {
         Log.info("StatePoller stopped", subsystem: "poller")
     }
 
+    func stopImmediately() {
+        guard let task = pollingTask else { return }
+        task.cancel()
+        pollingTask = nil
+        Log.info("StatePoller stop requested without awaiting current AX poll", subsystem: "poller")
+    }
+
     /// Whether the poller is currently running.
     var isRunning: Bool {
         pollingTask != nil && pollingTask?.isCancelled == false

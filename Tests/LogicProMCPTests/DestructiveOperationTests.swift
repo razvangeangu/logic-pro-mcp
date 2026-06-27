@@ -61,8 +61,12 @@ private final class AppleScriptOpenHarness: @unchecked Sendable {
     #expect(AppleScriptSafety.isValidFilePath("") == false)
     #expect(AppleScriptSafety.isValidFilePath("/dev/null") == false)
     #expect(AppleScriptSafety.isValidFilePath("relative/song.logicx") == false)
+    #expect(AppleScriptSafety.isValidFilePath(" /tmp/song.logicx") == false)
+    #expect(AppleScriptSafety.isValidProjectPath("\n/tmp/song.logicx", requireExisting: false) == false)
+    #expect(AppleScriptSafety.isValidFilePath("/tmp/project/../song.logicx") == false)
     #expect(AppleScriptSafety.isValidProjectPath("/Users/test/song.logicx", requireExisting: false) == true)
     #expect(AppleScriptSafety.isValidProjectPath("/Users/test/song.txt", requireExisting: false) == false)
+    #expect(AppleScriptSafety.isValidProjectPath("/tmp/project/../song.logicx", requireExisting: false) == false)
 }
 
 @Test func testAppleScriptSafetyRejectsControlCharactersAndMissingExistingProjects() {

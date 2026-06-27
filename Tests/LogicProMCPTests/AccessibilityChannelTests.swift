@@ -1,4 +1,5 @@
 @preconcurrency import ApplicationServices
+import Dispatch
 import Foundation
 import Testing
 @testable import LogicProMCP
@@ -95,6 +96,62 @@ private final class TrackRenameSession: @unchecked Sendable {
     var typed = ""
     var renamePressed = false
     var selectionCommitted = false
+}
+
+private final class BlockingExecuteProbe: @unchecked Sendable {
+    private let entered = DispatchSemaphore(value: 0)
+    private let release = DispatchSemaphore(value: 0)
+
+    func waitUntilEntered(timeout: DispatchTimeInterval = .seconds(5)) -> Bool {
+        entered.wait(timeout: .now() + timeout) == .success
+    }
+
+    func unblock() {
+        release.signal()
+    }
+
+    func block() {
+        entered.signal()
+        release.wait()
+    }
+}
+
+private final class HealthCheckCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: ChannelHealth?
+
+    func set(_ value: ChannelHealth) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.value = value
+    }
+
+    func isReady() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value != nil
+    }
+
+    func get() -> ChannelHealth? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
+private func waitUntilHealthCheckReady(
+    _ completion: HealthCheckCompletion,
+    timeoutNanoseconds: UInt64 = 500_000_000,
+    pollIntervalNanoseconds: UInt64 = 10_000_000
+) async -> Bool {
+    let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
+    while ContinuousClock.now < deadline {
+        if completion.isReady() {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+    return completion.isReady()
 }
 
 private func makeProcessRuntime(isRunning: Bool = true) -> ProcessUtils.Runtime {
@@ -357,6 +414,56 @@ private func makeSetInstrumentFixture() -> (
     #expect(healthyState.detail.contains("AX connected"))
 }
 
+@Test func testAccessibilityHealthCheckDoesNotWaitBehindBlockingExecute() async {
+    let probe = BlockingExecuteProbe()
+    let base = makeAccessibilityRuntime()
+    let runtime = AccessibilityChannel.Runtime(
+        isTrusted: base.isTrusted,
+        isLogicProRunning: base.isLogicProRunning,
+        appRoot: base.appRoot,
+        transportState: base.transportState,
+        toggleTransportButton: base.toggleTransportButton,
+        setTempo: base.setTempo,
+        setCycleRange: base.setCycleRange,
+        tracks: {
+            probe.block()
+            return .success("[]")
+        },
+        selectedTrack: base.selectedTrack,
+        selectTrack: base.selectTrack,
+        setTrackToggle: base.setTrackToggle,
+        renameTrack: base.renameTrack,
+        mixerState: base.mixerState,
+        channelStrip: base.channelStrip,
+        setMixerValue: base.setMixerValue,
+        projectInfo: base.projectInfo,
+        markers: base.markers,
+        importMIDIFile: base.importMIDIFile,
+        logicRuntime: base.logicRuntime
+    )
+    let channel = AccessibilityChannel(runtime: runtime)
+    let healthCompletion = HealthCheckCompletion()
+
+    let executeTask = Task.detached(priority: .userInitiated) {
+        await channel.execute(operation: "track.get_tracks", params: [:])
+    }
+    #expect(probe.waitUntilEntered())
+
+    let healthTask = Task.detached(priority: .userInitiated) {
+        healthCompletion.set(await channel.healthCheck())
+    }
+
+    let finishedWhileExecuteBlocked = await waitUntilHealthCheckReady(healthCompletion)
+    probe.unblock()
+    _ = await executeTask.value
+    _ = await healthTask.value
+
+    #expect(finishedWhileExecuteBlocked)
+    let health = healthCompletion.get()
+    #expect(health?.available == true)
+    #expect(health?.detail.contains("AX connected") == true)
+}
+
 @Test func testAccessibilityChannelExecuteRejectsWhenLogicNotRunning() async {
     let channel = AccessibilityChannel(runtime: makeAccessibilityRuntime(isRunning: false))
 
@@ -420,22 +527,20 @@ private func makeSetInstrumentFixture() -> (
 @Test func testAccessibilityChannelMIDIImportValidatesManagedTempPathBeforeRuntimeImport() async throws {
     let recorder = AccessibilityRuntimeRecorder()
     let channel = AccessibilityChannel(runtime: makeAccessibilityRuntime(recorder: recorder))
-    let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
-    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
-    let midiURL = managedDirectory.appendingPathComponent("coverage-uplift-\(UUID().uuidString).mid")
-    try Data([0x4d, 0x54, 0x68, 0x64]).write(to: midiURL)
-    defer { try? FileManager.default.removeItem(at: midiURL) }
+    let tempFile = try SMFWriter.temporaryMIDIFile()
+    try Data([0x4d, 0x54, 0x68, 0x64]).write(to: tempFile.fileURL)
+    defer { SMFWriter.cleanupTemporaryMIDIFile(tempFile) }
 
     let missing = await channel.execute(operation: "midi.import_file", params: [:])
     let invalid = await channel.execute(operation: "midi.import_file", params: ["path": "/tmp/not-managed.mid"])
-    let valid = await channel.execute(operation: "midi.import_file", params: ["path": midiURL.path])
+    let valid = await channel.execute(operation: "midi.import_file", params: ["path": tempFile.fileURL.path])
 
     #expect(!missing.isSuccess)
     #expect(missing.message.contains("requires 'path'"))
     #expect(!invalid.isSuccess)
-    #expect(invalid.message.contains("/tmp/LogicProMCP/*.mid"))
+    #expect(invalid.message.contains("server-managed LogicProMCP temp .mid"))
     #expect(valid.isSuccess)
-    #expect(recorder.importedMIDIPaths == [midiURL.path])
+    #expect(recorder.importedMIDIPaths == [tempFile.fileURL.path])
 }
 
 @Test func testAccessibilityChannelFastValidationErrorsCoverDeepOperationsWithoutTouchingUI() async {
@@ -1119,6 +1224,7 @@ private func makeSetInstrumentFixture() -> (
         path: tempFile.path,
         executeScript: { _ in .success("OK") },
         trackCount: { 3 },
+        regionInfos: { .success([]) },
         deltaPoll: {}
     )
 
@@ -1205,6 +1311,10 @@ private func makeSetInstrumentFixture() -> (
         func next() -> Int { values.removeFirst() }
     }
     let counter = Counter()
+    let regions = MIDIRegionReadbackSequence([
+        .success([]),
+        .success([midiRegionForImport(trackIndex: 1)]),
+    ])
 
     let result = await AccessibilityChannel.defaultImportMIDIFile(
         path: tempFile.path,
@@ -1214,6 +1324,7 @@ private func makeSetInstrumentFixture() -> (
             ["Studio Grand", "GM Device 1", "GM Device 2", "GM Device 3",
              "GM Device 4", "GM Device 5", "GM Device 6"]
         },
+        regionInfos: { regions.next() },
         deltaPoll: {}
     )
 
@@ -1286,9 +1397,10 @@ private func makeSetInstrumentFixture() -> (
 
     let result = await AccessibilityChannel.defaultImportMIDIFile(
         path: tempFile.path,
-        executeScript: { _ in .success("DIALOG_NOT_FOUND: file-open sheet did not appear") },
+        executeScript: { _ in .success(#"{"result":"DIALOG_NOT_FOUND: file-open sheet did not appear"}"#) },
         trackCount: { spy.read() },
         trackNames: { [] },
+        regionInfos: { .success([]) },
         deltaPoll: {}
     )
 
@@ -1312,6 +1424,7 @@ private func makeSetInstrumentFixture() -> (
         executeScript: { _ in .success("OK") },
         trackCount: { 0 },
         trackNames: { [] },
+        regionInfos: { .success([]) },
         deltaPoll: {}
     )
     #expect(!result.isSuccess)
@@ -1320,44 +1433,49 @@ private func makeSetInstrumentFixture() -> (
 }
 
 @Test func testAccessibilityChannelValidatedMIDIImportPathAcceptsManagedTempMID() throws {
-    let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
-    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
-    let file = managedDirectory.appendingPathComponent("validated-\(UUID().uuidString).mid")
-    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: file)
-    defer { try? FileManager.default.removeItem(at: file) }
+    let tempFile = try SMFWriter.temporaryMIDIFile()
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile.fileURL)
+    defer { SMFWriter.cleanupTemporaryMIDIFile(tempFile) }
 
-    let validated = AccessibilityChannel.validatedMIDIImportPath(file.path)
+    let validated = AccessibilityChannel.validatedMIDIImportPath(tempFile.fileURL.path)
 
-    #expect(validated?.hasSuffix("/LogicProMCP/\(file.lastPathComponent)") == true)
+    #expect(validated == tempFile.fileURL.resolvingSymlinksInPath().standardizedFileURL.path)
 }
 
-@Test func testAccessibilityChannelValidatedMIDIImportPathAcceptsPrivateTmpRepresentation() throws {
-    let managedDirectory = URL(fileURLWithPath: "/private/tmp/LogicProMCP", isDirectory: true)
-    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
-    let file = managedDirectory.appendingPathComponent("private-\(UUID().uuidString).mid")
-    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: file)
-    defer { try? FileManager.default.removeItem(at: file) }
+@Test func testAccessibilityChannelValidatedMIDIImportPathRejectsUnregisteredPrefixMID() throws {
+    let directory = URL(fileURLWithPath: SMFWriter.temporaryDirectoryPrefix() + UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let fileURL = directory.appendingPathComponent("external.mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: fileURL)
 
-    let validated = AccessibilityChannel.validatedMIDIImportPath(file.path)
+    #expect(AccessibilityChannel.validatedMIDIImportPath(fileURL.path) == nil)
+}
 
-    #expect(validated?.hasSuffix("/LogicProMCP/\(file.lastPathComponent)") == true)
-    #expect(
-        AccessibilityChannel.managedMIDIImportDirectoryPrefixes().contains { prefix in
-            validated?.hasPrefix(prefix) == true
-        }
-    )
+@Test func testAccessibilityChannelValidatedMIDIImportPathRejectsAfterCleanup() throws {
+    let tempFile = try SMFWriter.temporaryMIDIFile()
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile.fileURL)
+    let path = tempFile.fileURL.path
+    #expect(AccessibilityChannel.validatedMIDIImportPath(path) != nil)
+
+    SMFWriter.cleanupTemporaryMIDIFile(tempFile)
+
+    #expect(AccessibilityChannel.validatedMIDIImportPath(path) == nil)
+}
+
+@Test func testAccessibilityChannelManagedMIDIImportPrefixesMatchSMFWriter() {
+    #expect(AccessibilityChannel.managedMIDIImportDirectoryPrefixes() == [SMFWriter.temporaryDirectoryPrefix()])
 }
 
 @Test func testAccessibilityChannelValidatedMIDIImportPathRejectsSymlinkEscape() throws {
-    let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
-    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+    let tempFile = try SMFWriter.temporaryMIDIFile()
     let outside = FileManager.default.temporaryDirectory
         .appendingPathComponent("LogicProMCP-outside-\(UUID().uuidString).mid")
-    let link = managedDirectory.appendingPathComponent("link-\(UUID().uuidString).mid")
+    let link = tempFile.directoryURL.appendingPathComponent("link-\(UUID().uuidString).mid")
     try Data([0x4D, 0x54, 0x68, 0x64]).write(to: outside)
     try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
     defer {
-        try? FileManager.default.removeItem(at: link)
+        SMFWriter.cleanupTemporaryMIDIFile(tempFile)
         try? FileManager.default.removeItem(at: outside)
     }
 
@@ -1365,13 +1483,11 @@ private func makeSetInstrumentFixture() -> (
 }
 
 @Test func testAccessibilityChannelValidatedMIDIImportPathRejectsControlCharacters() throws {
-    let managedDirectory = URL(fileURLWithPath: "/tmp/LogicProMCP", isDirectory: true)
-    try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
-    let file = managedDirectory.appendingPathComponent("control-\(UUID().uuidString).mid")
-    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: file)
-    defer { try? FileManager.default.removeItem(at: file) }
+    let tempFile = try SMFWriter.temporaryMIDIFile()
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile.fileURL)
+    defer { SMFWriter.cleanupTemporaryMIDIFile(tempFile) }
 
-    #expect(AccessibilityChannel.validatedMIDIImportPath(file.path + "\n") == nil)
+    #expect(AccessibilityChannel.validatedMIDIImportPath(tempFile.fileURL.path + "\n") == nil)
 }
 
 @Test func testAccessibilityChannelAXBackedTempoReturnsErrorWhenAXFieldMissing() async {

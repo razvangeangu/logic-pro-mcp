@@ -94,73 +94,7 @@ jobs:
           done
 
       - name: Build universal binary
-        # SwiftPM's one-shot multi-arch build (`--arch arm64 --arch x86_64`)
-        # has been flaky on Xcode 16.4/macOS-15 runners for this dependency
-        # graph, sometimes emitting package-manifest language-version errors
-        # and returning non-zero even though most of the underlying xcodebuild
-        # work appears to complete. Build each slice separately, then merge
-        # them with `lipo` so the release artifact stays truly universal.
-        run: |
-          find_arch_binary() {
-            local build_dir="$1"
-            local arch="$2"
-            local candidates_file="$RUNNER_TEMP/logicpromcp-${arch}-candidates.txt"
-            local candidate=""
-            local file_out=""
-            local bin=""
-
-            find "$build_dir" -type f -name LogicProMCP -perm -u+x | sort > "$candidates_file"
-
-            if [ ! -s "$candidates_file" ]; then
-              echo "::error::No executable LogicProMCP candidates found under $build_dir for $arch" >&2
-              exit 1
-            fi
-
-            while IFS= read -r candidate; do
-              file_out=$(file "$candidate")
-              echo "Candidate [$arch]: $candidate" >&2
-              echo "$file_out" >&2
-              if echo "$file_out" | grep -q "Mach-O" && echo "$file_out" | grep -q "$arch"; then
-                bin="$candidate"
-                break
-              fi
-            done < "$candidates_file"
-
-            if [ -z "$bin" ]; then
-              echo "::error::No $arch LogicProMCP binary located; candidates below:" >&2
-              while IFS= read -r candidate; do
-                file "$candidate" >&2
-              done < "$candidates_file"
-              exit 1
-            fi
-
-            rm -f "$candidates_file"
-            printf '%s\n' "$bin"
-          }
-
-          ARM64_BUILD_DIR="$RUNNER_TEMP/logicpromcp-build-arm64"
-          X64_BUILD_DIR="$RUNNER_TEMP/logicpromcp-build-x86_64"
-          rm -rf "$ARM64_BUILD_DIR" "$X64_BUILD_DIR"
-
-          swift build -c release --arch arm64 --scratch-path "$ARM64_BUILD_DIR"
-          swift build -c release --arch x86_64 --scratch-path "$X64_BUILD_DIR"
-
-          ARM64_BIN=$(find_arch_binary "$ARM64_BUILD_DIR" "arm64")
-          X64_BIN=$(find_arch_binary "$X64_BUILD_DIR" "x86_64")
-
-          echo "ARM64 binary: $ARM64_BIN"
-          echo "x86_64 binary: $X64_BIN"
-          lipo -create -output LogicProMCP "$ARM64_BIN" "$X64_BIN"
-          chmod +x LogicProMCP
-
-          FILE_OUT=$(file LogicProMCP)
-          echo "$FILE_OUT"
-          for need in "Mach-O universal binary" "arm64" "x86_64"; do
-            if ! echo "$FILE_OUT" | grep -q "$need"; then
-              echo "::error::LogicProMCP missing required slice/type: '$need'"
-              exit 1
-            fi
-          done
+        run: bash Scripts/release-build-universal.sh
 
       - name: Codesign binary (Developer ID)
         if: steps.mode.outputs.mode == 'notarized'
@@ -211,49 +145,7 @@ jobs:
         env:
           RELEASE_MODE: ${{ steps.mode.outputs.mode }}
           APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
-        run: |
-          if [ "$RELEASE_MODE" = "notarized" ]; then
-            TEAM_ID="$APPLE_NOTARY_TEAM_ID"
-            SIGNING="notarized"
-          else
-            TEAM_ID="ADHOC"
-            SIGNING="adhoc"
-          fi
-          LIPO_OUT=$(lipo -info LogicProMCP 2>/dev/null || true)
-          if [ -z "$LIPO_OUT" ]; then
-            echo "::error::lipo -info LogicProMCP returned no output"
-            exit 1
-          fi
-          if echo "$LIPO_OUT" | grep -q "Non-fat file"; then
-            ARCH_FIELD=$(echo "$LIPO_OUT" | sed -E 's/.*architecture: ([a-zA-Z0-9_]+).*/\1/')
-            if [ -z "$ARCH_FIELD" ] || ! echo "$ARCH_FIELD" | grep -qE '^[a-zA-Z0-9_]+$'; then
-              echo "::error::Could not parse architecture from lipo output: $LIPO_OUT"
-              exit 1
-            fi
-            ARCH_JSON="[\"$ARCH_FIELD\"]"
-          else
-            ARCH_LIST=$(echo "$LIPO_OUT" | sed -E 's/.*are: //' | tr ' ' '\n' | grep -v '^$' | sed 's/.*/"&"/' | paste -sd, -)
-            if [ -z "$ARCH_LIST" ]; then
-              echo "::error::Could not parse fat-file architectures from lipo output: $LIPO_OUT"
-              exit 1
-            fi
-            ARCH_JSON="[$ARCH_LIST]"
-          fi
-          printf '{"version":"%s","team_id":"%s","signing":"%s","architectures":%s}\n' \
-            "$GITHUB_REF_NAME" "$TEAM_ID" "$SIGNING" "$ARCH_JSON" > RELEASE-METADATA.json
-          tar czf LogicProMCP-macOS-universal.tar.gz \
-            LogicProMCP \
-            docs/SETUP.md \
-            Scripts/install-keycmds.sh \
-            Scripts/uninstall-keycmds.sh \
-            Scripts/keycmd-preset.plist \
-            Scripts/LogicProMCP-Scripter.js
-          # arm64 alias, same universal payload, different filename for
-          # backward-compat with taps hardcoded to the older URL.
-          cp LogicProMCP-macOS-universal.tar.gz LogicProMCP-macOS-arm64.tar.gz
-          shasum -a 256 LogicProMCP-macOS-universal.tar.gz > SHA256SUMS.txt
-          shasum -a 256 LogicProMCP-macOS-arm64.tar.gz >> SHA256SUMS.txt
-          shasum -a 256 LogicProMCP >> SHA256SUMS.txt
+        run: bash Scripts/release-package.sh
 
       - name: Verify Formula install paths against tarball
         # Issue #22: v3.4.6/v3.5.0 shipped a Formula whose pkgshare.install
@@ -266,28 +158,7 @@ jobs:
         # directions fail the release before anything ships. The PR-time
         # half of the guard is VersionConsistencyTests
         # .testFormulaInstallPathsMatchRepoAndReleaseStaging.
-        run: |
-          tar -tzf LogicProMCP-macOS-universal.tar.gz > tarball-listing.txt
-          echo "Tarball listing:"
-          cat tarball-listing.txt
-          PATHS=$(sed -nE 's/^[[:space:]]*(pkgshare|bin)\.install "([^"]+)".*/\2/p' Formula/logic-pro-mcp.rb)
-          if [ -z "$PATHS" ]; then
-            echo "::error::Parsed no install paths from Formula/logic-pro-mcp.rb — parser or Formula layout drifted"
-            exit 1
-          fi
-          FAIL=0
-          while IFS= read -r p; do
-            if grep -Fxq "$p" tarball-listing.txt; then
-              echo "OK: $p"
-            else
-              echo "::error::Formula installs '$p' but it is missing from LogicProMCP-macOS-universal.tar.gz"
-              FAIL=1
-            fi
-          done <<< "$PATHS"
-          if [ "$FAIL" -ne 0 ]; then
-            exit 1
-          fi
-          echo "Formula install paths verified against the built tarball."
+        run: bash Scripts/release-verify-formula-install-paths.sh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191
@@ -317,6 +188,7 @@ jobs:
         env:
           LOGIC_PRO_MCP_VERSION: ${{ github.ref_name }}
           LOGIC_PRO_MCP_INSTALL_DIR: ${{ runner.temp }}/logic-pro-bin
+          LOGIC_PRO_MCP_SHARE_DIR: ${{ runner.temp }}/logic-pro-share/logic-pro-mcp
           LOGIC_PRO_MCP_SKIP_SUDO: "1"
           LOGIC_PRO_MCP_REGISTER_CLAUDE: "0"
           LOGIC_PRO_MCP_INSTALL_KEYCMDS: "1"
@@ -332,7 +204,7 @@ jobs:
           VERSION="${{ github.ref_name }}"
           BASE="https://github.com/${{ github.repository }}/releases/download/$VERSION"
           LOGIC_PRO_MCP_SHA256=$(curl -fsSL "$BASE/SHA256SUMS.txt" \
-              | awk '$2 == "LogicProMCP" {print $1}')
+              | awk '$2 == "LogicProMCP-macOS-universal.tar.gz" {print $1}')
           LOGIC_PRO_MCP_TEAM_ID=$(curl -fsSL "$BASE/RELEASE-METADATA.json" \
               | sed -n 's/.*"team_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
               | head -n 1)
@@ -342,8 +214,14 @@ jobs:
 
           bash Scripts/install.sh | tee install.log
           test -x "$LOGIC_PRO_MCP_INSTALL_DIR/LogicProMCP"
+          test -f "$LOGIC_PRO_MCP_SHARE_DIR/logic_bounce.py"
+          test -f "$LOGIC_PRO_MCP_SHARE_DIR/logic_bounce_ui.py"
+          test -f "$LOGIC_PRO_MCP_SHARE_DIR/logic_ui_jxa.py"
+          test -f "$LOGIC_PRO_MCP_SHARE_DIR/logic_input_source.py"
+          test -f "$LOGIC_PRO_MCP_SHARE_DIR/SETUP.md"
           bash Scripts/uninstall.sh | tee uninstall.log
           test ! -e "$LOGIC_PRO_MCP_INSTALL_DIR/LogicProMCP"
+          test ! -e "$LOGIC_PRO_MCP_SHARE_DIR"
 
       - name: Upload install validation evidence
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08

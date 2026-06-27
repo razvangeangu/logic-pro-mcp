@@ -578,6 +578,7 @@ enum StockPluginCatalog {
     /// resource payload bounded. The full set remains on disk at the entry's
     /// provenance `source_path`.
     static let maxFactoryPresetNames = 12
+    static let maxFactoryPresetDirectoryEntries = 4_096
 
     static func defaultSnapshot(census: StockPluginCensus) -> StockPluginCatalogSnapshot {
         let entries = seeds
@@ -671,6 +672,7 @@ enum StockPluginCatalog {
                 "logic.stock.midi_fx.*",
             ],
             "preset_name_cap": maxFactoryPresetNames,
+            "preset_directory_entry_scan_cap": maxFactoryPresetDirectoryEntries,
             "safe_write_capabilities": [
                 StockPluginSafeWriteCapability.none.rawValue,
                 StockPluginSafeWriteCapability.insertOnly.rawValue,
@@ -731,18 +733,46 @@ enum StockPluginCatalog {
                 let folder = root + "/" + seed.name
                 var isDirectory: ObjCBool = false
                 guard fm.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
-                let presets = ((try? fm.contentsOfDirectory(atPath: folder)) ?? [])
-                    .filter { $0.hasSuffix(".pst") }
-                    .map { String($0.dropLast(4)) }
-                    .sorted()
                 result[seed.id] = StockPluginLocalManifest(
                     sourcePath: folder,
-                    presetNames: Array(presets.prefix(maxFactoryPresetNames))
+                    presetNames: boundedFactoryPresetNames(in: folder, fileManager: fm)
                 )
                 break
             }
         }
         return result
+    }
+
+    static func boundedFactoryPresetNames(
+        in folder: String,
+        fileManager: FileManager = .default,
+        maxDirectoryEntries: Int = maxFactoryPresetDirectoryEntries,
+        maxNames: Int = maxFactoryPresetNames
+    ) -> [String] {
+        guard maxDirectoryEntries > 0, maxNames > 0 else { return [] }
+        let folderURL = URL(fileURLWithPath: folder, isDirectory: true)
+        guard let enumerator = fileManager.enumerator(
+            at: folderURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsSubdirectoryDescendants]
+        ) else {
+            return []
+        }
+
+        var scanned = 0
+        var names: [String] = []
+        for case let url as URL in enumerator {
+            guard scanned < maxDirectoryEntries else { break }
+            scanned += 1
+            let filename = url.lastPathComponent
+            guard filename.hasSuffix(".pst") else { continue }
+            names.append(String(filename.dropLast(4)))
+            names.sort()
+            if names.count > maxNames {
+                names.removeLast()
+            }
+        }
+        return names
     }
 
     // MARK: - Seed catalog

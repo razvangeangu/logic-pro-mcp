@@ -9,6 +9,7 @@ enum AudioAnalyzer {
         case unsupportedFormat(String)
         case unreadableMetadata(String)
         case zeroLengthFile
+        case analysisLimitExceeded(String)
         case decoderError(String)
 
         var code: String {
@@ -19,6 +20,7 @@ enum AudioAnalyzer {
             case .unsupportedFormat: return "unsupported_format"
             case .unreadableMetadata: return "unreadable_metadata"
             case .zeroLengthFile: return "zero_length_file"
+            case .analysisLimitExceeded: return "analysis_limit_exceeded"
             case .decoderError: return "decoder_error"
             }
         }
@@ -31,6 +33,7 @@ enum AudioAnalyzer {
             case .unsupportedFormat(let ext): return "Unsupported audio format: \(ext.isEmpty ? "<none>" : ext)."
             case .unreadableMetadata(let reason): return reason
             case .zeroLengthFile: return "Audio file has zero bytes."
+            case .analysisLimitExceeded(let reason): return reason
             case .decoderError(let reason): return reason
             }
         }
@@ -46,7 +49,8 @@ enum AudioAnalyzer {
             switch self {
             case .unsafePath, .missingFile:
                 return false
-            case .directoryPath, .zeroLengthFile, .unsupportedFormat, .unreadableMetadata, .decoderError:
+            case .directoryPath, .zeroLengthFile, .unsupportedFormat, .unreadableMetadata,
+                 .analysisLimitExceeded, .decoderError:
                 return true
             }
         }
@@ -83,11 +87,18 @@ enum AudioAnalyzer {
         }
     }
 
+    static let defaultMaximumInputFileSizeBytes: Int64 = 2 * 1024 * 1024 * 1024
+    static let defaultMaximumInputDurationSeconds: Double = 2 * 60 * 60
+    static let defaultMaximumDecodedFrames: Int64 = 192_000 * 60 * 60 * 2
+
     struct AnalysisPolicy: Equatable, Sendable {
         var minimumDurationSeconds: Double?
         var maximumDurationDriftSeconds: Double?
         var expectedDurationSeconds: Double?
         var minimumFileSizeBytes: Int?
+        var maximumInputFileSizeBytes: Int64?
+        var maximumInputDurationSeconds: Double?
+        var maximumDecodedFrames: Int64?
         var maximumPeakDbfs: Double?
         var nearSilenceThresholdDbfs: Double
         var maximumSilenceRatio: Double
@@ -95,11 +106,44 @@ enum AudioAnalyzer {
         var expectedChannelCount: Int?
         var outputRoot: String?
 
+        init(
+            minimumDurationSeconds: Double? = nil,
+            maximumDurationDriftSeconds: Double? = nil,
+            expectedDurationSeconds: Double? = nil,
+            minimumFileSizeBytes: Int? = nil,
+            maximumInputFileSizeBytes: Int64? = AudioAnalyzer.defaultMaximumInputFileSizeBytes,
+            maximumInputDurationSeconds: Double? = AudioAnalyzer.defaultMaximumInputDurationSeconds,
+            maximumDecodedFrames: Int64? = AudioAnalyzer.defaultMaximumDecodedFrames,
+            maximumPeakDbfs: Double? = nil,
+            nearSilenceThresholdDbfs: Double = -60.0,
+            maximumSilenceRatio: Double = 0.98,
+            expectedSampleRate: Int? = nil,
+            expectedChannelCount: Int? = nil,
+            outputRoot: String? = nil
+        ) {
+            self.minimumDurationSeconds = minimumDurationSeconds
+            self.maximumDurationDriftSeconds = maximumDurationDriftSeconds
+            self.expectedDurationSeconds = expectedDurationSeconds
+            self.minimumFileSizeBytes = minimumFileSizeBytes
+            self.maximumInputFileSizeBytes = maximumInputFileSizeBytes
+            self.maximumInputDurationSeconds = maximumInputDurationSeconds
+            self.maximumDecodedFrames = maximumDecodedFrames
+            self.maximumPeakDbfs = maximumPeakDbfs
+            self.nearSilenceThresholdDbfs = nearSilenceThresholdDbfs
+            self.maximumSilenceRatio = maximumSilenceRatio
+            self.expectedSampleRate = expectedSampleRate
+            self.expectedChannelCount = expectedChannelCount
+            self.outputRoot = outputRoot
+        }
+
         static let `default` = AnalysisPolicy(
             minimumDurationSeconds: nil,
             maximumDurationDriftSeconds: nil,
             expectedDurationSeconds: nil,
             minimumFileSizeBytes: nil,
+            maximumInputFileSizeBytes: AudioAnalyzer.defaultMaximumInputFileSizeBytes,
+            maximumInputDurationSeconds: AudioAnalyzer.defaultMaximumInputDurationSeconds,
+            maximumDecodedFrames: AudioAnalyzer.defaultMaximumDecodedFrames,
             maximumPeakDbfs: nil,
             nearSilenceThresholdDbfs: -60.0,
             maximumSilenceRatio: 0.98,
@@ -186,6 +230,13 @@ enum AudioAnalyzer {
             guard fileSize > 0 else {
                 throw AnalysisError.zeroLengthFile
             }
+            if let maximumFileSize = policy.maximumInputFileSizeBytes,
+               maximumFileSize > 0,
+               fileSize > maximumFileSize {
+                throw AnalysisError.analysisLimitExceeded(
+                    "Audio file size \(fileSize) bytes exceeds maximum \(maximumFileSize) bytes"
+                )
+            }
 
             let ext = normalizedExtension(safeURL.path)
             guard supportedExtensions.contains(ext) else {
@@ -195,6 +246,7 @@ enum AudioAnalyzer {
             let measurements = try measureAudio(
                 url: safeURL,
                 fileSizeBytes: fileSize,
+                policy: policy,
                 silenceThresholdDbfs: policy.nearSilenceThresholdDbfs
             )
             let verification = evaluate(measurements, policy: policy)
@@ -241,8 +293,18 @@ enum AudioAnalyzer {
             guard !isICloudPath(outputRoot) else {
                 throw AnalysisError.unsafePath("iCloud output roots are rejected")
             }
-            let resolvedRoot = runtime.resolveSymlinks(outputRoot)
-            guard resolvedPath == resolvedRoot || resolvedPath.hasPrefix(resolvedRoot + "/") else {
+            // SECURITY: do NOT symlink-resolve the root. The root is compared as
+            // its literal standardized path while the file path IS fully
+            // symlink-resolved, so a symlink-swapped output_root (a trusted-named
+            // symlink repointed at an escaped directory) fails containment and is
+            // rejected — see testAudioAnalyzerRejectsSymlinkSwappedOutputRoot and
+            // the export-guardrail symlink-swap test. (This is intentional, not
+            // the false-reject it superficially resembles.)
+            let standardizedRoot = URL(fileURLWithPath: outputRoot).standardizedFileURL.path
+            guard standardizedRoot != "/" else {
+                throw AnalysisError.unsafePath("output_root must not be the filesystem root")
+            }
+            guard resolvedPath == standardizedRoot || resolvedPath.hasPrefix(standardizedRoot + "/") else {
                 throw AnalysisError.unsafePath("resolved file path escapes output_root")
             }
         }
@@ -253,6 +315,7 @@ enum AudioAnalyzer {
     private static func measureAudio(
         url: URL,
         fileSizeBytes: Int64,
+        policy: AnalysisPolicy,
         silenceThresholdDbfs: Double
     ) throws -> Result {
         let file: AVAudioFile
@@ -271,6 +334,21 @@ enum AudioAnalyzer {
         }
         guard frameCount > 0 else {
             throw AnalysisError.zeroLengthFile
+        }
+        if let maximumFrames = policy.maximumDecodedFrames,
+           maximumFrames > 0,
+           frameCount > maximumFrames {
+            throw AnalysisError.analysisLimitExceeded(
+                "Audio frame count \(frameCount) exceeds maximum \(maximumFrames)"
+            )
+        }
+        let declaredDuration = Double(frameCount) / sampleRate
+        if let maximumDuration = policy.maximumInputDurationSeconds,
+           maximumDuration > 0,
+           declaredDuration > maximumDuration {
+            throw AnalysisError.analysisLimitExceeded(
+                "Audio duration \(rounded(declaredDuration))s exceeds maximum \(rounded(maximumDuration))s"
+            )
         }
 
         let thresholdAmplitude = dbfsToAmplitude(silenceThresholdDbfs)

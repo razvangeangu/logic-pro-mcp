@@ -9,6 +9,22 @@ import Testing
 @Suite("v3.0.5 LibraryDiskScanner — filesystem-backed scan")
 struct LibraryDiskScannerTests {
 
+    private final class FailingContentsFileManager: FileManager {
+        private let failingPath: String
+
+        init(failingPath: String) {
+            self.failingPath = failingPath
+            super.init()
+        }
+
+        override func contentsOfDirectory(atPath path: String) throws -> [String] {
+            if path == failingPath {
+                throw CocoaError(.fileReadNoPermission)
+            }
+            return try super.contentsOfDirectory(atPath: path)
+        }
+    }
+
     /// Build a throwaway "Patches/Instrument" fixture mirroring Logic's
     /// bundle layout. Returns the `Patches/Instrument` URL that the scanner
     /// is expected to walk. Caller is responsible for `try? FileManager.default.removeItem(at:)`
@@ -455,5 +471,27 @@ struct LibraryDiskScannerTests {
         let root = try LibraryDiskScanner.scan(bundleURL: bundle)
         #expect(root.leafCount == 1)
         #expect(root.categories == ["Bass"])
+    }
+
+    @Test("scan reports unreadable skipped directories instead of silent undercounts")
+    func scanReportsUnreadableSkippedDirectories() throws {
+        let (bundle, tmp) = try makeFixture(tree: [
+            "Bass/Sub Bass.patch",
+            "Synthesizer/Unreadable/Hidden.patch",
+        ])
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let failingPath = bundle.appendingPathComponent("Synthesizer/Unreadable").path
+        let root = try LibraryDiskScanner.scan(
+            bundleURL: bundle,
+            fileManager: FailingContentsFileManager(failingPath: failingPath)
+        )
+
+        #expect(root.leafCount == 1)
+        #expect(root.categories == ["Bass"])
+        #expect(root.skippedDirectoryCount == 1)
+        #expect(root.scanWarnings.count == 1)
+        #expect(root.scanWarnings[0].contains("skipped_directory"))
+        #expect(root.scanWarnings[0].contains(failingPath))
     }
 }

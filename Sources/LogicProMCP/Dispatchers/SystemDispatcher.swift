@@ -289,7 +289,7 @@ struct SystemDispatcher {
                   set_automation    -> { index: Int, mode: String } (read/write/touch/latch/trim/off)
                   set_instrument    -> { index: Int, path: String } OR { index: Int, category: String, preset: String }
                   list_library      -> {} — Read currently visible Library columns
-                  scan_library      -> { mode?: "ax"|"disk"|"both" } — ax (default) live Panel scan; disk reads ~/Music/Logic Pro Library.bundle (5,400+ leaves); both returns diff
+                  scan_library      -> { mode?: "ax"|"disk"|"both" } — disk (default) reads ~/Music/Logic Pro Library.bundle (5,400+ leaves); ax runs legacy live Panel scan; both returns diff
                   resolve_path      -> { path: String } — Cache-backed Library lookup
                   scan_plugin_presets -> { submenuOpenDelayMs?: Int } — Focused plugin Setting-menu scan
 
@@ -316,8 +316,9 @@ struct SystemDispatcher {
                   send_program_change -> { program: Int, channel: Int }
                   send_pitch_bend   -> { value: Int, channel: Int } (0 to 16383, center=8192)
                   send_aftertouch   -> { value: Int, channel: Int }
-                  send_sysex        -> { bytes: [Int] } or { data: String }
+                  send_sysex        -> { bytes: [Int] } or { data: String } (≤1024 bytes)
                   play_sequence     -> { notes: "pitch,offsetMs,durMs[,vel[,ch]];..." } — tight rhythm (≤256 events)
+                  list_ports        -> {} — same data as logic://midi/ports (prefer resource for polling)
                   create_virtual_port -> { name: String }
                   step_input        -> { note: Int, duration: String|Int }
                   mmc_play          -> {}

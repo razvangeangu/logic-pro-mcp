@@ -14,7 +14,7 @@
   <a href="https://github.com/MongLong0214/logic-pro-mcp/actions/workflows/ci.yml"><img src="https://github.com/MongLong0214/logic-pro-mcp/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" /></a>
   <a href="https://discord.gg/4M3s79DBzz"><img src="https://img.shields.io/badge/Discord-Community-5865F2.svg?style=flat-square&logo=discord&logoColor=white" /></a>
-  <img src="https://img.shields.io/badge/tests-1743_passing-brightgreen.svg?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-1846_passing-brightgreen.svg?style=flat-square" />
   <img src="https://img.shields.io/badge/stable-v3.7.1-blue.svg?style=flat-square" />
 </p>
 
@@ -57,7 +57,7 @@ Logic Pro MCP: region imported, instrument routed, readback exposed through reso
 | Read resources | 18 static resources for health, transport, tracks, mixer, markers, project metadata, project audit/cleanup planning, MIDI ports, MCU state, library inventory, stock plugin/instrument intelligence, Session Players, and workflow skills |
 | Resource templates | 11 templates for track, region, mixer-strip, stock plugin detail/search, stock instrument detail/search, Session Player detail, session-plan dry run, and workflow detail/search lookup |
 | Control channels | MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, MIDI Key Commands |
-| Verification line | v3.7.1 source tree: `1743` Swift tests and release build; v3.7.0 EN/KO strict fresh live close gate remains the live Logic attestation for unchanged Logic-facing behavior |
+| Verification line | Current source tree: `1846` Swift tests, release build, and strict fresh live Logic E2E `345/345` |
 | Release state | Published stable `v3.7.1`; previous stable `v3.7.0` remains available for pinned installs |
 | Community layer | Official Discord for setup support, release notes, reproducible bug triage, product requests, demos, and contributor discussion |
 
@@ -87,7 +87,7 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 |------|--------------------|-----------------------|
 | Transport | Play, stop, record, locate, cycle, metronome, tempo | CoreMIDI/AX routing with live `logic://transport/state` readback |
 | Tracks | Create, delete, duplicate, select, rename, mute, solo, arm, set instruments | Mutating targets require explicit index/name; uncertain selection fails closed before writes |
-| MIDI composition | Generate SMF server-side, import MIDI, send notes/CC/MMC, create virtual ports | `.mid` imports are constrained to `/tmp/LogicProMCP/` and must create a live track |
+| MIDI composition | Generate SMF server-side, import MIDI, send notes/CC/MMC, create virtual ports | `.mid` imports are constrained to server-managed temp files and must create a live track |
 | Mixer | Volume, pan, plugin snapshots, guarded stock plugin insertion | AX writes with same-surface readback for volume/pan (since #83); MCU writes for master/send; occupied plugin slots refuse replacement |
 | Library | Scan Logic's instrument library and load patches by path | Disk/AX inventory is cached and path-allowlisted |
 | Navigation | Bars, markers, zoom, view toggles | Marker navigation is target-faithful; cold-cache misses return failure instead of "next marker" |
@@ -113,7 +113,7 @@ Logic Pro MCP uses a different model. It routes each operation to the strongest 
 
 ## Quick Start
 
-**Prerequisites**: macOS 14+, Logic Pro 12.0.1+, and an MCP client that can launch a stdio server. Published GitHub Actions/Homebrew assets are universal (`arm64` + `x86_64`) and do not require Xcode.
+**Prerequisites**: macOS 14+, Logic Pro 12.0.1+, `cliclick`, and an MCP client that can launch a stdio server. Published GitHub Actions/Homebrew assets are universal (`arm64` + `x86_64`) and do not require Xcode. Homebrew installs `cliclick` automatically; source builds and the pinned shell installer expect it to already be present (`brew install cliclick`).
 
 The package manifest uses Swift tools 6.0 for compatibility. Current source verification uses Xcode 16.4 / Swift 6.2 in CI.
 
@@ -184,12 +184,13 @@ Expected: all 7 channels `ready` after full setup, or 5 if you intentionally ski
 
 ### Pinned shell installer
 
-The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. Inspect the script first, then execute with the pins copied from the release's `SHA256SUMS.txt`:
+The installer is **fail-closed**: it refuses to run without explicit `LOGIC_PRO_MCP_SHA256` + `LOGIC_PRO_MCP_TEAM_ID` env pins. It verifies the downloaded `LogicProMCP-macOS-universal.tar.gz` archive, so copy the SHA from that archive entry in the release's `SHA256SUMS.txt`:
 
 ```bash
+brew install cliclick
 curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v3.7.1/Scripts/install.sh -o install.sh
 # inspect install.sh, then:
-LOGIC_PRO_MCP_SHA256=<paste from release SHA256SUMS.txt> \
+LOGIC_PRO_MCP_SHA256=<paste LogicProMCP-macOS-universal.tar.gz SHA256SUMS entry> \
 LOGIC_PRO_MCP_TEAM_ID=<paste team_id from RELEASE-METADATA.json> \
 bash install.sh
 ```
@@ -218,7 +219,7 @@ MCP clients launch the Swift stdio server. Dispatchers validate tool parameters,
 | [Changelog](CHANGELOG.md) | Everyone | Per-release changes |
 | [Contributing](CONTRIBUTING.md) | Contributors | Dev setup, scoped PR workflow, PR verification |
 
-The public docs tree is intentionally small: setup, API, troubleshooting, and README media. Historical release notes, internal PRDs, ticket boards, spike notes, and local live-evidence work files are kept out of `docs/`; public release history belongs in [CHANGELOG.md](CHANGELOG.md), GitHub Releases, merged PRs, and issue history.
+The public docs tree is intentionally scoped: setup, API, troubleshooting, README media, plus public issue PRDs/tickets that explain active or shipped user-visible remediation. Historical release notes, internal PRDs, private ticket boards, spike notes, and local live-evidence work files are kept out of `docs/`; public release history belongs in [CHANGELOG.md](CHANGELOG.md), GitHub Releases, merged PRs, and issue history.
 
 ## Status
 
@@ -230,12 +231,12 @@ The public docs tree is intentionally small: setup, API, troubleshooting, and RE
 
 | Gate | Current evidence |
 |------|------------------|
-| Full deterministic suite | v3.7.1 source tree: `swift test --no-parallel` -> `1743` passed, `0` failed |
-| Release build | v3.7.1 source tree: `swift build -c release` passed |
+| Full deterministic suite | Current source tree: `swift test` -> `1846` passed, `0` failed |
+| Release build | Current source tree: `swift build -c release` passed |
 | Python E2E syntax | PR #24 verification: `python3 -m py_compile Scripts/live-e2e-test.py` passed |
 | Targeted live plugin proof | Logic Pro 12.2: `logic_plugins.insert_verified track=6 insert=6 plugin=Gain` returned State A with `observed_slot:6`, `write_source:"ax_exact_slot_popup"`, and independent `get_inventory` readback |
 | Track/transport readback proof | Logic Pro 12.2: `logic://tracks` returned `source:"ax_live"`, real names, `placeholder_count:0`, `unknown_type_count:0`; cycle toggle/resource roundtrip reflected live UI state |
-| Strict live Logic Pro 12.2 | v3.7.0 close gate retained for unchanged Logic-facing behavior: English `341` passed / `0` skipped and Korean `341` passed / `0` skipped |
+| Strict live Logic Pro 12.2 | Current source tree strict fresh live E2E: `345` passed / `0` skipped / `0` failed |
 | README media | Actual Logic Pro 12.2 capture derivatives are published under `docs/media/` |
 | v3.7.1 release evidence | GitHub Release, Actions logs, and [CHANGELOG.md](CHANGELOG.md) |
 
@@ -249,6 +250,7 @@ Live E2E defaults to the release binary. Protocol/security assertions run on any
 - **Exact-slot plugin insertion** — `logic_plugins.insert_verified` targets the physical insert index returned by `get_inventory`, verifies the popup is anchored to that slot, and confirms success only by post-write inventory diff.
 - **Target-faithful navigation** — `goto_marker` returns `element_not_found` on a cold cache instead of advancing to the next marker.
 - **1-based MIDI channel** — `send_note`, `send_cc`, and `record_sequence` `ch` values accept 1..16 to match Logic's UI.
+- **Bounded raw SysEx** — `send_sysex` rejects payloads over 1024 bytes before CoreMIDI routing.
 - **Audible-bounce guardrails** — `record_sequence` refuses unverified GM Device / External MIDI imports, `logic://project/audit` marks External MIDI tracks with MIDI regions as export blockers, and `logic_project.bounce` refuses those blockers before opening the Bounce dialog.
 - **Audit phase split** — audit logs distinguish rejected calls, confirmation prompts, and executed route invocations.
 - **Verified project saves** — `project.save_as` verifies the target `.logicx` package exists and that existing packages advance modification time.

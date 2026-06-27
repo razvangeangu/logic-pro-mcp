@@ -135,7 +135,11 @@ private func issue133JSONObject(_ result: CallTool.Result) -> [String: Any] {
             "bar": .int(1),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        trackHeaderCount: { 3 },
+        trackNameAt: { _ in nil },
+        readRegions: { .success([]) },
+        settleReadback: {}
     )
 
     let isError = try #require(result.isError)

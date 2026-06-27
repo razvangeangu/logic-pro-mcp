@@ -19,6 +19,7 @@ class LogicProMcp < Formula
   end
 
   depends_on :macos => :sonoma
+  depends_on "cliclick"
 
   # NOTE (v3.1.6): no `depends_on xcode:` — this Formula installs the
   # pre-built GitHub release binary; it does not invoke `swift build` or any
@@ -41,6 +42,10 @@ class LogicProMcp < Formula
     pkgshare.install "Scripts/uninstall-keycmds.sh"
     pkgshare.install "Scripts/keycmd-preset.plist"
     pkgshare.install "Scripts/LogicProMCP-Scripter.js"
+    pkgshare.install "Scripts/logic_bounce.py" if (buildpath/"Scripts/logic_bounce.py").exist?
+    pkgshare.install "Scripts/logic_bounce_ui.py" if (buildpath/"Scripts/logic_bounce_ui.py").exist?
+    pkgshare.install "Scripts/logic_ui_jxa.py" if (buildpath/"Scripts/logic_ui_jxa.py").exist?
+    pkgshare.install "Scripts/logic_input_source.py" if (buildpath/"Scripts/logic_input_source.py").exist?
   end
 
   def caveats
@@ -48,7 +53,7 @@ class LogicProMcp < Formula
       Logic Pro MCP Server is installed at #{bin}/LogicProMCP.
 
       Register with Claude Code:
-        claude mcp add --scope user logic-pro -- LogicProMCP
+        claude mcp add --scope user logic-pro -e LOGIC_PRO_MCP_SHARE_DIR="#{pkgshare}" -- LogicProMCP
 
       Check macOS permissions:
         LogicProMCP --check-permissions

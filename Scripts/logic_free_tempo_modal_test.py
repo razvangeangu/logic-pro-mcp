@@ -76,6 +76,28 @@ class ResolveFreeTempoModalTests(unittest.TestCase):
         self.assertEqual(result["decision"]["suppress_future_prompts"], "requested")
         self.assertEqual(result["decision"]["confirm"], "OK")
 
+    def test_selection_button_is_clicked_when_policy_option_is_a_button(self):
+        label = "Don't analyze region tempo or change project tempo"
+        runner = FakeRunner(
+            [
+                {
+                    "status": "present",
+                    "kind": "sheet",
+                    "title": "Free Tempo Recording",
+                    "buttons": [label],
+                    "checkboxes": [],
+                    "radio_buttons": [],
+                    "static_texts": ["Free Tempo Recording"],
+                },
+                {"status": "not_present"},
+            ]
+        )
+        result = resolve_free_tempo_modal(runner=runner, pause=lambda _: None)
+        self.assertEqual(result["status"], "dismissed")
+        self.assertEqual(runner.clicks, [("button", label)])
+        self.assertEqual(result["decision"]["confirm"], label)
+        self.assertEqual(result["decision"]["confirm_strategy"], "selection_button")
+
     def test_already_selected_plan_uses_single_button_fallback(self):
         runner = FakeRunner(
             [

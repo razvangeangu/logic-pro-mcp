@@ -123,6 +123,7 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
         importResult: .success("imported")
     )
     await router.register(ax)
+    let trackCounts = SequentialIntBox([0, 0])
 
     let result = await TrackDispatcher.handleRecordSequenceSMF(
         params: [
@@ -130,7 +131,11 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
             "bar": .int(1),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        trackHeaderCount: { trackCounts.next() },
+        trackNameAt: { _ in nil },
+        readRegions: { .success([]) },
+        settleReadback: {}
     )
     let text = sharedToolText(result)
 
@@ -170,7 +175,11 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
             "bar": .int(1),
         ],
         router: router,
-        cache: cache
+        cache: cache,
+        trackHeaderCount: { 0 },
+        trackNameAt: { _ in nil },
+        readRegions: { .success([]) },
+        settleReadback: {}
     )
     let text = sharedToolText(result)
     #expect(
@@ -206,7 +215,11 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
     let result = await TrackDispatcher.handleRecordSequenceSMF(
         params: ["notes": minimalNoteSpec(), "bar": .int(1)],
         router: router,
-        cache: cache
+        cache: cache,
+        trackHeaderCount: { 0 },
+        trackNameAt: { _ in nil },
+        readRegions: { .success([]) },
+        settleReadback: {}
     )
     let obj = recordSequenceJSONObject(result)
     #expect(obj["error"] as? String == "import_failure")

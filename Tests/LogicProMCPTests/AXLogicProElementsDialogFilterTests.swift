@@ -150,6 +150,23 @@ import Testing
     #expect(AXLogicProElements.dialogPresent(runtime: runtime) == false)
 }
 
+@Test func testDialogPresentIgnoresKeyboardLayoutOverlayDialog() {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(1)
+    let dialog = builder.element(2)
+    let indicator = builder.element(3)
+    let arrange = builder.element(4)
+
+    builder.setAttribute(dialog, kAXSubroleAttribute as String, kAXDialogSubrole as String)
+    builder.setChildren(dialog, [indicator])
+    builder.setAttribute(indicator, kAXRoleAttribute as String, kAXButtonRole as String)
+    builder.setAttribute(indicator, kAXDescriptionAttribute as String, "com.apple.keylayout.ABC")
+    builder.setAttribute(app, kAXWindowsAttribute as String, [dialog, arrange])
+
+    let runtime = builder.makeLogicRuntime(appElement: app)
+    #expect(AXLogicProElements.dialogPresent(runtime: runtime) == false)
+}
+
 @Test func testDialogPresentReturnsFalseWhenNoWindowsExposed() {
     // No kAXWindowsAttribute set — treated as "no dialogs known".
     let builder = FakeAXRuntimeBuilder()

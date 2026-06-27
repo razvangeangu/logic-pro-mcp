@@ -54,6 +54,56 @@ private func parseDispatcherObject(_ raw: String) -> [String: Any]? {
     return object
 }
 
+@Test func testDispatcherHumanControlErrorsUseHonestContractStateC() async {
+    func expectStateC(
+        _ result: CallTool.Result,
+        error expectedError: String,
+        operation expectedOperation: String
+    ) {
+        #expect(result.isError == true)
+        let object = parseDispatcherObject(dispatcherText(result))
+        #expect(object?["success"] as? Bool == false)
+        #expect(object?["error"] as? String == expectedError)
+        #expect(object?["operation"] as? String == expectedOperation)
+    }
+
+    let router = ChannelRouter()
+    let cache = StateCache()
+
+    let missingProjectPath = await ProjectDispatcher.handle(
+        command: "open",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+    expectStateC(missingProjectPath, error: "invalid_params", operation: "project.open")
+
+    let unknownView = await NavigateDispatcher.handle(
+        command: "toggle_view",
+        params: ["view": .string("notation")],
+        router: router,
+        cache: cache
+    )
+    expectStateC(unknownView, error: "invalid_params", operation: "nav.toggle_view")
+
+    await cache.updateTracks([TrackState(id: 0, name: "Bass", type: .audio)])
+    let missingTrack = await TrackDispatcher.handle(
+        command: "select",
+        params: ["name": .string("vocal")],
+        router: router,
+        cache: cache
+    )
+    expectStateC(missingTrack, error: "element_not_found", operation: "track.select")
+
+    let unsupportedMixerCommand = await MixerDispatcher.handle(
+        command: "set_output",
+        params: [:],
+        router: router,
+        cache: cache
+    )
+    expectStateC(unsupportedMixerCommand, error: "not_implemented", operation: "mixer.set_output")
+}
+
 private final class ProjectLifecycleHarness {
     var scripts: [String] = []
     var runningStates: [Bool]
@@ -372,10 +422,16 @@ private func liveTransportJSON(
             command: testCase.command,
             params: [:],
             router: router,
-            cache: cache
+            cache: cache,
+            sleep: { _ in }
         )
 
-        #expect(!result.isError!, "Expected \(testCase.command) to succeed")
+        if testCase.command == "play" || testCase.command == "record" {
+            #expect(result.isError == true, "Expected \(testCase.command) State B to be surfaced as an error")
+            #expect(dispatcherText(result).contains(#""verified":false"#))
+        } else {
+            #expect(result.isError == false, "Expected \(testCase.command) to succeed")
+        }
         let ops = await channel.executedOps
         #expect(ops.count == 1)
         #expect(ops[0].0 == testCase.operation)
@@ -1223,7 +1279,7 @@ private func liveTransportJSON(
 
 @Test func testTrackDispatcherScanLibraryForwardsModeParam() async {
     // v3.0.7 regression: dispatcher dropped `mode` on the floor, making
-    // {mode:"disk"} fall back to default AX behavior. Lock the forward path.
+    // {mode:"disk"} fell back to the default scanner. Lock the forward path.
     let router = ChannelRouter()
     let ax = MockChannel(id: .accessibility)
     await router.register(ax)
@@ -1241,6 +1297,12 @@ private func liveTransportJSON(
         router: router,
         cache: cache
     )
+    let mixedCaseResult = await TrackDispatcher.handle(
+        command: "scan_library",
+        params: ["mode": .string("AX")],
+        router: router,
+        cache: cache
+    )
     let defaultResult = await TrackDispatcher.handle(
         command: "scan_library",
         params: [:],
@@ -1250,12 +1312,14 @@ private func liveTransportJSON(
 
     #expect(!diskResult.isError!)
     #expect(!bothResult.isError!)
+    #expect(!mixedCaseResult.isError!)
     #expect(!defaultResult.isError!)
 
     let ops = await ax.executedOps
     expectExecutedOps(ops, equals: [
         ("library.scan_all", ["mode": "disk"]),
         ("library.scan_all", ["mode": "both"]),
+        ("library.scan_all", ["mode": "ax"]),
         ("library.scan_all", [:]),
     ])
 }
@@ -1605,6 +1669,23 @@ actor VerifiedSelectMockChannel: Channel {
     #expect(await ax.executedOps.isEmpty)
 }
 
+@Test func testTrackDispatcherRenameRejectsExcessiveNameBeforeRouting() async {
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+
+    let result = await TrackDispatcher.handle(
+        command: "rename",
+        params: ["index": .int(0), "name": .string(String(repeating: "A", count: 129))],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError!)
+    #expect(dispatcherText(result).contains("128 characters or fewer"))
+    #expect(await ax.executedOps.isEmpty)
+}
+
 @Test func testTrackDispatcherSetAutomationRequiresExplicitIndex() async {
     let router = ChannelRouter()
     let mcu = MockChannel(id: .mcu)
@@ -1710,39 +1791,69 @@ private actor TrackInsertingMockChannel: Channel {
 }
 
 @Test func testRecordSequenceSMFImportRoutingSequence() async {
-    // v3.1.2 P0-2 — under the new live-AX verification path the headless
-    // test sandbox has 0 track headers, so record_sequence will report the
-    // post-import live-AX delta failure. We can no longer assert a happy-path
-    // success in unit tests without a real Logic instance, but we CAN still
-    // verify the routing sequence is correct (goto_position bar=1 is sent
-    // before midi.import_file) and that the SMF temp file path is forwarded.
-    // Happy-path success coverage moves to live verification per the v3.1.2
-    // CHANGELOG discipline.
     let router = ChannelRouter()
     let cache = StateCache()
     await cache.updateDocumentState(true)
     let ax = TrackInsertingMockChannel(id: .accessibility, cache: cache)
     await router.register(ax)
+    final class HeaderCountSequence: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values = [1, 2]
 
-    let result = await TrackDispatcher.handle(
-        command: "record_sequence",
+        func next() -> Int {
+            lock.lock()
+            defer { lock.unlock() }
+            if values.count <= 1 { return values.first ?? 2 }
+            return values.removeFirst()
+        }
+    }
+    final class RegionSequence: @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls = 0
+
+        func next() -> TrackDispatcher.RecordSequenceRegionReadback {
+            lock.lock()
+            defer {
+                calls += 1
+                lock.unlock()
+            }
+            if calls == 0 {
+                return .success([])
+            }
+            return .success([
+                RegionInfo(
+                    name: "Imported MIDI",
+                    trackIndex: 1,
+                    startBar: 1,
+                    endBar: 6,
+                    kind: "midi",
+                    rawHelp: nil
+                )
+            ])
+        }
+    }
+    let headerCounts = HeaderCountSequence()
+    let regions = RegionSequence()
+
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
         params: ["bar": .int(5), "notes": .string("60,0,480;64,500,480;67,1000,480"), "tempo": .double(120)],
         router: router,
-        cache: cache
+        cache: cache,
+        trackHeaderCount: { headerCounts.next() },
+        trackNameAt: { $0 == 1 ? "Imported MIDI Track" : nil },
+        readRegions: { regions.next() },
+        settleReadback: {}
     )
 
     let text = dispatcherText(result)
-    // In sandbox: live AX returns 0, so we expect the new error wording.
-    #expect(
-        text.contains("live AX still shows"),
-        "expected new live-AX verification wording, got: \(text)"
-    )
+    #expect(!result.isError!, "expected deterministic verified import, got: \(text)")
+    #expect(text.contains("\"success\":true"), "expected State A success, got: \(text)")
 
     // Verify routing sequence regardless of verification outcome.
     let ops = await ax.executedOps
     let importOps = ops.filter { $0.0 == "midi.import_file" }
     #expect(importOps.count == 1, "expected 1 midi.import_file call, got \(importOps.count)")
-    #expect(importOps[0].1["path"]?.contains("/tmp/LogicProMCP") == true)
+    #expect(importOps[0].1["path"]?.hasPrefix(SMFWriter.temporaryDirectoryPrefix()) == true)
 
     // Playhead must be reset to bar 1 BEFORE import (otherwise Logic anchors
     // the region at the current playhead, defeating bar positioning).
@@ -1786,11 +1897,14 @@ private actor TrackInsertingMockChannel: Channel {
     let cache = StateCache()
     await cache.updateDocumentState(true)
 
-    let result = await TrackDispatcher.handle(
-        command: "record_sequence",
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
         params: ["bar": .int(1), "notes": .string("60,0,480"), "tempo": .double(120)],
         router: router,
-        cache: cache
+        cache: cache,
+        trackHeaderCount: { 1 },
+        trackNameAt: { _ in nil },
+        readRegions: { .success([]) },
+        settleReadback: {}
     )
 
     #expect(result.isError!)
@@ -1810,11 +1924,14 @@ private actor TrackInsertingMockChannel: Channel {
     let cache = StateCache()
     await cache.updateDocumentState(true)
 
-    let result = await TrackDispatcher.handle(
-        command: "record_sequence",
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
         params: ["index": .int(0), "bar": .int(1), "notes": .string("60,0,480"), "tempo": .double(120)],
         router: router,
-        cache: cache
+        cache: cache,
+        trackHeaderCount: { 1 },
+        trackNameAt: { _ in nil },
+        readRegions: { .success([]) },
+        settleReadback: {}
     )
 
     #expect(result.isError!)
@@ -1822,7 +1939,7 @@ private actor TrackInsertingMockChannel: Channel {
     let importOps = ops.filter { $0.0 == "midi.import_file" }
     #expect(importOps.count == 1, "expected one midi.import_file call, got \(importOps.count)")
     let importedPath = importOps.first?.1["path"] ?? ""
-    #expect(importedPath.hasPrefix("/tmp/LogicProMCP/"))
+    #expect(importedPath.hasPrefix(SMFWriter.temporaryDirectoryPrefix()))
     #expect(importedPath.hasSuffix(".mid"))
     #expect(
         !FileManager.default.fileExists(atPath: importedPath),
@@ -2375,6 +2492,12 @@ private actor SelectiveFailChannel: Channel {
         router: router,
         cache: cache
     )
+    let traversalSaveAsResult = await ProjectDispatcher.handle(
+        command: "save_as",
+        params: ["path": .string("/tmp/project/../escape.logicx")],
+        router: router,
+        cache: cache
+    )
     let unknownResult = await ProjectDispatcher.handle(
         command: "archive",
         params: [:],
@@ -2388,6 +2511,8 @@ private actor SelectiveFailChannel: Channel {
     #expect(dispatcherText(invalidOpenResult).contains("existing absolute .logicx"))
     #expect(invalidSaveAsResult.isError!)
     #expect(dispatcherText(invalidSaveAsResult).contains("absolute .logicx"))
+    #expect(traversalSaveAsResult.isError!)
+    #expect(dispatcherText(traversalSaveAsResult).contains("absolute .logicx"))
     #expect(unknownResult.isError!)
 }
 
@@ -2761,25 +2886,57 @@ private actor SelectiveFailChannel: Channel {
     ])
 }
 
-@Test func testMIDIDispatcherRoutesImportFileCommand() async {
+@Test func testMIDIDispatcherRejectsOversizedSysexBeforeRouting() async {
     let router = ChannelRouter()
-    let ax = MockChannel(id: .accessibility)
-    await router.register(ax)
+    let coreMidi = MockChannel(id: .coreMIDI)
+    await router.register(coreMidi)
 
-    let result = await MIDIDispatcher.handle(
-        command: "import_file",
-        params: ["path": .string("/tmp/LogicProMCP/acid.mid")],
+    let oversizedArray = [Value.int(0xF0)] + Array(repeating: Value.int(0x7D), count: 1023) + [.int(0xF7)]
+    let arrayResult = await MIDIDispatcher.handle(
+        command: "send_sysex",
+        params: ["bytes": .array(oversizedArray)],
         router: router,
         cache: StateCache()
     )
 
-    #expect(!result.isError!)
+    let oversizedText = "F0 " + Array(repeating: "7D", count: 1023).joined(separator: " ") + " F7"
+    let textResult = await MIDIDispatcher.handle(
+        command: "send_sysex",
+        params: ["data": .string(oversizedText)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(arrayResult.isError!)
+    #expect(textResult.isError!)
+    #expect(dispatcherText(arrayResult).contains("1024-byte limit"))
+    #expect(dispatcherText(textResult).contains("1024-byte limit"))
+    #expect(await coreMidi.executedOps.isEmpty)
+}
+
+@Test func testMIDIDispatcherRoutesImportFileCommand() async throws {
+    let router = ChannelRouter()
+    let ax = MockChannel(id: .accessibility)
+    await router.register(ax)
+    let tempFile = try SMFWriter.temporaryMIDIFile()
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile.fileURL)
+    defer { SMFWriter.cleanupTemporaryMIDIFile(tempFile) }
+    let expectedPath = tempFile.fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+
+    let result = await MIDIDispatcher.handle(
+        command: "import_file",
+        params: ["path": .string(tempFile.fileURL.path)],
+        router: router,
+        cache: StateCache()
+    )
+
+    #expect(result.isError != true)
     expectExecutedOps(await ax.executedOps, equals: [
-        ("midi.import_file", ["path": "/tmp/LogicProMCP/acid.mid"]),
+        ("midi.import_file", ["path": expectedPath]),
     ])
 }
 
-@Test func testMIDIDispatcherRoutesPrivateTmpImportFileCommand() async {
+@Test func testMIDIDispatcherRejectsLegacyFixedTmpImportFileCommand() async {
     let router = ChannelRouter()
     let ax = MockChannel(id: .accessibility)
     await router.register(ax)
@@ -2791,10 +2948,9 @@ private actor SelectiveFailChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(!result.isError!)
-    expectExecutedOps(await ax.executedOps, equals: [
-        ("midi.import_file", ["path": "/private/tmp/LogicProMCP/acid.mid"]),
-    ])
+    #expect(result.isError == true)
+    #expect(dispatcherText(result).contains("server-managed LogicProMCP temp .mid"))
+    #expect(await ax.executedOps.isEmpty)
 }
 
 @Test func testMIDIDispatcherUnknownCommandFailsInDispatcherSuite() async {
@@ -3502,13 +3658,42 @@ private actor TransportStateSequenceChannel: Channel {
     )
 
     let text = dispatcherText(result)
-    #expect(!(result.isError!))
+    #expect(result.isError!)
     #expect(text.contains(#""verified":false"#))
     #expect(text.contains(#""reason":"readback_mismatch""#))
     #expect(text.contains(#""operation":"transport.record""#))
     let coreOps = await coreMIDI.executedOps
     #expect(coreOps.count == 1)
     #expect(coreOps[0].0 == "transport.record")
+}
+
+@Test func testTransportDispatcherPlayStateBReadbackUnavailableIsError() async {
+    let router = ChannelRouter()
+    let ax = TransportStateSequenceChannel(
+        id: .accessibility,
+        states: [],
+        mutationResults: [
+            "transport.play": .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: ["via": "ax_mock"]
+            ))
+        ]
+    )
+    await router.register(ax)
+
+    let result = await TransportDispatcher.handle(
+        command: "play",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    let text = dispatcherText(result)
+    #expect(result.isError!)
+    #expect(text.contains(#""verified":false"#))
+    #expect(text.contains(#""reason":"readback_unavailable""#))
+    #expect(text.contains(#""operation":"transport.play""#))
 }
 
 @Test func testTransportDispatcherStopPromotesFallbackWriteToVerifiedReadback() async {
@@ -3543,7 +3728,8 @@ private actor TransportStateSequenceChannel: Channel {
         command: "stop",
         params: [:],
         router: router,
-        cache: cache
+        cache: cache,
+        sleep: { _ in }
     )
 
     let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
@@ -3560,6 +3746,56 @@ private actor TransportStateSequenceChannel: Channel {
     #expect(cached.isPlaying == false)
     #expect(cached.isRecording == false)
     #expect(cached.position == "9.1.1.1")
+}
+
+@Test func testTransportDispatcherStopPollsUntilLiveReadbackSettles() async {
+    let router = ChannelRouter()
+    let ax = TransportStateSequenceChannel(
+        id: .accessibility,
+        states: [
+            liveTransportJSON(
+                isPlaying: true,
+                isRecording: false,
+                position: "12.1.1.1"
+            ),
+            liveTransportJSON(
+                isPlaying: true,
+                isRecording: false,
+                position: "12.1.1.1"
+            ),
+            liveTransportJSON(
+                isPlaying: false,
+                isRecording: false,
+                position: "12.1.1.1"
+            )
+        ],
+        mutationResults: [:]
+    )
+    let cgEvent = MockChannel(id: .cgEvent)
+    await router.register(ax)
+    await router.register(cgEvent)
+    let cache = StateCache()
+
+    let result = await TransportDispatcher.handle(
+        command: "stop",
+        params: [:],
+        router: router,
+        cache: cache,
+        sleep: { _ in }
+    )
+
+    let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
+    #expect(!(result.isError!))
+    #expect((json["verified"] as? Bool)!)
+    #expect(json["operation"] as? String == "transport.stop")
+    #expect(json["poll_attempts"] as? Int == 2)
+    #expect(!((json["observed_isPlaying"] as? Bool)!))
+    #expect(await ax.executedOps.map(\.0) == [
+        "transport.get_state",
+        "transport.get_state",
+        "transport.get_state"
+    ])
+    #expect(await cgEvent.executedOps.map(\.0) == ["transport.stop"])
 }
 
 @Test func testTransportDispatcherStopFailsClosedWhenLiveReadbackUnavailable() async {
@@ -3587,7 +3823,8 @@ private actor TransportStateSequenceChannel: Channel {
         command: "stop",
         params: [:],
         router: router,
-        cache: cache
+        cache: cache,
+        sleep: { _ in }
     )
 
     let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]
@@ -3619,7 +3856,8 @@ private actor TransportStateSequenceChannel: Channel {
         command: "stop",
         params: [:],
         router: router,
-        cache: cache
+        cache: cache,
+        sleep: { _ in }
     )
 
     let json = try! sharedParseJSON(dispatcherText(result)) as! [String: Any]

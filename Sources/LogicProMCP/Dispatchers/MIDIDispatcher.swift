@@ -2,9 +2,12 @@ import Foundation
 import MCP
 
 struct MIDIDispatcher {
+    private static let maxSysExBytes = 1024
+    private static let maxSysExTextCharacters = maxSysExBytes * 5
+
     static let tool = commandTool(
         name: "logic_midi",
-        description: "MIDI operations in Logic Pro. Commands: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, play_sequence, import_file, create_virtual_port, step_input, mmc_play, mmc_stop, mmc_record, mmc_locate. Params: send_note/send_chord -> MIDI note payloads; send_cc/program_change/pitch_bend/aftertouch -> controller payloads; send_sysex -> { bytes: [Int] } or { data: String }; play_sequence -> { notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" } (≤256 events, tight server-side timing); import_file -> { path: \"/tmp/LogicProMCP/name.mid\" } and wait for verified:true before issuing the next import; mmc_locate -> { bar: Int } or { time: \"HH:MM:SS:FF\" }; create_virtual_port -> { name: String }. The 7 send-style ops (send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, play_sequence) accept an optional { port: \"midi\"|\"keycmd\" } selector — default \"midi\" routes to the CoreMIDI virtual port; \"keycmd\" routes to the MIDIKeyCommands KeyCmd virtual port (requires one-time MIDI Learn in Logic). Channel is 1-based (1..16). All other ops reject `port` with invalid_params.",
+        description: "MIDI operations in Logic Pro. Commands: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, play_sequence, import_file, list_ports, create_virtual_port, step_input, mmc_play, mmc_stop, mmc_record, mmc_locate. Params: send_note/send_chord -> MIDI note payloads; send_cc/program_change/pitch_bend/aftertouch -> controller payloads; send_sysex -> { bytes: [Int] } or { data: String } (≤1024 bytes); play_sequence -> { notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" } (≤256 events, tight server-side timing); import_file -> { path: server-managed LogicProMCP temp .mid } and wait for verified:true before issuing the next import; list_ports -> {} (same data as logic://midi/ports; prefer the resource for polling); mmc_locate -> { bar: Int } or { time: \"HH:MM:SS:FF\" }; create_virtual_port -> { name: String }. The 7 send-style ops (send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, play_sequence) accept an optional { port: \"midi\"|\"keycmd\" } selector — default \"midi\" routes to the CoreMIDI virtual port; \"keycmd\" routes to the MIDIKeyCommands KeyCmd virtual port (requires one-time MIDI Learn in Logic). Channel is 1-based (1..16). All other ops reject `port` with invalid_params.",
         commandDescription: "MIDI command to execute"
     )
 
@@ -206,6 +209,12 @@ struct MIDIDispatcher {
                 "name": stringParam(params, "name", default: "Virtual Port"),
             ])
 
+        case "list_ports":
+            if let reject = rejectIfPortPresent(params, command: command) {
+                return reject
+            }
+            return await routedTextResult(router, operation: "midi.list_ports")
+
         case "mmc_play":
             if let reject = rejectIfPortPresent(params, command: command) {
                 return reject
@@ -289,7 +298,7 @@ struct MIDIDispatcher {
 
         default:
             return toolTextResult(
-                "Unknown MIDI command: \(command). Available: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, play_sequence, import_file, create_virtual_port, step_input, mmc_play, mmc_stop, mmc_record, mmc_locate",
+                "Unknown MIDI command: \(command). Available: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, play_sequence, import_file, list_ports, create_virtual_port, step_input, mmc_play, mmc_stop, mmc_record, mmc_locate",
                 isError: true
             )
         }
@@ -345,10 +354,7 @@ struct MIDIDispatcher {
     /// so all dispatch-level rejections (port + channel + record_sequence)
     /// produce the same wire shape.
     static func invalidParamsResult(hint: String) -> CallTool.Result {
-        toolTextResult(
-            HonestContract.encodeStateC(error: .invalidParams, hint: hint, extras: [:]),
-            isError: true
-        )
+        toolInvalidParamsResult(hint)
     }
 
     // MARK: - Validation Helpers (T2)
@@ -482,6 +488,9 @@ struct MIDIDispatcher {
     ) -> Result<String, ValidationFailure> {
         let bytes: [Int]?
         if let arr = params["bytes"]?.arrayValue {
+            guard arr.count <= maxSysExBytes else {
+                return .failure(ValidationFailure("send_sysex payload exceeds \(maxSysExBytes)-byte limit"))
+            }
             var parsed: [Int] = []
             for item in arr {
                 guard let value = strictInt(item), (0...255).contains(value) else {
@@ -491,14 +500,23 @@ struct MIDIDispatcher {
             }
             bytes = parsed
         } else if let s = params["bytes"]?.stringValue, !s.isEmpty {
+            guard s.count <= maxSysExTextCharacters else {
+                return .failure(ValidationFailure("send_sysex payload exceeds \(maxSysExBytes)-byte limit"))
+            }
             bytes = parseSysexHexBytes(s)
         } else if let s = params["data"]?.stringValue, !s.isEmpty {
+            guard s.count <= maxSysExTextCharacters else {
+                return .failure(ValidationFailure("send_sysex payload exceeds \(maxSysExBytes)-byte limit"))
+            }
             bytes = parseSysexHexBytes(s)
         } else {
             bytes = nil
         }
 
-        guard let bytes, bytes.count >= 3, bytes.first == 0xF0, bytes.last == 0xF7 else {
+        guard let bytes, bytes.count <= maxSysExBytes else {
+            return .failure(ValidationFailure("send_sysex payload exceeds \(maxSysExBytes)-byte limit"))
+        }
+        guard bytes.count >= 3, bytes.first == 0xF0, bytes.last == 0xF7 else {
             return .failure(ValidationFailure("send_sysex requires bytes/data starting with F0, ending with F7, and at least one data byte"))
         }
         let interior = bytes.dropFirst().dropLast()
@@ -594,15 +612,8 @@ struct MIDIDispatcher {
             return .failure(ValidationFailure("import_file 'path' must not contain control characters"))
         }
 
-        let normalized = URL(fileURLWithPath: path)
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-            .path
-        let allowedPrefixes = AccessibilityChannel.managedMIDIImportDirectoryPrefixes()
-
-        guard allowedPrefixes.contains(where: normalized.hasPrefix),
-              normalized.lowercased().hasSuffix(".mid") else {
-            return .failure(ValidationFailure("import_file 'path' must be /tmp/LogicProMCP/*.mid"))
+        guard let normalized = AccessibilityChannel.validatedMIDIImportPath(path) else {
+            return .failure(ValidationFailure("import_file 'path' must be a server-managed LogicProMCP temp .mid"))
         }
         return .success(normalized)
     }

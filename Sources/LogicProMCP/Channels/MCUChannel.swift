@@ -11,6 +11,10 @@ protocol MCUTransportProtocol: Actor {
 actor MCUChannel: Channel {
     nonisolated let id = ChannelID.mcu
 
+    private struct ValidationFailure: Error {
+        let hint: String
+    }
+
     struct AXReadback: Sendable {
         let readVolume: @Sendable (Int) async -> Double?
         let readPan: @Sendable (Int) async -> Double?
@@ -221,13 +225,13 @@ actor MCUChannel: Channel {
         case "transport.toggle_cycle":
             return await sendTransport(.cycle)
         case "track.set_mute":
-            return await executeStripButton(.mute, params: params)
+            return await executeStripButton(.mute, operation: operation, params: params)
         case "track.set_solo":
-            return await executeStripButton(.solo, params: params)
+            return await executeStripButton(.solo, operation: operation, params: params)
         case "track.set_arm":
-            return await executeStripButton(.recArm, params: params)
+            return await executeStripButton(.recArm, operation: operation, params: params)
         case "track.select":
-            return await executeStripButton(.select, params: params)
+            return await executeStripButton(.select, operation: operation, params: params)
         case "mixer.set_plugin_param":
             return .error("Use plugin.set_param via the Scripter channel for deterministic plugin parameter control")
         case "track.set_automation":
@@ -287,24 +291,31 @@ actor MCUChannel: Channel {
     ///   - `mcu_connected:true, age small, verified:false` → this specific
     ///     fader/V-Pot echo didn't land (Logic 12.2 regression, bank-offset
     ///     mismatch, etc.) — the only shape that points at a code issue.
-    /// Returned as plain `[String: Any]` so callers merge it into existing
-    /// extras dictionaries.
-    private func mcuConnectionExtras() async -> [String: Any] {
+    private func mcuConnectionExtras(snapshotNow: Date = Date()) async -> [String: Any] {
         let conn = await cache.getMCUConnection()
         // Clamp + nil handling live in MCUConnectionState.lastFeedbackAgeMs so
         // the write envelope and logic://mixer (B1) share one definition.
         return [
             "mcu_connected": conn.isConnected,
             "mcu_registered": conn.registeredAsDevice,
-            "mcu_last_feedback_age_ms": conn.lastFeedbackAgeMs() ?? NSNull(),
+            "mcu_last_feedback_age_ms": conn.lastFeedbackAgeMs(now: snapshotNow) ?? NSNull(),
         ]
     }
 
     // MARK: - Command Implementations
 
     private func executeSetVolume(_ params: [String: String]) async -> ChannelResult {
-        let track = Int(params["index"] ?? "0") ?? 0
-        let value = Double(params["volume"] ?? "0") ?? 0.0
+        let operation = "mixer.set_volume"
+        let track: Int
+        let value: Double
+        do {
+            track = try Self.requiredTrackIndex(params["index"], operation: operation)
+            value = try Self.requiredUnitValue(params["volume"], field: "volume", operation: operation)
+        } catch let failure as ValidationFailure {
+            return Self.invalidParams(failure.hint, operation: operation)
+        } catch {
+            return Self.invalidParams("Invalid MCU parameters for \(operation)", operation: operation)
+        }
         let timeoutMs = Self.echoTimeoutMs
 
         return await withBanking(targetTrack: track) { strip in
@@ -324,8 +335,6 @@ actor MCUChannel: Channel {
                 strip: track, target: value, timeoutMs: timeoutMs,
                 requireFreshAfter: sendAt
             )
-            // v3.4.5-rc5 (Issues #10/#11) — merge MCU connection diagnostics
-            // *after* the poll window so age reflects the write-time snapshot.
             var extras: [String: Any] = [
                 "requested": value,
                 "observed": observed ?? NSNull(),
@@ -333,7 +342,7 @@ actor MCUChannel: Channel {
                 "observed_ax": NSNull(),
                 "track": track
             ]
-            for (k, v) in await self.mcuConnectionExtras() { extras[k] = v }
+            for (k, v) in await self.mcuConnectionExtras(snapshotNow: sendAt) { extras[k] = v }
             if let observed, abs(observed - value) <= 2.0 / 16383.0 {
                 extras["verify_source"] = "mcu_echo"
                 return .success(HonestContract.encodeStateA(extras: extras))
@@ -358,8 +367,17 @@ actor MCUChannel: Channel {
     }
 
     private func executeSetPan(_ params: [String: String]) async -> ChannelResult {
-        let track = Int(params["index"] ?? "0") ?? 0
-        let value = Double(params["pan"] ?? "0") ?? 0.0
+        let operation = "mixer.set_pan"
+        let track: Int
+        let value: Double
+        do {
+            track = try Self.requiredTrackIndex(params["index"], operation: operation)
+            value = try Self.requiredPanValue(params["pan"], operation: operation)
+        } catch let failure as ValidationFailure {
+            return Self.invalidParams(failure.hint, operation: operation)
+        } catch {
+            return Self.invalidParams("Invalid MCU parameters for \(operation)", operation: operation)
+        }
         let timeoutMs = Self.echoTimeoutMs
 
         return await withBanking(targetTrack: track) { strip in
@@ -394,7 +412,7 @@ actor MCUChannel: Channel {
                 "track": track,
                 "pan_write_mode": "relative_vpot"
             ]
-            for (k, v) in await self.mcuConnectionExtras() { extras[k] = v }
+            for (k, v) in await self.mcuConnectionExtras(snapshotNow: sendAt) { extras[k] = v }
             if let observed, abs(observed - value) <= 0.1 {
                 return .success(HonestContract.encodeStateA(extras: extras))
             }
@@ -405,7 +423,15 @@ actor MCUChannel: Channel {
     }
 
     private func executeSetMasterVolume(_ params: [String: String]) async -> ChannelResult {
-        let value = Double(params["volume"] ?? "0") ?? 0.0
+        let operation = "mixer.set_master_volume"
+        let value: Double
+        do {
+            value = try Self.requiredUnitValue(params["volume"], field: "volume", operation: operation)
+        } catch let failure as ValidationFailure {
+            return Self.invalidParams(failure.hint, operation: operation)
+        } catch {
+            return Self.invalidParams("Invalid MCU parameters for \(operation)", operation: operation)
+        }
         let timeoutMs = Self.echoTimeoutMs
         // v3.1.0 (Ralph-2 / C1) — same send-time freshness check as per-strip
         // set_volume so a cached master value can't mascarade as a fresh
@@ -433,7 +459,7 @@ actor MCUChannel: Channel {
             "track": "master",
             "readback_source": "mcu_echo",
         ]
-        for (k, v) in await mcuConnectionExtras() { extras[k] = v }
+        for (k, v) in await mcuConnectionExtras(snapshotNow: sendAt) { extras[k] = v }
         if let observed, abs(observed - value) <= 2.0 / 16383.0 {
             return .success(HonestContract.encodeStateA(extras: extras))
         }
@@ -459,16 +485,27 @@ actor MCUChannel: Channel {
         ))
     }
 
-    private func executeStripButton(_ function: MCUProtocol.ButtonFunction, params: [String: String]) async -> ChannelResult {
-        let track = Int(params["index"] ?? "0") ?? 0
+    private func executeStripButton(
+        _ function: MCUProtocol.ButtonFunction,
+        operation: String,
+        params: [String: String]
+    ) async -> ChannelResult {
+        let track: Int
         // `track.select` is not a toggle — callers always mean "make this track
         // the selected one." Forcing on=true avoids the previous bug where an
         // absent `enabled` param silently deselected (→ Drummer stayed focused).
         let enabled: Bool
-        if function == .select {
-            enabled = true
-        } else {
-            enabled = params["enabled"] == "true" || params["enabled"] == "1"
+        do {
+            track = try Self.requiredTrackIndex(params["index"], operation: operation)
+            if function == .select {
+                enabled = true
+            } else {
+                enabled = try Self.requiredBool(params["enabled"], field: "enabled", operation: operation)
+            }
+        } catch let failure as ValidationFailure {
+            return Self.invalidParams(failure.hint, operation: operation)
+        } catch {
+            return Self.invalidParams("Invalid MCU parameters for \(operation)", operation: operation)
         }
 
         return await withBanking(targetTrack: track) { strip in
@@ -493,15 +530,15 @@ actor MCUChannel: Channel {
     }
 
     private func executeAutomation(_ params: [String: String]) async -> ChannelResult {
-        let mode = params["mode"] ?? "read"
+        let operation = "track.set_automation"
+        let mode: String
         let function: MCUProtocol.ButtonFunction
-        switch mode {
-        case "read": function = .automationRead
-        case "write": function = .automationWrite
-        case "touch": function = .automationTouch
-        case "latch": function = .automationLatch
-        case "trim": function = .automationTrim
-        default: return .error("Unknown automation mode: \(mode)")
+        do {
+            (mode, function) = try Self.requiredAutomationMode(params["mode"], operation: operation)
+        } catch let failure as ValidationFailure {
+            return Self.invalidParams(failure.hint, operation: operation)
+        } catch {
+            return Self.invalidParams("Invalid MCU parameters for \(operation)", operation: operation)
         }
         let bytes = MCUProtocol.encodeButton(function, on: true)
         await transport.send(bytes)
@@ -514,6 +551,119 @@ actor MCUChannel: Channel {
             reason: .readbackUnavailable,
             extras: ["function": "set_automation", "mode": mode]
         ))
+    }
+
+    // MARK: - Validation
+
+    private static func invalidParams(_ hint: String, operation: String) -> ChannelResult {
+        .error(HonestContract.encodeStateC(
+            error: .invalidParams,
+            hint: hint,
+            extras: ["operation": operation, "channel": "MCU"]
+        ))
+    }
+
+    private static func requiredTrackIndex(_ raw: String?, operation: String) throws -> Int {
+        try requiredInt(
+            raw,
+            field: "index",
+            range: 0...255,
+            operation: operation,
+            rangeDescription: "0...255"
+        )
+    }
+
+    private static func requiredInt(
+        _ raw: String?,
+        field: String,
+        range: ClosedRange<Int>,
+        operation: String,
+        rangeDescription: String
+    ) throws -> Int {
+        guard let rawValue = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
+            throw ValidationFailure(hint: "\(operation) requires '\(field)' as an integer in \(rangeDescription)")
+        }
+        guard let value = Int(rawValue), range.contains(value) else {
+            throw ValidationFailure(hint: "\(operation) requires '\(field)' as an integer in \(rangeDescription)")
+        }
+        return value
+    }
+
+    private static func requiredUnitValue(_ raw: String?, field: String, operation: String) throws -> Double {
+        try requiredDouble(
+            raw,
+            field: field,
+            range: 0.0...1.0,
+            operation: operation,
+            rangeDescription: "0.0 and 1.0"
+        )
+    }
+
+    private static func requiredPanValue(_ raw: String?, operation: String) throws -> Double {
+        try requiredDouble(
+            raw,
+            field: "pan",
+            range: -1.0...1.0,
+            operation: operation,
+            rangeDescription: "-1.0 and 1.0"
+        )
+    }
+
+    private static func requiredDouble(
+        _ raw: String?,
+        field: String,
+        range: ClosedRange<Double>,
+        operation: String,
+        rangeDescription: String
+    ) throws -> Double {
+        guard let rawValue = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
+            throw ValidationFailure(hint: "\(operation) requires '\(field)' as a finite number between \(rangeDescription)")
+        }
+        guard let value = Double(rawValue), value.isFinite, range.contains(value) else {
+            throw ValidationFailure(hint: "\(operation) requires '\(field)' as a finite number between \(rangeDescription)")
+        }
+        return value
+    }
+
+    private static func requiredBool(_ raw: String?, field: String, operation: String) throws -> Bool {
+        guard let rawValue = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
+            throw ValidationFailure(hint: "\(operation) requires '\(field)' as true/false or 1/0")
+        }
+        switch rawValue.lowercased() {
+        case "true", "1":
+            return true
+        case "false", "0":
+            return false
+        default:
+            throw ValidationFailure(hint: "\(operation) requires '\(field)' as true/false or 1/0")
+        }
+    }
+
+    private static func requiredAutomationMode(
+        _ raw: String?,
+        operation: String
+    ) throws -> (String, MCUProtocol.ButtonFunction) {
+        guard let mode = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !mode.isEmpty else {
+            throw ValidationFailure(
+                hint: "\(operation) requires 'mode' as one of read, write, touch, latch, trim"
+            )
+        }
+        switch mode {
+        case "read":
+            return (mode, .automationRead)
+        case "write":
+            return (mode, .automationWrite)
+        case "touch":
+            return (mode, .automationTouch)
+        case "latch":
+            return (mode, .automationLatch)
+        case "trim":
+            return (mode, .automationTrim)
+        default:
+            throw ValidationFailure(
+                hint: "Unknown automation mode: \(mode). \(operation) requires 'mode' as one of read, write, touch, latch, trim"
+            )
+        }
     }
 
     // MARK: - Banking (Proper Queue)

@@ -6,20 +6,25 @@ import MCP
 /// server-wide. A second concurrent request is refused with State C
 /// `verified_op_in_progress` (`safe_to_retry:true`) rather than interleaving.
 /// `get_inventory` is non-mutating and is NOT gated.
-actor VerifiedOpGate {
+final class VerifiedOpGate: @unchecked Sendable {
     static let shared = VerifiedOpGate()
+    private let lock = NSLock()
     private var inProgress = false
 
     /// Try to acquire the gate. Returns false if a verified op is already
     /// running. The caller MUST call `release()` when done (use defer).
     func tryAcquire() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
         if inProgress { return false }
         inProgress = true
         return true
     }
 
     func release() {
+        lock.lock()
         inProgress = false
+        lock.unlock()
     }
 }
 
@@ -84,7 +89,7 @@ struct PluginsDispatcher {
         operation: String,
         _ body: () async -> CallTool.Result
     ) async -> CallTool.Result {
-        guard await VerifiedOpGate.shared.tryAcquire() else {
+        guard VerifiedOpGate.shared.tryAcquire() else {
             return toolTextResult(HonestContract.encodeV2StateC(
                 error: .verifiedOpInProgress,
                 extras: [
@@ -96,9 +101,8 @@ struct PluginsDispatcher {
                 ]
             ), isError: true)
         }
-        let result = await body()
-        await VerifiedOpGate.shared.release()
-        return result
+        defer { VerifiedOpGate.shared.release() }
+        return await body()
     }
 
     // MARK: - Param coercion

@@ -323,7 +323,8 @@ enum SetupLifecycle {
         // Order mirrors Scripts/uninstall.sh: approvals, binary, key commands,
         // registration, then manual Logic-side reminders.
         let approvalStore = approvalStorePath(home: home)
-        let approvalsPresent = runtime.fileExists(approvalStore)
+        let approvalLock = approvalLockPath(home: home)
+        let approvalsPresent = approvalStoreArtifacts(home: home).contains { runtime.fileExists($0) }
         steps.append(step(
             id: "approvals.remove",
             action: approvalsPresent ? .delete : .skip,
@@ -336,7 +337,7 @@ enum SetupLifecycle {
             requiresSudo: false,
             remediationType: approvalsPresent ? .command : .none,
             remediationValueOverride: approvalsPresent
-                ? "Scripts/uninstall.sh removes \(approvalStore); re-approve later with --approve-channel."
+                ? "Scripts/uninstall.sh removes \(approvalStore) and \(approvalLock) when present; re-approve later with --approve-channel."
                 : nil
         ))
 
@@ -417,8 +418,22 @@ enum SetupLifecycle {
             remediationType: cliAvailable ? .command : .manual,
             remediationValueOverride: registered
                 ? "Already registered with Claude Code."
-                : "claude mcp add --scope user logic-pro -- \(binaryPath)"
+                : "claude mcp add --scope user logic-pro -e LOGIC_PRO_MCP_SHARE_DIR=\(shareDirPath(binaryPath: binaryPath)) -- \(binaryPath)"
         )
+    }
+
+    private static func shareDirPath(binaryPath: String) -> String {
+        let binaryURL = URL(fileURLWithPath: binaryPath).standardizedFileURL
+        let installDir = binaryURL.deletingLastPathComponent()
+        if installDir.lastPathComponent == "bin" {
+            return installDir
+                .deletingLastPathComponent()
+                .appendingPathComponent("share/logic-pro-mcp")
+                .path
+        }
+        return installDir
+            .appendingPathComponent("share/logic-pro-mcp")
+            .path
     }
 
     private static func keyCommandsStep(runtime: Runtime, removing: Bool) -> Step {
@@ -513,6 +528,14 @@ enum SetupLifecycle {
         home
             .appendingPathComponent("Library/Application Support/LogicProMCP/operator-approvals.json")
             .path
+    }
+
+    private static func approvalLockPath(home: URL) -> String {
+        approvalStorePath(home: home) + ".lock"
+    }
+
+    private static func approvalStoreArtifacts(home: URL) -> [String] {
+        [approvalStorePath(home: home), approvalLockPath(home: home)]
     }
 
     private static func nextSafeAction(for command: Command) -> String {

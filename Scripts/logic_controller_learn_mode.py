@@ -9,6 +9,8 @@ import sys
 from copy import deepcopy
 from typing import Any
 
+from logic_ui_jxa import parse_jxa_json_result, run_jxa, ui_prelude
+
 PROCESS_NAME = "Logic Pro"
 
 DEFAULT_CONTROLLER_LEARN_MODE_POLICY: dict[str, Any] = {
@@ -156,72 +158,14 @@ class SystemEventsControllerLearnModeRunner:
         self._run = run
 
     def _osascript(self, source: str, timeout: float = 12.0) -> subprocess.CompletedProcess[str]:
-        return self._run(
-            ["/usr/bin/osascript", "-l", "JavaScript"],
-            input=source,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=timeout,
-        )
+        return run_jxa(source, timeout=timeout, run=self._run)
 
     def _jxa_source(self) -> str:
-        candidate_markers = json.dumps(self.policy["candidate_markers"], ensure_ascii=False)
-        return f"""
-const CANDIDATE_MARKERS = {candidate_markers};
-
-function safe(fn, fallback) {{
-  try {{
-    return fn();
-  }} catch (error) {{
-    return fallback;
-  }}
-}}
-
-function str(value) {{
-  return value === undefined || value === null ? "" : String(value);
-}}
-
-function safeName(item) {{
-  const name = safe(() => item.name(), "");
-  if (name) return str(name);
-  const description = safe(() => item.description(), "");
-  if (description) return str(description);
-  return str(safe(() => item.value(), ""));
-}}
-
-function namesOf(collection) {{
-  const output = [];
-  for (let index = 0; index < collection.length; index += 1) {{
-    const name = safeName(collection[index]);
-    if (name) output.push(name);
-  }}
-  return output;
-}}
-
-function namedStates(collection) {{
-  const output = [];
-  for (let index = 0; index < collection.length; index += 1) {{
-    const item = collection[index];
-    const name = safeName(item) || "<unnamed>";
-    output.push({{ name, value: str(safe(() => item.value(), "")) }});
-  }}
-  return output;
-}}
-
-function containsMarker(values) {{
-  return values.some((value) => CANDIDATE_MARKERS.some((marker) => str(value).includes(marker)));
-}}
-
-function collection(container, roleName) {{
-  if (roleName === "button") return safe(() => container.buttons(), []);
-  if (roleName === "checkbox") return safe(() => container.checkboxes(), []);
-  if (roleName === "radio button") return safe(() => container.radioButtons(), []);
-  if (roleName === "static text") return safe(() => container.staticTexts(), []);
-  if (roleName === "menu item") return safe(() => container.menuItems(), []);
-  return [];
-}}
-
+        return ui_prelude(
+            marker_constant="CANDIDATE_MARKERS",
+            markers=self.policy["candidate_markers"],
+            include_menu_items=True,
+        ) + f"""
 function snapshot(container, kind, title) {{
   return {{
     status: "present",
@@ -247,7 +191,7 @@ function labelsFor(candidate) {{
 
 function findCandidate() {{
   const systemEvents = Application("System Events");
-  const process = systemEvents.processes.byName("{PROCESS_NAME}");
+  const process = systemEvents.processes.byName({json.dumps(PROCESS_NAME)});
   if (!safe(() => process.exists(), false)) return {{ status: "not_present", reason: "logic_not_running" }};
   const windows = safe(() => process.windows(), []);
   for (let windowIndex = 0; windowIndex < windows.length; windowIndex += 1) {{
@@ -271,16 +215,7 @@ JSON.stringify(findCandidate());
 """
 
     def _json_result(self, result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
-        try:
-            parsed = json.loads(result.stdout.strip() or "{}")
-        except json.JSONDecodeError:
-            return {
-                "status": "error",
-                "reason": "invalid_jxa_output",
-                "stderr": (result.stderr or "").strip(),
-                "stdout": (result.stdout or "").strip(),
-            }
-        return parsed if isinstance(parsed, dict) else {"status": "error", "reason": "invalid_jxa_output"}
+        return parse_jxa_json_result(result)
 
     def detect(self) -> dict[str, Any]:
         try:

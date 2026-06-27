@@ -63,16 +63,26 @@ struct MixerDispatcher {
             ])
 
         case "set_send":
-            return toolTextResult(
+            return toolStateCResult(
+                .notImplemented,
+                hint:
                 "set_send is not exposed in the production MCP contract because targeted send/bus control is not yet deterministic",
-                isError: true
+                extras: ["operation": "mixer.set_send"]
             )
 
         case "set_output":
-            return toolTextResult("set_output is not exposed in the production MCP contract", isError: true)
+            return toolStateCResult(
+                .notImplemented,
+                hint: "set_output is not exposed in the production MCP contract",
+                extras: ["operation": "mixer.set_output"]
+            )
 
         case "set_input":
-            return toolTextResult("set_input is not exposed in the production MCP contract", isError: true)
+            return toolStateCResult(
+                .notImplemented,
+                hint: "set_input is not exposed in the production MCP contract",
+                extras: ["operation": "mixer.set_input"]
+            )
 
         case "set_master_volume":
             guard let volume = doubleParamOrNil(params, "value", "volume") else {
@@ -90,10 +100,18 @@ struct MixerDispatcher {
             ])
 
         case "toggle_eq":
-            return toolTextResult("toggle_eq is not exposed in the production MCP contract", isError: true)
+            return toolStateCResult(
+                .notImplemented,
+                hint: "toggle_eq is not exposed in the production MCP contract",
+                extras: ["operation": "mixer.toggle_eq"]
+            )
 
         case "reset_strip":
-            return toolTextResult("reset_strip is not exposed in the production MCP contract", isError: true)
+            return toolStateCResult(
+                .notImplemented,
+                hint: "reset_strip is not exposed in the production MCP contract",
+                extras: ["operation": "mixer.reset_strip"]
+            )
 
         case "insert_plugin":
             guard let track = intParamOrNil(params, "track", "track_index", "index"), track >= 0 else {
@@ -108,9 +126,9 @@ struct MixerDispatcher {
             }
             let pluginName = stringParam(params, "plugin_name", "plugin", "name")
             guard let spec = AccessibilityChannel.pluginInsertSpec(named: pluginName) else {
-                return toolTextResult(
+                return toolInvalidParamsResult(
                     "insert_plugin unsupported plugin '\(pluginName)'. Supported stock plugins: Gain, Compressor, Channel EQ",
-                    isError: true
+                    extras: ["operation": "mixer.insert_plugin"]
                 )
             }
             switch strictBoolParam(params, "confirmed") {
@@ -133,9 +151,11 @@ struct MixerDispatcher {
         case "bypass_plugin":
             // Still removed from the public surface: no verified AX/MCU
             // readback path exists for bypass writes yet.
-            return toolTextResult(
+            return toolStateCResult(
+                .notImplemented,
+                hint:
                 "\(command) is not exposed in the production MCP contract; use set_plugin_param via Scripter on the selected track instead",
-                isError: true
+                extras: ["operation": "mixer.\(command)"]
             )
 
         case "set_plugin_param":
@@ -195,9 +215,14 @@ struct MixerDispatcher {
             guard let data = selectResult.message.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let verified = json["verified"] as? Bool, verified == true else {
-                return toolTextResult(
-                    "set_plugin_param refused: track \(track) selection unverified (State B). Cannot safely write plugin parameter to an unverified selected track. select_response=\(selectResult.message)",
-                    isError: true
+                return toolStateCResult(
+                    .readbackMismatch,
+                    hint: "set_plugin_param refused: track \(track) selection unverified (State B). Cannot safely write plugin parameter to an unverified selected track.",
+                    extras: [
+                        "operation": "mixer.set_plugin_param",
+                        "requested_track": track,
+                        "select_response": selectResult.message,
+                    ]
                 )
             }
             return await routedTextResult(router, operation: "plugin.set_param", params: [
@@ -208,9 +233,9 @@ struct MixerDispatcher {
             ])
 
         default:
-            return toolTextResult(
+            return toolInvalidParamsResult(
                 "Unknown mixer command: \(command). Available: set_volume, set_pan, set_master_volume, set_plugin_param, insert_plugin",
-                isError: true
+                extras: ["operation": "mixer.\(command)"]
             )
         }
     }

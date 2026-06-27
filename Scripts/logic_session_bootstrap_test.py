@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
+# noqa: SIZE_OK - bootstrap helper coverage keeps focused fake MCP/bootstrap cases in one test module.
+import json
+import logic_session_bootstrap as bootstrap_module
 import unittest
+from unittest import mock
 
 from logic_session_bootstrap import (
     BootstrapConfig,
     FreshSessionAssessment,
     UISnapshot,
+    bootstrap_fresh_logic_session,
     detect_language,
     evaluate_fresh_session,
     _ui_snapshot_from_native_payload,
@@ -18,6 +23,7 @@ def make_config(expected_language="en", max_tracks=1):
         max_tracks=max_tracks,
         allow_launch=True,
         allow_new_project=True,
+        force_new_project=False,
         confirm_new_track_dialog=True,
         timeout_sec=8.0,
         poll_interval_sec=0.35,
@@ -33,6 +39,7 @@ def make_ui(**overrides):
         system_events_error=None,
         project_picker_visible=False,
         new_track_dialog_visible=False,
+        blocking_dialog_present=False,
     )
     values = base.__dict__.copy()
     values.update(overrides)
@@ -92,6 +99,19 @@ class DetectLanguageTests(unittest.TestCase):
         self.assertIsNone(detect_language(["Archivo", "Editar", "Pista"]))
 
 
+class BootstrapConfigTests(unittest.TestCase):
+    def test_force_new_project_env_flag_defaults_off(self):
+        config = BootstrapConfig.from_env(strict_live=True, env={})
+        self.assertFalse(config.force_new_project)
+
+    def test_force_new_project_env_flag_can_be_enabled(self):
+        config = BootstrapConfig.from_env(
+            strict_live=True,
+            env={"LOGIC_PRO_MCP_BOOTSTRAP_FORCE_NEW": "1"},
+        )
+        self.assertTrue(config.force_new_project)
+
+
 class EvaluateFreshSessionTests(unittest.TestCase):
     def assert_reason(self, assessment: FreshSessionAssessment, reason: str):
         self.assertFalse(assessment.ok)
@@ -120,16 +140,64 @@ class EvaluateFreshSessionTests(unittest.TestCase):
         )
         self.assert_reason(assessment, "language_mismatch")
 
-    def test_blocks_project_picker(self):
+    def test_blocks_modal_project_picker(self):
         assessment = evaluate_fresh_session(
-            ui=make_ui(project_picker_visible=True),
+            ui=make_ui(
+                project_picker_visible=True,
+                blocking_dialog_present=True,
+                logic_window_names=["Untitled 1 - Tracks", "Choose a Project"],
+            ),
             health=make_health(),
             project_payload=make_project(track_count=1),
             tracks_payload=make_tracks(count=1),
             region_count=0,
             config=make_config(),
         )
+        self.assert_reason(assessment, "blocking_dialog_present")
+
+    def test_accepts_nonblocking_project_picker_after_live_track_materializes(self):
+        assessment = evaluate_fresh_session(
+            ui=make_ui(
+                project_picker_visible=True,
+                logic_window_names=["Untitled 1 - Tracks", "Choose a Project"],
+            ),
+            health=make_health(
+                cache={"project": "Untitled 1 - Tracks", "track_count": 1},
+            ),
+            project_payload=make_project(track_count=1),
+            tracks_payload=make_tracks(count=1),
+            region_count=0,
+            config=make_config(),
+        )
+        self.assertTrue(assessment.ok)
+        self.assertEqual(assessment.inferred_track_count, 1)
+
+    def test_blocks_nonblocking_project_picker_without_live_track_evidence(self):
+        assessment = evaluate_fresh_session(
+            ui=make_ui(
+                project_picker_visible=True,
+                logic_window_names=["Untitled 1 - Tracks", "Choose a Project"],
+            ),
+            health=make_health(
+                cache={"project": "Untitled 1 - Tracks", "track_count": 0},
+            ),
+            project_payload=make_project(track_count=0),
+            tracks_payload=make_tracks(count=0),
+            region_count=0,
+            config=make_config(),
+        )
         self.assert_reason(assessment, "project_picker_visible")
+
+    def test_blocks_hidden_blocking_dialog(self):
+        assessment = evaluate_fresh_session(
+            ui=make_ui(blocking_dialog_present=True),
+            health=make_health(),
+            project_payload=make_project(track_count=1),
+            tracks_payload=make_tracks(count=1),
+            region_count=0,
+            config=make_config(),
+        )
+        self.assert_reason(assessment, "blocking_dialog_present")
 
     def test_blocks_placeholder_tracks(self):
         assessment = evaluate_fresh_session(
@@ -200,6 +268,7 @@ class EvaluateFreshSessionTests(unittest.TestCase):
                 "frontmost_bundle_id": "com.apple.logic10",
                 "logic_window_names": ["Untitled 1 - Tracks", "New Tracks"],
                 "logic_menu_items": ["Apple", "Logic Pro", "File", "Edit", "Track", "Navigate"],
+                "blocking_dialog_present": True,
                 "error": None,
             }
         )
@@ -207,8 +276,25 @@ class EvaluateFreshSessionTests(unittest.TestCase):
         assert snapshot is not None
         self.assertEqual(snapshot.detected_language, "en")
         self.assertTrue(snapshot.new_track_dialog_visible)
+        self.assertTrue(snapshot.blocking_dialog_present)
         self.assertFalse(snapshot.project_picker_visible)
         self.assertIsNone(snapshot.system_events_error)
+
+    def test_native_ui_snapshot_payload_preserves_hidden_blocking_dialog_flag(self):
+        snapshot = _ui_snapshot_from_native_payload(
+            {
+                "frontmost_app": "Logic Pro",
+                "frontmost_bundle_id": "com.apple.logic10",
+                "logic_window_names": ["Untitled 1 - Tracks"],
+                "logic_menu_items": ["Apple", "Logic Pro", "File", "Edit", "Track", "Navigate"],
+                "blocking_dialog_present": True,
+                "error": None,
+            }
+        )
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertFalse(snapshot.new_track_dialog_visible)
+        self.assertTrue(snapshot.blocking_dialog_present)
 
     def test_native_ui_snapshot_payload_surfaces_ax_error(self):
         snapshot = _ui_snapshot_from_native_payload(
@@ -238,6 +324,144 @@ class EvaluateFreshSessionTests(unittest.TestCase):
         assert snapshot is not None
         self.assertEqual(snapshot.frontmost_app, "Logic Pro")
         self.assertEqual(snapshot.detected_language, "ko")
+
+
+class ActivationHelperTests(unittest.TestCase):
+    def test_activate_logic_falls_back_to_open_when_osascript_fails(self):
+        fallback_result = mock.Mock(returncode=0)
+        with (
+            mock.patch("logic_session_bootstrap._run_osascript", return_value=None) as run_osascript,
+            mock.patch("logic_session_bootstrap.subprocess.run", return_value=fallback_result) as run_process,
+        ):
+            self.assertTrue(bootstrap_module._activate_logic())
+
+        run_osascript.assert_called_once_with(
+            [f'tell application "{bootstrap_module.LOGIC_APP_NAME}" to activate'],
+            timeout_sec=2.0,
+        )
+        run_process.assert_called_once_with(
+            ["/usr/bin/open", "-a", bootstrap_module.LOGIC_APP_NAME],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+
+
+class BootstrapFreshSessionTests(unittest.TestCase):
+    def test_uses_configured_timeout_for_health_probe(self):
+        health_timeouts: list[float | None] = []
+
+        def encode_tool(payload):
+            return {
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(payload)}],
+                    "isError": False,
+                }
+            }
+
+        def call_tool(tool, command, params, timeout):
+            if tool == "logic_system" and command == "health":
+                health_timeouts.append(timeout)
+                if timeout is None or timeout < 8.0:
+                    return None
+                return encode_tool(make_health())
+            if tool == "logic_system" and command == "refresh_cache":
+                return encode_tool({"status": "ok"})
+            self.fail(f"unexpected tool call: {tool}.{command}")
+
+        def read_resource(uri):
+            resources = {
+                "logic://project/info": make_project(),
+                "logic://tracks": make_tracks(),
+                "logic://tracks/0/regions": [],
+            }
+            return {"result": {"contents": [{"text": json.dumps(resources[uri])}]}}
+
+        def tool_text(response):
+            if response is None:
+                return ""
+            return response["result"]["content"][0]["text"]
+
+        def resource_text(response):
+            return response["result"]["contents"][0]["text"]
+
+        with (
+            mock.patch("logic_session_bootstrap._activate_logic", return_value=True),
+            mock.patch("logic_session_bootstrap.collect_ui_snapshot", return_value=make_ui()),
+            mock.patch("logic_session_bootstrap.time.sleep"),
+        ):
+            result = bootstrap_fresh_logic_session(
+                call_tool=call_tool,
+                read_resource=read_resource,
+                tool_text=tool_text,
+                resource_text=resource_text,
+                strict_live=True,
+                log=lambda _: None,
+                env={"LOGIC_PRO_MCP_BOOTSTRAP_TIMEOUT_SEC": "8.0"},
+            )
+
+        self.assertTrue(result.ok, result.as_dict())
+        self.assertGreaterEqual(len(health_timeouts), 2)
+        self.assertEqual(health_timeouts[0], 8.0)
+
+    def test_launch_observation_timeouts_are_clamped_to_remaining_deadline(self):
+        health_timeouts: list[float | None] = []
+
+        class FakeClock:
+            def __init__(self):
+                self.now = 0.0
+
+            def time(self):
+                current = self.now
+                self.now += 1.0
+                return current
+
+        def encode_tool(payload):
+            return {
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(payload)}],
+                    "isError": False,
+                }
+            }
+
+        def call_tool(tool, command, params, timeout):
+            if tool == "logic_system" and command == "health":
+                health_timeouts.append(timeout)
+                return encode_tool(
+                    make_health(
+                        logic_pro_running=False,
+                        logic_pro_has_window=False,
+                        logic_pro_has_document=False,
+                    )
+                )
+            if tool == "logic_project" and command == "launch":
+                return encode_tool({"success": True})
+            self.fail(f"unexpected tool call: {tool}.{command}")
+
+        def tool_text(response):
+            return response["result"]["content"][0]["text"]
+
+        fake_clock = FakeClock()
+        with (
+            mock.patch("logic_session_bootstrap.time.sleep"),
+            mock.patch("logic_session_bootstrap.time.time", side_effect=fake_clock.time),
+        ):
+            result = bootstrap_fresh_logic_session(
+                call_tool=call_tool,
+                read_resource=lambda uri: self.fail(f"unexpected read_resource: {uri}"),
+                tool_text=tool_text,
+                resource_text=lambda response: "",
+                strict_live=True,
+                log=lambda _: None,
+                env={"LOGIC_PRO_MCP_BOOTSTRAP_TIMEOUT_SEC": "8.0"},
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "logic_launch_timeout")
+        loop_health_timeouts = health_timeouts[1:-1]
+        self.assertTrue(loop_health_timeouts, health_timeouts)
+        self.assertTrue(all(timeout is not None and timeout < 8.0 for timeout in loop_health_timeouts))
 
 
 if __name__ == "__main__":

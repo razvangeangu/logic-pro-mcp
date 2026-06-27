@@ -13,13 +13,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - `record_sequence` no longer re-promotes a lower-level `midi.import_file` State B GM Device / External MIDI audibility downgrade into verified success; it now fails closed with `audibility_unverified` before a silent Bounce can be claimed.
 - `logic://project/audit` now reports `external_midi_regions_bounce_risk` as an export blocker when MIDI regions sit on GM Device / External MIDI tracks, preventing track/region readback from being mistaken for audible-routing evidence.
 - `logic_project.bounce` now runs the audit preflight and refuses `export_readiness_blocked` before opening the Bounce dialog when export blockers are present.
+- `logic_tracks.scan_library` now defaults to the non-mutating disk scanner; callers can still request the legacy live AX Library Panel walk with `{ "mode": "ax" }`.
+- Public documentation policy now explicitly allows `docs/prd/` and `docs/tickets/` for public issue remediation plans while keeping internal PRDs, private ticket boards, and local live-evidence work files out of `docs/`.
 
 ## [3.7.1] — 2026-06-23
 
 ### Fixed
 
 - Public documentation/runtime-surface corrections after v3.7.0: README, API, setup, troubleshooting, docs inventory, and MIDIKeyCommands health detail now reflect the shipped v3.7.x behavior for verified pause/cycle-range outcomes, marker rename refusal, `set_zoom` Accessibility readback, `project/info.trackCount` live-cache promotion, and public mixer dispatcher boundaries.
-- Public docs inventory is now minimal and repository-facing: `docs/API.md`, `docs/SETUP.md`, `docs/TROUBLESHOOTING.md`, the README demo GIF/MP4, and the registry/social thumbnail. Internal PRDs, ticket boards, spike notes, maintainer handoffs, historical live-verify notes, and generated demo harness files were removed from the public docs tree.
+- Public docs inventory was narrowed for the v3.7.1 release: `docs/API.md`, `docs/SETUP.md`, `docs/TROUBLESHOOTING.md`, the README demo GIF/MP4, and the registry/social thumbnail stayed public. Internal-only PRDs, private ticket boards, spike notes, maintainer handoffs, historical live-verify notes, and generated demo harness files were removed from the public docs tree.
 - Release/version surfaces now point at v3.7.1 across `ServerConfig`, manifest metadata, official MCP `server.json`, installer defaults, Homebrew Formula version, README, setup docs, and version-consistency tests.
 
 ## [3.7.0] — 2026-06-23

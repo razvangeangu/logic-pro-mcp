@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 import Testing
 @testable import LogicProMCP
@@ -57,6 +58,75 @@ actor FailingStartChannel: Channel {
     func healthCheck() async -> ChannelHealth {
         .unavailable("startup failed")
     }
+}
+
+private final class BlockingStopProbe: @unchecked Sendable {
+    private let entered = DispatchSemaphore(value: 0)
+    private let release = DispatchSemaphore(value: 0)
+
+    func waitUntilStopCalled(timeout: DispatchTimeInterval = .seconds(1)) -> Bool {
+        entered.wait(timeout: .now() + timeout) == .success
+    }
+
+    func unblock() {
+        release.signal()
+    }
+
+    func blockUntilReleased() {
+        entered.signal()
+        release.wait()
+    }
+}
+
+private actor BlockingStopChannel: Channel {
+    nonisolated let id: ChannelID
+    private let probe: BlockingStopProbe
+
+    init(id: ChannelID, probe: BlockingStopProbe) {
+        self.id = id
+        self.probe = probe
+    }
+
+    func start() async throws {}
+
+    func stop() async {
+        probe.blockUntilReleased()
+    }
+
+    func execute(operation: String, params: [String : String]) async -> ChannelResult {
+        .success("Mock: \(operation)")
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        .healthy(detail: "blocking stop channel")
+    }
+}
+
+private actor StopAllCompletionProbe {
+    private var completed = false
+
+    func markCompleted() {
+        completed = true
+    }
+
+    func isCompleted() -> Bool {
+        completed
+    }
+}
+
+private func waitUntil(
+    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 5_000_000,
+    condition: @escaping @Sendable () async -> Bool
+) async throws -> Bool {
+    let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
+    while ContinuousClock.now < deadline {
+        if await condition() {
+            return true
+        }
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+    return await condition()
 }
 
 @Test func testRouterMixerWritePrefersAccessibilityForVerifiedReadback() async {
@@ -577,4 +647,23 @@ private func verifiedReadbackMismatchEnvelope() -> String {
     #expect(report.degraded[.accessibility] != nil)
     #expect(report.hasFailures == false)
     #expect(report.hasDegraded == true)
+}
+
+@Test func testRouterStopAllCanSkipAccessibilityDuringForcedShutdown() async throws {
+    let probe = BlockingStopProbe()
+    let completion = StopAllCompletionProbe()
+    let router = ChannelRouter()
+    await router.register(BlockingStopChannel(id: .accessibility, probe: probe))
+    await router.register(MockChannel(id: .coreMIDI))
+
+    let stopTask = Task {
+        await router.stopAll(excluding: [.accessibility])
+        await completion.markCompleted()
+    }
+
+    #expect(try await waitUntil { await completion.isCompleted() })
+    #expect(probe.waitUntilStopCalled(timeout: .milliseconds(10)) == false)
+
+    probe.unblock()
+    await stopTask.value
 }

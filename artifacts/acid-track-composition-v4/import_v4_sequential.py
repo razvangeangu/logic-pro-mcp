@@ -22,6 +22,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parents[1]
 REQUESTS = ROOT / "v4-import-requests.jsonl"
+TMP_MIDI_ROOT = Path("/tmp") / "LogicProMCP"
 DEFAULT_RESPONSE_TIMEOUT_SEC = 45.0
 
 
@@ -33,12 +34,14 @@ def prepare_tmp_midis(requests: list[dict[str, Any]]) -> list[Path]:
     copied: list[Path] = []
     for request in requests:
         params = request["params"]["arguments"]["params"]
-        target = Path(params["path"])
-        source = ROOT / "midi" / target.name
+        requested_path = Path(params["path"])
+        source = requested_path if requested_path.is_absolute() else ROOT / requested_path
         if not source.exists():
             raise FileNotFoundError(source)
+        target = TMP_MIDI_ROOT / requested_path.name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+        params["path"] = str(target)
         copied.append(target)
     return copied
 

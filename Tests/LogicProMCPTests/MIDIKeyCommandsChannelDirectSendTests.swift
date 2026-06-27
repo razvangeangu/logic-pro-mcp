@@ -93,6 +93,26 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     }
 }
 
+@Test func testKeycmdSendNoteNoteOffFailureReturnsStateC() async throws {
+    let (channel, transport) = try await makeStartedChannel()
+    await transport.setFailOnSendAttempts([2])
+
+    let result = await channel.execute(operation: "midi.send_note.keycmd", params: [
+        "note": "60",
+        "velocity": "100",
+        "channel": "0",
+        "duration_ms": "1",
+    ])
+
+    #expect(!result.isSuccess)
+    let envelope = decodeEnvelope(result.message)
+    #expect(envelope?["error"] as? String == "ax_write_failed")
+    #expect(envelope?["operation"] as? String == "midi.send_note.keycmd")
+    #expect(envelope?["note_off_failed"] as? Bool == true)
+    #expect(envelope?["note_on_sent"] as? Bool == true)
+    #expect(await transport.sentBytes == [[0x90, 60, 100]])
+}
+
 // MARK: - 3. Chord
 
 @Test func testKeycmdSendChordMultipleNotes() async throws {
@@ -188,6 +208,24 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     #expect(envelope?["reason"] as? String == "readback_unavailable")
     #expect(envelope?["via"] as? String == "midi-keycmd-direct-send")
     #expect(envelope?["note_count"] as? Int == 3)
+}
+
+@Test func testKeycmdPlaySequenceNoteOffFailureReturnsStateC() async throws {
+    let (channel, transport) = try await makeStartedChannel()
+    await transport.setFailOnSendAttempts([2])
+
+    let result = await channel.execute(operation: "midi.play_sequence.keycmd", params: [
+        "notes": "60,0,1,100,1",
+    ])
+
+    #expect(!result.isSuccess)
+    let envelope = decodeEnvelope(result.message)
+    #expect(envelope?["error"] as? String == "ax_write_failed")
+    #expect(envelope?["operation"] as? String == "midi.play_sequence.keycmd")
+    #expect(envelope?["note_off_failed"] as? Bool == true)
+    #expect(envelope?["failed_note_off_count"] as? Int == 1)
+    #expect(envelope?["note_on_count"] as? Int == 1)
+    #expect(await transport.sentBytes == [[0x90, 60, 100]])
 }
 
 // MARK: - 8. Play Sequence (parser failure)

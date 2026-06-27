@@ -104,14 +104,9 @@ enum AXMouseHelper {
         }
     }
 
-    /// Post a sequence of keystrokes for an arbitrary ASCII string. Uses
-    /// Unicode text injection so we don't have to maintain a full virtual-key
-    /// table — relies on the active input source to resolve characters. Used
-    /// by the Library type-to-jump path when we need to seek to a preset that
-    /// is scrolled out of the AX-visible but screen-invisible viewport.
     static func typeText(_ s: String, runtime: Runtime = .production) {
-        for ch in s.unicodeScalars {
-            _ = runtime.postUnicodeScalar(UniChar(ch.value & 0xFFFF))
+        for codeUnit in s.utf16 {
+            _ = runtime.postUnicodeScalar(codeUnit)
             runtime.sleepMicros(12_000)
         }
     }

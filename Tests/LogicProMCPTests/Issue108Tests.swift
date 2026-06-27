@@ -190,9 +190,10 @@ struct Issue108Tests {
         let path = tempMIDIFile(); defer { try? FileManager.default.removeItem(atPath: path) }
         let result = await AccessibilityChannel.defaultImportMIDIFile(
             path: path,
-            executeScript: { _ in .success("MENU_ERROR: not found") },
+            executeScript: { _ in .success(#"{"result":"MENU_ERROR: not found"}"#) },
             trackCount: { 1 },
             trackNames: { [] },
+            regionInfos: { .success([]) },
             deltaPoll: {}
         )
         #expect(!result.isSuccess)
@@ -206,6 +207,7 @@ struct Issue108Tests {
             executeScript: { _ in .success("OK") },
             trackCount: { 1 },
             trackNames: { [] },
+            regionInfos: { .success([]) },
             deltaPoll: {}
         )
         #expect(!result.isSuccess)

@@ -24,6 +24,25 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
     (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
 }
 
+private actor SlowSendMCUTransport: MCUTransportProtocol {
+    let delayNs: UInt64
+
+    init(delayNs: UInt64) {
+        self.delayNs = delayNs
+    }
+
+    func send(_ bytes: [UInt8]) async {
+        _ = bytes
+        try? await Task.sleep(nanoseconds: delayNs)
+    }
+
+    func start(onReceive: @escaping @Sendable (MIDIFeedback.Event) -> Void) async throws {
+        _ = onReceive
+    }
+
+    func stop() {}
+}
+
 @Test func testSetVolumeStateBIncludesMCUDiagnostics_disconnected() async {
     // No feedback has ever arrived → mcuConnection defaults all false / nil.
     let transport = MockMCUTransport()
@@ -296,6 +315,37 @@ private func decodeMixerJSON(_ s: String) -> [String: Any] {
         #expect(ageMs < 2000, "fresh feedback case must report sub-2s age, got \(ageMs)")
     } else {
         Issue.record("fresh-feedback case must produce an Int age, not null")
+    }
+}
+
+@Test func testSetVolumeDiagnosticsAgeAnchorsToWriteStartUnderSlowTransport() async {
+    let transport = SlowSendMCUTransport(delayNs: 2_500_000_000)
+    let cache = StateCache()
+    var conn = await cache.getMCUConnection()
+    conn.isConnected = true
+    conn.registeredAsDevice = true
+    conn.portName = "LogicProMCP-MCU-Internal"
+    conn.lastFeedbackAt = Date()
+    await cache.updateMCUConnection(conn)
+
+    let channel = MCUChannel(transport: transport, cache: cache)
+    let result = await channel.execute(
+        operation: "mixer.set_volume",
+        params: ["index": "0", "volume": "0.5"]
+    )
+    #expect(result.isSuccess)
+    let obj = decodeMixerJSON(result.message)
+    #expect(!((obj["verified"] as? Bool)!))
+    #expect((obj["reason"] as? String)?.hasPrefix("echo_timeout_") == true)
+    #expect((obj["mcu_connected"] as? Bool)!)
+    #expect((obj["mcu_registered"] as? Bool)!)
+    if let ageMs = obj["mcu_last_feedback_age_ms"] as? Int {
+        #expect(
+            ageMs < 1000,
+            "write-start snapshot must stay fresh even if the send path stalls, got \(ageMs)"
+        )
+    } else {
+        Issue.record("slow-send fresh case must produce an Int age, not null")
     }
 }
 

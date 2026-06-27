@@ -1,24 +1,30 @@
 import Foundation
 import Testing
 
-private func repositoryRootURL() -> URL {
-    URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-}
-
-private func scriptContents(_ relativePath: String) throws -> String {
-    try String(contentsOf: repositoryRootURL().appendingPathComponent(relativePath), encoding: .utf8)
-}
-
 @Test func testInstallScriptRequiresPinnedReleaseVerificationByDefault() throws {
     let script = try scriptContents("Scripts/install.sh")
 
+    #expect(script.contains("LogicProMCP-macOS-universal.tar.gz"))
     #expect(script.contains("LOGIC_PRO_MCP_VERSION"))
     #expect(script.contains("LOGIC_PRO_MCP_SHA256"))
+    #expect(script.contains("LOGIC_PRO_MCP_SHARE_DIR"))
     #expect(script.contains("mutable 'latest' installs are not allowed in enterprise mode"))
     #expect(script.contains("Fetching release SHA256 manifest"))
+}
+
+@Test func testPinnedInstallerDocsUseArchiveSHAEntry() throws {
+    let readme = try scriptContents("README.md")
+    let setup = try scriptContents("docs/SETUP.md")
+    let installer = try scriptContents("Scripts/install.sh")
+
+    #expect(readme.contains("v3.7.1/Scripts/install.sh"))
+    #expect(setup.contains("v3.7.1/Scripts/install.sh"))
+    #expect(installer.contains("awk -v artifact=\"$ARCHIVE\" '$2 == artifact {print $1}'"))
+    #expect(readme.contains("verifies the downloaded `LogicProMCP-macOS-universal.tar.gz` archive"))
+    #expect(readme.contains("LogicProMCP-macOS-universal.tar.gz SHA256SUMS entry"))
+    #expect(setup.contains("sha256 for LogicProMCP-macOS-universal.tar.gz entry"))
+    #expect(!readme.contains("bare `LogicProMCP` binary"))
+    #expect(!setup.contains("sha256 for bare LogicProMCP entry"))
 }
 
 @Test func testInstallScriptIncludesSignatureAndGatekeeperVerification() throws {
@@ -30,6 +36,8 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(script.contains("spctl --assess --type execute"))
     #expect(script.contains("RELEASE-METADATA.json"))
     #expect(script.contains("could not resolve TeamIdentifier from release metadata"))
+    #expect(script.contains("require_command \"cliclick\""))
+    #expect(script.contains("brew install cliclick"))
 }
 
 @Test func testInstallScriptExtractsTeamIDFromSingleLineReleaseMetadata() throws {
@@ -43,6 +51,11 @@ private func scriptContents(_ relativePath: String) throws -> String {
 @Test func testInstallScriptRegistersClaudeAndKeyCommandsByDefault() throws {
     let script = try scriptContents("Scripts/install.sh")
 
+    #expect(script.contains("SETUP.md"))
+    #expect(script.contains("logic_bounce.py"))
+    #expect(script.contains("logic_bounce_ui.py"))
+    #expect(script.contains("logic_ui_jxa.py"))
+    #expect(script.contains("logic_input_source.py"))
     #expect(script.contains("LOGIC_PRO_MCP_REGISTER_CLAUDE"))
     #expect(script.contains("Registering with Claude Code"))
     #expect(script.contains("LOGIC_PRO_MCP_INSTALL_KEYCMDS"))
@@ -52,13 +65,23 @@ private func scriptContents(_ relativePath: String) throws -> String {
     // for Manual MIDI Learn.
     #expect(script.contains("Staging Key Commands mapping reference"))
     #expect(script.contains("LOGIC_PRO_MCP_INSTALL_DIR"))
+    #expect(script.contains("LOGIC_PRO_MCP_SHARE_DIR"))
     #expect(script.contains("LOGIC_PRO_MCP_SKIP_SUDO"))
     #expect(script.contains("--approve-channel MIDIKeyCommands"))
     #expect(script.contains("--approve-channel Scripter"))
+    #expect(script.contains("LogicProMCP-Scripter.js"))
+}
+
+@Test func testInstallScriptEscalatesWhenEitherInstallOrSharePathNeedsSudo() throws {
+    let script = try scriptContents("Scripts/install.sh")
+
+    #expect(script.contains("path_writable_without_sudo"))
+    #expect(script.contains("path_writable_without_sudo \"$INSTALL_DIR\" && path_writable_without_sudo \"$SHARE_DIR\""))
 }
 
 @Test func testReleaseWorkflowDualModesAndPublishesMetadata() throws {
     let workflow = try scriptContents(".github/workflows/release.yml")
+    let packageScript = try scriptContents("Scripts/release-package.sh")
 
     // Dual-mode release: Developer ID credentials produce notarized artifacts;
     // otherwise stable and prerelease tags use the historical ADHOC path.
@@ -70,15 +93,30 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(!workflow.contains("Do not push stable tags manually"))
     #expect(!workflow.contains("ALLOW_ADHOC_STABLE"))
     #expect(workflow.contains("Validate notarization secrets"))
+    #expect(workflow.contains("bash Scripts/release-build-universal.sh"))
     #expect(workflow.contains("is required for a notarized release build"))
     #expect(workflow.contains("Codesign binary (Developer ID)"))
     #expect(workflow.contains("Codesign binary (ADHOC)"))
     #expect(workflow.contains("codesign --force --sign - LogicProMCP"))
-    #expect(workflow.contains("RELEASE-METADATA.json"))
+    #expect(workflow.contains("bash Scripts/release-package.sh"))
+    #expect(workflow.contains("bash Scripts/release-verify-formula-install-paths.sh"))
     #expect(workflow.contains("validate-install"))
     #expect(workflow.contains("macos-15"))
     #expect(workflow.contains("macos-14"))
     #expect(workflow.contains("LOGIC_PRO_MCP_INSTALL_DIR"))
+    #expect(workflow.contains("LOGIC_PRO_MCP_SHARE_DIR"))
+    #expect(workflow.contains("LogicProMCP-macOS-universal.tar.gz"))
+    #expect(workflow.contains("test -f \"$LOGIC_PRO_MCP_SHARE_DIR/logic_ui_jxa.py\""))
+    #expect(packageScript.contains("RELEASE-METADATA.json"))
+    #expect(packageScript.contains("Scripts/logic_bounce.py"))
+    #expect(packageScript.contains("Scripts/logic_bounce_ui.py"))
+    #expect(packageScript.contains("Scripts/logic_ui_jxa.py"))
+    #expect(packageScript.contains("Scripts/logic_input_source.py"))
+    #expect(packageScript.contains("APPLE_NOTARY_TEAM_ID is required when RELEASE_MODE=notarized"))
+    #expect(packageScript.contains("rm -f LogicProMCP-macOS-universal.tar.gz LogicProMCP-macOS-arm64.tar.gz SHA256SUMS.txt RELEASE-METADATA.json"))
+    #expect(packageScript.contains("binary_file=\"$binary_dir/$binary_name\""))
+    #expect(packageScript.contains("python3 - \"$release_version\" \"$team_id\" \"$signing\" \"$arch_json\""))
+    #expect(try scriptContents("Formula/logic-pro-mcp.rb").contains("depends_on \"cliclick\""))
 }
 
 @Test func testReleaseWorkflowMarksHyphenTagsAsPrereleases() throws {
@@ -121,8 +159,18 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(shell.contains("export LLVM_PROFILE_FILE"))
 }
 
+@Test func testStrictLiveE2EBridgeUsesRawStdIOCaptureInsteadOfPaneMirroring() throws {
+    let shell = try scriptContents("Scripts/live-e2e-test.sh")
+
+    #expect(shell.contains("tee -a ${CAPTURE_FILE_COMMAND}"))
+    #expect(!shell.contains("capture-pane -t \"$SESSION\""))
+    #expect(!shell.contains("tmux send-keys -t \"$SESSION\" -l"))
+    #expect(!shell.contains("CAPTURE_PID"))
+    #expect(!shell.contains("SENDER_PID"))
+}
+
 @Test func testScriptsFolderNoLongerShipsOneOffSpikeHarnesses() {
-    let root = repositoryRootURL()
+    let root = installScriptContractRepositoryRootURL()
     let legacyPaths = [
         "Scripts/analysis-to-logic.py",
         "Scripts/issue7_live_verify.sh",
@@ -149,6 +197,12 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(!script.contains("There is intentionally no override"))
     #expect(!script.contains("LOGIC_PRO_MCP_ALLOW_ADHOC_STABLE"))
     #expect(script.contains("RELEASE_FLAGS=\"--prerelease\""))
+    #expect(script.contains("Scripts/logic_bounce.py"))
+    #expect(script.contains("Scripts/logic_bounce_ui.py"))
+    #expect(script.contains("Scripts/logic_ui_jxa.py"))
+    #expect(script.contains("Scripts/logic_input_source.py"))
+    #expect(script.contains("LOGIC_PRO_MCP_SHA256=$TARBALL_SHA"))
+    #expect(!script.contains("LOGIC_PRO_MCP_SHA256=$BINARY_SHA"))
     #expect(script.contains("could not verify remote tag availability"))
     #expect(script.contains("Refusing to continue because publishing could race"))
 }
@@ -169,11 +223,21 @@ private func scriptContents(_ relativePath: String) throws -> String {
     #expect(script.contains("git push origin \"$VERSION\""))
 }
 
+@Test func testFormulaClaudeRegistrationCaveatIncludesShareDirEnv() throws {
+    let formula = try scriptContents("Formula/logic-pro-mcp.rb")
+
+    #expect(formula.contains("claude mcp add --scope user logic-pro -e LOGIC_PRO_MCP_SHARE_DIR=\"#\\{pkgshare\\}\" -- LogicProMCP") == false)
+    #expect(formula.contains("claude mcp add --scope user logic-pro -e LOGIC_PRO_MCP_SHARE_DIR=\"#{pkgshare}\" -- LogicProMCP"))
+}
+
 @Test func testUninstallScriptRemovesClaudeRegistrationAndKeepsManualScripterReminder() throws {
     let script = try scriptContents("Scripts/uninstall.sh")
 
     #expect(script.contains("claude mcp remove logic-pro"))
     #expect(script.contains("Remove Scripter MIDI FX"))
     #expect(script.contains("APPROVAL_STORE"))
+    #expect(script.contains("LOGIC_PRO_MCP_SHARE_DIR"))
+    #expect(script.contains("Removed shared assets"))
     #expect(script.contains("Removed operator approvals"))
+    #expect(script.contains("APPROVAL_LOCK"))
 }

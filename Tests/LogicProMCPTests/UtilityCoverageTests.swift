@@ -17,17 +17,20 @@ private struct FailingJSONValue: Encodable {
     #expect((try? JSONSerialization.jsonObject(with: Data(json.utf8))) != nil)
 }
 
-@Test func testDispatcherSupportHelpersUseFallbackValues() {
+@Test func testDispatcherSupportStrictHelpersReturnNilForMissingOrInvalidValues() {
     let params: [String: Value] = [
-        "numbers": .array([.int(60), .int(64), .int(67)]),
-        "name": .string("Lead"),
+        "badInt": .double(1.5),
+        "badDouble": .string("not-a-number"),
+        "badBool": .int(2),
     ]
 
-    #expect(intParam(params, "missing", default: 7) == 7)
-    #expect(doubleParam(params, "missing", default: 0.25) == 0.25)
+    #expect(intParamOrNil(params, "missing") == nil)
+    #expect(intParamOrNil(params, "badInt") == nil)
+    #expect(doubleParamOrNil(params, "missing") == nil)
+    #expect(doubleParamOrNil(params, "badDouble") == nil)
+    #expect(boolParamOrNil(params, "missing") == nil)
+    #expect(boolParamOrNil(params, "badBool") == nil)
     #expect(stringParam(params, "missing", default: "fallback") == "fallback")
-    #expect(boolParam(params, "missing", default: true) == true)
-    #expect(csvIntListOrStringParam(params, key: "numbers") == "60,64,67")
 }
 
 @Test func testDispatcherSupportHelpersRespectProvidedValues() {
@@ -39,9 +42,8 @@ private struct FailingJSONValue: Encodable {
         "numbers": .string("1,2,3"),
     ]
 
-    #expect(intParam(params, "track", default: 0) == 9)
-    #expect(doubleParam(params, "tempo", default: 0) == 128.5)
+    #expect(intParamOrNil(params, "track") == 9)
+    #expect(doubleParamOrNil(params, "tempo") == 128.5)
     #expect(stringParam(params, "name", default: "") == "Verse")
-    #expect(boolParam(params, "enabled", default: true) == false)
-    #expect(csvIntListOrStringParam(params, key: "numbers") == "1,2,3")
+    #expect(boolParamOrNil(params, "enabled") == false)
 }

@@ -3,8 +3,8 @@ import Testing
 
 /// v3.0.6 — verifies the `library.scan_all` mode dispatch. Ralph round 2
 /// requires this test to exist so a future regression that silently flips
-/// the default back to `disk` (or drops a mode entirely) is caught by the
-/// test suite rather than by end-user reports.
+/// the default back to the live AX scanner (or drops a mode entirely) is
+/// caught by the test suite rather than by end-user reports.
 ///
 /// We exercise `AccessibilityChannel.parseScanMode` directly — a pure,
 /// isolated function that is the single source of truth for the
@@ -16,14 +16,14 @@ import Testing
 @Suite("v3.0.6 library.scan_all mode routing")
 struct ScanLibraryModeRoutingTests {
 
-    @Test("default (nil) → ax")
-    func defaultIsAX() {
-        #expect(AccessibilityChannel.parseScanMode(nil) == .ax)
+    @Test("default (nil) → disk")
+    func defaultIsDisk() {
+        #expect(AccessibilityChannel.parseScanMode(nil) == .disk)
     }
 
-    @Test("empty string → ax")
-    func emptyStringIsAX() {
-        #expect(AccessibilityChannel.parseScanMode("") == .ax)
+    @Test("empty string → disk")
+    func emptyStringIsDisk() {
+        #expect(AccessibilityChannel.parseScanMode("") == .disk)
     }
 
     @Test("explicit ax → ax")
@@ -48,18 +48,16 @@ struct ScanLibraryModeRoutingTests {
         #expect(AccessibilityChannel.parseScanMode("BOTH") == .both)
     }
 
-    @Test("unknown mode falls back to ax (not disk — v3.0.6 regression guard)")
-    func unknownFallsBackToAX() {
-        #expect(AccessibilityChannel.parseScanMode("filesystem") == .ax)
-        #expect(AccessibilityChannel.parseScanMode("legacy") == .ax)
-        #expect(AccessibilityChannel.parseScanMode("xyz") == .ax)
+    @Test("unknown mode falls back to disk")
+    func unknownFallsBackToDisk() {
+        #expect(AccessibilityChannel.parseScanMode("filesystem") == .disk)
+        #expect(AccessibilityChannel.parseScanMode("legacy") == .disk)
+        #expect(AccessibilityChannel.parseScanMode("xyz") == .disk)
     }
 
-    /// Dedicated regression test for the v3.0.5 bug: the default MUST NOT
-    /// be `.disk`. Anyone re-flipping it will trip this assertion loudly.
-    @Test("regression: v3.0.5 default-to-disk bug does not recur")
-    func regressionNoDefaultToDisk() {
-        #expect(AccessibilityChannel.parseScanMode(nil) != .disk)
-        #expect(AccessibilityChannel.parseScanMode("") != .disk)
+    @Test("regression: unattended default does not click through live AX panel")
+    func regressionNoDefaultToAX() {
+        #expect(AccessibilityChannel.parseScanMode(nil) != .ax)
+        #expect(AccessibilityChannel.parseScanMode("") != .ax)
     }
 }

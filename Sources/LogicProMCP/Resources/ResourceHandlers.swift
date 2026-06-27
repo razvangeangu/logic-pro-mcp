@@ -1337,13 +1337,10 @@ extension ResourceHandlers {
         // (~/Library/Application Support/LogicProMCP/, <CWD>/Resources/,
         // ~/Music/Logic/) plus an optional additive `LOGIC_PRO_MCP_INVENTORY_ALLOWLIST`.
         let prefixes = allowedPrefixes ?? defaultLibraryInventoryAllowedPrefixes()
-        let resolvedDir: String = {
-            // Use the resolved file's parent dir + "/" so a file *exactly at*
-            // a prefix boundary (e.g. `prefix=/foo/`, `file=/foo/x.json`)
-            // matches via standard hasPrefix.
-            return resolved
-        }()
-        let inAllowlist = prefixes.contains { resolvedDir.hasPrefix($0) }
+        // Prefixes are normalized with a trailing "/", so comparing the full
+        // resolved file path accepts files under the prefix while rejecting
+        // sibling-prefix paths such as `/foo-evil/x.json` for prefix `/foo/`.
+        let inAllowlist = prefixes.contains { resolved.hasPrefix($0) }
         guard inAllowlist else {
             Log.warn(
                 "library-inventory path rejected (outside allowlist): raw=\(rawPath), resolved=\(resolved), allowlist=\(prefixes.joined(separator: ", "))",
