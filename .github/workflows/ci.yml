@@ -21,9 +21,6 @@ jobs:
       - name: Build
         run: swift build -c release
 
-      - name: Run tests
-        run: swift test -Xswiftc -suppress-warnings --no-parallel
-
       - name: Coverage report
         # H-4 (2026-05-08 enterprise review) closed in v3.4.0: re-armed
         # the coverage gate. Pre-fix this step disabled shell error handling
