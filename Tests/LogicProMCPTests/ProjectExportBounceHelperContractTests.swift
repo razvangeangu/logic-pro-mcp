@@ -4,6 +4,7 @@ import Testing
 
 @Suite("Project export bounce helper contract", .serialized)
 struct ProjectExportBounceHelperContractTests {
+    // Use nonexistent fixture roots; real /opt/homebrew can make URL stats stall on CI.
     private static let trustedCliclick = "/opt/homebrew/bin/cliclick"
 
     @Test("resolver honors LOGIC_PRO_MCP_SHARE_DIR for custom install layouts")
@@ -37,14 +38,14 @@ struct ProjectExportBounceHelperContractTests {
             currentDirectoryPath: "/tmp/elsewhere",
             executablePath: nil,
             commandLineExecutablePath: "LogicProMCP",
-            processExecutablePath: "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/bin/LogicProMCP",
+            processExecutablePath: "/private/tmp/lpmcp-cellar-fixture/Cellar/logic-pro-mcp/3.7.1/bin/LogicProMCP",
             fileExists: {
-                $0 == "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
+                $0 == "/private/tmp/lpmcp-cellar-fixture/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
             },
             resolveSymlinks: { $0 }
         )
         #expect(
-            homebrew == "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
+            homebrew == "/private/tmp/lpmcp-cellar-fixture/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
         )
     }
 
@@ -88,14 +89,14 @@ struct ProjectExportBounceHelperContractTests {
         let homebrew = ProjectExportExecutor.resolveBounceHelperPath(
             environment: [:],
             currentDirectoryPath: "/tmp/elsewhere",
-            executablePath: "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/bin/LogicProMCP",
+            executablePath: "/private/tmp/lpmcp-cellar-fixture/Cellar/logic-pro-mcp/3.7.1/bin/LogicProMCP",
             fileExists: {
-                $0 == "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
+                $0 == "/private/tmp/lpmcp-cellar-fixture/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
             },
             resolveSymlinks: { $0 }
         )
         #expect(
-            homebrew == "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
+            homebrew == "/private/tmp/lpmcp-cellar-fixture/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
         )
     }
 

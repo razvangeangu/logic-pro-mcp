@@ -37,7 +37,7 @@ extension ProjectExportExecutor {
         let searchPath = environment["PATH"] ?? "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         for entry in searchPath.split(separator: Character(pathSeparator)) {
             guard !entry.isEmpty else { continue }
-            let candidate = URL(fileURLWithPath: String(entry))
+            let candidate = URL(fileURLWithPath: String(entry), isDirectory: true)
                 .appendingPathComponent(trimmed)
                 .path
             if isExecutable(candidate) {
@@ -56,9 +56,9 @@ extension ProjectExportExecutor {
     ) -> String? {
         let candidates = ([environment["LOGIC_PRO_MCP_CLICLICK"]] + trustedCliclickPaths).compactMap { $0 }
         for candidate in candidates {
-            let normalized = URL(fileURLWithPath: candidate).standardizedFileURL.path
+            let normalized = URL(fileURLWithPath: candidate, isDirectory: false).standardized.path
             guard normalized.hasPrefix("/") else { continue }
-            let parent = URL(fileURLWithPath: normalized).deletingLastPathComponent().path
+            let parent = URL(fileURLWithPath: normalized, isDirectory: false).deletingLastPathComponent().path
             guard trustedCliclickPaths.contains(normalized) else { continue }
             guard let attrs = try? attributesOfItem(parent),
                   let permissions = attrs[.posixPermissions] as? NSNumber,
@@ -89,7 +89,7 @@ extension ProjectExportExecutor {
         for candidate in [overrideExecutablePath, processExecutablePath] {
             guard let candidate = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !candidate.isEmpty else { continue }
-            return URL(fileURLWithPath: candidate).standardizedFileURL.path
+            return URL(fileURLWithPath: candidate, isDirectory: false).standardized.path
         }
         guard let commandLineExecutablePath = commandLineExecutablePath?.trimmingCharacters(in: .whitespacesAndNewlines),
               !commandLineExecutablePath.isEmpty,
@@ -97,7 +97,7 @@ extension ProjectExportExecutor {
         else {
             return nil
         }
-        return URL(fileURLWithPath: commandLineExecutablePath).standardizedFileURL.path
+        return URL(fileURLWithPath: commandLineExecutablePath, isDirectory: false).standardized.path
     }
 
     static func bounceHelperCandidatePaths(
@@ -112,7 +112,7 @@ extension ProjectExportExecutor {
         func appendCandidate(_ candidate: String?) {
             guard let candidate = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !candidate.isEmpty else { return }
-            let normalized = URL(fileURLWithPath: candidate).standardizedFileURL.path
+            let normalized = URL(fileURLWithPath: candidate, isDirectory: false).standardized.path
             if !candidates.contains(normalized) {
                 candidates.append(normalized)
             }
@@ -121,7 +121,7 @@ extension ProjectExportExecutor {
         appendCandidate(environment["LOGIC_PRO_MCP_BOUNCE_HELPER"])
         if let shareDir = environment["LOGIC_PRO_MCP_SHARE_DIR"]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !shareDir.isEmpty {
-            let shareURL = URL(fileURLWithPath: shareDir).standardizedFileURL
+            let shareURL = URL(fileURLWithPath: shareDir, isDirectory: true).standardized
             if shareURL.pathExtension == "py" {
                 appendCandidate(shareURL.path)
             } else {
@@ -131,7 +131,7 @@ extension ProjectExportExecutor {
         }
 
         if let executablePath {
-            let executableDir = URL(fileURLWithPath: resolveSymlinks(executablePath))
+            let executableDir = URL(fileURLWithPath: resolveSymlinks(executablePath), isDirectory: false)
                 .deletingLastPathComponent()
             appendCandidate(executableDir.appendingPathComponent("Scripts/logic_bounce.py").path)
             appendCandidate(
@@ -164,7 +164,7 @@ extension ProjectExportExecutor {
                 appendCandidate(repoCandidate)
             }
         } else {
-            let repoRoot = URL(fileURLWithPath: currentDirectoryPath).standardizedFileURL
+            let repoRoot = URL(fileURLWithPath: currentDirectoryPath, isDirectory: true).standardized
             let packageSwift = repoRoot.appendingPathComponent("Package.swift").path
             let helper = repoRoot.appendingPathComponent("Scripts/logic_bounce.py").path
             if fileExists(packageSwift), fileExists(helper) {
@@ -181,7 +181,7 @@ extension ProjectExportExecutor {
         resolveSymlinks: @Sendable (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
     ) -> [String] {
         var candidates: [String] = []
-        var current = URL(fileURLWithPath: resolveSymlinks(executablePath))
+        var current = URL(fileURLWithPath: resolveSymlinks(executablePath), isDirectory: false)
             .deletingLastPathComponent()
 
         while true {
