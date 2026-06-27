@@ -38,7 +38,7 @@ extension ProjectExportExecutor {
         for entry in searchPath.split(separator: Character(pathSeparator)) {
             guard !entry.isEmpty else { continue }
             let candidate = URL(fileURLWithPath: String(entry), isDirectory: true)
-                .appendingPathComponent(trimmed)
+                .appendingPathComponent(trimmed, isDirectory: false)
                 .path
             if isExecutable(candidate) {
                 return true
@@ -125,35 +125,35 @@ extension ProjectExportExecutor {
             if shareURL.pathExtension == "py" {
                 appendCandidate(shareURL.path)
             } else {
-                appendCandidate(shareURL.appendingPathComponent("logic_bounce.py").path)
-                appendCandidate(shareURL.appendingPathComponent("Scripts/logic_bounce.py").path)
+                appendCandidate(shareURL.appendingPathComponent("logic_bounce.py", isDirectory: false).path)
+                appendCandidate(shareURL.appendingPathComponent("Scripts/logic_bounce.py", isDirectory: false).path)
             }
         }
 
         if let executablePath {
             let executableDir = URL(fileURLWithPath: resolveSymlinks(executablePath), isDirectory: false)
                 .deletingLastPathComponent()
-            appendCandidate(executableDir.appendingPathComponent("Scripts/logic_bounce.py").path)
+            appendCandidate(executableDir.appendingPathComponent("Scripts/logic_bounce.py", isDirectory: false).path)
             appendCandidate(
                 executableDir
-                    .appendingPathComponent("share/logic-pro-mcp/logic_bounce.py")
+                    .appendingPathComponent("share/logic-pro-mcp/logic_bounce.py", isDirectory: false)
                     .path
             )
             appendCandidate(
                 executableDir
-                    .appendingPathComponent("share/logic-pro-mcp/Scripts/logic_bounce.py")
-                    .path
-            )
-            appendCandidate(
-                executableDir
-                    .deletingLastPathComponent()
-                    .appendingPathComponent("share/logic-pro-mcp/logic_bounce.py")
+                    .appendingPathComponent("share/logic-pro-mcp/Scripts/logic_bounce.py", isDirectory: false)
                     .path
             )
             appendCandidate(
                 executableDir
                     .deletingLastPathComponent()
-                    .appendingPathComponent("share/logic-pro-mcp/Scripts/logic_bounce.py")
+                    .appendingPathComponent("share/logic-pro-mcp/logic_bounce.py", isDirectory: false)
+                    .path
+            )
+            appendCandidate(
+                executableDir
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("share/logic-pro-mcp/Scripts/logic_bounce.py", isDirectory: false)
                     .path
             )
             for repoCandidate in repositoryBounceHelperCandidatePaths(
@@ -165,8 +165,8 @@ extension ProjectExportExecutor {
             }
         } else {
             let repoRoot = URL(fileURLWithPath: currentDirectoryPath, isDirectory: true).standardized
-            let packageSwift = repoRoot.appendingPathComponent("Package.swift").path
-            let helper = repoRoot.appendingPathComponent("Scripts/logic_bounce.py").path
+            let packageSwift = repoRoot.appendingPathComponent("Package.swift", isDirectory: false).path
+            let helper = repoRoot.appendingPathComponent("Scripts/logic_bounce.py", isDirectory: false).path
             if fileExists(packageSwift), fileExists(helper) {
                 appendCandidate(helper)
             }
@@ -185,8 +185,8 @@ extension ProjectExportExecutor {
             .deletingLastPathComponent()
 
         while true {
-            let packageSwift = current.appendingPathComponent("Package.swift").path
-            let helper = current.appendingPathComponent("Scripts/logic_bounce.py").path
+            let packageSwift = current.appendingPathComponent("Package.swift", isDirectory: false).path
+            let helper = current.appendingPathComponent("Scripts/logic_bounce.py", isDirectory: false).path
             if fileExists(packageSwift), fileExists(helper) {
                 candidates.append(helper)
             }
