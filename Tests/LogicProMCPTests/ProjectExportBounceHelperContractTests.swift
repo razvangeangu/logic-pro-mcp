@@ -14,7 +14,8 @@ struct ProjectExportBounceHelperContractTests {
             executablePath: nil,
             commandLineExecutablePath: "LogicProMCP",
             processExecutablePath: nil,
-            fileExists: { $0 == "/tmp/custom/share/logic-pro-mcp/logic_bounce.py" }
+            fileExists: { $0 == "/tmp/custom/share/logic-pro-mcp/logic_bounce.py" },
+            resolveSymlinks: { $0 }
         )
         #expect(resolved == "/tmp/custom/share/logic-pro-mcp/logic_bounce.py")
     }
@@ -39,7 +40,8 @@ struct ProjectExportBounceHelperContractTests {
             processExecutablePath: "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/bin/LogicProMCP",
             fileExists: {
                 $0 == "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
-            }
+            },
+            resolveSymlinks: { $0 }
         )
         #expect(
             homebrew == "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
@@ -54,7 +56,8 @@ struct ProjectExportBounceHelperContractTests {
             executablePath: "/tmp/LogicProMCP-root/LogicProMCP",
             fileExists: {
                 $0 == "/tmp/LogicProMCP-root/share/logic-pro-mcp/logic_bounce.py"
-            }
+            },
+            resolveSymlinks: { $0 }
         )
         #expect(resolved == "/tmp/LogicProMCP-root/share/logic-pro-mcp/logic_bounce.py")
     }
@@ -68,7 +71,8 @@ struct ProjectExportBounceHelperContractTests {
             fileExists: {
                 $0 == "/Users/test/logic-pro-mcp/Package.swift" ||
                     $0 == "/Users/test/logic-pro-mcp/Scripts/logic_bounce.py"
-            }
+            },
+            resolveSymlinks: { $0 }
         )
         #expect(sourceBuild == "/Users/test/logic-pro-mcp/Scripts/logic_bounce.py")
 
@@ -76,7 +80,8 @@ struct ProjectExportBounceHelperContractTests {
             environment: [:],
             currentDirectoryPath: "/tmp/elsewhere",
             executablePath: "/Applications/LogicProMCP/LogicProMCP",
-            fileExists: { $0 == "/Applications/LogicProMCP/Scripts/logic_bounce.py" }
+            fileExists: { $0 == "/Applications/LogicProMCP/Scripts/logic_bounce.py" },
+            resolveSymlinks: { $0 }
         )
         #expect(extracted == "/Applications/LogicProMCP/Scripts/logic_bounce.py")
 
@@ -86,7 +91,8 @@ struct ProjectExportBounceHelperContractTests {
             executablePath: "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/bin/LogicProMCP",
             fileExists: {
                 $0 == "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"
-            }
+            },
+            resolveSymlinks: { $0 }
         )
         #expect(
             homebrew == "/opt/homebrew/Cellar/logic-pro-mcp/3.7.1/share/logic-pro-mcp/logic_bounce.py"

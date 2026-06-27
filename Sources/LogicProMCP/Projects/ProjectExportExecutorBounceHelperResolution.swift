@@ -104,7 +104,8 @@ extension ProjectExportExecutor {
         environment: [String: String],
         currentDirectoryPath: String,
         executablePath: String?,
-        fileExists: @Sendable (String) -> Bool
+        fileExists: @Sendable (String) -> Bool,
+        resolveSymlinks: @Sendable (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
     ) -> [String] {
         var candidates: [String] = []
 
@@ -130,8 +131,7 @@ extension ProjectExportExecutor {
         }
 
         if let executablePath {
-            let executableDir = URL(fileURLWithPath: executablePath)
-                .resolvingSymlinksInPath()
+            let executableDir = URL(fileURLWithPath: resolveSymlinks(executablePath))
                 .deletingLastPathComponent()
             appendCandidate(executableDir.appendingPathComponent("Scripts/logic_bounce.py").path)
             appendCandidate(
@@ -158,7 +158,8 @@ extension ProjectExportExecutor {
             )
             for repoCandidate in repositoryBounceHelperCandidatePaths(
                 executablePath: executablePath,
-                fileExists: fileExists
+                fileExists: fileExists,
+                resolveSymlinks: resolveSymlinks
             ) {
                 appendCandidate(repoCandidate)
             }
@@ -176,11 +177,11 @@ extension ProjectExportExecutor {
 
     static func repositoryBounceHelperCandidatePaths(
         executablePath: String,
-        fileExists: @Sendable (String) -> Bool
+        fileExists: @Sendable (String) -> Bool,
+        resolveSymlinks: @Sendable (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
     ) -> [String] {
         var candidates: [String] = []
-        var current = URL(fileURLWithPath: executablePath)
-            .resolvingSymlinksInPath()
+        var current = URL(fileURLWithPath: resolveSymlinks(executablePath))
             .deletingLastPathComponent()
 
         while true {
@@ -205,7 +206,13 @@ extension ProjectExportExecutor {
         executablePath: String? = nil,
         commandLineExecutablePath: String? = CommandLine.arguments.first,
         processExecutablePath: String? = currentExecutablePath(),
-        fileExists: @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        fileExists: @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        // Injectable so unit tests stay fully hermetic: the real
+        // `resolvingSymlinksInPath()` performs filesystem I/O (realpath/lstat) on
+        // the caller-supplied executable path, which on some CI runners stalls for
+        // minutes on certain prefixes (e.g. a real `/opt/homebrew`). Tests inject
+        // an identity closure so resolution never touches the disk.
+        resolveSymlinks: @Sendable (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
     ) -> String? {
         let effectiveExecutablePath = effectiveExecutablePath(
             overrideExecutablePath: executablePath,
@@ -216,7 +223,8 @@ extension ProjectExportExecutor {
             environment: environment,
             currentDirectoryPath: currentDirectoryPath,
             executablePath: effectiveExecutablePath,
-            fileExists: fileExists
+            fileExists: fileExists,
+            resolveSymlinks: resolveSymlinks
         )
         for candidate in candidates where fileExists(candidate) {
             return candidate
