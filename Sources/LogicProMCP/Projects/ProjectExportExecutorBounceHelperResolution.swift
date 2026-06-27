@@ -22,6 +22,50 @@ extension ProjectExportExecutor {
         "/usr/bin/cliclick",
     ]
 
+    private static func lexicalPath(_ path: String) -> String {
+        let isAbsolute = path.hasPrefix("/")
+        var components: [Substring] = []
+        for component in path.split(separator: "/", omittingEmptySubsequences: true) {
+            if component == "." {
+                continue
+            }
+            if component == ".." {
+                if !components.isEmpty, components.last != ".." {
+                    components.removeLast()
+                } else if !isAbsolute {
+                    components.append(component)
+                }
+                continue
+            }
+            components.append(component)
+        }
+        let joined = components.joined(separator: "/")
+        if isAbsolute {
+            return joined.isEmpty ? "/" : "/\(joined)"
+        }
+        return joined.isEmpty ? "." : joined
+    }
+
+    private static func parentPath(of path: String) -> String {
+        let normalized = lexicalPath(path)
+        guard normalized != "/" else { return "/" }
+        let parts = normalized.split(separator: "/", omittingEmptySubsequences: true)
+        let parentParts = parts.dropLast()
+        if normalized.hasPrefix("/") {
+            return parentParts.isEmpty ? "/" : "/" + parentParts.joined(separator: "/")
+        }
+        return parentParts.isEmpty ? "." : parentParts.joined(separator: "/")
+    }
+
+    private static func joinPath(_ base: String, _ component: String) -> String {
+        lexicalPath(base.hasSuffix("/") ? base + component : base + "/" + component)
+    }
+
+    private static func absoluteLexicalPath(_ path: String) -> String {
+        let normalized = lexicalPath(path)
+        return normalized.hasPrefix("/") ? normalized : joinPath(FileManager.default.currentDirectoryPath, normalized)
+    }
+
     static func commandExists(
         _ command: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -56,9 +100,9 @@ extension ProjectExportExecutor {
     ) -> String? {
         let candidates = ([environment["LOGIC_PRO_MCP_CLICLICK"]] + trustedCliclickPaths).compactMap { $0 }
         for candidate in candidates {
-            let normalized = URL(fileURLWithPath: candidate, isDirectory: false).standardized.path
+            let normalized = absoluteLexicalPath(candidate)
             guard normalized.hasPrefix("/") else { continue }
-            let parent = URL(fileURLWithPath: normalized, isDirectory: false).deletingLastPathComponent().path
+            let parent = parentPath(of: normalized)
             guard trustedCliclickPaths.contains(normalized) else { continue }
             guard let attrs = try? attributesOfItem(parent),
                   let permissions = attrs[.posixPermissions] as? NSNumber,
@@ -97,7 +141,7 @@ extension ProjectExportExecutor {
         else {
             return nil
         }
-        return URL(fileURLWithPath: commandLineExecutablePath, isDirectory: false).standardized.path
+        return absoluteLexicalPath(commandLineExecutablePath)
     }
 
     static func bounceHelperCandidatePaths(
@@ -112,7 +156,7 @@ extension ProjectExportExecutor {
         func appendCandidate(_ candidate: String?) {
             guard let candidate = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !candidate.isEmpty else { return }
-            let normalized = URL(fileURLWithPath: candidate, isDirectory: false).standardized.path
+            let normalized = absoluteLexicalPath(candidate)
             if !candidates.contains(normalized) {
                 candidates.append(normalized)
             }
@@ -121,41 +165,23 @@ extension ProjectExportExecutor {
         appendCandidate(environment["LOGIC_PRO_MCP_BOUNCE_HELPER"])
         if let shareDir = environment["LOGIC_PRO_MCP_SHARE_DIR"]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !shareDir.isEmpty {
-            let shareURL = URL(fileURLWithPath: shareDir, isDirectory: true).standardized
-            if shareURL.pathExtension == "py" {
-                appendCandidate(shareURL.path)
+            let sharePath = absoluteLexicalPath(shareDir)
+            if URL(fileURLWithPath: sharePath, isDirectory: false).pathExtension == "py" {
+                appendCandidate(sharePath)
             } else {
-                appendCandidate(shareURL.appendingPathComponent("logic_bounce.py", isDirectory: false).path)
-                appendCandidate(shareURL.appendingPathComponent("Scripts/logic_bounce.py", isDirectory: false).path)
+                appendCandidate(joinPath(sharePath, "logic_bounce.py"))
+                appendCandidate(joinPath(sharePath, "Scripts/logic_bounce.py"))
             }
         }
 
         if let executablePath {
-            let executableDir = URL(fileURLWithPath: resolveSymlinks(executablePath), isDirectory: false)
-                .deletingLastPathComponent()
-            appendCandidate(executableDir.appendingPathComponent("Scripts/logic_bounce.py", isDirectory: false).path)
-            appendCandidate(
-                executableDir
-                    .appendingPathComponent("share/logic-pro-mcp/logic_bounce.py", isDirectory: false)
-                    .path
-            )
-            appendCandidate(
-                executableDir
-                    .appendingPathComponent("share/logic-pro-mcp/Scripts/logic_bounce.py", isDirectory: false)
-                    .path
-            )
-            appendCandidate(
-                executableDir
-                    .deletingLastPathComponent()
-                    .appendingPathComponent("share/logic-pro-mcp/logic_bounce.py", isDirectory: false)
-                    .path
-            )
-            appendCandidate(
-                executableDir
-                    .deletingLastPathComponent()
-                    .appendingPathComponent("share/logic-pro-mcp/Scripts/logic_bounce.py", isDirectory: false)
-                    .path
-            )
+            let executableDir = parentPath(of: resolveSymlinks(executablePath))
+            appendCandidate(joinPath(executableDir, "Scripts/logic_bounce.py"))
+            appendCandidate(joinPath(executableDir, "share/logic-pro-mcp/logic_bounce.py"))
+            appendCandidate(joinPath(executableDir, "share/logic-pro-mcp/Scripts/logic_bounce.py"))
+            let installRoot = parentPath(of: executableDir)
+            appendCandidate(joinPath(installRoot, "share/logic-pro-mcp/logic_bounce.py"))
+            appendCandidate(joinPath(installRoot, "share/logic-pro-mcp/Scripts/logic_bounce.py"))
             for repoCandidate in repositoryBounceHelperCandidatePaths(
                 executablePath: executablePath,
                 fileExists: fileExists,
@@ -164,9 +190,9 @@ extension ProjectExportExecutor {
                 appendCandidate(repoCandidate)
             }
         } else {
-            let repoRoot = URL(fileURLWithPath: currentDirectoryPath, isDirectory: true).standardized
-            let packageSwift = repoRoot.appendingPathComponent("Package.swift", isDirectory: false).path
-            let helper = repoRoot.appendingPathComponent("Scripts/logic_bounce.py", isDirectory: false).path
+            let repoRoot = absoluteLexicalPath(currentDirectoryPath)
+            let packageSwift = joinPath(repoRoot, "Package.swift")
+            let helper = joinPath(repoRoot, "Scripts/logic_bounce.py")
             if fileExists(packageSwift), fileExists(helper) {
                 appendCandidate(helper)
             }
@@ -181,17 +207,16 @@ extension ProjectExportExecutor {
         resolveSymlinks: @Sendable (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
     ) -> [String] {
         var candidates: [String] = []
-        var current = URL(fileURLWithPath: resolveSymlinks(executablePath), isDirectory: false)
-            .deletingLastPathComponent()
+        var current = parentPath(of: resolveSymlinks(executablePath))
 
         while true {
-            let packageSwift = current.appendingPathComponent("Package.swift", isDirectory: false).path
-            let helper = current.appendingPathComponent("Scripts/logic_bounce.py", isDirectory: false).path
+            let packageSwift = joinPath(current, "Package.swift")
+            let helper = joinPath(current, "Scripts/logic_bounce.py")
             if fileExists(packageSwift), fileExists(helper) {
                 candidates.append(helper)
             }
-            let parent = current.deletingLastPathComponent()
-            if parent.path == current.path {
+            let parent = parentPath(of: current)
+            if parent == current {
                 break
             }
             current = parent
