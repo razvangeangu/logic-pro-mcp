@@ -93,4 +93,28 @@ struct VerifiedOpGateSharedTests {
     #expect(!text.contains("verified_op_in_progress"))
 }
 
+// Lives in this serialized suite (moved from PluginsDispatcherReachabilityTests)
+// because it drives the shared VerifiedOpGate via
+// callTool(set_param_verified/insert_verified) → runVerified.tryAcquire/release.
+// Run in parallel with the gate tests above it could free a peer's claim, since
+// VerifiedOpGate.release() is token-less. This is a Plane-1 reachability check.
+@Test func testPluginsToolReachesRouterNotUnknownTool() async {
+    let server = LogicProServer()
+    let handlers = await server.makeHandlers()
+
+    for command in ["get_inventory", "set_param_verified", "insert_verified"] {
+        let r = await handlers.callTool(CallTool.Parameters(
+            name: "logic_plugins",
+            arguments: ["command": .string(command), "params": .object(["track": .int(0)])]
+        ))
+        let text = sharedToolText(r)
+        // Plane 1: the tool is registered — "Unknown tool" means callTool's
+        // switch has no case for logic_plugins.
+        #expect(!text.contains("Unknown tool"), "\(command): Plane 1 — tool not dispatched")
+        // Plane 1 (dispatcher): the command is recognised inside PluginsDispatcher.
+        #expect(!text.contains("Unknown plugins command"), "\(command): dispatcher command not handled")
+        #expect(!text.isEmpty)
+    }
+}
+
 }  // end @Suite(.serialized) struct VerifiedOpGateSharedTests
