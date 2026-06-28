@@ -188,7 +188,7 @@ jobs:
         env:
           LOGIC_PRO_MCP_VERSION: ${{ github.ref_name }}
           LOGIC_PRO_MCP_INSTALL_DIR: ${{ runner.temp }}/logic-pro-bin
-          LOGIC_PRO_MCP_SHARE_DIR: ${{ runner.temp }}/logic-pro-share/logic-pro-mcp
+          LOGIC_PRO_MCP_SHARE_DIR: ${{ runner.temp }}/logic-pro/share/logic-pro-mcp
           LOGIC_PRO_MCP_SKIP_SUDO: "1"
           LOGIC_PRO_MCP_REGISTER_CLAUDE: "0"
           LOGIC_PRO_MCP_INSTALL_KEYCMDS: "1"

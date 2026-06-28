@@ -125,6 +125,38 @@ import Testing
     #expect(workflow.contains("prerelease: ${{ contains(github.ref_name, '-') }}"))
 }
 
+@Test func testReleaseWorkflowShareDirSatisfiesInstallerValidator() throws {
+    // Regression guard for the release.yml <-> validate_share_dir drift that made
+    // every tagged release fail install validation: install-common.sh's
+    // validate_share_dir refuses any share dir that does not match the glob
+    // `*/share/logic-pro-mcp`, so the workflow's LOGIC_PRO_MCP_SHARE_DIR value
+    // (which `bash Scripts/install.sh` then validates) must end with
+    // `/share/logic-pro-mcp`. A penultimate segment like `logic-pro-share`
+    // fails the glob and exits the installer non-zero on every release.
+    let workflow = try scriptContents(".github/workflows/release.yml")
+    let common = try scriptContents("Scripts/install-common.sh")
+
+    // Anchor the test to the actual validator contract it is protecting.
+    #expect(common.contains("*/share/logic-pro-mcp)"))
+
+    let shareDirLine = workflow
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .first { $0.contains("LOGIC_PRO_MCP_SHARE_DIR:") }
+    let line = String(try #require(
+        shareDirLine,
+        "release.yml must set LOGIC_PRO_MCP_SHARE_DIR for the install-validation job"
+    ))
+    let value = line
+        .components(separatedBy: "LOGIC_PRO_MCP_SHARE_DIR:")
+        .last!
+        .trimmingCharacters(in: .whitespaces)
+
+    #expect(
+        value.hasSuffix("/share/logic-pro-mcp"),
+        "release.yml LOGIC_PRO_MCP_SHARE_DIR (\(value)) must end with /share/logic-pro-mcp so validate_share_dir accepts it"
+    )
+}
+
 @Test func testCoverageWorkflowFailsClosedAndUsesWritableProfilePath() throws {
     let workflow = try scriptContents(".github/workflows/ci.yml")
 

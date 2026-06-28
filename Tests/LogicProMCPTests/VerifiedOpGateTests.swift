@@ -16,6 +16,13 @@ import Testing
     gate.release()
 }
 
+// These three tests mutate the process-global VerifiedOpGate.shared singleton.
+// They must run serially so a peer test's unconditional release() cannot free
+// another's in-flight claim — the default-parallel race the repo's --no-parallel
+// CI used to mask (same class of flake fixed in ProjectAuditPhaseTests).
+@Suite(.serialized)
+struct VerifiedOpGateSharedTests {
+
 @Test func testPluginsDispatcherRefusesConcurrentVerifiedOp() async {
     // Hold the shared gate, then issue a verified op through the dispatcher and
     // confirm it is refused with verified_op_in_progress before touching AX.
@@ -85,3 +92,5 @@ import Testing
     // No channels registered → channels_exhausted, NOT verified_op_in_progress.
     #expect(!text.contains("verified_op_in_progress"))
 }
+
+}  // end @Suite(.serialized) struct VerifiedOpGateSharedTests

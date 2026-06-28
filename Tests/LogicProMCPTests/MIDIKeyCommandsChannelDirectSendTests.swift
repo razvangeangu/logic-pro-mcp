@@ -108,9 +108,12 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     let envelope = decodeEnvelope(result.message)
     #expect(envelope?["error"] as? String == "ax_write_failed")
     #expect(envelope?["operation"] as? String == "midi.send_note.keycmd")
-    #expect(envelope?["note_off_failed"] as? Bool == true)
-    #expect(envelope?["note_on_sent"] as? Bool == true)
-    #expect(await transport.sentBytes == [[0x90, 60, 100]])
+    #expect((envelope?["note_off_failed"] as? Bool)!)
+    #expect((envelope?["note_on_sent"] as? Bool)!)
+    // Note-on (attempt 1) succeeded; the reliable note-off (attempt 2) failed and
+    // is reported as note_off_failed; the best-effort retry note-off (attempt 3)
+    // then succeeds and is recorded, so the note is still silenced.
+    #expect(await transport.sentBytes == [[0x90, 60, 100], [0x80, 60, 0]])
 }
 
 // MARK: - 3. Chord
@@ -222,7 +225,7 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     let envelope = decodeEnvelope(result.message)
     #expect(envelope?["error"] as? String == "ax_write_failed")
     #expect(envelope?["operation"] as? String == "midi.play_sequence.keycmd")
-    #expect(envelope?["note_off_failed"] as? Bool == true)
+    #expect((envelope?["note_off_failed"] as? Bool)!)
     #expect(envelope?["failed_note_off_count"] as? Int == 1)
     #expect(envelope?["note_on_count"] as? Int == 1)
     #expect(await transport.sentBytes == [[0x90, 60, 100]])

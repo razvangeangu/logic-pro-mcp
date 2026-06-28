@@ -60,9 +60,9 @@ private func parseDispatcherObject(_ raw: String) -> [String: Any]? {
         error expectedError: String,
         operation expectedOperation: String
     ) {
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let object = parseDispatcherObject(dispatcherText(result))
-        #expect(object?["success"] as? Bool == false)
+        #expect(!((object?["success"] as? Bool)!))
         #expect(object?["error"] as? String == expectedError)
         #expect(object?["operation"] as? String == expectedOperation)
     }
@@ -427,10 +427,10 @@ private func liveTransportJSON(
         )
 
         if testCase.command == "play" || testCase.command == "record" {
-            #expect(result.isError == true, "Expected \(testCase.command) State B to be surfaced as an error")
+            #expect(result.isError!, "Expected \(testCase.command) State B to be surfaced as an error")
             #expect(dispatcherText(result).contains(#""verified":false"#))
         } else {
-            #expect(result.isError == false, "Expected \(testCase.command) to succeed")
+            #expect(!result.isError!, "Expected \(testCase.command) to succeed")
         }
         let ops = await channel.executedOps
         #expect(ops.count == 1)
@@ -518,8 +518,8 @@ private func liveTransportJSON(
     #expect(object["error"] as? String == "unsupported_state")
     #expect(object["operation"] as? String == "transport.set_tempo")
     #expect(object["failure_stage"] as? String == "preflight_blocking_dialog")
-    #expect(object["blocking_dialog_present"] as? Bool == true)
-    #expect(object["write_attempted"] as? Bool == false)
+    #expect((object["blocking_dialog_present"] as? Bool)!)
+    #expect(!((object["write_attempted"] as? Bool)!))
 
     let executed = await ax.executedOps
     #expect(executed.isEmpty)
@@ -2429,7 +2429,7 @@ private actor SelectiveFailChannel: Channel {
     let isError = try #require(result.isError)
     #expect(isError)
     let object = try #require(parseDispatcherObject(dispatcherText(result)))
-    #expect(object["success"] as? Bool == false)
+    #expect(!((object["success"] as? Bool)!))
     #expect(object["error"] as? String == "export_readiness_blocked")
     #expect(object["failure_stage"] as? String == "pre_bounce_audit")
     #expect((object["blockers"] as? [String])?.contains("external_midi_regions_bounce_risk") == true)
@@ -2948,7 +2948,7 @@ private actor SelectiveFailChannel: Channel {
         cache: StateCache()
     )
 
-    #expect(result.isError == true)
+    #expect(result.isError!)
     #expect(dispatcherText(result).contains("server-managed LogicProMCP temp .mid"))
     #expect(await ax.executedOps.isEmpty)
 }

@@ -95,7 +95,12 @@ extension SMFWriter {
                 guard (attributes[.ownerAccountID] as? NSNumber)?.uintValue == UInt(getuid()) else { continue }
                 try? fileManager.removeItem(atPath: fullPath)
             } else if name.hasPrefix("LogicProMCP-\(getuid())-"),
-                      (attributes[.type] as? FileAttributeType) == .typeDirectory {
+                      (attributes[.type] as? FileAttributeType) == .typeDirectory,
+                      (attributes[.ownerAccountID] as? NSNumber)?.uintValue == UInt(getuid()) {
+                // Match on the uid in the directory NAME and on-disk ownership —
+                // the name alone is attacker-controllable, so verify the real
+                // owner before deleting (the uid-scoping the legacy branch refers
+                // to). Harmless in $TMPDIR (0700); defense-in-depth otherwise.
                 // Keep the in-memory registry consistent with disk so a future
                 // mid-session sweep can never delete a directory while its .mid
                 // path is still registered as live.

@@ -272,6 +272,11 @@ actor MIDIKeyCommandsChannel: Channel {
         do {
             try await transport.send(buildNoteOffBytes(channel: channel, note: note))
         } catch {
+            // The note-on already sounded; best-effort a second note-off before
+            // surfacing the failure so a transient KeyCmd transport error still
+            // attempts to silence the note (mirrors the CoreMIDI send_note path).
+            // State C stays truthful — the reliable note-off could not be confirmed.
+            try? await transport.send(buildNoteOffBytes(channel: channel, note: note))
             return .error(HonestContract.encodeStateC(
                 error: .axWriteFailed,
                 hint: "KeyCmd transport note-off send failed after note-on: \(error)",
@@ -327,6 +332,12 @@ actor MIDIKeyCommandsChannel: Channel {
         }
         try? await Task.sleep(nanoseconds: durationMs * 1_000_000)
         if let failure = await sendKeyCmdNoteOffs(notes, channel: channel) {
+            // Best-effort re-send of every note-off before surfacing the failure
+            // so a transient transport error still attempts to silence the chord
+            // (mirrors the CoreMIDI send_chord path). State C stays truthful.
+            for n in notes {
+                try? await transport.send(buildNoteOffBytes(channel: channel, note: n))
+            }
             return .error(HonestContract.encodeStateC(
                 error: .axWriteFailed,
                 hint: "KeyCmd transport note-off send failed after chord note-ons: \(failure.firstError)",

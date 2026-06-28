@@ -460,8 +460,8 @@ private func makeSetInstrumentFixture() -> (
 
     #expect(finishedWhileExecuteBlocked)
     let health = healthCompletion.get()
-    #expect(health?.available == true)
-    #expect(health?.detail.contains("AX connected") == true)
+    #expect(health!.available)
+    #expect(health!.detail.contains("AX connected"))
 }
 
 @Test func testAccessibilityChannelExecuteRejectsWhenLogicNotRunning() async {

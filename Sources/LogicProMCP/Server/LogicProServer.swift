@@ -439,7 +439,11 @@ actor LogicProServer {
             extras: [
                 "operation": operation,
                 "active_operation": activeOperation as Any? ?? NSNull(),
-                "safe_to_retry": false,
+                // No write was attempted (the gate refused before dispatch), so
+                // the caller can safely retry once the in-flight op releases the
+                // gate — matching the sibling `verified_op_in_progress` and the
+                // HonestContract `safe_to_retry` semantics (write_attempted:false).
+                "safe_to_retry": true,
                 "write_attempted": false,
             ]
         )

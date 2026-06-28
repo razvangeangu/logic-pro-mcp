@@ -136,7 +136,7 @@ struct Issue112CommandDeadlineTests {
             try? await Task.sleep(nanoseconds: 3_000_000_000) // 3s — far past the 0.15s deadline
             return toolTextResult("{\"verified\":true}") // must NOT win
         }
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let obj = json(result)
         #expect(obj?["error"] as? String == "operation_timeout")
         #expect(obj?["operation"] as? String == "logic_tracks.rename")
@@ -174,19 +174,23 @@ struct Issue112CommandDeadlineTests {
         ) {
             toolTextResult("{\"unexpected\":true}")
         }
-        #expect(refused.isError == true)
+        #expect(refused.isError!)
         #expect(json(refused)?["error"] as? String == "mutating_operation_in_progress")
         #expect(json(refused)?["active_operation"] as? String == "logic_project.export_run")
-        #expect(json(refused)?["safe_to_retry"] as? Bool == false)
+        // No write was attempted — the gate refused before dispatch — so the
+        // refusal is retryable once the in-flight op releases the gate.
+        #expect((json(refused)?["safe_to_retry"] as? Bool)!)
 
         blocker.unblock()
         await runner.value
 
         let result = await resultProbe.load()!
-        #expect(result.isError == true)
+        #expect(result.isError!)
         #expect(json(result)?["error"] as? String == "operation_timeout")
-        #expect(json(result)?["safe_to_retry"] as? Bool == false)
-        #expect(json(result)?["underlying_operation_stopped"] as? Bool == false)
+        // Timeout abandons (does not stop) a possibly-partial mutation, so this
+        // result is intentionally NOT safe to retry and the op is not stopped.
+        #expect(!((json(result)?["safe_to_retry"] as? Bool)!))
+        #expect(!((json(result)?["underlying_operation_stopped"] as? Bool)!))
         #expect(try await waitUntil(timeoutNanoseconds: 1_000_000_000) { blocker.isCompleted() })
 
         let afterDrain = await LogicProServer.runWithDeadline(
@@ -242,9 +246,9 @@ struct Issue112CommandDeadlineTests {
     @Test("the deadline timeout result is shaped like a State C envelope")
     func timeoutResultShape() {
         let result = LogicProServer.deadlineTimeoutResult(tool: "logic_navigate", command: "create_marker", seconds: 25)
-        #expect(result.isError == true)
+        #expect(result.isError!)
         let obj = json(result)
-        #expect(obj?["success"] as? Bool == false)
+        #expect(!((obj?["success"] as? Bool)!))
         #expect(obj?["error"] as? String == "operation_timeout")
         #expect(obj?["operation"] as? String == "logic_navigate.create_marker")
     }
