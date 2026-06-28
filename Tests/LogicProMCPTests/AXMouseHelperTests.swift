@@ -79,3 +79,12 @@ private final class AXMouseHelperRecorder: @unchecked Sendable {
     #expect(recorder.unicodeEvents == [65, 54620])
     #expect(recorder.sleeps == [12_000, 12_000])
 }
+
+@Test func axMouseHelperTextTypingPreservesSupplementaryUnicodeScalars() {
+    let recorder = AXMouseHelperRecorder()
+
+    AXMouseHelper.typeText("🎹", runtime: recorder.runtime())
+
+    #expect(recorder.unicodeEvents == [0xD83C, 0xDFB9])
+    #expect(recorder.sleeps == [12_000, 12_000])
+}

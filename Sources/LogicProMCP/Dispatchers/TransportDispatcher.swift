@@ -17,7 +17,7 @@ struct TransportDispatcher {
         dialogPresent: @escaping @Sendable () -> Bool = { false }
     ) async -> CallTool.Result {
         if let operation = modalGuardedTransportOperation(for: command), dialogPresent() {
-            return blockingDialogResult(operation: operation)
+            return blockingLogicDialogResult(operation: operation)
         }
 
         switch command {
@@ -29,7 +29,7 @@ struct TransportDispatcher {
             )
 
         case "stop":
-            return await verifiedStopResult(router: router, cache: cache)
+            return await verifiedStopResult(router: router, cache: cache, sleep: sleep)
 
         case "record":
             return await handleVerifiedTransportCommand(
@@ -210,30 +210,18 @@ struct TransportDispatcher {
         }
     }
 
-    private static func blockingDialogResult(operation: String) -> CallTool.Result {
-        toolTextResult(
-            HonestContract.encodeStateC(
-                error: .unsupportedState,
-                hint: "Refusing \(operation) while a blocking Logic dialog/sheet is present. Dismiss crash, save, bounce, import, or other modal dialogs, then retry.",
-                extras: [
-                    "operation": operation,
-                    "failure_stage": "preflight_blocking_dialog",
-                    "blocking_dialog_present": true,
-                    "write_attempted": false,
-                    "safe_to_retry": true,
-                ]
-            ),
-            isError: true
-        )
-    }
-
     private static func verifiedStopResult(
         router: ChannelRouter,
-        cache: StateCache
+        cache: StateCache,
+        sleep: @escaping (UInt64) async -> Void
     ) async -> CallTool.Result {
         if let beforeState = await readTransportState(router: router),
            beforeState.isPlaying == false,
            beforeState.isRecording == false {
+            // verify_source distinguishes the two verified-stop paths for
+            // downstream consumers: `transport_state` = already-stopped, proven by
+            // a pure pre-read with no write attempted (this branch);
+            // `ax_transport_state` = proven by the post-write AX readback below.
             return toolTextResult(.success(HonestContract.encodeStateA(
                 extras: [
                     "operation": "transport.stop",
@@ -251,40 +239,61 @@ struct TransportDispatcher {
         guard writeResult.isSuccess else {
             return toolTextResult(writeResult)
         }
+        let writePayload = jsonValue(from: writeResult.message)
 
-        let liveRefresh = await ResourceHandlers.readLiveTransportState(router: router)
-        guard let liveState = liveRefresh.state else {
+        var attempts = 0
+        var afterState: TransportState?
+        var refreshError: String?
+        for attempt in 1...12 {
+            attempts = attempt
+            let liveRefresh = await ResourceHandlers.readLiveTransportState(router: router)
+            guard let liveState = liveRefresh.state else {
+                refreshError = liveRefresh.errorCode
+                if attempt < 12 { await sleep(100_000_000) }
+                continue
+            }
+
+            afterState = liveState
+            await cache.updateTransport(liveState)
+            let observedExtras = stopObservedExtras(
+                for: liveState,
+                pollAttempts: attempts,
+                writePayload: writePayload
+            )
+
+            if liveState.isPlaying == false, liveState.isRecording == false {
+                return toolTextResult(HonestContract.encodeStateA(extras: observedExtras))
+            }
+
+            if attempt < 12 { await sleep(100_000_000) }
+        }
+
+        guard let afterState else {
             let cachedState = await cache.getTransport()
+            var extras = stopReadbackUnavailableExtras(
+                cachedState: cachedState,
+                refreshError: refreshError ?? "live_transport_read_failed"
+            )
+            extras["poll_attempts"] = attempts
+            extras["write_result"] = writePayload
             return toolTextResult(HonestContract.encodeStateC(
                 error: .readbackUnavailable,
                 hint: "transport.stop executed, but live transport state could not be refreshed. Focus Logic's Tracks window, dismiss modal or plugin dialogs, then retry or run logic_system refresh_cache.",
-                extras: stopReadbackUnavailableExtras(
-                    cachedState: cachedState,
-                    refreshError: liveRefresh.errorCode
-                )
+                extras: extras
             ), isError: true)
         }
 
-        await cache.updateTransport(liveState)
-        let observedExtras: [String: Any] = [
-            "operation": "transport.stop",
-            "requested_state": "stopped",
-            "verify_source": "ax_transport_state",
-            "observed_isPlaying": liveState.isPlaying,
-            "observed_isRecording": liveState.isRecording,
-            "observed_position": liveState.position,
-            "observed_time_position": liveState.timePosition,
-        ]
-
-        guard liveState.isPlaying == false, liveState.isRecording == false else {
-            return toolTextResult(HonestContract.encodeStateC(
-                error: .readbackMismatch,
-                hint: "transport.stop executed, but live transport state still reports playback or recording",
-                extras: observedExtras.merging(["safe_to_retry": true]) { _, new in new }
-            ), isError: true)
-        }
-
-        return toolTextResult(HonestContract.encodeStateA(extras: observedExtras))
+        var observedExtras = stopObservedExtras(
+            for: afterState,
+            pollAttempts: attempts,
+            writePayload: writePayload
+        )
+        observedExtras["safe_to_retry"] = true
+        return toolTextResult(HonestContract.encodeStateC(
+            error: .readbackMismatch,
+            hint: "transport.stop executed, but live transport state still reports playback or recording",
+            extras: observedExtras
+        ), isError: true)
     }
 
     /// Verified `pause` mirroring `verifiedStopResult`: a pause that does not
@@ -385,6 +394,25 @@ struct TransportDispatcher {
             "cache_age_sec": cacheAgeExtra(for: cachedState),
             "refresh_error": refreshError ?? "live_transport_read_failed",
             "safe_to_retry": true,
+        ]
+    }
+
+    private static func stopObservedExtras(
+        for state: TransportState,
+        pollAttempts: Int,
+        writePayload: Any
+    ) -> [String: Any] {
+        [
+            "operation": "transport.stop",
+            "requested_state": "stopped",
+            "verify_source": "ax_transport_state",
+            "write_attempted": true,
+            "poll_attempts": pollAttempts,
+            "observed_isPlaying": state.isPlaying,
+            "observed_isRecording": state.isRecording,
+            "observed_position": state.position,
+            "observed_time_position": state.timePosition,
+            "write_result": writePayload,
         ]
     }
 
@@ -605,15 +633,15 @@ struct TransportDispatcher {
         }
         if let afterState {
             extras["observed_after"] = transportStateSummary(afterState)
-            return toolTextResult(.success(HonestContract.encodeStateB(
+            return toolTextResult(HonestContract.encodeStateB(
                 reason: .readbackMismatch,
                 extras: extras
-            )))
+            ), isError: true)
         }
-        return toolTextResult(.success(HonestContract.encodeStateB(
+        return toolTextResult(HonestContract.encodeStateB(
             reason: .readbackUnavailable,
             extras: extras
-        )))
+        ), isError: true)
     }
 
     private static func readTransportState(router: ChannelRouter) async -> TransportState? {

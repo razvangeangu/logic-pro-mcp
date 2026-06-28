@@ -20,56 +20,14 @@ import Testing
 // log noise (e.g. cache invalidation `INFO`) doesn't leak into the
 // assertion.
 //
-// v3.4.1 (CI hotfix): the entire suite is `@Suite(.serialized)` and the
-// capture is **synchronous lock-guarded** (not actor-based fire-and-forget).
-// Pre-fix the suite used `Task { await capture.append(line) }` for each
-// log line and a 30 ms post-test sleep to drain pending Tasks. Under
-// parallel `swift test` on macos-15 / Xcode 16.4 runners, the 30 ms drain
-// was insufficient — three tests' Task chains could outrun snapshot, plus
-// `Log.output` is a static mutation that races between concurrent suites.
-// `.serialized` gives single-test ordering within this suite; the lock
-// gives ordering within a single test's emit chain. Together they make
-// the suite robust to runner timing.
-
-private final class AuditCapture: @unchecked Sendable {
-    private let lock = NSLock()
-    private var lines: [String] = []
-    func append(_ s: String) {
-        lock.lock(); defer { lock.unlock() }
-        lines.append(s)
-    }
-    func snapshot() -> [String] {
-        lock.lock(); defer { lock.unlock() }
-        return lines
-    }
-}
-
-@MainActor
 private func captureAuditLines(during body: () async -> Void) async -> [String] {
-    let capture = AuditCapture()
-    let previousOutput = Log.output
-    let previousLevel = Log.minLevel
-
-    // Coverage runs gate at INFO by default; force-set so all three phases emit.
-    Log.setLevel(.info)
-    Log.output = { line in
+    await LogTestConfiguration.capture(level: .info) {
         // We only care about [AUDIT] lines on the project subsystem.
         // Synchronous capture — no Task hop — so the line is recorded
         // before `Log.info(...)` returns. This eliminates the race where
         // a fire-and-forget Task could land after the test's snapshot.
-        if line.contains("[AUDIT]") {
-            capture.append(line)
-        }
-    }
-    defer {
-        Log.output = previousOutput
-        Log.setLevel(previousLevel)
-        Log.resetForTests()
-    }
-
-    Log.resetForTests()
-    await body()
-    return capture.snapshot()
+        await body()
+    }.filter { $0.contains("[AUDIT]") }
 }
 
 private func projectAudits(_ lines: [String]) -> [String] {
@@ -187,6 +145,30 @@ struct ProjectAuditPhaseTests {
     let audits = projectAudits(captured)
     #expect(audits.contains { $0.contains("project.quit confirmation_required") })
     #expect(!audits.contains { $0.contains("project.quit executed") })
+}
+
+@Test func testProjectExportRunWithoutConfirmLogsConfirmationRequired() async throws {
+    let projDir = try makeExecTempDir()
+    let outputRoot = try makeExecTempDir()
+    let project = try makeLogicxProject(in: projDir, named: "Audit Export Song")
+
+    let captured = await captureAuditLines {
+        _ = await ProjectDispatcher.handle(
+            command: "export_run",
+            params: [
+                "projects": .array([.string(project.path)]),
+                "output_root": .string(outputRoot.path),
+                "artifacts": .array([.string("bounce")]),
+            ],
+            router: ChannelRouter(),
+            cache: StateCache()
+        )
+    }
+
+    let audits = projectAudits(captured)
+    #expect(audits.contains { $0.contains("project.export_run confirmation_required") })
+    #expect(!audits.contains { $0.contains("project.export_run executed") })
+    #expect(!audits.contains { $0.contains("project.export_run rejected") })
 }
 
 }  // end @Suite(.serialized) struct ProjectAuditPhaseTests

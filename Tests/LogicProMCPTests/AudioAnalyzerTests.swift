@@ -202,6 +202,96 @@ private func measureOnlyPolicy() -> AudioAnalyzer.AnalysisPolicy {
     #expect(zeroResult.verification.reasons.contains("zero_length_file"))
 }
 
+@Test func testAudioAnalyzerRejectsFilesystemRootOutputRoot() throws {
+    let outside = try writeAudioFixture(named: "outside-root.wav") { _ in 0.25 }
+    let result = AudioAnalyzer.analyzeFile(
+        path: outside.path,
+        policy: .init(
+            minimumDurationSeconds: nil,
+            maximumDurationDriftSeconds: nil,
+            expectedDurationSeconds: nil,
+            minimumFileSizeBytes: nil,
+            maximumPeakDbfs: nil,
+            nearSilenceThresholdDbfs: -60,
+            maximumSilenceRatio: 0.98,
+            expectedSampleRate: nil,
+            expectedChannelCount: nil,
+            outputRoot: "/"
+        )
+    )
+
+    #expect(result.verification.status == .fail)
+    #expect(result.verification.reasons.contains("unsafe_path"))
+}
+
+@Test func testAudioAnalyzerRejectsSymlinkSwappedOutputRoot() throws {
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("logicpromcp-audio-root-swap-\(UUID().uuidString)", isDirectory: true)
+    let trustedRoot = workspace.appendingPathComponent("trusted", isDirectory: true)
+    let escapedRoot = workspace.appendingPathComponent("escaped", isDirectory: true)
+    try FileManager.default.createDirectory(at: trustedRoot, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: escapedRoot, withIntermediateDirectories: true)
+
+    let fixture = try writeAudioFixture(named: "swap-tone.wav") { _ in 0.25 }
+    let escapedFile = escapedRoot.appendingPathComponent("swap-tone.wav")
+    try FileManager.default.moveItem(at: fixture, to: escapedFile)
+
+    try FileManager.default.removeItem(at: trustedRoot)
+    try FileManager.default.createSymbolicLink(at: trustedRoot, withDestinationURL: escapedRoot)
+
+    let result = AudioAnalyzer.analyzeFile(
+        path: trustedRoot.appendingPathComponent("swap-tone.wav").path,
+        policy: .init(
+            minimumDurationSeconds: nil,
+            maximumDurationDriftSeconds: nil,
+            expectedDurationSeconds: nil,
+            minimumFileSizeBytes: nil,
+            maximumPeakDbfs: nil,
+            nearSilenceThresholdDbfs: -60,
+            maximumSilenceRatio: 0.98,
+            expectedSampleRate: nil,
+            expectedChannelCount: nil,
+            outputRoot: trustedRoot.path
+        )
+    )
+
+    #expect(result.verification.status == .fail)
+    #expect(result.verification.reasons.contains("unsafe_path"))
+}
+
+@Test func testAudioAnalyzerRejectsInputsAboveConfiguredWorkCaps() throws {
+    let oversizedRuntime = AudioAnalyzer.Runtime(
+        fileExists: { _, isDirectory in
+            isDirectory?.pointee = false
+            return true
+        },
+        attributesOfItem: { _ in
+            [.size: NSNumber(value: 2_048)]
+        },
+        resolveSymlinks: { $0 }
+    )
+    var sizePolicy = measureOnlyPolicy()
+    sizePolicy.maximumInputFileSizeBytes = 1_024
+
+    let oversized = AudioAnalyzer.analyzeFile(
+        path: "/tmp/oversized.wav",
+        policy: sizePolicy,
+        runtime: oversizedRuntime
+    )
+    #expect(oversized.exists)
+    #expect(oversized.verification.status == .fail)
+    #expect(oversized.verification.reasons == ["analysis_limit_exceeded"])
+    #expect(oversized.verification.detail?.contains("exceeds maximum") == true)
+
+    let tone = try writeAudioFixture(named: "too-long.wav", durationSeconds: 0.2) { _ in 0.2 }
+    var durationPolicy = measureOnlyPolicy()
+    durationPolicy.maximumInputDurationSeconds = 0.05
+    let tooLong = AudioAnalyzer.analyzeFile(path: tone.path, policy: durationPolicy)
+    #expect(tooLong.verification.status == .fail)
+    #expect(tooLong.verification.reasons == ["analysis_limit_exceeded"])
+    #expect(tooLong.verification.detail?.contains("duration") == true)
+}
+
 @Test func testAudioDispatcherAnalyzeFileReturnsJSONAndErrorsOnFailedVerification() throws {
     let silent = try writeAudioFixture(named: "dispatcher-silent.wav") { _ in 0.0 }
     let result = AudioDispatcher.handle(

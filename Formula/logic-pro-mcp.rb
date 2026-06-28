@@ -3,7 +3,7 @@ class LogicProMcp < Formula
   homepage "https://github.com/MongLong0214/logic-pro-mcp"
   # Single source of truth is Sources/LogicProMCP/Server/ServerConfig.swift
   # (ServerConfig.serverVersion). Bump both together.
-  version "3.7.1"
+  version "3.7.2"
   license "MIT"
 
   # GitHub Actions release artifacts are expected to be true universal
@@ -11,14 +11,18 @@ class LogicProMcp < Formula
   # arm64-only metadata, so inspect RELEASE-METADATA.json when auditing a
   # specific tag.
   #
-  # SHA256 is copied from the published v3.7.1 SHA256SUMS.txt for
-  # LogicProMCP-macOS-universal.tar.gz.
+  # SHA256 is copied from the published SHA256SUMS.txt for
+  # LogicProMCP-macOS-universal.tar.gz. PENDING: this hash is still the v3.7.1
+  # artifact — re-sync it from the v3.7.2 SHA256SUMS.txt in the post-publish
+  # `docs: sync v3.7.2 release evidence` step (Scripts/release.sh does this
+  # automatically; release-stable.sh relies on the manual evidence-sync commit).
   on_macos do
     url "https://github.com/MongLong0214/logic-pro-mcp/releases/download/v#{version}/LogicProMCP-macOS-universal.tar.gz"
     sha256 "a5833040ca47c928fa04a8e334e50af166640523b1067e5a52ae3a4804aa77b8"
   end
 
   depends_on :macos => :sonoma
+  depends_on "cliclick"
 
   # NOTE (v3.1.6): no `depends_on xcode:` — this Formula installs the
   # pre-built GitHub release binary; it does not invoke `swift build` or any
@@ -41,6 +45,10 @@ class LogicProMcp < Formula
     pkgshare.install "Scripts/uninstall-keycmds.sh"
     pkgshare.install "Scripts/keycmd-preset.plist"
     pkgshare.install "Scripts/LogicProMCP-Scripter.js"
+    pkgshare.install "Scripts/logic_bounce.py" if (buildpath/"Scripts/logic_bounce.py").exist?
+    pkgshare.install "Scripts/logic_bounce_ui.py" if (buildpath/"Scripts/logic_bounce_ui.py").exist?
+    pkgshare.install "Scripts/logic_ui_jxa.py" if (buildpath/"Scripts/logic_ui_jxa.py").exist?
+    pkgshare.install "Scripts/logic_input_source.py" if (buildpath/"Scripts/logic_input_source.py").exist?
   end
 
   def caveats
@@ -48,7 +56,7 @@ class LogicProMcp < Formula
       Logic Pro MCP Server is installed at #{bin}/LogicProMCP.
 
       Register with Claude Code:
-        claude mcp add --scope user logic-pro -- LogicProMCP
+        claude mcp add --scope user logic-pro -e LOGIC_PRO_MCP_SHARE_DIR="#{pkgshare}" -- LogicProMCP
 
       Check macOS permissions:
         LogicProMCP --check-permissions

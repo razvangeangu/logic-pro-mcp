@@ -9,11 +9,14 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  MCP_PUBLISHER_VERSION: v1.7.9
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Sync server.json version from release tag
         if: github.event_name == 'release'
@@ -27,7 +30,25 @@ jobs:
       - name: Download MCP Publisher
         run: |
           set -euo pipefail
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          asset="mcp-publisher_${os}_${arch}.tar.gz"
+          case "$asset" in
+            mcp-publisher_linux_amd64.tar.gz)
+              sha256="ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac"
+              ;;
+            mcp-publisher_linux_arm64.tar.gz)
+              sha256="04f5199b3deef8e6fc4d6ed98c56a74f799def53edca3fe6d4862ecd4397c172"
+              ;;
+            *)
+              echo "::error::unsupported mcp-publisher asset for $os/$arch"
+              exit 1
+              ;;
+          esac
+          curl -fsSLo "$asset" "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/${asset}"
+          echo "${sha256}  ${asset}" | sha256sum -c -
+          tar xzf "$asset" mcp-publisher
+          chmod +x mcp-publisher
 
       - name: Validate metadata
         run: ./mcp-publisher validate

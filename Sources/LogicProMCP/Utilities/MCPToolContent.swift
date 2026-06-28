@@ -12,6 +12,21 @@ func toolTextResult(_ result: ChannelResult) -> CallTool.Result {
     CallTool.Result(content: [toolTextContent(result.message)], isError: !result.isSuccess)
 }
 
+func toolStateCResult(
+    _ error: HonestContract.FailureError,
+    hint: String? = nil,
+    extras: [String: Any] = [:]
+) -> CallTool.Result {
+    toolTextResult(
+        HonestContract.encodeStateC(error: error, hint: hint, extras: extras),
+        isError: true
+    )
+}
+
+func toolInvalidParamsResult(_ hint: String, extras: [String: Any] = [:]) -> CallTool.Result {
+    toolStateCResult(.invalidParams, hint: hint, extras: extras)
+}
+
 func commandParamsToolSchema(commandDescription: String) -> Value {
     .object([
         "type": .string("object"),

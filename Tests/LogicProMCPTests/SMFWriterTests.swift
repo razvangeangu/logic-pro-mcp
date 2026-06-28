@@ -180,29 +180,80 @@ import Foundation
     #expect(noteOnCount == 3, "Expected 3 note-on events for chord")
 }
 
-@Test func testSMFWriterCleanupDeletesOldFiles() throws {
+@Test func testSMFWriterCleanupDeletesOwnedDirectoriesWithoutTouchingUnrelatedMIDIFiles() throws {
     let tempDir = NSTemporaryDirectory() + "SMFWriter-cleanup-\(UUID().uuidString)"
     try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(atPath: tempDir) }
 
-    let oldFile = "\(tempDir)/old.mid"
-    let recentFile = "\(tempDir)/recent.mid"
-    FileManager.default.createFile(atPath: oldFile, contents: Data([0, 1, 2]))
-    FileManager.default.createFile(atPath: recentFile, contents: Data([0, 1, 2]))
+    let ownedDir = SMFWriter.temporaryDirectoryPrefix(
+        baseDirectory: URL(fileURLWithPath: tempDir, isDirectory: true)
+    ) + UUID().uuidString
+    let unrelatedFile = "\(tempDir)/other.mid"
+    try FileManager.default.createDirectory(atPath: ownedDir, withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: "\(ownedDir)/owned.mid",
+        contents: Data([0, 1, 2])
+    )
+    FileManager.default.createFile(atPath: unrelatedFile, contents: Data([0, 1, 2]))
 
-    // Backdate oldFile by 10 minutes
     let oldDate = Date().addingTimeInterval(-600)
-    try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: oldFile)
+    try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: ownedDir)
+    try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: unrelatedFile)
 
     SMFWriter.cleanupOrphanFiles(in: tempDir, olderThan: 300)
 
-    #expect(!FileManager.default.fileExists(atPath: oldFile), "old file should be deleted")
-    #expect(FileManager.default.fileExists(atPath: recentFile), "recent file should be preserved")
+    #expect(!FileManager.default.fileExists(atPath: ownedDir), "owned temp directory should be deleted")
+    #expect(
+        FileManager.default.fileExists(atPath: unrelatedFile),
+        "unrelated MIDI file in temp root must be preserved"
+    )
+}
+
+@Test func testSMFWriterCleanupDeletesLegacyManagedMIDIFilesOnlyWhenScopedToLegacyDirectory() throws {
+    let tempDir = NSTemporaryDirectory() + "SMFWriter-legacy-\(UUID().uuidString)"
+    let legacyDir = "\(tempDir)/LogicProMCP"
+    try FileManager.default.createDirectory(atPath: legacyDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: tempDir) }
+
+    let oldFile = "\(legacyDir)/old.mid"
+    let recentFile = "\(legacyDir)/recent.mid"
+    FileManager.default.createFile(atPath: oldFile, contents: Data([0, 1, 2]))
+    FileManager.default.createFile(atPath: recentFile, contents: Data([0, 1, 2]))
+
+    let oldDate = Date().addingTimeInterval(-600)
+    try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: oldFile)
+
+    SMFWriter.cleanupOrphanFiles(
+        in: legacyDir,
+        olderThan: 300,
+        legacyManagedDirectories: [URL(fileURLWithPath: legacyDir, isDirectory: true).standardizedFileURL.path]
+    )
+
+    #expect(!FileManager.default.fileExists(atPath: oldFile), "stale legacy managed .mid should be deleted")
+    #expect(FileManager.default.fileExists(atPath: recentFile), "recent legacy managed .mid should be preserved")
 }
 
 @Test func testSMFWriterCleanupHandlesMissingDir() {
     // No error should be thrown — this is a safe no-op.
     SMFWriter.cleanupOrphanFiles(in: "/tmp/does-not-exist-\(UUID().uuidString)")
+}
+
+@Test func testSMFWriterTemporaryMIDIFileAvoidsLegacySymlinkDirectory() throws {
+    let sandbox = NSTemporaryDirectory() + "SMFWriter-temp-\(UUID().uuidString)"
+    let legacyPath = "\(sandbox)/LogicProMCP"
+    let attackTarget = "\(sandbox)/attacker"
+    try FileManager.default.createDirectory(atPath: attackTarget, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: sandbox) }
+
+    try FileManager.default.createSymbolicLink(atPath: legacyPath, withDestinationPath: attackTarget)
+
+    let temp = try SMFWriter.temporaryMIDIFile(baseDirectory: URL(fileURLWithPath: sandbox, isDirectory: true))
+    defer { SMFWriter.cleanupTemporaryMIDIFile(temp) }
+    try Data([0x4D, 0x54]).write(to: temp.fileURL, options: .atomic)
+
+    #expect(!temp.fileURL.path.hasPrefix(legacyPath + "/"))
+    #expect(FileManager.default.fileExists(atPath: temp.fileURL.path))
+    #expect((try? FileManager.default.contentsOfDirectory(atPath: attackTarget).isEmpty) == true)
 }
 
 // MARK: - Helpers

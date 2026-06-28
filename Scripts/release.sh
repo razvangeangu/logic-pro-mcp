@@ -92,15 +92,18 @@ run "codesign --force --sign - .build/release/LogicProMCP"
 
 # 3. Stage artifacts
 run "cp .build/release/LogicProMCP '$STAGE_DIR/'"
-run "cp docs/SETUP.md '$STAGE_DIR/'"
-run "cp Scripts/install-keycmds.sh Scripts/uninstall-keycmds.sh Scripts/keycmd-preset.plist Scripts/LogicProMCP-Scripter.js '$STAGE_DIR/'"
+run "mkdir -p '$STAGE_DIR/docs' '$STAGE_DIR/Scripts'"
+run "cp docs/SETUP.md '$STAGE_DIR/docs/'"
+run "cp Scripts/install-keycmds.sh Scripts/uninstall-keycmds.sh Scripts/keycmd-preset.plist Scripts/LogicProMCP-Scripter.js Scripts/logic_bounce.py Scripts/logic_bounce_ui.py Scripts/logic_ui_jxa.py Scripts/logic_input_source.py '$STAGE_DIR/Scripts/'"
 
 if [ "$DRY_RUN" = "1" ]; then
     BINARY_SHA="<dry-run-binary-sha>"
     TARBALL_SHA="<dry-run-tarball-sha>"
 else
     (cd "$STAGE_DIR" && tar -czf "LogicProMCP-macOS-arm64.tar.gz" \
-        LogicProMCP SETUP.md install-keycmds.sh uninstall-keycmds.sh keycmd-preset.plist LogicProMCP-Scripter.js)
+        LogicProMCP docs/SETUP.md Scripts/install-keycmds.sh Scripts/uninstall-keycmds.sh \
+        Scripts/keycmd-preset.plist Scripts/LogicProMCP-Scripter.js Scripts/logic_bounce.py \
+        Scripts/logic_bounce_ui.py Scripts/logic_ui_jxa.py Scripts/logic_input_source.py)
     cp "$STAGE_DIR/LogicProMCP-macOS-arm64.tar.gz" "$STAGE_DIR/LogicProMCP-macOS-universal.tar.gz"
 
     BINARY_SHA=$(shasum -a 256 "$STAGE_DIR/LogicProMCP" | awk '{print $1}')
@@ -240,7 +243,7 @@ brew install logic-pro-mcp
 
 Or manual:
 \`\`\`
-LOGIC_PRO_MCP_SHA256=$BINARY_SHA \\
+LOGIC_PRO_MCP_SHA256=$TARBALL_SHA \\
 LOGIC_PRO_MCP_TEAM_ID=ADHOC \\
 bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/$VERSION/Scripts/install.sh)
 \`\`\`

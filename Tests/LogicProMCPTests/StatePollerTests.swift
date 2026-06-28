@@ -1,6 +1,58 @@
+import Dispatch
 import Foundation
 import Testing
 @testable import LogicProMCP
+
+private final class BlockingTracksProbe: @unchecked Sendable {
+    private let entryLock = NSLock()
+    private var entered = false
+    private let release = DispatchSemaphore(value: 0)
+
+    func hasEntered() -> Bool {
+        entryLock.lock()
+        defer { entryLock.unlock() }
+        return entered
+    }
+
+    func unblock() {
+        release.signal()
+    }
+
+    func tracksResult() -> ChannelResult {
+        entryLock.lock()
+        entered = true
+        entryLock.unlock()
+        release.wait()
+        return .success("[]")
+    }
+}
+
+private actor CompletionProbe {
+    private var completed = false
+
+    func markCompleted() {
+        completed = true
+    }
+
+    func isCompleted() -> Bool {
+        completed
+    }
+}
+
+private func waitUntil(
+    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 5_000_000,
+    condition: @escaping @Sendable () async -> Bool
+) async throws -> Bool {
+    let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
+    while ContinuousClock.now < deadline {
+        if await condition() {
+            return true
+        }
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+    return await condition()
+}
 
 private func makeStatePollerAccessibilityRuntime(
     projectInfoResult: ChannelResult,
@@ -235,4 +287,57 @@ private func makeStatePollerAccessibilityRuntime(
     await poller.refreshNow()
 
     #expect(await cache.getMarkers().isEmpty)
+}
+
+@Test func testStatePollerImmediateStopDoesNotAwaitBlockedPollCycle() async throws {
+    let blocker = BlockingTracksProbe()
+    let completion = CompletionProbe()
+    let cache = StateCache()
+    let projectPayload = """
+    {"name":"Blocked Session","sampleRate":48000,"bitDepth":24,"tempo":128,"timeSignature":"4/4","trackCount":1,"filePath":null,"lastUpdated":"2026-04-12T00:00:00Z"}
+    """
+    let channel = AccessibilityChannel(
+        runtime: .init(
+            isTrusted: { true },
+            isLogicProRunning: { true },
+            hasVisibleWindow: { true },
+            appRoot: { nil },
+            transportState: { .success("{}") },
+            toggleTransportButton: { _ in .success("{}") },
+            setTempo: { _ in .success("{}") },
+            setCycleRange: { _ in .success("{}") },
+            tracks: { blocker.tracksResult() },
+            selectedTrack: { .success("{}") },
+            selectTrack: { _ in .success("{}") },
+            setTrackToggle: { _, _ in .success("{}") },
+            renameTrack: { _ in .success("{}") },
+            mixerState: { .success("[]") },
+            channelStrip: { _ in .success("{}") },
+            setMixerValue: { _, _ in .success("{}") },
+            projectInfo: { .success(projectPayload) },
+            markers: { .success("[]") }
+        )
+    )
+    let poller = StatePoller(
+        axChannel: channel,
+        cache: cache,
+        runtime: .init(
+            hasVisibleWindow: { true },
+            sleep: { _ in try await Task.sleep(nanoseconds: 1_000) }
+        )
+    )
+
+    await poller.start()
+    #expect(try await waitUntil(timeoutNanoseconds: 5_000_000_000) { blocker.hasEntered() })
+
+    let stopTask = Task {
+        await poller.stopImmediately()
+        await completion.markCompleted()
+    }
+
+    #expect(try await waitUntil { await completion.isCompleted() })
+    #expect(await poller.isRunning == false)
+
+    blocker.unblock()
+    await stopTask.value
 }

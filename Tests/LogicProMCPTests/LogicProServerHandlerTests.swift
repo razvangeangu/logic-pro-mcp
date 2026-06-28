@@ -147,6 +147,57 @@ private let serverResourceText = sharedResourceText
     ])
 }
 
+@Test func testLogicProServerStartCleansOwnedAndLegacySMFArtifacts() async throws {
+    let sandbox = FileManager.default.temporaryDirectory
+        .appendingPathComponent("logic-pro-server-startup-cleanup-\(UUID().uuidString)", isDirectory: true)
+    let tempRoot = sandbox.appendingPathComponent("temp-root", isDirectory: true)
+    let legacyDir = sandbox.appendingPathComponent("LogicProMCP", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: sandbox) }
+
+    let ownedDirPath = SMFWriter.temporaryDirectoryPrefix(baseDirectory: tempRoot) + UUID().uuidString
+    let unrelatedFilePath = tempRoot.appendingPathComponent("other.mid").path
+    let legacyFilePath = legacyDir.appendingPathComponent("old.mid").path
+    try FileManager.default.createDirectory(atPath: ownedDirPath, withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: "\(ownedDirPath)/owned.mid",
+        contents: Data([0, 1, 2])
+    )
+    FileManager.default.createFile(atPath: unrelatedFilePath, contents: Data([0, 1, 2]))
+    FileManager.default.createFile(atPath: legacyFilePath, contents: Data([0, 1, 2]))
+
+    let oldDate = Date().addingTimeInterval(-600)
+    try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: ownedDirPath)
+    try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: unrelatedFilePath)
+    try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: legacyFilePath)
+
+    let overrides = LogicProServerRuntimeOverrides(
+        cleanupStartupArtifacts: {
+            SMFWriter.cleanupStartupOrphanFiles(
+                baseDirectory: tempRoot,
+                legacyManagedDirectories: [legacyDir.standardizedFileURL.path]
+            )
+        },
+        startPorts: {},
+        registerChannels: {},
+        startChannels: { .init(started: [], failures: [:], degraded: [:]) },
+        startPoller: {},
+        registerHandlers: {},
+        serve: {},
+        stopPoller: {},
+        stopChannels: {},
+        stopPorts: {}
+    )
+    let server = LogicProServer(runtimeOverrides: overrides)
+
+    try await server.start()
+
+    #expect(!FileManager.default.fileExists(atPath: ownedDirPath))
+    #expect(FileManager.default.fileExists(atPath: unrelatedFilePath))
+    #expect(!FileManager.default.fileExists(atPath: legacyFilePath))
+}
+
 @Test func testLogicProServerStartUsesRuntimeOverridesOnStartupFailure() async {
     let recorder = ServerStartRecorder()
     let overrides = LogicProServerRuntimeOverrides(

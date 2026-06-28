@@ -5,6 +5,7 @@ import Testing
 enum MockCoreMIDIHarnessError: Error, Sendable {
     case startFailed
     case createPortFailed
+    case sendFailed
 }
 
 actor MockCoreMIDIEngine: CoreMIDIEngineProtocol {
@@ -17,16 +18,31 @@ actor MockCoreMIDIEngine: CoreMIDIEngineProtocol {
         case aftertouch(channel: UInt8, pressure: UInt8)
     }
 
+    enum SendFailureMode: Sendable {
+        case all
+        case noteOff
+        case sysex
+    }
+
     var sysexMessages: [[UInt8]] = []
     var shortMessages: [Message] = []
     var active: Bool
     var startCount = 0
     var stopCount = 0
     let startFailure: MockCoreMIDIHarnessError?
+    let sendFailure: MockCoreMIDIHarnessError?
+    let sendFailureMode: SendFailureMode
 
-    init(active: Bool = true, startFailure: MockCoreMIDIHarnessError? = nil) {
+    init(
+        active: Bool = true,
+        startFailure: MockCoreMIDIHarnessError? = nil,
+        sendFailure: MockCoreMIDIHarnessError? = nil,
+        sendFailureMode: SendFailureMode = .all
+    ) {
         self.active = active
         self.startFailure = startFailure
+        self.sendFailure = sendFailure
+        self.sendFailureMode = sendFailureMode
     }
 
     func start() throws {
@@ -43,32 +59,78 @@ actor MockCoreMIDIEngine: CoreMIDIEngineProtocol {
     }
 
     var isActive: Bool { active }
-    func sendNoteOn(channel: UInt8, note: UInt8, velocity: UInt8) {
+    func sendNoteOn(channel: UInt8, note: UInt8, velocity: UInt8) throws {
+        try failIfNeeded(.noteOn(channel: channel, note: note, velocity: velocity))
         shortMessages.append(.noteOn(channel: channel, note: note, velocity: velocity))
     }
 
-    func sendNoteOff(channel: UInt8, note: UInt8, velocity: UInt8) {
+    func sendNoteOff(channel: UInt8, note: UInt8, velocity: UInt8) throws {
+        try failIfNeeded(.noteOff(channel: channel, note: note, velocity: velocity))
         shortMessages.append(.noteOff(channel: channel, note: note, velocity: velocity))
     }
 
-    func sendCC(channel: UInt8, controller: UInt8, value: UInt8) {
+    func sendCC(channel: UInt8, controller: UInt8, value: UInt8) throws {
+        try failIfNeeded(.cc(channel: channel, controller: controller, value: value))
         shortMessages.append(.cc(channel: channel, controller: controller, value: value))
     }
 
-    func sendProgramChange(channel: UInt8, program: UInt8) {
+    func sendProgramChange(channel: UInt8, program: UInt8) throws {
+        try failIfNeeded(.programChange(channel: channel, program: program))
         shortMessages.append(.programChange(channel: channel, program: program))
     }
 
-    func sendPitchBend(channel: UInt8, value: UInt16) {
+    func sendPitchBend(channel: UInt8, value: UInt16) throws {
+        try failIfNeeded(.pitchBend(channel: channel, value: value))
         shortMessages.append(.pitchBend(channel: channel, value: value))
     }
 
-    func sendAftertouch(channel: UInt8, pressure: UInt8) {
+    func sendAftertouch(channel: UInt8, pressure: UInt8) throws {
+        try failIfNeeded(.aftertouch(channel: channel, pressure: pressure))
         shortMessages.append(.aftertouch(channel: channel, pressure: pressure))
     }
 
-    func sendSysEx(_ bytes: [UInt8]) {
+    func sendSysEx(_ bytes: [UInt8]) throws {
+        try failIfNeeded(.sysex)
         sysexMessages.append(bytes)
+    }
+
+    private func failIfNeeded(_ message: MessageOrSysEx) throws {
+        guard let sendFailure else { return }
+        switch (sendFailureMode, message) {
+        case (.all, _), (.noteOff, .message(.noteOff(_, _, _))), (.sysex, .sysex):
+            throw sendFailure
+        default:
+            return
+        }
+    }
+
+    private enum MessageOrSysEx {
+        case message(Message)
+        case sysex
+
+        static func noteOn(channel: UInt8, note: UInt8, velocity: UInt8) -> MessageOrSysEx {
+            .message(.noteOn(channel: channel, note: note, velocity: velocity))
+        }
+
+        static func noteOff(channel: UInt8, note: UInt8, velocity: UInt8) -> MessageOrSysEx {
+            .message(.noteOff(channel: channel, note: note, velocity: velocity))
+        }
+
+        static func cc(channel: UInt8, controller: UInt8, value: UInt8) -> MessageOrSysEx {
+            .message(.cc(channel: channel, controller: controller, value: value))
+        }
+
+        static func programChange(channel: UInt8, program: UInt8) -> MessageOrSysEx {
+            .message(.programChange(channel: channel, program: program))
+        }
+
+        static func pitchBend(channel: UInt8, value: UInt16) -> MessageOrSysEx {
+            .message(.pitchBend(channel: channel, value: value))
+        }
+
+        static func aftertouch(channel: UInt8, pressure: UInt8) -> MessageOrSysEx {
+            .message(.aftertouch(channel: channel, pressure: pressure))
+        }
     }
 }
 
@@ -227,7 +289,7 @@ actor MockVirtualPortManager: VirtualPortManaging {
     let channel = CoreMIDIChannel(engine: engine)
 
     let operations: [(String, [String: String])] = [
-        ("midi.send_note", ["note": "60", "channel": "2", "velocity": "90", "duration_ms": "0"]),
+        ("midi.send_note", ["note": "60", "channel": "2", "velocity": "90", "duration_ms": "1"]),
         ("midi.note_on", ["note": "61", "channel": "1", "velocity": "91"]),
         ("midi.note_off", ["note": "61", "channel": "1"]),
         ("midi.send_cc", ["controller": "74", "value": "80", "channel": "3"]),
@@ -257,6 +319,41 @@ actor MockVirtualPortManager: VirtualPortManaging {
         .pitchBend(channel: 7, value: 16_383),
         .aftertouch(channel: 8, pressure: 70),
         .aftertouch(channel: 9, pressure: 71),
+    ])
+}
+
+@Test func testCoreMIDIChannelSendFailureReturnsStateC() async {
+    let engine = MockCoreMIDIEngine(sendFailure: .sendFailed)
+    let channel = CoreMIDIChannel(engine: engine)
+
+    let result = await channel.execute(
+        operation: "midi.send_cc",
+        params: ["controller": "74", "value": "80", "channel": "3"]
+    )
+
+    #expect(!result.isSuccess)
+    #expect(result.message.contains("\"error\":\"ax_write_failed\""))
+    #expect(result.message.contains("\"operation\":\"midi.send_cc\""))
+    #expect(await engine.shortMessages.isEmpty)
+}
+
+@Test func testCoreMIDIChannelPlaySequenceNoteOffFailureReturnsStateC() async {
+    let engine = MockCoreMIDIEngine(
+        sendFailure: .sendFailed,
+        sendFailureMode: .noteOff
+    )
+    let channel = CoreMIDIChannel(engine: engine)
+
+    let result = await channel.execute(
+        operation: "midi.play_sequence",
+        params: ["notes": "60,0,1,100,1"]
+    )
+
+    #expect(!result.isSuccess)
+    #expect(result.message.contains("\"error\":\"ax_write_failed\""))
+    #expect(result.message.contains("\"operation\":\"midi.play_sequence\""))
+    #expect(await engine.shortMessages == [
+        .noteOn(channel: 0, note: 60, velocity: 100),
     ])
 }
 
@@ -297,7 +394,7 @@ actor MockVirtualPortManager: VirtualPortManaging {
 
     let chord = await channel.execute(
         operation: "midi.send_chord",
-        params: ["notes": "60, 64,67", "velocity": "88", "channel": "3", "duration_ms": "0"]
+        params: ["notes": "60, 64,67", "velocity": "88", "channel": "3", "duration_ms": "1"]
     )
     #expect(chord.isSuccess)
 
@@ -344,12 +441,22 @@ actor MockVirtualPortManager: VirtualPortManaging {
 
     let failingCases: [(String, [String: String], String)] = [
         ("midi.send_note", [:], "requires 'note'"),
+        ("midi.send_note", ["note": "60", "channel": "16"], "wire byte in 0-15"),
+        ("midi.send_note", ["note": "60", "duration_ms": "0"], "duration_ms"),
         ("midi.note_on", [:], "requires 'note'"),
         ("midi.note_off", [:], "requires 'note'"),
         ("midi.send_cc", ["controller": "74"], "requires 'controller' and 'value'"),
         ("midi.program_change", [:], "requires 'program'"),
         ("midi.aftertouch", [:], "requires 'pressure'"),
+        ("midi.aftertouch", ["value": "128"], "requires 'pressure'"),
+        ("midi.send_pitch_bend", ["value": "8192", "channel": "16"], "wire byte in 0-15"),
         ("midi.send_sysex", ["bytes": "7F 7F"], "must start with F0 and end with F7"),
+        ("midi.send_sysex", ["bytes": "F0 7F nope F7"], "invalid hex token"),
+        ("midi.send_sysex", ["bytes": "F0 80 F7"], "body bytes"),
+        ("midi.send_sysex", ["bytes": "F0 " + Array(repeating: "7D", count: 1023).joined(separator: " ") + " F7"], "1024-byte limit"),
+        ("midi.send_chord", ["notes": "60, nope,64"], "must contain 1..24"),
+        ("midi.send_chord", ["notes": "60,64", "duration_ms": "0"], "duration_ms"),
+        ("midi.step_input", [:], "step_input requires explicit 'note'"),
         ("unknown.operation", [:], "Unknown CoreMIDI operation"),
     ]
 

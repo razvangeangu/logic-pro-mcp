@@ -105,7 +105,7 @@ Select an instrument track, verify the channel is `1..16`, and confirm the track
 
 ### `import_file` rejects a path
 
-MIDI imports are constrained to safe locations. Prefer server-generated files under `/tmp/LogicProMCP/`.
+MIDI imports are constrained to safe locations. Prefer `record_sequence`, which uses private server-managed temp files.
 
 ## MIDI Key Commands and Scripter
 

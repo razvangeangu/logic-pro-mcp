@@ -49,9 +49,12 @@ private actor StateBSelectForPluginMockChannel: Channel {
 
     #expect(result.isError!, "set_plugin_param must error on State B select")
     let text = sharedToolText(result)
-    #expect(text.contains("set_plugin_param refused"), "expected refusal, got: \(text)")
-    #expect(text.contains("select_response="), "expected original select response, got: \(text)")
-    #expect(text.contains("\"verified\":false"), "expected State B envelope, got: \(text)")
+    let object = try? #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+    #expect(object?["success"] as? Bool == false)
+    #expect(object?["error"] as? String == "readback_mismatch")
+    #expect((object?["hint"] as? String)?.contains("set_plugin_param refused") == true)
+    let selectResponse = object?["select_response"] as? String
+    #expect(selectResponse?.contains("\"verified\":false") == true)
 
     let mcuOps = await mcu.executedOps
     let scripterOps = await scripter.executedOps

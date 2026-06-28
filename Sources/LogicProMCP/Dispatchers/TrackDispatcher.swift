@@ -2,9 +2,11 @@ import Foundation
 import MCP
 
 struct TrackDispatcher {
+    private static let maxTrackNameLength = 128
+
     static let tool = Tool(
         name: "logic_tracks",
-        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment; SMF end <= 3,600,000 ms), tempo?: Float } SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call, then verifies the imported region by AX readback. Successful responses include `created_track`, `target_track_index`, `target_track_name`, `region_name`, `start_bar`, `end_bar`, `note_count`, and `verify_source`; structured error JSON distinguishes `import_failure`, `audibility_unverified`, `import_unverified`, `wrong_track_import`, `timing_mismatch`, and `unreadable_readback`. If Logic imports GM Device / External MIDI lanes, record_sequence fails closed instead of promoting region readback to audible success. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`; callers that want a specific patch must follow up with explicit `set_instrument` on a Software Instrument track. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default ax — live Library Panel; disk reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
+        description: "Track actions in Logic Pro. Commands: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets. Params: select -> { index: Int } or { name: String }; rename/mute/solo/arm/arm_only/set_automation/set_instrument ALL require explicit { index: Int (≥0) }; mute/solo/arm -> also { enabled: Bool }; arm_only disarms all others + arms target, returns error on partial disarm failure; record_sequence -> { bar?: Int (default 1), notes: \"pitch,offsetMs,durMs[,vel[,ch]];...\" (BREAKING since v3.1.6: optional `ch` field is 1-based, range 1..16 — pre-v3.1.6 was 0-based; whole-parse-fail on any invalid segment; SMF end <= 3,600,000 ms), tempo?: Float } SMF-import path: generates a Standard MIDI File server-side, forces playhead to bar 1, imports via AX menu — byte-exact timing, creates a new track each call, then verifies the imported region by AX readback. Successful responses include `created_track`, `target_track_index`, `target_track_name`, `region_name`, `start_bar`, `end_bar`, `note_count`, and `verify_source`; structured error JSON distinguishes `import_failure`, `audibility_unverified`, `import_unverified`, `wrong_track_import`, `timing_mismatch`, and `unreadable_readback`. If Logic imports GM Device / External MIDI lanes, record_sequence fails closed instead of promoting region readback to audible success. v3.0.8 REMOVED the internal instrument auto-load: response always carries `\"instrument\":\"not-attempted\"`; callers that want a specific patch must follow up with explicit `set_instrument` on a Software Instrument track. The legacy `instrument_path` param is accepted for wire compat but ignored (surfaces as `\"ignored:<path>\"` in the response) — see CHANGELOG v3.0.8 for why the inline auto-load was unsafe (could load the wrong track's patch, corrupting a pre-existing track); create_* -> {}; delete/duplicate -> { index: Int }; set_automation -> { mode: read|write|touch|latch|trim|off }; set_instrument -> { path: String } or { category: String, preset: String } — path mode preferred; scan_library -> { mode?: \"ax\"|\"disk\"|\"both\" } (default disk — reads ~/Music/Logic Pro Library.bundle for 5,400+ leaves with Panel-taxonomy remap; ax is the legacy live Library Panel scan; both returns diff summary); resolve_path -> { path: String } cache-backed read-only; scan_plugin_presets -> { submenuOpenDelayMs?: Int }.",
         inputSchema: commandParamsToolSchema(commandDescription: "Track command to execute")
     )
 
@@ -21,7 +23,7 @@ struct TrackDispatcher {
         dialogPresent: @escaping @Sendable () -> Bool = { false }
     ) async -> CallTool.Result {
         if let operation = modalGuardedTrackOperation(for: command), dialogPresent() {
-            return blockingDialogResult(operation: operation)
+            return blockingLogicDialogResult(operation: operation)
         }
 
         switch command {
@@ -32,15 +34,15 @@ struct TrackDispatcher {
             // request would corrupt the wrong track.
             if params["index"] != nil || params["track"] != nil {
                 guard let index = intParamOrNil(params, "index", "track") else {
-                    return toolTextResult(
+                    return toolInvalidParamsResult(
                         "select 'index' must be a non-negative integer (non-numeric or missing value rejected)",
-                        isError: true
+                        extras: ["operation": "track.select"]
                     )
                 }
                 guard index >= 0 else {
-                    return toolTextResult(
+                    return toolInvalidParamsResult(
                         "select 'index' must be ≥ 0 (got \(index)) — Logic doesn't have negative track indices",
-                        isError: true
+                        extras: ["operation": "track.select"]
                     )
                 }
                 let result = await router.route(
@@ -59,9 +61,16 @@ struct TrackDispatcher {
                     )
                     return toolTextResult(result)
                 }
-                return toolTextResult("No track found matching '\(name)'", isError: true)
+                return toolStateCResult(
+                    .elementNotFound,
+                    hint: "No track found matching '\(name)'",
+                    extras: ["operation": "track.select", "requested_name": name]
+                )
             }
-            return toolTextResult("select requires 'index' or 'name' param", isError: true)
+            return toolInvalidParamsResult(
+                "select requires 'index' or 'name' param",
+                extras: ["operation": "track.select"]
+            )
 
         case "create_audio":
             let result = await router.route(operation: "track.create_audio")
@@ -93,7 +102,10 @@ struct TrackDispatcher {
 
         case "delete":
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
-                return toolTextResult("delete requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "delete requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.delete"]
+                )
             }
             let selectResult = await router.route(
                 operation: "track.select",
@@ -115,9 +127,14 @@ struct TrackDispatcher {
             guard let data = selectResult.message.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let verified = json["verified"] as? Bool, verified == true else {
-                return toolTextResult(
-                    "track.delete refused: track \(index) selection unverified (State B). Cannot safely delete unverified target — re-select or fix Logic Pro AX state and retry. select_response=\(selectResult.message)",
-                    isError: true
+                return toolStateCResult(
+                    .readbackMismatch,
+                    hint: "track.delete refused: track \(index) selection unverified (State B). Cannot safely delete unverified target — re-select or fix Logic Pro AX state and retry.",
+                    extras: [
+                        "operation": "track.delete",
+                        "requested_index": index,
+                        "select_response": selectResult.message,
+                    ]
                 )
             }
             let result = await router.route(operation: "track.delete")
@@ -125,7 +142,10 @@ struct TrackDispatcher {
 
         case "duplicate":
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
-                return toolTextResult("duplicate requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "duplicate requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.duplicate"]
+                )
             }
             let selectResult = await router.route(
                 operation: "track.select",
@@ -146,9 +166,14 @@ struct TrackDispatcher {
             guard let data = selectResult.message.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let verified = json["verified"] as? Bool, verified == true else {
-                return toolTextResult(
-                    "track.duplicate refused: track \(index) selection unverified (State B). Cannot safely duplicate unverified target — re-select or fix Logic Pro AX state and retry. select_response=\(selectResult.message)",
-                    isError: true
+                return toolStateCResult(
+                    .readbackMismatch,
+                    hint: "track.duplicate refused: track \(index) selection unverified (State B). Cannot safely duplicate unverified target — re-select or fix Logic Pro AX state and retry.",
+                    extras: [
+                        "operation": "track.duplicate",
+                        "requested_index": index,
+                        "select_response": selectResult.message,
+                    ]
                 )
             }
             let result = await router.route(operation: "track.duplicate")
@@ -156,11 +181,27 @@ struct TrackDispatcher {
 
         case "rename":
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
-                return toolTextResult("rename requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "rename requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.rename"]
+                )
             }
             let name = stringParam(params, "name")
             guard !name.isEmpty else {
-                return toolTextResult("rename requires 'name' parameter", isError: true)
+                return toolInvalidParamsResult(
+                    "rename requires 'name' parameter",
+                    extras: ["operation": "track.rename"]
+                )
+            }
+            guard name.count <= maxTrackNameLength else {
+                return toolInvalidParamsResult(
+                    "rename 'name' must be \(maxTrackNameLength) characters or fewer",
+                    extras: [
+                        "operation": "track.rename",
+                        "max_length": maxTrackNameLength,
+                        "actual_length": name.count,
+                    ]
+                )
             }
             let result = await router.route(
                 operation: "track.rename",
@@ -179,7 +220,10 @@ struct TrackDispatcher {
 
         case "mute":
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
-                return toolTextResult("mute requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "mute requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.set_mute"]
+                )
             }
             let enabled: Bool
             if params["enabled"] != nil {
@@ -206,7 +250,10 @@ struct TrackDispatcher {
 
         case "solo":
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
-                return toolTextResult("solo requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "solo requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.set_solo"]
+                )
             }
             let enabled: Bool
             if params["enabled"] != nil {
@@ -231,7 +278,10 @@ struct TrackDispatcher {
 
         case "arm":
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
-                return toolTextResult("arm requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "arm requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.set_arm"]
+                )
             }
             let enabled: Bool
             if params["enabled"] != nil {
@@ -258,7 +308,10 @@ struct TrackDispatcher {
 
         case "arm_only":
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
-                return toolTextResult("arm_only requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "arm_only requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.arm_only"]
+                )
             }
             let tracks = await cache.getTracks()
             var disarmed: [Int] = []
@@ -285,9 +338,15 @@ struct TrackDispatcher {
             // of a structured success payload. Partial-disarm visibility still
             // available in the error detail.
             guard armResult.isSuccess else {
-                return toolTextResult(
-                    "arm_only failed: target arm rejected — \(armResult.message); disarmed=\(disarmed) failedDisarm=\(failedDisarm)",
-                    isError: true
+                return toolStateCResult(
+                    .axWriteFailed,
+                    hint: "arm_only failed: target arm rejected — \(armResult.message)",
+                    extras: [
+                        "operation": "track.arm_only",
+                        "requested_index": index,
+                        "disarmed": disarmed,
+                        "failed_disarm": failedDisarm,
+                    ]
                 )
             }
             if !trackToggleResultIsVerified(armResult) {
@@ -333,18 +392,31 @@ struct TrackDispatcher {
             ))
 
         case "set_color":
-            return toolTextResult("set_color is not exposed in the production MCP contract", isError: true)
+            return toolStateCResult(
+                .notImplemented,
+                hint: "set_color is not exposed in the production MCP contract",
+                extras: ["operation": "track.set_color"]
+            )
 
         case "set_automation":
             guard let index = intParamOrNil(params, "index", "track"), index >= 0 else {
-                return toolTextResult("set_automation requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "set_automation requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.set_automation"]
+                )
             }
-            let mode = stringParam(params, "mode", default: "read")
+            guard params["mode"] != nil else {
+                return toolInvalidParamsResult(
+                    "set_automation requires explicit 'mode'",
+                    extras: ["operation": "track.set_automation"]
+                )
+            }
+            let mode = stringParam(params, "mode")
             let validModes = ["read", "write", "touch", "latch", "trim", "off"]
             guard validModes.contains(mode) else {
-                return toolTextResult(
+                return toolInvalidParamsResult(
                     "set_automation 'mode' must be one of \(validModes.joined(separator: ", ")) (got '\(mode)')",
-                    isError: true
+                    extras: ["operation": "track.set_automation"]
                 )
             }
             let result = await router.route(
@@ -355,15 +427,18 @@ struct TrackDispatcher {
 
         case "set_instrument":
             guard let index = intParamOrNil(params, "index"), index >= 0 else {
-                return toolTextResult("set_instrument requires explicit 'index' (Int ≥ 0)", isError: true)
+                return toolInvalidParamsResult(
+                    "set_instrument requires explicit 'index' (Int ≥ 0)",
+                    extras: ["operation": "track.set_instrument"]
+                )
             }
             let category = stringParam(params, "category")
             let preset = stringParam(params, "preset")
             let path = stringParam(params, "path")
             guard !path.isEmpty || (!category.isEmpty && !preset.isEmpty) else {
-                return toolTextResult(
+                return toolInvalidParamsResult(
                     "set_instrument requires 'path' or both 'category' + 'preset'",
-                    isError: true
+                    extras: ["operation": "track.set_instrument"]
                 )
             }
             var routeParams: [String: String] = ["index": String(index)]
@@ -371,7 +446,7 @@ struct TrackDispatcher {
             if !category.isEmpty { routeParams["category"] = category }
             if !preset.isEmpty { routeParams["preset"] = preset }
             if dialogPresent() {
-                return blockingDialogResult(operation: "track.set_instrument")
+                return blockingLogicDialogResult(operation: "track.set_instrument")
             }
             let result = await router.route(
                 operation: "track.set_instrument",
@@ -382,7 +457,10 @@ struct TrackDispatcher {
         case "resolve_path":
             let path = stringParam(params, "path")
             if path.isEmpty {
-                return toolTextResult("Missing 'path' parameter", isError: true)
+                return toolInvalidParamsResult(
+                    "Missing 'path' parameter; resolve_path requires 'path' parameter",
+                    extras: ["operation": "library.resolve_path"]
+                )
             }
             let result = await router.route(
                 operation: "library.resolve_path",
@@ -392,7 +470,7 @@ struct TrackDispatcher {
 
         case "list_library", "library":
             if dialogPresent() {
-                return blockingDialogResult(operation: "library.list")
+                return blockingLogicDialogResult(operation: "library.list")
             }
             let result = await router.route(operation: "library.list")
             return toolTextResult(result)
@@ -401,7 +479,8 @@ struct TrackDispatcher {
             // v3.0.7: forward `mode` param (ax|disk|both) to the scan handler.
             // Previously dropped on the floor — v3.0.6 mode routing was dead.
             var scanParams: [String: String] = [:]
-            let mode = stringParam(params, "mode")
+            let mode = stringParam(params, "mode").lowercased()
+            let effectiveMode = AccessibilityChannel.parseScanMode(mode)
             if !mode.isEmpty {
                 guard ["ax", "disk", "both"].contains(mode) else {
                     return MIDIDispatcher.invalidParamsResult(
@@ -410,8 +489,8 @@ struct TrackDispatcher {
                 }
                 scanParams["mode"] = mode
             }
-            if dialogPresent(), mode != "disk" {
-                return blockingDialogResult(operation: "library.scan_all")
+            if dialogPresent(), effectiveMode != .disk {
+                return blockingLogicDialogResult(operation: "library.scan_all")
             }
             let result = await router.route(
                 operation: "library.scan_all",
@@ -434,7 +513,7 @@ struct TrackDispatcher {
                 settleMs = 250
             }
             if dialogPresent() {
-                return blockingDialogResult(operation: "plugin.scan_presets")
+                return blockingLogicDialogResult(operation: "plugin.scan_presets")
             }
             let result = await router.route(
                 operation: "plugin.scan_presets",
@@ -443,9 +522,9 @@ struct TrackDispatcher {
             return toolTextResult(result)
 
         default:
-            return toolTextResult(
+            return toolInvalidParamsResult(
                 "Unknown track command: \(command). Available: select, create_audio, create_instrument, create_drummer, create_external_midi, delete, duplicate, rename, mute, solo, arm, arm_only, record_sequence, set_automation, set_instrument, list_library, scan_library, resolve_path, scan_plugin_presets",
-                isError: true
+                extras: ["operation": "track.\(command)"]
             )
         }
     }
@@ -468,23 +547,6 @@ struct TrackDispatcher {
         case "set_automation": return "track.set_automation"
         default: return nil
         }
-    }
-
-    private static func blockingDialogResult(operation: String) -> CallTool.Result {
-        toolTextResult(
-            HonestContract.encodeStateC(
-                error: .unsupportedState,
-                hint: "Refusing \(operation) while a blocking Logic dialog/sheet is present. Dismiss crash, save, bounce, import, or other modal dialogs, then retry.",
-                extras: [
-                    "operation": operation,
-                    "failure_stage": "preflight_blocking_dialog",
-                    "blocking_dialog_present": true,
-                    "write_attempted": false,
-                    "safe_to_retry": true,
-                ]
-            ),
-            isError: true
-        )
     }
 
     private static func trackToggleResultIsVerified(_ result: ChannelResult) -> Bool {
@@ -570,7 +632,7 @@ struct TrackDispatcher {
 
     // MARK: - record_sequence SMF-import implementation
 
-    /// Generate a Standard MIDI File from the notes spec, write to /tmp/LogicProMCP/,
+    /// Generate a Standard MIDI File from the notes spec, write to a private temp dir,
     /// then import into the current project via AX menu navigation. Logic always
     /// creates a NEW MIDI track for the imported content (verified OQ-3).
     static func handleRecordSequenceSMF(
@@ -678,11 +740,15 @@ struct TrackDispatcher {
             )
         }
 
-        let tempDir = "/tmp/LogicProMCP"
-        try? FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        let path = "\(tempDir)/\(UUID().uuidString).mid"
+        let tempFile: SMFWriter.TemporaryMIDIFile
+        do {
+            tempFile = try SMFWriter.temporaryMIDIFile()
+        } catch {
+            return toolTextResult("record_sequence: temporary SMF path failed: \(error)", isError: true)
+        }
+        let path = tempFile.fileURL.path
         defer {
-            try? FileManager.default.removeItem(atPath: path)
+            SMFWriter.cleanupTemporaryMIDIFile(tempFile)
         }
 
         // Logic's MIDI File import strips leading empty delta before the first
@@ -698,7 +764,7 @@ struct TrackDispatcher {
                 tempo: tempo,
                 timeSignature: (4, 4)
             )
-            try data.write(to: URL(fileURLWithPath: path))
+            try data.write(to: tempFile.fileURL, options: .atomic)
         } catch {
             return toolTextResult("record_sequence: SMF generation failed: \(error)", isError: true)
         }

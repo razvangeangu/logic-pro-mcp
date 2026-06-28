@@ -81,7 +81,7 @@ enum AXLogicProElements {
         let windows: [AXUIElement] = AXHelpers.getAttribute(
             app, kAXWindowsAttribute, runtime: runtime.ax
         ) ?? []
-        return windows.contains { isDialogWindow($0, runtime: runtime.ax) }
+        return windows.contains { isBlockingDialogWindow($0, runtime: runtime.ax) }
     }
 
     /// True when `window` carries an AXSubrole indicating a modal dialog/sheet.
@@ -97,6 +97,28 @@ enum AXLogicProElements {
         guard let subrole else { return false }
         return subrole == (kAXDialogSubrole as String)
             || subrole == (kAXSystemDialogSubrole as String)
+    }
+
+    private static func isBlockingDialogWindow(
+        _ window: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        guard isDialogWindow(window, runtime: runtime) else { return false }
+        return !isKeyboardLayoutOverlayWindow(window, runtime: runtime)
+    }
+
+    private static func isKeyboardLayoutOverlayWindow(
+        _ window: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        let title: String = AXHelpers.getAttribute(window, kAXTitleAttribute, runtime: runtime) ?? ""
+        guard title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        let children = AXHelpers.getChildren(window, runtime: runtime)
+        guard children.count == 1 else { return false }
+        let child = children[0]
+        guard AXHelpers.getRole(child, runtime: runtime) == (kAXButtonRole as String) else { return false }
+        let description: String = AXHelpers.getAttribute(child, kAXDescriptionAttribute, runtime: runtime) ?? ""
+        return description.hasPrefix("com.apple.keylayout.")
     }
 
     /// True when `window` contains Logic's track-header rail. Used by

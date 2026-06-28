@@ -82,6 +82,10 @@ private func approvalStorePath(_ home: URL = lifecycleTestHome) -> String {
     home.appendingPathComponent("Library/Application Support/LogicProMCP/operator-approvals.json").path
 }
 
+private func approvalLockPath(_ home: URL = lifecycleTestHome) -> String {
+    approvalStorePath(home) + ".lock"
+}
+
 private func launchAgentPath(_ home: URL = lifecycleTestHome) -> String {
     home.appendingPathComponent("Library/LaunchAgents/com.logicpro.mcp.plist").path
 }
@@ -167,6 +171,7 @@ private func launchAgentPath(_ home: URL = lifecycleTestHome) -> String {
         binaryPath(),
         keyCommandsPath(),
         approvalStorePath(),
+        approvalLockPath(),
         launchAgentPath(),
     ]
     let plan = SetupLifecycle.plan(
@@ -229,6 +234,21 @@ private func launchAgentPath(_ home: URL = lifecycleTestHome) -> String {
 
     // A skipped binary removal needs no sudo regardless of dir writability.
     #expect(try #require(step(plan, "binary.remove")).requiresSudo == false)
+}
+
+@Test func testUninstallPlanDeletesApprovalsWhenOnlyLockSidecarExists() throws {
+    let plan = SetupLifecycle.plan(
+        command: .uninstall,
+        runtime: lifecycleRuntime(
+            presentPaths: [approvalLockPath()],
+            registration: .notRegistered
+        )
+    )
+
+    let approvals = try #require(step(plan, "approvals.remove"))
+    #expect(approvals.action == .delete)
+    #expect(approvals.target == approvalStorePath())
+    #expect(approvals.remediation.value.contains("operator-approvals.json.lock"))
 }
 
 @Test func testUninstallUnregisterIsManualWhenClaudeCLIMissing() throws {

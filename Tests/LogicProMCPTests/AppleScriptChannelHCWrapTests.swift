@@ -14,6 +14,21 @@ private func parseEnvelope(_ message: String) -> [String: Any]? {
     return raw as? [String: Any]
 }
 
+actor IdentityResponseQueue {
+    private var results: [ChannelResult]
+
+    init(_ results: [ChannelResult]) {
+        self.results = results
+    }
+
+    func next() -> ChannelResult {
+        guard !results.isEmpty else {
+            return .success("")
+        }
+        return results.removeFirst()
+    }
+}
+
 /// Local copy of the file-private helper in AppleScriptChannelTests.swift.
 /// Same shape — kept in lock-step. Centralising into AccessibilityTestSupport
 /// would be a bigger refactor than the P2-2 patch warrants and the original
@@ -43,8 +58,24 @@ private func makeAppleScriptRuntime(
 
 @Test func testAppleScriptProjectNewReturnsHCEnvelope() async {
     let recorder = AppleScriptRecorder()
+    let identities = IdentityResponseQueue([
+        .success("/Users/x/Old.logicx\u{001F}Old"),
+        .success("\u{001F}Untitled"),
+    ])
     await recorder.setResult(.success("{\"result\":\"Untitled\"}"))
-    let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(scriptRecorder: recorder))
+    let channel = AppleScriptChannel(
+        runtime: .init(
+            isLogicProRunning: { true },
+            openFile: { _ in true },
+            runScript: { source in
+                if source.contains("character id 31") {
+                    return await identities.next()
+                }
+                return await recorder.run(source)
+            },
+            executeTransportAction: { _ in .success("OK") }
+        )
+    )
 
     let result = await channel.execute(operation: "project.new", params: [:])
     #expect(result.isSuccess)

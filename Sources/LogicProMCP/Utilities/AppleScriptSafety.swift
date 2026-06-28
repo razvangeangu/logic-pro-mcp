@@ -7,17 +7,17 @@ enum AppleScriptSafety {
 
         static let production = Runtime(
             openFileURL: { url in
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-                process.arguments = ["-a", "Logic Pro", url.path]
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-                    return process.terminationStatus == 0
-                } catch {
-                    Log.error("Failed to launch project via open(1): \(error)", subsystem: "appleScript")
+                let result = BoundedProcessRunner.run(
+                    executable: "/usr/bin/open",
+                    arguments: ["-a", "Logic Pro", url.path],
+                    timeout: ServerConfig.appleScriptTimeout,
+                    outputLimitBytes: 4 * 1024
+                )
+                guard case let .completed(output) = result else {
+                    Log.error("Failed to launch project via open(1): \(result)", subsystem: "appleScript")
                     return false
                 }
+                return output.exitCode == 0
             }
         )
     }
@@ -34,17 +34,31 @@ enum AppleScriptSafety {
 
     /// Validate a file path is non-empty and usable.
     static func isValidFilePath(_ path: String) -> Bool {
+        validatedFilePath(path) != nil
+    }
+
+    private static func validatedFilePath(_ path: String) -> String? {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed == path else {
+            return nil
+        }
         guard !trimmed.isEmpty, trimmed.hasPrefix("/") else {
-            return false
+            return nil
         }
         guard trimmed.rangeOfCharacter(from: .controlCharacters) == nil else {
-            return false
+            return nil
         }
         guard !trimmed.hasPrefix("/dev/") else {
-            return false
+            return nil
         }
-        return true
+        guard !containsParentDirectoryTraversal(trimmed) else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func containsParentDirectoryTraversal(_ path: String) -> Bool {
+        (path as NSString).pathComponents.contains("..")
     }
 
     /// Validate a Logic project path. Existing projects must point to a .logicx package.
@@ -56,8 +70,8 @@ enum AppleScriptSafety {
     }
 
     static func projectURL(from path: String, requireExisting: Bool) -> URL? {
-        guard isValidFilePath(path) else { return nil }
-        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard let safePath = validatedFilePath(path) else { return nil }
+        let url = URL(fileURLWithPath: safePath).standardizedFileURL
         guard url.isFileURL, url.path.hasPrefix("/") else {
             return nil
         }

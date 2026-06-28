@@ -52,7 +52,7 @@ git clone https://github.com/MongLong0214/logic-pro-mcp.git
 cd logic-pro-mcp
 
 swift build              # debug
-swift test               # 1743 unit + integration tests on current v3.7.0 source
+swift test               # 1846 unit + integration tests on the current source tree
 swift build -c release   # release binary at .build/release/LogicProMCP
 ```
 
@@ -95,17 +95,17 @@ Sources/LogicProMCP/
 ├── Server/            LogicProServer + ServerConfig
 └── Utilities/         DestructivePolicy, AppleScriptSafety, Logger, PermissionChecker
 
-Tests/LogicProMCPTests/  1743 tests across the Swift test target on the v3.7.0 source
+Tests/LogicProMCPTests/  1846 tests across the Swift test target on the current source tree
 Scripts/                 install / uninstall / live E2E / Scripter JS
-docs/                    minimal public setup, API, troubleshooting, and README media
+docs/                    public setup, API, troubleshooting, README media, and public issue PRDs/tickets
 artifacts/               generated local artifacts; only explicitly published fixtures belong in git
 ```
 
 ## Documentation Policy
 
-Keep `docs/` intentionally small and public-facing. The only default text docs are `SETUP.md`, `API.md`, and `TROUBLESHOOTING.md`; README media is limited to the demo GIF/MP4 plus the registry/social thumbnail. Release detail belongs in `CHANGELOG.md` or GitHub Releases, maintainer process belongs in `CONTRIBUTING.md`, and architecture summaries belong in README/API unless they become too large.
+Keep `docs/` intentionally public-facing. Default end-user docs are `SETUP.md`, `API.md`, and `TROUBLESHOOTING.md`; README media is limited to the demo GIF/MP4 plus the registry/social thumbnail. Public issue PRDs and ticket checklists may live under `docs/prd/` and `docs/tickets/` when they explain active or shipped user-visible remediation. Release detail belongs in `CHANGELOG.md` or GitHub Releases, maintainer process belongs in `CONTRIBUTING.md`, and architecture summaries belong in README/API unless they become too large.
 
-Do not commit internal PRDs, ticket boards, spike notes, private reviews, session handoffs, local workspace paths, personal identifiers, chat transcripts, or community-user provenance.
+Do not commit internal PRDs, private ticket boards, spike notes, private reviews, session handoffs, local workspace paths, personal identifiers, chat transcripts, or community-user provenance.
 
 ## Channel Priority
 
@@ -158,7 +158,7 @@ If you cannot run a required gate, say so in the PR and explain why. Do not mark
 ## Pull Request Checklist
 
 - [ ] `swift build` clean
-- [ ] `swift test` green (all 1743 tests on current v3.7.0 source)
+- [ ] `swift test` green (all 1846 tests on the current source tree)
 - [ ] New behavior covered by at least one unit test
 - [ ] Changed production code keeps the global coverage floor green (`region >=70%`, `line >=78%`); high-risk Logic-facing changes target about 90% line coverage on the touched surface or document the live/manual evidence that substitutes for direct measurement
 - [ ] Public API change → `CHANGELOG.md` entry under `[Unreleased]`; new MCP tools also require README and `docs/API.md` updates

@@ -175,7 +175,11 @@ struct ProductionHardeningReviewRegressionTests {
                 "tempo": .double(120),
             ],
             router: router,
-            cache: cache
+            cache: cache,
+            trackHeaderCount: { 1 },
+            trackNameAt: { _ in nil },
+            readRegions: { .success([]) },
+            settleReadback: {}
         )
 
         let text = sharedToolText(result)

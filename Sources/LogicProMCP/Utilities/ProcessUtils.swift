@@ -281,83 +281,45 @@ enum ProcessUtils {
     }
 
     private static func runAppleScript(_ source: String) -> String? {
-        let inProcessResult: String?? = runAppKit {
-            let script = NSAppleScript(source: source)
-            var errorInfo: NSDictionary?
-            let result = script?.executeAndReturnError(&errorInfo)
-            guard errorInfo == nil else {
-                return nil
-            }
-            return result?.stringValue
-        }
-        if let outer = inProcessResult, let result = outer {
-            return result
-        }
-
-        return runProcessAndCaptureStdout(
-            executablePath: "/bin/zsh",
-            arguments: ["-lc", appleScriptShellCommand(for: source)],
+        runProcessAndCaptureStdout(
+            executablePath: "/usr/bin/osascript",
+            arguments: appleScriptArguments(for: source),
             timeout: subprocessTimeout
         )
     }
 
-    private static func appleScriptShellCommand(for source: String) -> String {
+    private static func appleScriptArguments(for source: String) -> [String] {
         let lines = source
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        let args = lines.map { "-e \(shellQuote($0))" }.joined(separator: " ")
-        return "osascript \(args)"
-    }
-
-    private static func shellQuote(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+        return lines.flatMap { ["-e", $0] }
     }
 
     private static func runProcessAndCaptureStdout(
         executablePath: String,
         arguments: [String],
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        // Process-table probes (`ps -axo`, `pgrep`) can be large on busy hosts;
+        // use a generous cap so a Logic line never lands past a truncation
+        // boundary and makes PID parsing silently miss it.
+        outputLimitBytes: Int = 8_388_608
     ) -> String? {
-        let process = Process()
-        let stdout = Pipe()
-        let stdin = Pipe()
-        stdin.fileHandleForWriting.closeFile()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = arguments
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = Pipe()
-
-        let group = DispatchGroup()
-        group.enter()
-        process.terminationHandler = { _ in
-            group.leave()
-        }
-
-        do {
-            try process.run()
-        } catch {
+        guard case let .completed(output) = BoundedProcessRunner.run(
+            executable: executablePath,
+            arguments: arguments,
+            timeout: timeout,
+            outputLimitBytes: outputLimitBytes
+        ), output.exitCode == 0 else {
             return nil
         }
-
-        if group.wait(timeout: .now() + timeout) == .timedOut {
-            if process.isRunning {
-                process.terminate()
-            }
-            if group.wait(timeout: .now() + 0.2) == .timedOut, process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-                _ = group.wait(timeout: .now() + 0.2)
-            }
-            return nil
+        if output.stdoutTruncated {
+            Log.warn(
+                "Process output truncated at \(outputLimitBytes) bytes for \(executablePath); downstream parsing (e.g. PID lookup) may be incomplete",
+                subsystem: "process"
+            )
         }
-
-        guard process.terminationStatus == 0 else {
-            return nil
-        }
-
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)
+        return output.stdout
     }
 
     /// Lightweight server-process metrics for diagnostics.

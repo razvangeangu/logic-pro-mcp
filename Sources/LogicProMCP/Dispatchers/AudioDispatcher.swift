@@ -9,7 +9,7 @@ struct AudioDispatcher {
 
     static let tool = commandTool(
         name: "logic_audio",
-        description: "Read-only audio artifact analysis for post-bounce/export verification. Commands: analyze_file. Params: analyze_file -> { path: absolute audio file path, output_root?: absolute allowlist root, min_duration_seconds?: number, expected_duration_seconds?: number, max_duration_drift_seconds?: number, min_file_size_bytes?: int, max_peak_dbfs?: number, near_silence_dbfs?: number, max_silence_ratio?: number, expected_sample_rate?: int, expected_channel_count?: int }. Returns schema logic_pro_mcp_audio_analysis.v1 and never mutates files or Logic Pro.",
+        description: "Read-only audio artifact analysis for post-bounce/export verification. Commands: analyze_file. Params: analyze_file -> { path: absolute audio file path, output_root?: absolute allowlist root, min_duration_seconds?: number, expected_duration_seconds?: number, max_duration_drift_seconds?: number, min_file_size_bytes?: int, max_input_file_size_bytes?: int, max_input_duration_seconds?: number, max_decoded_frames?: int, max_peak_dbfs?: number, near_silence_dbfs?: number, max_silence_ratio?: number, expected_sample_rate?: int, expected_channel_count?: int }. Returns schema logic_pro_mcp_audio_analysis.v1 and never mutates files or Logic Pro.",
         commandDescription: "Audio command to execute"
     )
 
@@ -47,6 +47,18 @@ struct AudioDispatcher {
         policy.expectedDurationSeconds = doubleParamOrNil(params, "expected_duration_seconds")
         policy.maximumDurationDriftSeconds = doubleParamOrNil(params, "max_duration_drift_seconds", "maximum_duration_drift_seconds")
         policy.minimumFileSizeBytes = intParamOrNil(params, "min_file_size_bytes", "minimum_file_size_bytes")
+        if let maxInputFileSize = intParamOrNil(params, "max_input_file_size_bytes", "maximum_input_file_size_bytes"),
+           maxInputFileSize > 0 {
+            policy.maximumInputFileSizeBytes = Int64(maxInputFileSize)
+        }
+        if let maxInputDuration = doubleParamOrNil(params, "max_input_duration_seconds", "maximum_input_duration_seconds"),
+           maxInputDuration > 0 {
+            policy.maximumInputDurationSeconds = maxInputDuration
+        }
+        if let maxDecodedFrames = intParamOrNil(params, "max_decoded_frames", "maximum_decoded_frames"),
+           maxDecodedFrames > 0 {
+            policy.maximumDecodedFrames = Int64(maxDecodedFrames)
+        }
         policy.maximumPeakDbfs = doubleParamOrNil(params, "max_peak_dbfs", "maximum_peak_dbfs")
         policy.expectedSampleRate = intParamOrNil(params, "expected_sample_rate")
         policy.expectedChannelCount = intParamOrNil(params, "expected_channel_count")

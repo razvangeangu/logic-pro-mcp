@@ -99,4 +99,13 @@ struct Issue141LibraryModalPreconditionTests {
         #expect(!isError)
         #expect(await channel.operations().map(\.0) == ["library.scan_all"])
     }
+
+    @Test("default scan_library remains available while a blocking dialog is present")
+    func defaultScanLibraryBypassesBlockingDialogGuard() async throws {
+        let (result, channel) = await call(command: "scan_library", params: [:])
+
+        let isError = try #require(result.isError)
+        #expect(!isError)
+        #expect(await channel.operations().map(\.0) == ["library.scan_all"])
+    }
 }

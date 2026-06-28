@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 import Testing
 @testable import LogicProMCP
 
@@ -6,24 +7,9 @@ import Testing
 @Suite("Logger", .serialized)
 struct LoggerTests {
 
-    /// Install a capture sink, run the body, then restore stderr + reset rate limiter.
-    private func capture(_ body: () -> Void) -> [String] {
-        let box = LogCaptureBox()
-        let previous = Log.output
-        Log.output = { msg in box.append(msg) }
-        defer {
-            Log.output = previous
-            Log.resetForTests()
-        }
-        Log.resetForTests()
-        body()
-        return box.snapshot()
-    }
-
     @Test("text format emits timestamp + level + subsystem + message + filename:line")
     func textFormatShape() {
-        Log.setFormatForTests(.text)
-        let lines = capture {
+        let lines = LogTestConfiguration.capture(format: .text) {
             Log.info("hello world", subsystem: "router")
         }
         #expect(lines.count == 1)
@@ -37,10 +23,7 @@ struct LoggerTests {
 
     @Test("JSON format produces one JSON object per line with required keys")
     func jsonFormatShape() throws {
-        Log.setFormatForTests(.json)
-        defer { Log.setFormatForTests(.text) }
-
-        let lines = capture {
+        let lines = LogTestConfiguration.capture(format: .json) {
             Log.warn("disk filling up", subsystem: Log.Subsystem.poller)
         }
         #expect(lines.count == 1)
@@ -58,10 +41,7 @@ struct LoggerTests {
 
     @Test("JSON format escapes embedded quotes and control chars")
     func jsonEscaping() throws {
-        Log.setFormatForTests(.json)
-        defer { Log.setFormatForTests(.text) }
-
-        let lines = capture {
+        let lines = LogTestConfiguration.capture(format: .json) {
             Log.error("oops \"quoted\"\nnewline\ttab", subsystem: "validation")
         }
         let data = Data(lines[0].trimmingCharacters(in: .whitespacesAndNewlines).utf8)
@@ -71,11 +51,7 @@ struct LoggerTests {
 
     @Test("setLevel filters messages below threshold at runtime")
     func runtimeLevelFiltering() {
-        let original = Log.minLevel
-        defer { Log.setLevel(original) }
-
-        Log.setLevel(.warn)
-        let lines = capture {
+        let lines = LogTestConfiguration.capture(level: .warn) {
             Log.debug("d", subsystem: "main")
             Log.info("i", subsystem: "main")
             Log.warn("w", subsystem: "main")
@@ -88,7 +64,7 @@ struct LoggerTests {
 
     @Test("Subsystem enum overload matches raw string equivalent")
     func subsystemEnumOverload() {
-        let lines = capture {
+        let lines = LogTestConfiguration.capture {
             Log.info("msg", subsystem: Log.Subsystem.midi)
         }
         #expect(lines.count == 1)
@@ -97,7 +73,7 @@ struct LoggerTests {
 
     @Test("rate limit suppresses repeated identical messages within window")
     func rateLimitSuppression() {
-        let lines = capture {
+        let lines = LogTestConfiguration.capture {
             for _ in 0..<50 {
                 Log.info("tight loop", subsystem: "poller")
             }
@@ -111,7 +87,7 @@ struct LoggerTests {
 
     @Test("rate limit does not affect distinct messages")
     func rateLimitDistinctMessages() {
-        let lines = capture {
+        let lines = LogTestConfiguration.capture {
             for i in 0..<30 {
                 Log.info("unique #\(i)", subsystem: "poller")
             }
@@ -121,15 +97,11 @@ struct LoggerTests {
 
     @Test("output sink is swappable (DI)")
     func outputInjection() {
-        let box = LogCaptureBox()
-        let prev = Log.output
-        Log.output = { msg in box.append(msg) }
-        defer { Log.output = prev; Log.resetForTests() }
-        Log.resetForTests()
-
-        Log.error("from DI sink", subsystem: "main")
-        #expect(box.snapshot().count == 1)
-        #expect(box.snapshot()[0].contains("from DI sink"))
+        let lines = LogTestConfiguration.capture {
+            Log.error("from DI sink", subsystem: "main")
+        }
+        #expect(lines.count == 1)
+        #expect(lines[0].contains("from DI sink"))
     }
 
     @Test("all 14 legacy subsystem string values are representable via enum")
@@ -139,6 +111,81 @@ struct LoggerTests {
         let enumRawValues = Set(Log.Subsystem.allCases.map(\.rawValue))
         for s in legacyStrings {
             #expect(enumRawValues.contains(s), "Missing enum case for \(s)")
+        }
+    }
+}
+
+enum LogTestConfiguration {
+    private static let semaphore = DispatchSemaphore(value: 1)
+
+    static func capture(
+        format: Log.Format? = nil,
+        level: Log.Level? = nil,
+        during body: () -> Void
+    ) -> [String] {
+        semaphore.wait()
+        defer { semaphore.signal() }
+        let box = install(format: format, level: level)
+        defer { restore(box.previous) }
+        body()
+        return box.capture.snapshot()
+    }
+
+    static func capture(
+        format: Log.Format? = nil,
+        level: Log.Level? = nil,
+        during body: () async -> Void
+    ) async -> [String] {
+        await waitForSemaphore()
+        defer { semaphore.signal() }
+        let box = install(format: format, level: level)
+        defer { restore(box.previous) }
+        await body()
+        return box.capture.snapshot()
+    }
+
+    private struct PreviousConfiguration {
+        let output: @Sendable (String) -> Void
+        let level: Log.Level
+        let format: Log.Format
+    }
+
+    private struct CaptureSession {
+        let capture: LogCaptureBox
+        let previous: PreviousConfiguration
+    }
+
+    private static func install(format: Log.Format?, level: Log.Level?) -> CaptureSession {
+        let capture = LogCaptureBox()
+        let previous = PreviousConfiguration(
+            output: Log.output,
+            level: Log.minLevel,
+            format: Log.format
+        )
+        Log.output = { msg in capture.append(msg) }
+        if let format {
+            Log.setFormatForTests(format)
+        }
+        if let level {
+            Log.setLevel(level)
+        }
+        Log.resetForTests()
+        return CaptureSession(capture: capture, previous: previous)
+    }
+
+    private static func restore(_ previous: PreviousConfiguration) {
+        Log.output = previous.output
+        Log.setLevel(previous.level)
+        Log.setFormatForTests(previous.format)
+        Log.resetForTests()
+    }
+
+    private static func waitForSemaphore() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                semaphore.wait()
+                continuation.resume()
+            }
         }
     }
 }

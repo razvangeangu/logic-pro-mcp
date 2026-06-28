@@ -7,6 +7,15 @@ import Foundation
 actor AppleScriptChannel: Channel {
     let id: ChannelID = .appleScript
 
+    struct FrontDocumentIdentity: Equatable, Sendable {
+        let path: String?
+        let name: String?
+
+        var isUntitled: Bool {
+            name != nil && path == nil
+        }
+    }
+
     struct Runtime: Sendable {
         let isLogicProRunning: @Sendable () -> Bool
         let openFile: @Sendable (String) -> Bool
@@ -83,17 +92,13 @@ actor AppleScriptChannel: Channel {
     func execute(operation: String, params: [String: String]) async -> ChannelResult {
         switch operation {
         case "project.new":
-            // #144 (B): `newProjectScript()` returns `name of newDocument`, so
-            // the raw script output IS the observed new-document name. Surface it
-            // as `observed_name` in the State-B envelope to make the unverified
-            // result actionable (e.g. "Untitled 17"). There is no reliable
-            // AppleScript readback for blank-active-project identity, so this
-            // stays verified:false — observed_name is evidence, not verification.
+            let previousDocumentIdentity = await logicCurrentDocumentIdentity()
             let raw = await runScript(newProjectScript())
-            return Self.wrapMutatingResult(
+            let currentDocumentIdentity = await logicCurrentDocumentIdentity()
+            return Self.wrapNewProjectResult(
                 raw,
-                operation: operation,
-                extras: Self.newProjectExtras(raw)
+                previousDocumentIdentity: previousDocumentIdentity,
+                currentDocumentIdentity: currentDocumentIdentity
             )
 
         case "project.open":
@@ -142,6 +147,9 @@ actor AppleScriptChannel: Channel {
         case "project.save_as":
             guard let path = params["path"] else {
                 return .error("Missing 'path' parameter for project.save_as")
+            }
+            guard AppleScriptSafety.isValidProjectPath(path, requireExisting: false) else {
+                return .error("save_as requires an absolute .logicx project path")
             }
             let saveStartedAt = Date()
             let candidatePaths = Self.saveAsCandidatePaths(path: path)
@@ -247,6 +255,52 @@ actor AppleScriptChannel: Channel {
         }
         guard !name.isEmpty else { return [:] }
         return ["observed_name": name]
+    }
+
+    static func wrapNewProjectResult(
+        _ result: ChannelResult,
+        previousDocumentIdentity: FrontDocumentIdentity?,
+        currentDocumentIdentity: FrontDocumentIdentity?
+    ) -> ChannelResult {
+        guard result.isSuccess else { return result }
+
+        var extras = newProjectExtras(result)
+        if let currentDocumentName = currentDocumentIdentity?.name {
+            extras["observed_document_name"] = currentDocumentName
+        }
+        if let currentDocumentPath = currentDocumentIdentity?.path {
+            extras["observed_document_path"] = currentDocumentPath
+        }
+
+        guard didFrontDocumentChange(
+            previousDocumentIdentity: previousDocumentIdentity,
+            currentDocumentIdentity: currentDocumentIdentity
+        ) else {
+            return .error(HonestContract.encodeStateC(
+                error: .readbackMismatch,
+                hint: "project.new completed but the front document identity did not change",
+                extras: extras.merging([
+                    "operation": "project.new",
+                    "method": "applescript",
+                    "raw": result.message,
+                ]) { _, new in new }
+            ))
+        }
+
+        return wrapMutatingResult(result, operation: "project.new", extras: extras)
+    }
+
+    static func didFrontDocumentChange(
+        previousDocumentIdentity: FrontDocumentIdentity?,
+        currentDocumentIdentity: FrontDocumentIdentity?
+    ) -> Bool {
+        guard let currentDocumentIdentity else {
+            return false
+        }
+        guard let previousDocumentIdentity else {
+            return true
+        }
+        return currentDocumentIdentity != previousDocumentIdentity
     }
 
     /// #144: fail-fast guard for `project.save`. Returns a terminal State C
@@ -396,8 +450,8 @@ actor AppleScriptChannel: Channel {
     }
 
     func healthCheck() async -> ChannelHealth {
-        if runtime.isLogicProRunning() {
-            return .healthy(detail: "AppleScript ready")
+        guard runtime.isLogicProRunning() else {
+            return .unavailable("Logic Pro not running")
         }
         let probe = await runScript(readinessProbeScript())
         switch probe {
@@ -416,55 +470,26 @@ actor AppleScriptChannel: Channel {
 
     static func executeAppleScript(_ source: String) async -> ChannelResult {
         await Task.detached(priority: .userInitiated) {
-            // Primary path: in-process NSAppleScript via main thread (inherits TCC permissions)
-            let inProcessResult: ChannelResult? = ProcessUtils.runAppKit {
-                let script = NSAppleScript(source: source)
-                var errorInfo: NSDictionary?
-                let result = script?.executeAndReturnError(&errorInfo)
-                if let errorInfo {
-                    let message = (errorInfo[NSAppleScript.errorMessage] as? String)
-                        ?? "NSAppleScript error \(errorInfo[NSAppleScript.errorNumber] ?? -1)"
-                    Log.error("NSAppleScript error: \(message)", subsystem: "appleScript")
-                    return ChannelResult.error("AppleScript error: \(message)")
-                }
-                let output = result?.stringValue ?? ""
-                return ChannelResult.success("{\"result\":\"\(AppleScriptChannel.escapeJSON(output))\"}")
-            } ?? nil
-            if let inProcessResult {
-                return inProcessResult
+            let execution = BoundedProcessRunner.run(
+                executable: "/usr/bin/osascript",
+                arguments: appleScriptArguments(for: source),
+                timeout: ServerConfig.appleScriptTimeout,
+                outputLimitBytes: 128 * 1024
+            )
+            guard case let .completed(output) = execution else {
+                Log.error("AppleScript child process failed: \(execution)", subsystem: "appleScript")
+                return ChannelResult.error("AppleScript error: \(execution)")
             }
 
-            // Fallback: osascript child process (for environments where main thread is unavailable)
-            let process = Process()
-            let stdout = Pipe()
-            let stderr = Pipe()
-            let stdin = Pipe()
-            stdin.fileHandleForWriting.closeFile()
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-lc", shellCommand(for: source)]
-            process.standardInput = stdin
-            process.standardOutput = stdout
-            process.standardError = stderr
-
-            do {
-                try process.run()
-            } catch {
-                Log.error("AppleScript shell spawn failed: \(error)", subsystem: "appleScript")
-                return ChannelResult.error("AppleScript error: \(error)")
-            }
-
-            process.waitUntilExit()
-            let stderrOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if process.terminationStatus != 0 {
-                let message = stderrOutput.isEmpty ? "osascript exited with status \(process.terminationStatus)" : stderrOutput
+            let stderrOutput = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if output.exitCode != 0 {
+                let message = stderrOutput.isEmpty ? "osascript exited with status \(output.exitCode)" : stderrOutput
                 Log.error("AppleScript error: \(message)", subsystem: "appleScript")
                 return ChannelResult.error("AppleScript error: \(message)")
             }
 
-            let rawOutput = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let output = normalizedAppleScriptResult(rawOutput)
-            return ChannelResult.success("{\"result\":\"\(AppleScriptChannel.escapeJSON(output))\"}")
+            let result = normalizedAppleScriptResult(output.stdout)
+            return ChannelResult.success("{\"result\":\"\(AppleScriptChannel.escapeJSON(result))\"}")
         }.value
     }
 
@@ -474,10 +499,19 @@ actor AppleScriptChannel: Channel {
         """
         tell application "Logic Pro"
             activate
-            set newDocument to make new document
-            delay 0.2
-            return name of newDocument
         end tell
+        tell application "System Events"
+            tell process "Logic Pro"
+                click menu item 1 of menu 1 of menu bar item 3 of menu bar 1
+                repeat 20 times
+                    delay 0.2
+                    if (count of windows) > 0 then
+                        return name of window 1
+                    end if
+                end repeat
+            end tell
+        end tell
+        return ""
         """
     }
 
@@ -493,25 +527,32 @@ actor AppleScriptChannel: Channel {
         case .success:
             return .success("Opened: \(path)")
         case .error(let initialMessage):
-            // Retry once after a best-effort close only if Logic is still sitting on
-            // a different front document. This avoids dropping the current session
-            // before we've even tried the Launch Services open path.
             guard runtime.isLogicProRunning() else {
                 return .error("Failed to verify opened project: \(path). \(initialMessage)")
             }
 
-            let previousDocumentPath = await logicCurrentDocumentPath()
-            if let previousDocumentPath,
-               projectPathsMatch(previousDocumentPath, path) {
+            let documentAfterInitialVerification = await logicCurrentDocumentIdentity()
+            if let currentDocumentPath = documentAfterInitialVerification?.path,
+               projectPathsMatch(currentDocumentPath, path) {
                 return .success("Opened: \(path)")
             }
 
-            if previousDocumentPath != nil {
-                _ = await runScript(closeCurrentProjectIfAnyScript(saving: "no"))
+            if documentAfterInitialVerification?.isUntitled == true {
+                return .error(HonestContract.encodeStateC(
+                    error: .unsupportedState,
+                    hint: "project.open could not verify the requested project and the current front document is untitled; refusing to close an unsaved document to retry",
+                    extras: [
+                        "operation": "project.open",
+                        "method": "applescript",
+                        "path": path,
+                    ]
+                ))
             }
 
+            _ = await runScript(closeCurrentProjectIfAnyScript(saving: "no"))
+
             guard runtime.openFile(path) else {
-                if let previousDocumentPath,
+                if let previousDocumentPath = documentAfterInitialVerification?.path,
                    !projectPathsMatch(previousDocumentPath, path) {
                     _ = runtime.openFile(previousDocumentPath)
                 }
@@ -527,7 +568,7 @@ actor AppleScriptChannel: Channel {
                    projectPathsMatch(currentDocumentPath, path) {
                     return .success("Opened: \(path)")
                 }
-                if let previousDocumentPath,
+                if let previousDocumentPath = documentAfterInitialVerification?.path,
                    !projectPathsMatch(previousDocumentPath, path) {
                     _ = runtime.openFile(previousDocumentPath)
                 }
@@ -571,6 +612,25 @@ actor AppleScriptChannel: Channel {
         """
     }
 
+    static func currentDocumentIdentityScript() -> String {
+        """
+        tell application "Logic Pro"
+            if (count of documents) > 0 then
+                set docPath to ""
+                set docName to ""
+                try
+                    set docPath to path of front document as text
+                end try
+                try
+                    set docName to name of front document as text
+                end try
+                return docPath & character id 31 & docName
+            end if
+            return ""
+        end tell
+        """
+    }
+
     /// v3.1.8 (Issue #7) — file-scoped helper for `LogicProjectFileReader` so it
     /// can resolve the open project's path without instantiating a channel.
     /// Returns nil when no document is open, TCC is denied, or AppleScript
@@ -585,7 +645,30 @@ actor AppleScriptChannel: Channel {
         guard result.isSuccess else { return nil }
         let raw = Self.appleScriptResultText(from: result)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return raw.isEmpty ? nil : raw
+        guard raw.hasPrefix("/") else { return nil }
+        return raw
+    }
+
+    static func parseCurrentDocumentIdentity(from result: ChannelResult) -> FrontDocumentIdentity? {
+        guard result.isSuccess else { return nil }
+        let raw = Self.appleScriptResultText(from: result)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty else { return nil }
+
+        let parts = raw.split(
+            separator: "\u{001F}",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard parts.count == 2 else { return nil }
+
+        let rawPath = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawName = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = rawPath.hasPrefix("/") ? rawPath : nil
+        let name = rawName.isEmpty ? nil : rawName
+
+        guard path != nil || name != nil else { return nil }
+        return FrontDocumentIdentity(path: path, name: name)
     }
 
     /// Static, side-effect-free POSIX-path comparison used by the verified
@@ -613,6 +696,11 @@ actor AppleScriptChannel: Channel {
     private func logicCurrentDocumentPath() async -> String? {
         let result = await runScript(Self.currentDocumentPathScript())
         return Self.parseCurrentDocumentPath(from: result)
+    }
+
+    private func logicCurrentDocumentIdentity() async -> FrontDocumentIdentity? {
+        let result = await runScript(Self.currentDocumentIdentityScript())
+        return Self.parseCurrentDocumentIdentity(from: result)
     }
 
     private func projectPathsMatch(_ lhs: String, _ rhs: String) -> Bool {
@@ -752,26 +840,37 @@ actor AppleScriptChannel: Channel {
         return result
     }
 
-    private static func normalizedAppleScriptResult(_ raw: String) -> String {
+    /// Sanitizes raw `osascript` stdout for downstream JSON wrapping. C0 control
+    /// bytes are stripped because RFC 8259 forbids them unescaped — EXCEPT
+    /// `\n`/`\r`/`\t` (legitimate whitespace) and U+001E/U+001F, the record /
+    /// field separators the front-document identity readback (and the marker /
+    /// projectInfo / tracks helpers) use as structured delimiters. Those two are
+    /// preserved here and escaped as ``/`` later by `escapeJSON`.
+    ///
+    /// Stripping U+001F here was a real defect: `currentDocumentIdentityScript`
+    /// emits `docPath & character id 31 & docName`, so deleting the delimiter
+    /// before `parseCurrentDocumentIdentity` collapsed the readback to a single
+    /// field, forced `logicCurrentDocumentIdentity()` to return `nil`, and made
+    /// `project.new` / `project.open` verification degrade to State C / CGEvent
+    /// fallback on every real invocation. `internal` so the delimiter-survival
+    /// regression test drives this exact sanitizer instead of stubbing `runScript`.
+    static func normalizedAppleScriptResult(_ raw: String) -> String {
         let sanitized = String(
             raw.unicodeScalars.filter { scalar in
-                !CharacterSet.controlCharacters.contains(scalar) || scalar == "\n" || scalar == "\r" || scalar == "\t"
+                !CharacterSet.controlCharacters.contains(scalar)
+                    || scalar == "\n" || scalar == "\r" || scalar == "\t"
+                    || scalar == "\u{1E}" || scalar == "\u{1F}"
             }
         ).trimmingCharacters(in: .whitespacesAndNewlines)
         return sanitized.isEmpty ? "OK" : sanitized
     }
 
-    private static func shellCommand(for source: String) -> String {
+    private static func appleScriptArguments(for source: String) -> [String] {
         let lines = source
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        let args = lines.map { "-e \(shellQuote($0))" }.joined(separator: " ")
-        return "osascript \(args)"
-    }
-
-    private static func shellQuote(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+        return lines.flatMap { ["-e", $0] }
     }
 
 }

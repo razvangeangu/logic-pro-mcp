@@ -1,0 +1,139 @@
+import Foundation
+
+struct ProjectExportPlan: Codable, Sendable, Equatable {
+    let schema: String
+    let runID: String
+    let generatedAt: String
+    let status: String
+    let executionMode: String
+    let outputRoot: String
+    let collisionPolicy: String
+    let namingPolicy: String
+    let projectCount: Int
+    let projects: [ProjectExportPlanProject]
+    let requiredConfirmations: [ProjectExportConfirmation]
+    let unsupportedOrBlockedSteps: [ProjectExportBlockedStep]
+    let baselineVerification: [String]
+    let enhancementPath: [String]
+    let nextSafeAction: String
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case runID = "run_id"
+        case generatedAt = "generated_at"
+        case status
+        case executionMode = "execution_mode"
+        case outputRoot = "output_root"
+        case collisionPolicy = "collision_policy"
+        case namingPolicy = "naming_policy"
+        case projectCount = "project_count"
+        case projects
+        case requiredConfirmations = "required_confirmations"
+        case unsupportedOrBlockedSteps = "unsupported_or_blocked_steps"
+        case baselineVerification = "baseline_verification"
+        case enhancementPath = "enhancement_path"
+        case nextSafeAction = "next_safe_action"
+    }
+}
+
+struct ProjectExportPlanProject: Codable, Sendable, Equatable {
+    let index: Int
+    let projectPath: String
+    let displayName: String
+    let validationStatus: String
+    let validationIssues: [String]
+    let expectedArtifacts: [ProjectExportPlanArtifact]
+    let workflowSteps: [ProjectExportWorkflowStep]
+    let manifestStatus: String
+
+    enum CodingKeys: String, CodingKey {
+        case index
+        case projectPath = "project_path"
+        case displayName = "display_name"
+        case validationStatus = "validation_status"
+        case validationIssues = "validation_issues"
+        case expectedArtifacts = "expected_artifacts"
+        case workflowSteps = "workflow_steps"
+        case manifestStatus = "manifest_status"
+    }
+}
+
+struct ProjectExportPlanArtifact: Codable, Sendable, Equatable {
+    let kind: String
+    let path: String
+    let status: String
+    let verification: ProjectExportArtifactVerification
+    let analysis: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case path
+        case status
+        case verification
+        case analysis
+    }
+}
+
+struct ProjectExportArtifactVerification: Codable, Sendable, Equatable {
+    let exists: Bool
+    let fileSizeBytes: Int64?
+    let mtime: String?
+    let pathUnderOutputRoot: Bool
+    let wouldOverwrite: Bool
+    let issues: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case exists
+        case fileSizeBytes = "file_size_bytes"
+        case mtime
+        case pathUnderOutputRoot = "path_under_output_root"
+        case wouldOverwrite = "would_overwrite"
+        case issues
+    }
+}
+
+struct ProjectExportWorkflowStep: Codable, Sendable, Equatable {
+    let id: String
+    let title: String
+    let tool: String?
+    let command: String?
+    let mutates: Bool
+    let executed: Bool
+    let requiresConfirmationLevel: String?
+    let stopConditions: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case tool
+        case command
+        case mutates
+        case executed
+        case requiresConfirmationLevel = "requires_confirmation_level"
+        case stopConditions = "stop_conditions"
+    }
+}
+
+struct ProjectExportConfirmation: Codable, Sendable, Equatable {
+    let level: String
+    let requiredFor: [String]
+    let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case level
+        case requiredFor = "required_for"
+        case message
+    }
+}
+
+struct ProjectExportBlockedStep: Codable, Sendable, Equatable {
+    let operation: String
+    let reason: String
+    let safeAlternative: String
+
+    enum CodingKeys: String, CodingKey {
+        case operation
+        case reason
+        case safeAlternative = "safe_alternative"
+    }
+}

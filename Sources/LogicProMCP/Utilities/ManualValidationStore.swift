@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 enum ManualValidationChannel: String, Sendable, CaseIterable, Codable {
@@ -46,10 +47,23 @@ private struct ManualValidationFile: Codable {
 }
 
 actor ManualValidationStore: ManualValidationStoring {
-    private let fileURL: URL
+    struct Runtime: Sendable {
+        let beforeSaveWhileLocked: (@Sendable () async -> Void)?
 
-    init(fileURL: URL = ManualValidationStore.defaultFileURL()) {
+        static let production = Runtime(beforeSaveWhileLocked: nil)
+    }
+
+    private let fileURL: URL
+    private let runtime: Runtime
+    private static let directoryPermissions: NSNumber = 0o700
+    private static let filePermissions: NSNumber = 0o600
+
+    init(
+        fileURL: URL = ManualValidationStore.defaultFileURL(),
+        runtime: Runtime = .production
+    ) {
         self.fileURL = fileURL
+        self.runtime = runtime
     }
 
     static func defaultFileURL() -> URL {
@@ -88,18 +102,18 @@ actor ManualValidationStore: ManualValidationStoring {
     }
 
     func approve(_ channel: ManualValidationChannel, note: String?) async throws {
-        var file = loadFile()
-        file.approvals[channel.rawValue] = ManualValidationApproval(
-            approvedAt: Date(),
-            note: normalized(note)
-        )
-        try save(file)
+        try await mutateLockedFile { file in
+            file.approvals[channel.rawValue] = ManualValidationApproval(
+                approvedAt: Date(),
+                note: normalized(note)
+            )
+        }
     }
 
     func revoke(_ channel: ManualValidationChannel) async throws {
-        var file = loadFile()
-        file.approvals.removeValue(forKey: channel.rawValue)
-        try save(file)
+        try await mutateLockedFile { file in
+            file.approvals.removeValue(forKey: channel.rawValue)
+        }
     }
 
     func list() async -> [ManualValidationChannel: ManualValidationApproval] {
@@ -113,6 +127,8 @@ actor ManualValidationStore: ManualValidationStoring {
         return result
     }
 
+    /// Lenient read for the read-only `list()`/`status()` paths: an unreadable or
+    /// corrupt store degrades to "no approvals" rather than failing the query.
     private func loadFile() -> ManualValidationFile {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return .init()
@@ -127,13 +143,78 @@ actor ManualValidationStore: ManualValidationStoring {
         }
     }
 
+    /// Strict read for the read-modify-write mutate path. A missing file
+    /// legitimately starts empty, but an existing-but-undecodable file MUST abort
+    /// the mutation: `mutateLockedFile` rewrites the WHOLE struct atomically, so
+    /// silently starting from an empty store on a transient read/decode failure
+    /// would persist only the one channel being changed and destroy every other
+    /// operator approval. Fail closed instead.
+    private func loadFileForMutation() throws -> ManualValidationFile {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return .init()
+        }
+        let data = try Data(contentsOf: fileURL)
+        return try JSONDecoder().decode(ManualValidationFile.self, from: data)
+    }
+
+    private func mutateLockedFile(
+        _ mutation: (inout ManualValidationFile) throws -> Void
+    ) async throws {
+        let lockFD = try lockFileDescriptor()
+        defer {
+            _ = flock(lockFD, LOCK_UN)
+            _ = close(lockFD)
+        }
+
+        var file = try loadFileForMutation()
+        try mutation(&file)
+        if let beforeSaveWhileLocked = runtime.beforeSaveWhileLocked {
+            await beforeSaveWhileLocked()
+        }
+        try save(file)
+    }
+
     private func save(_ file: ManualValidationFile) throws {
         let directory = fileURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        let directoryAlreadyExists = fileManager.fileExists(
+            atPath: directory.path,
+            isDirectory: &isDirectory
+        )
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: Self.directoryPermissions]
+        )
+        if !directoryAlreadyExists || Self.shouldHardenExistingDirectory(directory) {
+            do {
+                try fileManager.setAttributes(
+                    [.posixPermissions: Self.directoryPermissions],
+                    ofItemAtPath: directory.path
+                )
+            } catch {
+                if !directoryAlreadyExists {
+                    throw error
+                }
+                Log.warn(
+                    "Failed to harden existing manual validation directory permissions: \(error)",
+                    subsystem: "validation"
+                )
+            }
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(file)
         try data.write(to: fileURL, options: .atomic)
+        try fileManager.setAttributes(
+            [.posixPermissions: Self.filePermissions],
+            ofItemAtPath: fileURL.path
+        )
+    }
+
+    private static func shouldHardenExistingDirectory(_ directory: URL) -> Bool {
+        directory.lastPathComponent == "LogicProMCP"
     }
 
     private func normalized(_ note: String?) -> String? {
@@ -141,4 +222,45 @@ actor ManualValidationStore: ManualValidationStoring {
         let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+
+    private func lockFileDescriptor() throws -> Int32 {
+        let directory = fileURL.deletingLastPathComponent()
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: Self.directoryPermissions]
+        )
+
+        let lockPath = fileURL.appendingPathExtension("lock").path
+        let descriptor = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+            throw POSIXError(code)
+        }
+        // Acquire the advisory lock WITHOUT parking the actor's cooperative
+        // executor indefinitely: a blocking flock(LOCK_EX) would stall the actor
+        // for as long as a live peer holds the lock. Use non-blocking attempts
+        // with a bounded retry budget and surface a typed timeout instead.
+        let deadline = Date().addingTimeInterval(Self.lockAcquireTimeout)
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            let err = errno
+            if err != EWOULDBLOCK {
+                let code = POSIXErrorCode(rawValue: err) ?? .EIO
+                _ = close(descriptor)
+                throw POSIXError(code)
+            }
+            if Date() >= deadline {
+                _ = close(descriptor)
+                throw POSIXError(.ETIMEDOUT)
+            }
+            usleep(Self.lockRetryIntervalMicroseconds)
+        }
+        return descriptor
+    }
+
+    /// Bounded wait for the cross-process approval lock (rare operator admin
+    /// op, latency-insensitive) so a stalled peer can never park the actor.
+    private static let lockAcquireTimeout: TimeInterval = 5
+    private static let lockRetryIntervalMicroseconds: UInt32 = 25_000
 }

@@ -454,12 +454,20 @@ struct WorkflowCommandCensusTests {
         "logic_tracks": ["library"], // alias of list_library
     ]
 
+    /// Extract the executable command labels from a dispatcher source. Most
+    /// dispatchers use a top-level `switch command { ... }`; `EditDispatcher`
+    /// also has a command route table for boilerplate-free forwarding. Both
+    /// forms are executable surfaces and must stay reconciled with the public
+    /// workflow census.
+    private static func executableCommandLabels(in source: String) throws -> Set<String> {
+        try commandSwitchLabels(in: source).union(routeTableLabels(in: source))
+    }
+
     /// Extract the string labels of the top-level `switch command { ... }`
     /// block in a dispatcher source. Isolated by indentation: the command
     /// switch and its `case` labels sit at the same column; every nested
     /// switch (zoom direction, view name, help category, error-code) is
-    /// indented deeper and therefore excluded. This is the single source of
-    /// truth the census is reconciled against in both directions.
+    /// indented deeper and therefore excluded.
     private static func commandSwitchLabels(in source: String) throws -> Set<String> {
         let lines = source.components(separatedBy: "\n")
         func indent(_ line: String) -> Int { line.prefix { $0 == " " }.count }
@@ -491,13 +499,38 @@ struct WorkflowCommandCensusTests {
         return labels
     }
 
+    private static func routeTableLabels(in source: String) -> Set<String> {
+        let lines = source.components(separatedBy: "\n")
+        func indent(_ line: String) -> Int { line.prefix { $0 == " " }.count }
+        guard let tableIndex = lines.firstIndex(where: { $0.contains("routedCommands") && $0.contains("[") }) else {
+            return []
+        }
+        let tableIndent = indent(lines[tableIndex])
+        var labels: Set<String> = []
+        var i = tableIndex + 1
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let lineIndent = indent(line)
+            if trimmed == "]" && lineIndent == tableIndent { break }
+            if trimmed.hasPrefix("\""), let colon = trimmed.firstIndex(of: ":") {
+                let prefix = trimmed[..<colon]
+                if let close = prefix.dropFirst().firstIndex(of: "\"") {
+                    labels.insert(String(prefix[prefix.index(after: prefix.startIndex)..<close]))
+                }
+            }
+            i += 1
+        }
+        return labels
+    }
+
     private func labels(forTool tool: String) throws -> Set<String> {
         let file = try #require(Self.dispatcherFiles[tool], "no dispatcher source mapped for \(tool)")
         let url = workflowRepoRoot
             .appendingPathComponent("Sources/LogicProMCP/Dispatchers")
             .appendingPathComponent(file)
         let source = try String(contentsOf: url, encoding: .utf8)
-        return try Self.commandSwitchLabels(in: source)
+        return try Self.executableCommandLabels(in: source)
     }
 
     @Test("every MCP tool dispatcher is mapped and censused")
@@ -509,13 +542,13 @@ struct WorkflowCommandCensusTests {
         #expect(censusTools == mappedTools, "\(message)")
     }
 
-    @Test("every census command exists as an executable command-switch label")
+    @Test("every census command exists as an executable dispatcher label")
     func censusCommandsAreExecutable() throws {
         for (tool, commands) in WorkflowSkillCatalog.publicCommands {
             let dispatcherLabels = try labels(forTool: tool)
             for command in commands.sorted() {
                 #expect(dispatcherLabels.contains(command),
-                        "census command \(tool).\(command) is not a command-switch label in its dispatcher")
+                        "census command \(tool).\(command) is not an executable label in its dispatcher")
             }
             // A census command must actually execute, not degrade into a stub.
             let file = Self.dispatcherFiles[tool]!
@@ -555,7 +588,7 @@ struct WorkflowCommandCensusTests {
             let dispatcherLabels = try labels(forTool: tool)
             for command in stubs.sorted() {
                 #expect(dispatcherLabels.contains(command),
-                        "declared stub \(tool).\(command) is no longer a command-switch label")
+                        "declared stub \(tool).\(command) is no longer an executable dispatcher label")
                 #expect(WorkflowSkillCatalog.publicCommands[tool]?.contains(command) != true,
                         "\(tool).\(command) returns a not-exposed error and must not be in the census")
             }

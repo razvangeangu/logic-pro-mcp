@@ -10,8 +10,10 @@ private let e2eResourceText = sharedResourceText
 private let e2eJSON = sharedJSONObject
 private let e2eJSONArray = sharedJSONArray
 
-private func makeE2EHandlers() async -> LogicProServerHandlers {
-    let server = LogicProServer()
+private func makeE2EHandlers(
+    pollerRuntime: StatePoller.Runtime = .production
+) async -> LogicProServerHandlers {
+    let server = LogicProServer(pollerRuntime: pollerRuntime)
     return await server.makeHandlers()
 }
 
@@ -415,13 +417,11 @@ typealias ServerStartRecorder = SharedServerStartRecorder
     #expect(!e2eText(r).isEmpty)
 }
 
-// P1-1 (D1): MIDI ports are served by logic://midi/ports. list_ports is not a
-// tool command and must be rejected as unknown (false-green guard).
-@Test func testE2EMIDIListPortsRejectedAsUnknownCommand() async {
+@Test func testE2EMIDIListPortsDispatches() async {
     let h = await makeE2EHandlers()
     let r = await e2eCall(h, tool: "logic_midi", command: "list_ports")
-    #expect(r.isError!)
-    #expect(e2eText(r).contains("Unknown"))
+    #expect(r.isError != true)
+    #expect(e2eText(r).contains("midi.list_ports"))
 }
 
 @Test func testE2EMIDIStepInputDispatches() async {
@@ -665,7 +665,7 @@ typealias ServerStartRecorder = SharedServerStartRecorder
 }
 
 @Test func testE2ESystemRefreshDispatches() async {
-    let h = await makeE2EHandlers()
+    let h = await makeE2EHandlers(pollerRuntime: .fastTest)
     let r = await e2eCall(h, tool: "logic_system", command: "refresh_cache")
     #expect(!(r.isError!))
     #expect(e2eText(r).contains("State refresh"))

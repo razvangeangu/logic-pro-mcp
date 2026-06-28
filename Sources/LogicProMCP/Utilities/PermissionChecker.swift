@@ -130,49 +130,20 @@ enum PermissionChecker {
     }
 
     private static func runAutomationProbeViaShell() -> Bool {
-        let process = Process()
-        let stdout = Pipe()
-        let stdin = Pipe()
-        stdin.fileHandleForWriting.closeFile()
         let escapedBundleID = ServerConfig.logicProBundleID
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let script = "tell application id \"\(escapedBundleID)\" to return name"
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = Pipe()
-
-        let group = DispatchGroup()
-        group.enter()
-        process.terminationHandler = { _ in
-            group.leave()
-        }
-
-        do {
-            try process.run()
-        } catch {
+        guard case let .completed(output) = BoundedProcessRunner.run(
+            executable: "/usr/bin/osascript",
+            arguments: ["-e", script],
+            timeout: 1.0,
+            outputLimitBytes: 4 * 1024
+        ), output.exitCode == 0 else {
             return false
         }
 
-        if group.wait(timeout: .now() + 1.0) == .timedOut {
-            if process.isRunning {
-                process.terminate()
-            }
-            if group.wait(timeout: .now() + 0.2) == .timedOut, process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-                _ = group.wait(timeout: .now() + 0.2)
-            }
-            return false
-        }
-
-        guard process.terminationStatus == 0 else {
-            return false
-        }
-
-        let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return output == ServerConfig.logicProProcessName
+        let trimmed = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed == ServerConfig.logicProProcessName
     }
 }

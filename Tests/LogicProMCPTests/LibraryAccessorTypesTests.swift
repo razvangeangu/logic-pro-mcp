@@ -64,7 +64,7 @@ struct LibraryAccessorTypesTests {
             "generatedAt", "scanDurationMs", "measuredSettleDelayMs",
             "selectionRestored", "truncatedBranches", "probeTimeouts", "cycleCount",
             "nodeCount", "leafCount", "folderCount",
-            "root", "categories", "presetsByCategory",
+            "root", "categories", "presetsByCategory", "skippedDirectoryCount", "scanWarnings",
         ] {
             #expect(s.contains("\"\(key)\""), "missing key \(key)")
         }
@@ -122,6 +122,8 @@ struct LibraryAccessorTypesTests {
         let decoded = try JSONDecoder().decode(LibraryRoot.self, from: data)
         #expect(decoded.nodeCount == 1)
         #expect(decoded.root.kind == .folder)
+        #expect(decoded.skippedDirectoryCount == 0)
+        #expect(decoded.scanWarnings == [])
     }
 
     // 8 — malformed rejects

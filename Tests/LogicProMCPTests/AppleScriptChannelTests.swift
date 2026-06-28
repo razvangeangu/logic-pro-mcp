@@ -2,6 +2,21 @@ import Foundation
 import Testing
 @testable import LogicProMCP
 
+actor ScriptResponseQueue {
+    private var results: [ChannelResult]
+
+    init(_ results: [ChannelResult]) {
+        self.results = results
+    }
+
+    func next() -> ChannelResult {
+        guard !results.isEmpty else {
+            return .success("")
+        }
+        return results.removeFirst()
+    }
+}
+
 actor AppleScriptRecorder {
     private var scripts: [String] = []
     private var result: ChannelResult = .success("{\"result\":\"OK\"}")
@@ -99,6 +114,21 @@ private func makeAppleScriptRuntime(
     #expect(missing.detail.contains("not running"))
 }
 
+@Test func testAppleScriptHealthFailsWhenProbeFailsEvenIfLogicIsRunning() async {
+    let recorder = AppleScriptRecorder()
+    await recorder.setResult(.error("AppleScript error: osascript denied"))
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(
+            isRunning: true,
+            scriptRecorder: recorder
+        )
+    )
+
+    let health = await channel.healthCheck()
+    #expect(!health.available)
+    #expect(health.detail.contains("osascript denied"))
+}
+
 @Test func testAppleScriptUnsupportedOperationFails() async {
     let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime())
     let result = await channel.execute(operation: "project.export", params: [:])
@@ -157,11 +187,17 @@ private func makeAppleScriptRuntime(
 @Test func testAppleScriptProjectOpenRetriesAfterClosingCurrentDocument() async {
     let openRecorder = OpenFileRecorder()
     let path = "/tmp/reopen.logicx"
+    let identities = ScriptResponseQueue([
+        .success("/tmp/other.logicx\u{001F}Previous Project"),
+    ])
     let channel = AppleScriptChannel(
         runtime: .init(
             isLogicProRunning: { true },
             openFile: { openRecorder.open($0) },
             runScript: { source in
+                if source.contains("character id 31") {
+                    return await identities.next()
+                }
                 if source.contains("close front document") {
                     return .success("OK")
                 }
@@ -189,18 +225,30 @@ private func makeAppleScriptRuntime(
     #expect(openRecorder.snapshot() == [path, path])
 }
 
-@Test func testAppleScriptProjectOpenDoesNotPreemptivelyCloseCurrentDocument() async {
+@Test func testAppleScriptProjectOpenRefusesToCloseUntitledCurrentDocumentOnRetry() async throws {
     let openRecorder = OpenFileRecorder()
-    let path = "/tmp/failed.logicx"
+    let path = "/tmp/untitled.logicx"
     let recorder = AppleScriptRecorder()
-    await recorder.setResult(.error("Timed out waiting for Logic Pro to open the requested project"))
+    let identities = ScriptResponseQueue([
+        .success("\u{001F}Untitled 12"),
+    ])
     let channel = AppleScriptChannel(
         runtime: .init(
             isLogicProRunning: { true },
             openFile: { openRecorder.open($0) },
             runScript: { source in
+                if source.contains("character id 31") {
+                    return await identities.next()
+                }
                 if source.contains("return path of front document as text") {
+                    _ = await recorder.run(source)
                     return .success("")
+                }
+                if source.contains("path of front document as text") {
+                    _ = await recorder.run(source)
+                    return openRecorder.snapshot().count == 1
+                        ? .error("front document never changed")
+                        : .success("opened")
                 }
                 return await recorder.run(source)
             },
@@ -210,9 +258,15 @@ private func makeAppleScriptRuntime(
 
     let result = await channel.execute(operation: "project.open", params: ["path": path])
     #expect(!result.isSuccess)
-    #expect(result.message.contains("Failed to verify opened project"))
+    let obj = try JSONSerialization.jsonObject(
+        with: Data(result.message.utf8), options: []
+    ) as! [String: Any]
+    #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["error"] as? String == "unsupported_state")
+    #expect((obj["hint"] as? String)?.contains("refusing to close") == true)
+    #expect(openRecorder.snapshot() == [path])
     let scripts = await recorder.snapshot()
-    #expect(!scripts.contains(where: { $0.contains("close front document") }))
+    #expect(!scripts.contains(where: { $0.contains("close front document saving no") }))
 }
 
 @Test func testAppleScriptProjectOpenRestoresPreviousSavedProjectAfterRetryFailure() async {
@@ -220,12 +274,19 @@ private func makeAppleScriptRuntime(
     let path = "/tmp/failed.logicx"
     let previous = "/tmp/previous.logicx"
     let recorder = AppleScriptRecorder()
+    let identities = ScriptResponseQueue([
+        .success("\(previous)\u{001F}Previous Project"),
+        .success("\(previous)\u{001F}Previous Project"),
+    ])
     await recorder.setResult(.error("Timed out waiting for Logic Pro to open the requested project"))
     let channel = AppleScriptChannel(
         runtime: .init(
             isLogicProRunning: { true },
             openFile: { openRecorder.open($0) },
             runScript: { source in
+                if source.contains("character id 31") {
+                    return await identities.next()
+                }
                 if source.contains("return path of front document as text") {
                     return .success(previous)
                 }
@@ -243,14 +304,89 @@ private func makeAppleScriptRuntime(
     #expect(openRecorder.snapshot() == [path, path, previous])
 }
 
+// Regression: the front-document identity readback delimiter (U+001F) must
+// survive the real `normalizedAppleScriptResult` sanitizer. Every other identity
+// test stubs `runScript` directly with a U+001F-bearing result, bypassing the
+// sanitizer that runs in production — which is exactly how the
+// "project.new always degrades to State C" defect hid behind a green suite.
+@Test func testNormalizedAppleScriptResultPreservesIdentityDelimiters() {
+    let titled = AppleScriptChannel.normalizedAppleScriptResult("/Users/x/Song.logicx\u{001F}Song")
+    #expect(titled.contains("\u{001F}"))
+    let untitled = AppleScriptChannel.normalizedAppleScriptResult("\u{001E}\u{001F}Untitled 3")
+    #expect(untitled.contains("\u{001F}"))
+    #expect(untitled.contains("\u{001E}"))
+    // Genuinely-forbidden control bytes are still stripped (fix is not over-broad).
+    let withBell = AppleScriptChannel.normalizedAppleScriptResult("OK\u{0001}\u{0007}")
+    #expect(!withBell.contains("\u{0001}"))
+    #expect(!withBell.contains("\u{0007}"))
+}
+
+@Test func testIdentityReadbackSurvivesRealSanitizerPipeline() {
+    // Drive the production pipeline: raw osascript stdout -> real sanitizer ->
+    // identity parse. Before the fix, the sanitizer deleted U+001F and the parse
+    // returned nil for both of these.
+    let titled = AppleScriptChannel.parseCurrentDocumentIdentity(
+        from: .success(AppleScriptChannel.normalizedAppleScriptResult("/Users/x/Song.logicx\u{001F}Song"))
+    )
+    #expect(titled?.path == "/Users/x/Song.logicx")
+    #expect(titled?.name == "Song")
+
+    let untitled = AppleScriptChannel.parseCurrentDocumentIdentity(
+        from: .success(AppleScriptChannel.normalizedAppleScriptResult("\u{001F}Untitled 7"))
+    )
+    #expect(untitled?.path == nil)
+    #expect(untitled?.name == "Untitled 7")
+}
+
+@Test func testProjectNewYieldsStateAThroughRealSanitizer() {
+    // Previous and current identities both flow through the real sanitizer.
+    let previous = AppleScriptChannel.parseCurrentDocumentIdentity(
+        from: .success(AppleScriptChannel.normalizedAppleScriptResult("\u{001F}Untitled 7"))
+    )
+    let current = AppleScriptChannel.parseCurrentDocumentIdentity(
+        from: .success(AppleScriptChannel.normalizedAppleScriptResult("\u{001F}Untitled 8"))
+    )
+    // A genuine front-document change must verify as State A success, NOT the
+    // readback_mismatch State C the stripped-delimiter bug produced every time.
+    let result = AppleScriptChannel.wrapNewProjectResult(
+        .success("new project created"),
+        previousDocumentIdentity: previous,
+        currentDocumentIdentity: current
+    )
+    #expect(result.isSuccess)
+
+    // Control: when the readback identity is unparseable (nil), verification
+    // still fails closed to State C — the fix does not paper over a real miss.
+    let unverifiable = AppleScriptChannel.wrapNewProjectResult(
+        .success("new project created"),
+        previousDocumentIdentity: previous,
+        currentDocumentIdentity: nil
+    )
+    #expect(!unverifiable.isSuccess)
+}
+
 @Test func testAppleScriptProjectCommandsGenerateExpectedScripts() async {
     let recorder = AppleScriptRecorder()
+    let identities = ScriptResponseQueue([
+        .success("/Users/x/Song.logicx\u{001F}Song"),
+        .success("\u{001F}Untitled 18"),
+    ])
     // #144: a titled front document keeps `project.save` on the healthy path
     // that fires `save front document` (the untitled fail-fast is covered
     // separately in testAppleScriptSaveOnUntitledDocumentFailsFast).
     let channel = AppleScriptChannel(
-        runtime: makeAppleScriptRuntime(
-            scriptRecorder: recorder,
+        runtime: .init(
+            isLogicProRunning: { true },
+            openFile: { _ in true },
+            runScript: { source in
+                if source.contains("character id 31") {
+                    return await identities.next()
+                }
+                return await recorder.run(source)
+            },
+            executeTransportAction: { _ in .success("OK") },
+            fileExists: { $0 == "/tmp/export.logicx" },
+            fileModificationDate: { _ in Date.distantFuture },
             currentDocumentPath: { "/Users/x/Song.logicx" }
         )
     )
@@ -274,14 +410,31 @@ private func makeAppleScriptRuntime(
 
     let scripts = await recorder.snapshot()
     #expect(scripts.count == 6)
-    #expect(scripts[0].contains("make new document"))
-    #expect(scripts[0].contains("return name of newDocument"))
+    #expect(scripts[0].contains("click menu item 1 of menu 1 of menu bar item 3"))
+    #expect(scripts[0].contains("return name of window 1"))
     #expect(scripts[1].contains("save front document"))
     #expect(scripts[2].contains("save front document in (POSIX file"))
     #expect(scripts[2].contains("/tmp/export.logicx"))
     #expect(scripts[3].contains("close front document saving yes"))
     #expect(scripts[4].contains("close front document saving ask"))
     #expect(scripts[5].contains("close front document saving no"))
+}
+
+@Test func testAppleScriptSaveAsRejectsAbsoluteTraversalBeforeScript() async {
+    let recorder = AppleScriptRecorder()
+    let channel = AppleScriptChannel(
+        runtime: makeAppleScriptRuntime(scriptRecorder: recorder)
+    )
+
+    let result = await channel.execute(
+        operation: "project.save_as",
+        params: ["path": "/tmp/project/../escape.logicx"]
+    )
+
+    #expect(!result.isSuccess)
+    #expect(result.message.contains("absolute .logicx"))
+    let scripts = await recorder.snapshot()
+    #expect(scripts.isEmpty)
 }
 
 @Test func testAppleScriptSaveAsReturnsVerifiedWhenPackageExists() async throws {
@@ -462,10 +615,38 @@ private func makeAppleScriptRuntime(
     #expect(parsed == nil)
 }
 
+@Test func testCurrentDocumentPath_parseNonAbsoluteToken_returnsNil() {
+    let parsed = AppleScriptChannel.parseCurrentDocumentPath(
+        from: .success("{\"result\":\"OK\"}")
+    )
+    #expect(parsed == nil)
+}
+
 @Test func testCurrentDocumentPathScript_isStableShape() {
     let script = AppleScriptChannel.currentDocumentPathScript()
     #expect(script.contains("path of front document"))
     #expect(script.contains("count of documents"))
+}
+
+@Test func testCurrentDocumentIdentity_parseUntitledDocument_returnsNameWithoutPath() {
+    let parsed = AppleScriptChannel.parseCurrentDocumentIdentity(
+        from: .success("{\"result\":\"\\u001fUntitled 7\"}")
+    )
+    #expect(parsed == AppleScriptChannel.FrontDocumentIdentity(path: nil, name: "Untitled 7"))
+}
+
+@Test func testCurrentDocumentIdentity_parseTitledDocument_returnsPathAndName() {
+    let parsed = AppleScriptChannel.parseCurrentDocumentIdentity(
+        from: .success("{\"result\":\"/Users/x/A.logicx\\u001fA\"}")
+    )
+    #expect(parsed == AppleScriptChannel.FrontDocumentIdentity(path: "/Users/x/A.logicx", name: "A"))
+}
+
+@Test func testCurrentDocumentIdentity_parseBlank_returnsNil() {
+    let parsed = AppleScriptChannel.parseCurrentDocumentIdentity(
+        from: .success("{\"result\":\"\"}")
+    )
+    #expect(parsed == nil)
 }
 
 // MARK: - #144 — project.save fail-fast on untitled document
@@ -558,12 +739,26 @@ private func makeAppleScriptRuntime(
 
 // MARK: - #144 (B) — project.new observed_name enrichment
 
-/// `project.new` carries the observed new-document name (the raw script output)
-/// into the State-B envelope, while staying verified:false (no real readback).
 @Test func testAppleScriptProjectNewAttachesObservedName() async throws {
     let recorder = AppleScriptRecorder()
+    let identities = ScriptResponseQueue([
+        .success("/Users/x/Old.logicx\u{001F}Old"),
+        .success("\u{001F}Untitled 17"),
+    ])
     await recorder.setResult(.success("Untitled 17"))
-    let channel = AppleScriptChannel(runtime: makeAppleScriptRuntime(scriptRecorder: recorder))
+    let channel = AppleScriptChannel(
+        runtime: .init(
+            isLogicProRunning: { true },
+            openFile: { _ in true },
+            runScript: { source in
+                if source.contains("character id 31") {
+                    return await identities.next()
+                }
+                return await recorder.run(source)
+            },
+            executeTransportAction: { _ in .success("OK") }
+        )
+    )
 
     let result = await channel.execute(operation: "project.new", params: [:])
 
@@ -574,9 +769,41 @@ private func makeAppleScriptRuntime(
     let success = try #require(obj["success"] as? Bool)
     #expect(success)
     let verified = try #require(obj["verified"] as? Bool)
-    #expect(!verified) // still unverified — observed_name is evidence, not proof
+    #expect(!verified)
     #expect(obj["reason"] as? String == "readback_unavailable")
     #expect(obj["observed_name"] as? String == "Untitled 17")
+}
+
+@Test func testAppleScriptProjectNewFailsWhenFrontDocumentIdentityDoesNotChange() async throws {
+    let recorder = AppleScriptRecorder()
+    let identities = ScriptResponseQueue([
+        .success("/Users/x/Old.logicx\u{001F}Old"),
+        .success("/Users/x/Old.logicx\u{001F}Old"),
+    ])
+    await recorder.setResult(.success("Old"))
+    let channel = AppleScriptChannel(
+        runtime: .init(
+            isLogicProRunning: { true },
+            openFile: { _ in true },
+            runScript: { source in
+                if source.contains("character id 31") {
+                    return await identities.next()
+                }
+                return await recorder.run(source)
+            },
+            executeTransportAction: { _ in .success("OK") }
+        )
+    )
+
+    let result = await channel.execute(operation: "project.new", params: [:])
+
+    #expect(!result.isSuccess)
+    let obj = try JSONSerialization.jsonObject(
+        with: Data(result.message.utf8), options: []
+    ) as! [String: Any]
+    #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["error"] as? String == "readback_mismatch")
+    #expect((obj["hint"] as? String)?.contains("did not change") == true)
 }
 
 /// newProjectExtras is the deterministic seam: a real name → observed_name; a

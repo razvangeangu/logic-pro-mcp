@@ -82,6 +82,25 @@ private struct InventoryFixture {
     #expect(resolved == nil, "file outside allowlist must be rejected")
 }
 
+@Test func testSiblingPrefixPathRejected() {
+    let parent = FileManager.default.temporaryDirectory
+        .appendingPathComponent("allowlist-prefix-\(UUID().uuidString)", isDirectory: true)
+    let allowed = parent.appendingPathComponent("Logic", isDirectory: true)
+    let sibling = parent.appendingPathComponent("Logic-evil", isDirectory: true)
+    try? FileManager.default.createDirectory(at: allowed, withIntermediateDirectories: true)
+    try? FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: parent) }
+
+    let url = sibling.appendingPathComponent("inventory.json")
+    try? #"{"ok":true}"#.write(to: url, atomically: true, encoding: .utf8)
+
+    var allow = allowed.resolvingSymlinksInPath().path
+    if !allow.hasSuffix("/") { allow += "/" }
+
+    let resolved = ResourceHandlers.validateLibraryInventoryPath(url.path, allowedPrefixes: [allow])
+    #expect(resolved == nil, "sibling prefix path must not match a trailing-slash allowlist prefix")
+}
+
 @Test func testEmptyAllowlistRejectsEverything() {
     // Defence-in-depth: if a misconfigured operator passes an empty
     // allowlist, every candidate must be rejected — no implicit fallback

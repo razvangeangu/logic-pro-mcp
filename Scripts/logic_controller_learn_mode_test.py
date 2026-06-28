@@ -7,6 +7,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
+import logic_session_bootstrap as bootstrap_module
 from logic_controller_learn_mode import (
     DEFAULT_CONTROLLER_LEARN_MODE_POLICY,
     classify_controller_learn_mode,
@@ -92,12 +93,17 @@ class ControllerLearnModeGuardTests(unittest.TestCase):
 
 
 class LiveE2EGuardedCallTests(unittest.TestCase):
-    def test_guarded_live_tool_call_does_not_call_client_when_blocked(self):
+    @staticmethod
+    def load_live_e2e_module():
         module_path = Path(__file__).with_name("live-e2e-test.py")
         spec = importlib.util.spec_from_file_location("live_e2e_test_module", module_path)
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(module)
+        return module
+
+    def test_guarded_live_tool_call_does_not_call_client_when_blocked(self):
+        module = self.load_live_e2e_module()
 
         class FakeClient:
             def __init__(self):
@@ -122,6 +128,36 @@ class LiveE2EGuardedCallTests(unittest.TestCase):
         self.assertEqual(result["tool"], "logic_midi")
         self.assertEqual(result["command"], "play_sequence")
         self.assertTrue(module.is_error(result))
+
+    def test_bootstrap_failure_reason_includes_hint(self):
+        module = self.load_live_e2e_module()
+        bootstrap = bootstrap_module.BootstrapResult(
+            ok=False,
+            reason="fresh_project_close_failed",
+            hint="Dismiss modal dialogs and retry.",
+        )
+
+        self.assertEqual(
+            module.bootstrap_failure_reason(bootstrap),
+            "fresh bootstrap failed: fresh_project_close_failed (Dismiss modal dialogs and retry.)",
+        )
+
+    def test_bootstrap_status_payload_embeds_failed_bootstrap_detail(self):
+        module = self.load_live_e2e_module()
+        bootstrap = bootstrap_module.BootstrapResult(
+            ok=False,
+            reason="health_unavailable",
+            hint="Could not read logic_system.health from the MCP server.",
+        )
+
+        payload = module.bootstrap_status_payload("fresh bootstrap failed: health_unavailable", bootstrap)
+
+        self.assertEqual(payload["result"]["bootstrap"], "fresh bootstrap failed: health_unavailable")
+        self.assertEqual(payload["result"]["detail"]["reason"], "health_unavailable")
+        self.assertEqual(
+            payload["result"]["detail"]["hint"],
+            "Could not read logic_system.health from the MCP server.",
+        )
 
 
 if __name__ == "__main__":

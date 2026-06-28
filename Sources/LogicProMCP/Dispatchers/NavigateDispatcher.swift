@@ -109,7 +109,10 @@ struct NavigateDispatcher {
             }
             let name = stringParam(params, "name")
             if name.isEmpty {
-                return toolTextResult("goto_marker requires 'index' or 'name' param", isError: true)
+                return toolInvalidParamsResult(
+                    "goto_marker requires 'index' or 'name' param",
+                    extras: ["operation": "nav.goto_marker"]
+                )
             }
             if let target = markers.first(where: { $0.name.localizedCaseInsensitiveContains(name) }) {
                 return await routeMarkerTarget(target)
@@ -140,9 +143,9 @@ struct NavigateDispatcher {
             // Marker mutations are not undoable in the same project session,
             // so missing/negative target now fails closed.
             guard let index = intParamOrNil(params, "index"), index >= 0 else {
-                return toolTextResult(
+                return toolInvalidParamsResult(
                     "delete_marker requires explicit 'index' (Int ≥ 0)",
-                    isError: true
+                    extras: ["operation": "nav.delete_marker"]
                 )
             }
             let result = await router.route(
@@ -155,16 +158,16 @@ struct NavigateDispatcher {
             // RB-1.b — same fail-closed treatment for index, plus reject empty
             // `name` (a blank rename overwrote the marker label silently).
             guard let index = intParamOrNil(params, "index"), index >= 0 else {
-                return toolTextResult(
+                return toolInvalidParamsResult(
                     "rename_marker requires explicit 'index' (Int ≥ 0)",
-                    isError: true
+                    extras: ["operation": "nav.rename_marker"]
                 )
             }
             let name = stringParam(params, "name")
             guard !name.isEmpty else {
-                return toolTextResult(
+                return toolInvalidParamsResult(
                     "rename_marker requires non-empty 'name'",
-                    isError: true
+                    extras: ["operation": "nav.rename_marker"]
                 )
             }
             let result = await router.route(
@@ -235,18 +238,18 @@ struct NavigateDispatcher {
             case "inspector": operation = "view.toggle_inspector"
             case "automation": operation = "automation.toggle_view"
             default:
-                return toolTextResult(
+                return toolInvalidParamsResult(
                     "Unknown view: \(view). Available: mixer, piano_roll, score, step_editor, library, inspector, automation",
-                    isError: true
+                    extras: ["operation": "nav.toggle_view"]
                 )
             }
             let result = await router.route(operation: operation)
             return toolTextResult(result)
 
         default:
-            return toolTextResult(
+            return toolInvalidParamsResult(
                 "Unknown navigate command: \(command). Available: goto_bar, goto_marker, create_marker, delete_marker, rename_marker, zoom_to_fit, set_zoom, toggle_view",
-                isError: true
+                extras: ["operation": "nav.\(command)"]
             )
         }
     }

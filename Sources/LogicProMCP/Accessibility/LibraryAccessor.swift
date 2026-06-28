@@ -88,13 +88,34 @@ public struct LibraryRoot: Codable, Sendable, Equatable {
     public let root: LibraryNode
     public let categories: [String]
     public let presetsByCategory: [String: [String]]
+    public let skippedDirectoryCount: Int
+    public let scanWarnings: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case generatedAt
+        case scanDurationMs
+        case measuredSettleDelayMs
+        case selectionRestored
+        case truncatedBranches
+        case probeTimeouts
+        case cycleCount
+        case nodeCount
+        case leafCount
+        case folderCount
+        case root
+        case categories
+        case presetsByCategory
+        case skippedDirectoryCount
+        case scanWarnings
+    }
 
     public init(
         generatedAt: String, scanDurationMs: Int, measuredSettleDelayMs: Int,
         selectionRestored: Bool,
         truncatedBranches: Int, probeTimeouts: Int, cycleCount: Int,
         nodeCount: Int, leafCount: Int, folderCount: Int,
-        root: LibraryNode, categories: [String], presetsByCategory: [String: [String]]
+        root: LibraryNode, categories: [String], presetsByCategory: [String: [String]],
+        skippedDirectoryCount: Int = 0, scanWarnings: [String] = []
     ) {
         self.generatedAt = generatedAt
         self.scanDurationMs = scanDurationMs
@@ -109,6 +130,27 @@ public struct LibraryRoot: Codable, Sendable, Equatable {
         self.root = root
         self.categories = categories
         self.presetsByCategory = presetsByCategory
+        self.skippedDirectoryCount = skippedDirectoryCount
+        self.scanWarnings = scanWarnings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.generatedAt = try container.decode(String.self, forKey: .generatedAt)
+        self.scanDurationMs = try container.decode(Int.self, forKey: .scanDurationMs)
+        self.measuredSettleDelayMs = try container.decode(Int.self, forKey: .measuredSettleDelayMs)
+        self.selectionRestored = try container.decode(Bool.self, forKey: .selectionRestored)
+        self.truncatedBranches = try container.decode(Int.self, forKey: .truncatedBranches)
+        self.probeTimeouts = try container.decode(Int.self, forKey: .probeTimeouts)
+        self.cycleCount = try container.decode(Int.self, forKey: .cycleCount)
+        self.nodeCount = try container.decode(Int.self, forKey: .nodeCount)
+        self.leafCount = try container.decode(Int.self, forKey: .leafCount)
+        self.folderCount = try container.decode(Int.self, forKey: .folderCount)
+        self.root = try container.decode(LibraryNode.self, forKey: .root)
+        self.categories = try container.decode([String].self, forKey: .categories)
+        self.presetsByCategory = try container.decode([String: [String]].self, forKey: .presetsByCategory)
+        self.skippedDirectoryCount = try container.decodeIfPresent(Int.self, forKey: .skippedDirectoryCount) ?? 0
+        self.scanWarnings = try container.decodeIfPresent([String].self, forKey: .scanWarnings) ?? []
     }
 }
 
@@ -179,7 +221,9 @@ enum LibraryAccessor {
                 folderCount: result.folderCount,
                 root: result.root,
                 categories: result.categories,
-                presetsByCategory: result.presetsByCategory
+                presetsByCategory: result.presetsByCategory,
+                skippedDirectoryCount: result.skippedDirectoryCount,
+                scanWarnings: result.scanWarnings
             )
 
             // Write JSON (tolerate failure)

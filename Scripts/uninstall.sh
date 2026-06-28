@@ -3,41 +3,93 @@
 # Rolls back all MCP server artifacts (PRD §9.3)
 set -euo pipefail
 
-SCRIPT_DIR="$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="${LOGIC_PRO_MCP_INSTALL_DIR:-/usr/local/bin}"
-BINARY="$INSTALL_DIR/LogicProMCP"
 SKIP_SUDO="${LOGIC_PRO_MCP_SKIP_SUDO:-0}"
-APPROVAL_STORE="${LOGIC_PRO_MCP_APPROVAL_STORE:-$HOME/Library/Application Support/LogicProMCP/operator-approvals.json}"
+
+fail_uninstall() {
+    echo "Error: $1"
+    exit 1
+}
+
+fail_path_validation() {
+    fail_uninstall "$1"
+}
+
+# uninstall.sh relies on the shared path/validation helpers (normalize_path,
+# validate_*). install-common.sh is not shipped in the release tarball, so guard
+# the source: a bare `source` under `set -e` would abort with an opaque error if
+# uninstall.sh is fetched/run detached from its sibling (mirroring the curl
+# install pattern). Fail with an actionable message instead.
+if [ -f "$SCRIPT_DIR/install-common.sh" ]; then
+    source "$SCRIPT_DIR/install-common.sh"
+else
+    fail_uninstall "install-common.sh not found next to uninstall.sh ($SCRIPT_DIR); run uninstall.sh from a full checkout that includes Scripts/install-common.sh"
+fi
+
+if [ -n "${LOGIC_PRO_MCP_APPROVAL_STORE:-}" ]; then
+    fail_uninstall "LOGIC_PRO_MCP_APPROVAL_STORE override is not supported by uninstall.sh"
+fi
+
+INSTALL_DIR="$(normalize_path "$INSTALL_DIR")"
+BINARY="$INSTALL_DIR/LogicProMCP"
+APPROVAL_STORE="$(normalize_path "$HOME/Library/Application Support/LogicProMCP/operator-approvals.json")"
+APPROVAL_LOCK="$APPROVAL_STORE.lock"
+
+if [ "$(basename "$INSTALL_DIR")" = "bin" ]; then
+    INSTALL_PREFIX="$(normalize_path "$(dirname "$INSTALL_DIR")")"
+else
+    INSTALL_PREFIX="$(normalize_path "$INSTALL_DIR")"
+fi
+SHARE_DIR="$(normalize_path "${LOGIC_PRO_MCP_SHARE_DIR:-$INSTALL_PREFIX/share/logic-pro-mcp}")"
+
+validate_install_dir "$INSTALL_DIR"
+validate_share_dir "$SHARE_DIR"
+validate_approval_store "$APPROVAL_STORE"
 
 echo "=== LogicProMCP Full Uninstaller ==="
 echo ""
 
 # 1. Remove operator approvals
-if [ -f "$APPROVAL_STORE" ]; then
-    rm "$APPROVAL_STORE"
-    echo "✓ Removed operator approvals: $APPROVAL_STORE"
+if [ -f "$APPROVAL_STORE" ] || [ -f "$APPROVAL_LOCK" ]; then
+    rm -f "$APPROVAL_STORE" "$APPROVAL_LOCK"
+    echo "✓ Removed operator approvals: $APPROVAL_STORE (and lock sidecar when present)"
 else
     echo "Operator approvals not found — skipped."
 fi
 
 # 2. Remove binary
 if [ -f "$BINARY" ]; then
-    if [ "$SKIP_SUDO" = "1" ] || [ -w "$INSTALL_DIR" ]; then
-        rm "$BINARY"
-    else
-        sudo rm "$BINARY"
+    USE_SUDO=0
+    if ! { [ "$SKIP_SUDO" = "1" ] || [ -w "$INSTALL_DIR" ]; }; then
+        USE_SUDO=1
     fi
+    run_with_optional_sudo "$USE_SUDO" rm "$BINARY"
     echo "✓ Removed binary: $BINARY"
 else
     echo "Binary not found — skipped."
 fi
 
 # 3. Uninstall Key Commands
-if [ -f "$SCRIPT_DIR/uninstall-keycmds.sh" ]; then
+if [ -f "$SHARE_DIR/uninstall-keycmds.sh" ]; then
+    echo ""
+    bash "$SHARE_DIR/uninstall-keycmds.sh"
+elif [ -f "$SCRIPT_DIR/uninstall-keycmds.sh" ]; then
     echo ""
     bash "$SCRIPT_DIR/uninstall-keycmds.sh"
 else
     echo "Key Commands uninstaller not found — skipped."
+fi
+
+if [ -d "$SHARE_DIR" ]; then
+    USE_SUDO=0
+    if ! { [ "$SKIP_SUDO" = "1" ] || [ -w "$SHARE_DIR" ] || [ -w "$(dirname "$SHARE_DIR")" ]; }; then
+        USE_SUDO=1
+    fi
+    run_with_optional_sudo "$USE_SUDO" rm -rf "$SHARE_DIR"
+    echo "✓ Removed shared assets: $SHARE_DIR"
+else
+    echo "Shared assets not found — skipped."
 fi
 
 # 4. Remove MCP registration

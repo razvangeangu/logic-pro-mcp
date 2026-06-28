@@ -60,7 +60,8 @@ Use tools for actions. Use resources for state. Treat every mutating result as o
 
 | Command | Params | Result | Route |
 |---------|--------|--------|-------|
-| `play`, `stop`, `record` | none | text / contract envelope | Accessibility -> MIDIKeyCommands -> CGEvent -> MCU |
+| `play`, `record` | none | text / contract envelope | Accessibility -> MCU -> CoreMIDI -> CGEvent -> AppleScript |
+| `stop` | none | text / contract envelope | CGEvent -> Accessibility -> MCU -> CoreMIDI -> AppleScript |
 | `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |
 | `set_cycle_range` | `{ startBar, endBar }` | State C `not_implemented` on current public surface | none |
 | `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility |
@@ -74,7 +75,7 @@ Use explicit indices or names. Track mutation fails closed when the target canno
 
 Common commands: `create_audio`, `create_instrument`, `create_drummer`, `create_external_midi`, `select`, `rename`, `delete`, `duplicate`, `mute`, `solo`, `arm`, `set_instrument`, `record_sequence`, `get_regions`.
 
-`record_sequence` writes a server-generated MIDI file under `/tmp/LogicProMCP/`, imports it into Logic, and verifies the created region. If the import returns an unverified State B result, including GM Device / External MIDI lanes that can bounce silent, `record_sequence` fails closed with `audibility_unverified` or `import_unverified` instead of promoting region readback to audible success.
+`record_sequence` writes a server-generated MIDI file under a private server-managed temp directory, imports it into Logic, and verifies the created region. If the import returns an unverified State B result, including GM Device / External MIDI lanes that can bounce silent, `record_sequence` fails closed with `audibility_unverified` or `import_unverified` instead of promoting region readback to audible success.
 
 ### `logic_mixer`
 
@@ -118,6 +119,8 @@ Minimal `set_param_verified` shape:
 Common commands: `send_note`, `send_chord`, `send_cc`, `send_program_change`, `send_pitch_bend`, `send_aftertouch`, `play_sequence`, `import_file`, `list_ports`, `create_virtual_port`, `mmc_play`, `mmc_stop`, `mmc_locate`.
 
 Channels are 1-based (`1..16`) to match Logic's UI.
+
+`send_sysex` accepts `{ bytes: [Int] }` or `{ data: "F0 ... F7" }` and rejects payloads over 1024 bytes before routing to CoreMIDI.
 
 ### `logic_navigate`
 

@@ -606,104 +606,15 @@ enum SetupDoctor {
         arguments: [String],
         timeout: TimeInterval
     ) -> ProductionCommandResult? {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        let stdin = Pipe()
-        stdin.fileHandleForWriting.closeFile()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        // Drain both pipes CONCURRENTLY with the child. Reading only after the
-        // process exits deadlocks when the child writes more than the OS pipe
-        // buffer (~16-64KB): its write() blocks, the child never exits, the
-        // termination handler never fires, and the timeout becomes the only exit
-        // path. Accumulating into thread-safe buffers from readabilityHandler
-        // removes that buffer-full deadlock and makes the timeout the only failure
-        // path. The buffer is a Sendable reference type so the @Sendable handler
-        // can mutate it safely.
-        let stdoutBuffer = PipeDrainBuffer()
-        let stderrBuffer = PipeDrainBuffer()
-
-        let group = DispatchGroup()
-
-        group.enter()
-        stdout.fileHandleForReading.readabilityHandler = { fileHandle in
-            let chunk = fileHandle.availableData
-            if chunk.isEmpty {
-                fileHandle.readabilityHandler = nil
-                group.leave()
-                return
-            }
-            stdoutBuffer.append(chunk)
-        }
-        group.enter()
-        stderr.fileHandleForReading.readabilityHandler = { fileHandle in
-            let chunk = fileHandle.availableData
-            if chunk.isEmpty {
-                fileHandle.readabilityHandler = nil
-                group.leave()
-                return
-            }
-            stderrBuffer.append(chunk)
-        }
-
-        group.enter()
-        process.terminationHandler = { _ in group.leave() }
-
-        do {
-            try process.run()
-        } catch {
-            // The readers never received data; clear them and balance the group so
-            // it cannot leak. terminationHandler will not fire because run() threw.
-            stdout.fileHandleForReading.readabilityHandler = nil
-            stderr.fileHandleForReading.readabilityHandler = nil
-            group.leave() // termination handler
-            group.leave() // stdout reader
-            group.leave() // stderr reader
-            return .spawnFailed(String(describing: error))
-        }
-
-        if group.wait(timeout: .now() + timeout) == .timedOut {
-            if process.isRunning {
-                process.terminate()
-            }
-            if group.wait(timeout: .now() + 0.2) == .timedOut, process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-                _ = group.wait(timeout: .now() + 0.5)
-            }
-            stdout.fileHandleForReading.readabilityHandler = nil
-            stderr.fileHandleForReading.readabilityHandler = nil
+        switch BoundedProcessRunner.run(executable: executable, arguments: arguments, timeout: timeout) {
+        case let .completed(output):
+            return .completed(
+                CommandOutput(exitCode: output.exitCode, stdout: output.stdout, stderr: output.stderr)
+            )
+        case .timedOut:
             return .timedOut
-        }
-
-        let stdoutText = String(data: stdoutBuffer.snapshot(), encoding: .utf8) ?? ""
-        let stderrText = String(data: stderrBuffer.snapshot(), encoding: .utf8) ?? ""
-        return .completed(
-            CommandOutput(exitCode: process.terminationStatus, stdout: stdoutText, stderr: stderrText)
-        )
-    }
-
-    /// Thread-safe Data accumulator for concurrent pipe draining. Reference type so
-    /// the `@Sendable` readabilityHandler can mutate shared state without capturing
-    /// a non-Sendable closure.
-    private final class PipeDrainBuffer: @unchecked Sendable {
-        private let lock = NSLock()
-        private var data = Data()
-
-        func append(_ chunk: Data) {
-            lock.lock()
-            data.append(chunk)
-            lock.unlock()
-        }
-
-        func snapshot() -> Data {
-            lock.lock()
-            defer { lock.unlock() }
-            return data
+        case let .spawnFailed(message):
+            return .spawnFailed(message)
         }
     }
 

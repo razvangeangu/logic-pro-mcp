@@ -33,24 +33,9 @@ private func sharedObject(_ result: ChannelResult) -> [String: Any]? {
 
 // MARK: - Plane 1 + Plane 2 (handler entry → router)
 
-@Test func testPluginsToolReachesRouterNotUnknownTool() async {
-    let server = LogicProServer()
-    let handlers = await server.makeHandlers()
-
-    for command in ["get_inventory", "set_param_verified", "insert_verified"] {
-        let r = await handlers.callTool(CallTool.Parameters(
-            name: "logic_plugins",
-            arguments: ["command": .string(command), "params": .object(["track": .int(0)])]
-        ))
-        let text = sharedToolText(r)
-        // Plane 1: the tool is registered — "Unknown tool" means callTool's
-        // switch has no case for logic_plugins.
-        #expect(!text.contains("Unknown tool"), "\(command): Plane 1 — tool not dispatched")
-        // Plane 1 (dispatcher): the command is recognised inside PluginsDispatcher.
-        #expect(!text.contains("Unknown plugins command"), "\(command): dispatcher command not handled")
-        #expect(!text.isEmpty)
-    }
-}
+// NOTE: the Plane-1 handler-entry test `testPluginsToolReachesRouterNotUnknownTool`
+// lives in VerifiedOpGateTests.swift's @Suite(.serialized) — it drives the shared
+// VerifiedOpGate via callTool, so it must be serialized with the other gate tests.
 
 @Test func testPluginsOperationsAreRegisteredInRoutingTable() async {
     // Plane 2: a missing routing-table entry yields "Unknown operation: …".

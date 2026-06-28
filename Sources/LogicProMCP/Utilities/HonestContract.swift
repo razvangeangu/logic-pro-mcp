@@ -126,6 +126,7 @@ enum HonestContract {
         case insertLandedAtDifferentSlot
         case rollbackFailed
         case verifiedOpInProgress
+        case mutatingOperationInProgress
         case operationTimeout
         /// `track.set_instrument` could not stage the Logic Library panel: it
         /// was closed and the auto-open (⌘L / View > Show Library) did not make
@@ -192,6 +193,7 @@ enum HonestContract {
             case .insertLandedAtDifferentSlot: return "insert_landed_at_different_slot"
             case .rollbackFailed: return "rollback_failed"
             case .verifiedOpInProgress: return "verified_op_in_progress"
+            case .mutatingOperationInProgress: return "mutating_operation_in_progress"
             case .operationTimeout: return "operation_timeout"
             case .libraryPanelUnavailable: return "library_panel_unavailable"
             case .unsupportedTrackType: return "unsupported_track_type"
@@ -359,6 +361,7 @@ enum HonestContract {
         FailureError.insertLandedAtDifferentSlot.rawValue,
         FailureError.rollbackFailed.rawValue,
         FailureError.verifiedOpInProgress.rawValue,
+        FailureError.mutatingOperationInProgress.rawValue,
         FailureError.operationTimeout.rawValue,
         // #144: `project.save` on an untitled document fails fast as terminal
         // State C `unsupported_state` — no fallback channel can save a document

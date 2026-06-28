@@ -23,7 +23,7 @@ private func readRepoFile(_ relativePath: String) throws -> String {
 @Test func testServerVersionMatchesPackagingArtefacts() throws {
     let sourceVersion = ServerConfig.serverVersion
     #expect(
-        sourceVersion == "3.7.1",
+        sourceVersion == "3.7.2",
         "version surfaces must match the published stable release — bump all packaging artefacts together"
     )
 
@@ -127,7 +127,7 @@ private func readRepoFile(_ relativePath: String) throws -> String {
 /// the actual built artifact before anything is published.
 @Test func testFormulaInstallPathsMatchRepoAndReleaseStaging() throws {
     let formula = try readRepoFile("Formula/logic-pro-mcp.rb")
-    let releaseWorkflow = try readRepoFile(".github/workflows/release.yml")
+    let releasePackaging = try readRepoFile("Scripts/release-package.sh")
 
     func installPaths(_ directive: String) -> [String] {
         formula.components(separatedBy: "\n").compactMap { line in
@@ -141,10 +141,26 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     let pkgsharePaths = installPaths("pkgshare")
     let binPaths = installPaths("bin")
     #expect(
-        pkgsharePaths.count == 5,
-        "expected the 5 helper assets in Formula pkgshare.install; parser or Formula drifted: \(pkgsharePaths)"
+        pkgsharePaths.count == 9,
+        "expected the 9 helper assets in Formula pkgshare.install; parser or Formula drifted: \(pkgsharePaths)"
     )
     #expect(binPaths == ["LogicProMCP"], "Formula bin.install drifted: \(binPaths)")
+    #expect(
+        formula.contains("pkgshare.install \"Scripts/logic_bounce.py\" if (buildpath/\"Scripts/logic_bounce.py\").exist?"),
+        "Formula must keep logic_bounce.py optional so brew install stays compatible with published tarballs that predate project-helper scripts"
+    )
+    #expect(
+        formula.contains("pkgshare.install \"Scripts/logic_bounce_ui.py\" if (buildpath/\"Scripts/logic_bounce_ui.py\").exist?"),
+        "Formula must keep logic_bounce_ui.py optional so brew install stays compatible with published tarballs that predate project-helper scripts"
+    )
+    #expect(
+        formula.contains("pkgshare.install \"Scripts/logic_ui_jxa.py\" if (buildpath/\"Scripts/logic_ui_jxa.py\").exist?"),
+        "Formula must keep logic_ui_jxa.py optional so brew install stays compatible with published tarballs that predate project-helper scripts"
+    )
+    #expect(
+        formula.contains("pkgshare.install \"Scripts/logic_input_source.py\" if (buildpath/\"Scripts/logic_input_source.py\").exist?"),
+        "Formula must keep logic_input_source.py optional so brew install stays compatible with published tarballs that predate project-helper scripts"
+    )
 
     let root = repositoryRootURL()
     for path in pkgsharePaths {
@@ -159,8 +175,8 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     }
     for path in pkgsharePaths + binPaths {
         #expect(
-            releaseWorkflow.contains(path),
-            "Formula installs '\(path)' but release.yml does not stage it into the tarball (issue #22)"
+            releasePackaging.contains(path),
+            "Formula installs '\(path)' but Scripts/release-package.sh does not stage it into the tarball (issue #22)"
         )
     }
 }

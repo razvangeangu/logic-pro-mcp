@@ -4,12 +4,18 @@ import CoreGraphics
 import Foundation
 
 let keyName = CommandLine.arguments.dropFirst().first ?? ""
-let keyCodeByName: [String: CGKeyCode] = [
-    "space": 49,
-    "return": 36,
+struct KeyEventSpec {
+    let keyCode: CGKeyCode
+    let flags: CGEventFlags
+}
+
+let keyEventByName: [String: KeyEventSpec] = [
+    "space": KeyEventSpec(keyCode: 49, flags: []),
+    "return": KeyEventSpec(keyCode: 36, flags: []),
+    "escape": KeyEventSpec(keyCode: 53, flags: []),
 ]
 
-guard let keyCode = keyCodeByName[keyName] else {
+guard let keyEvent = keyEventByName[keyName] else {
     FileHandle.standardError.write(Data("unknown_key\n".utf8))
     exit(64)
 }
@@ -25,12 +31,14 @@ if let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com
 }
 
 let source = CGEventSource(stateID: .hidSystemState)
-guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-      let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyEvent.keyCode, keyDown: true),
+      let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyEvent.keyCode, keyDown: false) else {
     FileHandle.standardError.write(Data("event_create_failed\n".utf8))
     exit(1)
 }
 
+keyDown.flags = keyEvent.flags
+keyUp.flags = keyEvent.flags
 keyDown.post(tap: .cghidEventTap)
 usleep(30_000)
 keyUp.post(tap: .cghidEventTap)

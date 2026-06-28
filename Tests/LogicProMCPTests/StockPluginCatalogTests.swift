@@ -352,6 +352,33 @@ struct StockPluginCatalogTests {
                 "verified entries carrying factory presets must validate: \(snapshot.validation.issues)")
     }
 
+    @Test("factory preset probing keeps bounded sorted names without full-directory storage")
+    func boundedFactoryPresetNames() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("stock-plugin-presets-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for filename in ["Zed.pst", "Alpha.pst", "Beta.pst", "Gamma.pst", "ignore.txt"] {
+            FileManager.default.createFile(
+                atPath: directory.appendingPathComponent(filename).path,
+                contents: Data("preset".utf8)
+            )
+        }
+
+        let names = StockPluginCatalog.boundedFactoryPresetNames(
+            in: directory.path,
+            maxDirectoryEntries: 100,
+            maxNames: 3
+        )
+        #expect(names == ["Alpha", "Beta", "Gamma"])
+
+        let entryCapped = StockPluginCatalog.boundedFactoryPresetNames(
+            in: directory.path,
+            maxDirectoryEntries: 1,
+            maxNames: 12
+        )
+        #expect(entryCapped.count <= 1)
+    }
+
     @Test("contradictory census evidence fails loudly and never yields verified")
     func censusConflictSurfaced() throws {
         let census = censusFixture(
@@ -449,6 +476,7 @@ struct StockPluginResourceTests {
         #expect((capabilities["resources"] as? [String])?.contains("logic://stock-plugins") == true)
         #expect((capabilities["production_reachable_states"] as? [String]) == ["inferred", "manifested"])
         #expect((capabilities["census_injectable_states"] as? [String])?.contains("readback_mismatch") == true)
+        #expect(capabilities["preset_directory_entry_scan_cap"] as? Int == StockPluginCatalog.maxFactoryPresetDirectoryEntries)
     }
 
     @Test("stock plugin URI routing fails closed on malformed inputs")

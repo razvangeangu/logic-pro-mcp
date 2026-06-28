@@ -116,12 +116,18 @@ actor MockKeyCmdTransport: KeyCmdTransportProtocol {
     var sentBytes: [[UInt8]] = []
     var prepared = false
     var sendError: MockKeyCmdTransportError?
+    var sendAttempts = 0
+    var failOnSendAttempts: Set<Int> = []
 
     func prepare() async throws {
         prepared = true
     }
 
     func send(_ bytes: [UInt8]) async throws {
+        sendAttempts += 1
+        if failOnSendAttempts.contains(sendAttempts) {
+            throw MockKeyCmdTransportError.sendFailed
+        }
         if let sendError {
             throw sendError
         }
@@ -130,6 +136,10 @@ actor MockKeyCmdTransport: KeyCmdTransportProtocol {
 
     func setSendError(_ error: MockKeyCmdTransportError?) {
         sendError = error
+    }
+
+    func setFailOnSendAttempts(_ attempts: Set<Int>) {
+        failOnSendAttempts = attempts
     }
 
     func readiness() async -> KeyCmdTransportReadiness {

@@ -5,13 +5,13 @@ protocol CoreMIDIEngineProtocol: Actor {
     func start() throws
     func stop()
     var isActive: Bool { get }
-    func sendNoteOn(channel: UInt8, note: UInt8, velocity: UInt8)
-    func sendNoteOff(channel: UInt8, note: UInt8, velocity: UInt8)
-    func sendCC(channel: UInt8, controller: UInt8, value: UInt8)
-    func sendProgramChange(channel: UInt8, program: UInt8)
-    func sendPitchBend(channel: UInt8, value: UInt16)
-    func sendAftertouch(channel: UInt8, pressure: UInt8)
-    func sendSysEx(_ bytes: [UInt8])
+    func sendNoteOn(channel: UInt8, note: UInt8, velocity: UInt8) throws
+    func sendNoteOff(channel: UInt8, note: UInt8, velocity: UInt8) throws
+    func sendCC(channel: UInt8, controller: UInt8, value: UInt8) throws
+    func sendProgramChange(channel: UInt8, program: UInt8) throws
+    func sendPitchBend(channel: UInt8, value: UInt16) throws
+    func sendAftertouch(channel: UInt8, pressure: UInt8) throws
+    func sendSysEx(_ bytes: [UInt8]) throws
 }
 
 /// Actor wrapping CoreMIDI. Creates a virtual source (for sending MIDI to Logic Pro)
@@ -181,79 +181,80 @@ actor MIDIEngine: CoreMIDIEngineProtocol {
 
     // MARK: - Send: Notes
 
-    func sendNoteOn(channel: UInt8 = 0, note: UInt8, velocity: UInt8 = 100) {
+    func sendNoteOn(channel: UInt8 = 0, note: UInt8, velocity: UInt8 = 100) throws {
         let status: UInt8 = 0x90 | (channel & 0x0F)
-        sendShortMessage([status, note & 0x7F, velocity & 0x7F])
+        try sendShortMessage([status, note & 0x7F, velocity & 0x7F])
     }
 
-    func sendNoteOff(channel: UInt8 = 0, note: UInt8, velocity: UInt8 = 0) {
+    func sendNoteOff(channel: UInt8 = 0, note: UInt8, velocity: UInt8 = 0) throws {
         let status: UInt8 = 0x80 | (channel & 0x0F)
-        sendShortMessage([status, note & 0x7F, velocity & 0x7F])
+        try sendShortMessage([status, note & 0x7F, velocity & 0x7F])
     }
 
     // MARK: - Send: Control Change
 
-    func sendCC(channel: UInt8 = 0, controller: UInt8, value: UInt8) {
+    func sendCC(channel: UInt8 = 0, controller: UInt8, value: UInt8) throws {
         let status: UInt8 = 0xB0 | (channel & 0x0F)
-        sendShortMessage([status, controller & 0x7F, value & 0x7F])
+        try sendShortMessage([status, controller & 0x7F, value & 0x7F])
     }
 
     // MARK: - Send: Program Change
 
-    func sendProgramChange(channel: UInt8 = 0, program: UInt8) {
+    func sendProgramChange(channel: UInt8 = 0, program: UInt8) throws {
         let status: UInt8 = 0xC0 | (channel & 0x0F)
-        sendShortMessage([status, program & 0x7F])
+        try sendShortMessage([status, program & 0x7F])
     }
 
     // MARK: - Send: Pitch Bend
 
     /// Send pitch bend. `value` is 14-bit (0-16383), center = 8192.
-    func sendPitchBend(channel: UInt8 = 0, value: UInt16 = 8192) {
+    func sendPitchBend(channel: UInt8 = 0, value: UInt16 = 8192) throws {
         let clamped = min(value, 16383)
         let lsb = UInt8(clamped & 0x7F)
         let msb = UInt8((clamped >> 7) & 0x7F)
         let status: UInt8 = 0xE0 | (channel & 0x0F)
-        sendShortMessage([status, lsb, msb])
+        try sendShortMessage([status, lsb, msb])
     }
 
     // MARK: - Send: Aftertouch
 
     /// Channel pressure (mono aftertouch).
-    func sendAftertouch(channel: UInt8 = 0, pressure: UInt8) {
+    func sendAftertouch(channel: UInt8 = 0, pressure: UInt8) throws {
         let status: UInt8 = 0xD0 | (channel & 0x0F)
-        sendShortMessage([status, pressure & 0x7F])
+        try sendShortMessage([status, pressure & 0x7F])
     }
 
     // MARK: - Send: SysEx
 
     /// Send a complete SysEx message (must start with 0xF0 and end with 0xF7, middle bytes < 0x80).
-    func sendSysEx(_ bytes: [UInt8]) {
+    func sendSysEx(_ bytes: [UInt8]) throws {
         guard MCUProtocol.isValidSysEx(bytes) else {
             Log.error("Invalid SysEx: must start with F0, end with F7, middle bytes < 0x80", subsystem: "midi")
-            return
+            throw MIDIEngineError.invalidSysEx
         }
-        sendRawBytes(bytes)
+        try sendRawBytes(bytes)
     }
 
     // MARK: - Send: Raw
 
     /// Send arbitrary MIDI bytes through the virtual source.
     /// Uses dynamic buffer for large messages (SysEx 256+ bytes).
-    func sendRawBytes(_ bytes: [UInt8]) {
+    func sendRawBytes(_ bytes: [UInt8]) throws {
         guard isRunning else {
             Log.warn("MIDIEngine not running — dropping message", subsystem: "midi")
-            return
+            throw MIDIEngineError.notRunning
         }
         let status = runtime.sendMessage(virtualSource, bytes)
         if status != noErr {
             Log.error("MIDIReceived failed with status \(status)", subsystem: "midi")
+            throw MIDIEngineError.sendFailed(status)
         }
     }
 
     // MARK: - Private
 
-    private func sendShortMessage(_ bytes: [UInt8]) {
-        sendRawBytes(bytes)
+    private func sendShortMessage(_ bytes: [UInt8]) throws {
+        try sendRawBytes(bytes)
         Log.debug("MIDI out: \(bytes.map { String(format: "%02X", $0) }.joined(separator: " "))", subsystem: "midi")
     }
 
@@ -278,4 +279,7 @@ enum MIDIEngineError: Error, Sendable {
     case clientCreationFailed(OSStatus)
     case sourceCreationFailed(OSStatus)
     case destinationCreationFailed(OSStatus)
+    case notRunning
+    case sendFailed(OSStatus)
+    case invalidSysEx
 }

@@ -2,6 +2,31 @@ import Foundation
 import MCP
 
 struct EditDispatcher {
+    private enum EditRoute {
+        case regular(String)
+        case unverifiedIsError(String)
+    }
+
+    private static let routedCommands: [String: EditRoute] = [
+        "undo": .regular("edit.undo"),
+        "redo": .regular("edit.redo"),
+        "cut": .regular("edit.cut"),
+        "copy": .regular("edit.copy"),
+        "paste": .regular("edit.paste"),
+        "delete": .regular("edit.delete"),
+        "select_all": .unverifiedIsError("edit.select_all"),
+        "split": .regular("edit.split"),
+        "join": .regular("edit.join"),
+        "bounce_in_place": .regular("edit.bounce_in_place"),
+        "normalize": .regular("edit.normalize"),
+        "duplicate": .regular("edit.duplicate"),
+        "toggle_step_input": .regular("edit.toggle_step_input"),
+    ]
+
+    private static let validQuantizeGrids = [
+        "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "1/4T", "1/8T", "1/16T",
+    ]
+
     static let tool = Tool(
         name: "logic_edit",
         description: """
@@ -35,41 +60,12 @@ struct EditDispatcher {
         cache: StateCache
     ) async -> CallTool.Result {
         switch command {
-        case "undo":
-            let result = await router.route(operation: "edit.undo")
-            return toolTextResult(result)
-
-        case "redo":
-            let result = await router.route(operation: "edit.redo")
-            return toolTextResult(result)
-
-        case "cut":
-            let result = await router.route(operation: "edit.cut")
-            return toolTextResult(result)
-
-        case "copy":
-            let result = await router.route(operation: "edit.copy")
-            return toolTextResult(result)
-
-        case "paste":
-            let result = await router.route(operation: "edit.paste")
-            return toolTextResult(result)
-
-        case "delete":
-            let result = await router.route(operation: "edit.delete")
-            return toolTextResult(result)
-
-        case "select_all":
-            let result = await router.route(operation: "edit.select_all")
-            return toolTextResultTreatingUnverifiedAsError(result)
-
-        case "split":
-            let result = await router.route(operation: "edit.split")
-            return toolTextResult(result)
-
-        case "join":
-            let result = await router.route(operation: "edit.join")
-            return toolTextResult(result)
+        case "undo", "redo", "cut", "copy", "paste", "delete", "select_all", "split", "join",
+             "bounce_in_place", "normalize", "duplicate", "toggle_step_input":
+            guard let route = routedCommands[command] else {
+                return toolTextResult("Internal edit route missing for \(command)", isError: true)
+            }
+            return await routeEditCommand(route, router: router)
 
         case "quantize":
             guard params["value"] != nil || params["grid"] != nil else {
@@ -78,10 +74,9 @@ struct EditDispatcher {
                 )
             }
             let value = stringParam(params, "value", "grid", default: "1/16")
-            let validGrids = ["1/1","1/2","1/4","1/8","1/16","1/32","1/64","1/4T","1/8T","1/16T"]
-            guard validGrids.contains(value) else {
+            guard validQuantizeGrids.contains(value) else {
                 return toolTextResult(
-                    "quantize 'value' must be one of \(validGrids.joined(separator: ", ")) (got '\(value)')",
+                    "quantize 'value' must be one of \(validQuantizeGrids.joined(separator: ", ")) (got '\(value)')",
                     isError: true
                 )
             }
@@ -91,27 +86,24 @@ struct EditDispatcher {
             )
             return toolTextResultTreatingUnverifiedAsError(result)
 
-        case "bounce_in_place":
-            let result = await router.route(operation: "edit.bounce_in_place")
-            return toolTextResult(result)
-
-        case "normalize":
-            let result = await router.route(operation: "edit.normalize")
-            return toolTextResult(result)
-
-        case "duplicate":
-            let result = await router.route(operation: "edit.duplicate")
-            return toolTextResult(result)
-
-        case "toggle_step_input":
-            let result = await router.route(operation: "edit.toggle_step_input")
-            return toolTextResult(result)
-
         default:
             return toolTextResult(
                 "Unknown edit command: \(command). Available: undo, redo, cut, copy, paste, delete, select_all, split, join, quantize, bounce_in_place, normalize, duplicate, toggle_step_input",
                 isError: true
             )
+        }
+    }
+
+    private static func routeEditCommand(
+        _ route: EditRoute,
+        router: ChannelRouter
+    ) async -> CallTool.Result {
+        switch route {
+        case .regular(let operation):
+            return await routedTextResult(router, operation: operation)
+        case .unverifiedIsError(let operation):
+            let result = await router.route(operation: operation)
+            return toolTextResultTreatingUnverifiedAsError(result)
         }
     }
 }

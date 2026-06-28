@@ -30,10 +30,6 @@ import Testing
 //   2. A successful injected bounce -> on-disk-verified artifact -> State A
 //      (verified == true). Success is driven by the real bounce OUTCOME (the
 //      produced + analyzed file), never by track record-enablement.
-//   3. An injected bounce FAILURE -> honest State C (`bounce_helper_failed`,
-//      verified == false, bounceFired == false). A failed bounce is NEVER
-//      reported as a false success.
-
 // MARK: - Fixtures
 
 /// Write a real, non-silent stereo WAV so `AudioAnalyzer` verification PASSES.
@@ -128,11 +124,6 @@ private func makeIssue125Router(recorder: OpRecorder) async -> ChannelRouter {
     return router
 }
 
-/// Build `Options` that drive the SHIPPED `bounceToPath` seam (the Cmd+B helper)
-/// rather than the legacy router-bounce seam. `bounce` is the injectable stand-in
-/// for `Scripts/logic_bounce.py`: it receives the artifact basename + output dir
-/// and returns the produced path (or nil on failure) — exactly the production
-/// contract, with zero record-track involvement.
 private func shippedBounceOptions(
     identity: @escaping @Sendable () async -> String?,
     bounce: @escaping ProjectExportExecutor.BounceToPath
@@ -166,13 +157,12 @@ struct Issue125BouncePreconditionTests {
         let recorder = OpRecorder()
         let router = await makeIssue125Router(recorder: recorder)
 
-        // The injected Cmd+B helper writes a real artifact and returns its path.
-        // It is given ONLY a basename + output dir — there is no record-track
-        // input, so success cannot be gated on record-enablement.
-        let options = shippedBounceOptions(identity: { project.path }) { name, dir in
-            let produced = (dir as NSString).appendingPathComponent("\(name).wav")
+        let bounceAifPath = (bouncePath as NSString).deletingPathExtension + ".aif"
+
+        let options = shippedBounceOptions(identity: { project.path }) { artifactPath in
+            let produced = (artifactPath as NSString).deletingPathExtension + ".aif"
             try? writeIssue125ToneWav(at: URL(fileURLWithPath: produced))
-            return produced
+            return .success(produced)
         }
 
         let run = await ProjectExportExecutor.run(
@@ -199,9 +189,10 @@ struct Issue125BouncePreconditionTests {
         #expect(artifact.verified)
         #expect(artifact.bounceFired)
         #expect(artifact.error == nil)
+        #expect(artifact.path == bounceAifPath)
         let evidence = try #require(artifact.evidence)
         #expect(evidence.verificationStatus == "pass")
-        #expect(FileManager.default.fileExists(atPath: bouncePath))
+        #expect(FileManager.default.fileExists(atPath: bounceAifPath))
 
         // The crux of #125: the only mutating op routed is project.open. The
         // bounce went through the path-directed helper, and NOTHING armed or
@@ -231,10 +222,9 @@ struct Issue125BouncePreconditionTests {
         let recorder = OpRecorder()
         let router = await makeIssue125Router(recorder: recorder)
 
-        // The injected helper returns nil — i.e. the real bounce did not produce
-        // a verified artifact (helper crash, panel mishandled, etc.). This must
-        // surface as an honest failure, NOT a fabricated State A.
-        let options = shippedBounceOptions(identity: { project.path }) { _, _ in nil }
+        let options = shippedBounceOptions(identity: { project.path }) { _ in
+            .failure("bounce_dialog_did_not_appear")
+        }
 
         let run = await ProjectExportExecutor.run(
             params: [
@@ -258,6 +248,7 @@ struct Issue125BouncePreconditionTests {
         #expect(!artifact.bounceFired)
         let error = try #require(artifact.error)
         #expect(error.contains("bounce_helper_failed"))
+        #expect(error.contains("bounce_dialog_did_not_appear"))
         // No false artifact materialized on disk.
         #expect(!FileManager.default.fileExists(atPath: bouncePath))
 
@@ -267,5 +258,79 @@ struct Issue125BouncePreconditionTests {
             $0.lowercased().contains("record") || $0.lowercased().contains("arm")
         }
         #expect(recordOps.isEmpty)
+    }
+
+    @Test("a post-click shipped bounce failure preserves bounceFired so retries stay honest")
+    func postClickShippedBounceFailurePreservesBounceFired() async throws {
+        let projDir = try makeIssue125TempDir()
+        let outputRoot = try makeIssue125TempDir()
+        let project = try makeIssue125Project(in: projDir, named: "Bounce Post Click Honest Song")
+
+        let recorder = OpRecorder()
+        let router = await makeIssue125Router(recorder: recorder)
+
+        let options = shippedBounceOptions(identity: { project.path }) { _ in
+            .failure("artifact_not_produced_in_staging", bounceFired: true)
+        }
+
+        let run = await ProjectExportExecutor.run(
+            params: [
+                "projects": .array([.string(project.path)]),
+                "output_root": .string(outputRoot.path),
+                "artifacts": .array([.string("bounce")]),
+                "confirmed": .bool(true),
+            ],
+            router: router,
+            resume: false,
+            options: options
+        )
+
+        #expect(run.status == "failed")
+        let artifact = try #require(run.projects.first?.artifacts.first)
+        #expect(artifact.state == "C")
+        #expect(!artifact.verified)
+        #expect(artifact.bounceFired)
+        let error = try #require(artifact.error)
+        #expect(error.contains("bounce_helper_failed"))
+        #expect(error.contains("artifact_not_produced_in_staging"))
+
+        let recordOps = recorder.all.filter {
+            $0.lowercased().contains("record") || $0.lowercased().contains("arm")
+        }
+        #expect(recordOps.isEmpty)
+    }
+
+    @Test("shipped bounce rejects helper artifact paths that change the planned stem")
+    func shippedBounceRejectsUnexpectedArtifactStem() async throws {
+        let projDir = try makeIssue125TempDir()
+        let outputRoot = try makeIssue125TempDir()
+        let project = try makeIssue125Project(in: projDir, named: "Bounce Wrong Stem Song")
+
+        let recorder = OpRecorder()
+        let router = await makeIssue125Router(recorder: recorder)
+        let wrongPath = outputRoot.appendingPathComponent("Other-Song-bounce.aif").path
+
+        let options = shippedBounceOptions(identity: { project.path }) { _ in
+            try? writeIssue125ToneWav(at: URL(fileURLWithPath: wrongPath))
+            return .success(wrongPath)
+        }
+
+        let run = await ProjectExportExecutor.run(
+            params: [
+                "projects": .array([.string(project.path)]),
+                "output_root": .string(outputRoot.path),
+                "artifacts": .array([.string("bounce")]),
+                "confirmed": .bool(true),
+            ],
+            router: router,
+            resume: false,
+            options: options
+        )
+
+        #expect(run.status == "failed")
+        let artifact = try #require(run.projects.first?.artifacts.first)
+        #expect(artifact.state == "C")
+        #expect(artifact.bounceFired)
+        #expect(artifact.error?.contains("bounce_helper_unexpected_artifact_path") == true)
     }
 }
