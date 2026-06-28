@@ -8,12 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.7.2] — 2026-06-28
+
+Production-readiness hardening pass. No public tool/resource/template surface change (10 tools / 18 resources / 11 templates unchanged).
+
+### Changed
+
+- `mutating_operation_in_progress` State C now reports `safe_to_retry: true` — no write was attempted (the gate refused before dispatch), so the call is retryable once the in-flight mutating operation releases the gate. This aligns it with the sibling `verified_op_in_progress` and the Honest Contract retry-signal semantics.
+
 ### Fixed
 
 - `record_sequence` no longer re-promotes a lower-level `midi.import_file` State B GM Device / External MIDI audibility downgrade into verified success; it now fails closed with `audibility_unverified` before a silent Bounce can be claimed.
 - `logic://project/audit` now reports `external_midi_regions_bounce_risk` as an export blocker when MIDI regions sit on GM Device / External MIDI tracks, preventing track/region readback from being mistaken for audible-routing evidence.
 - `logic_project.bounce` now runs the audit preflight and refuses `export_readiness_blocked` before opening the Bounce dialog when export blockers are present.
 - `logic_tracks.scan_library` now defaults to the non-mutating disk scanner; callers can still request the legacy live AX Library Panel walk with `{ "mode": "ax" }`.
+- The release install-validation job published artifacts but its share directory (`.../logic-pro-share/logic-pro-mcp`) failed the installer's own `validate_share_dir` check (which requires `*/share/logic-pro-mcp`), so install validation failed on every tagged release. The path now satisfies the validator and a contract test pins the workflow value to the validator glob.
+- MIDI Key Commands `send_note` / `send_chord` now make a best-effort note-off before surfacing a note-off transport failure, so a transient error cannot leave a sounding note (the failure is still reported honestly via State C `note_off_failed`). This mirrors the CoreMIDI mitigation.
+- Startup orphan temp-directory cleanup now verifies on-disk ownership (`ownerAccountID`), not just the uid embedded in the directory name, before deleting a managed temp directory.
 - Public documentation policy now explicitly allows `docs/prd/` and `docs/tickets/` for public issue remediation plans while keeping internal PRDs, private ticket boards, and local live-evidence work files out of `docs/`.
 
 ## [3.7.1] — 2026-06-23
