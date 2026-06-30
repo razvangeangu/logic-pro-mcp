@@ -8,7 +8,9 @@ private final class PermissionRuntimeHarness: @unchecked Sendable {
     var running = true
     var probeResult = true
     var systemEventsProbeCalls = 0
-    var systemEventsProbeResult = true
+    // Tri-state now (was Bool): the seam returns a CheckState so a could-not-run
+    // probe can be modelled as .notVerifiable, distinct from a denial (.notGranted).
+    var systemEventsProbeState: PermissionChecker.CheckState = .granted
 
     func runtime() -> PermissionChecker.Runtime {
         PermissionChecker.Runtime(
@@ -23,7 +25,7 @@ private final class PermissionRuntimeHarness: @unchecked Sendable {
             },
             runSystemEventsAutomationProbe: {
                 self.systemEventsProbeCalls += 1
-                return self.systemEventsProbeResult
+                return self.systemEventsProbeState
             }
         )
     }
@@ -31,7 +33,7 @@ private final class PermissionRuntimeHarness: @unchecked Sendable {
 
 @Test func testPermissionCheckerSystemEventsAutomationProbeReflectsGrant() {
     let harness = PermissionRuntimeHarness()
-    harness.systemEventsProbeResult = true
+    harness.systemEventsProbeState = .granted
 
     let state = PermissionChecker.checkSystemEventsAutomationState(runtime: harness.runtime())
 
@@ -46,12 +48,28 @@ private final class PermissionRuntimeHarness: @unchecked Sendable {
     // is reported as not_granted, not not_verifiable.
     let harness = PermissionRuntimeHarness()
     harness.running = false
-    harness.systemEventsProbeResult = false
+    harness.systemEventsProbeState = .notGranted
 
     let state = PermissionChecker.checkSystemEventsAutomationState(runtime: harness.runtime())
 
     #expect(state == .notGranted)
     #expect(harness.systemEventsProbeCalls == 1)
+}
+
+@Test func testPermissionCheckerSystemEventsProbeCouldNotRunIsNotVerifiable() {
+    // A probe that could not run (osascript timeout / spawn failure) maps to
+    // .notVerifiable, NOT .notGranted — an infrastructure failure is not a denial.
+    let harness = PermissionRuntimeHarness()
+    harness.systemEventsProbeState = .notVerifiable
+
+    let state = PermissionChecker.checkSystemEventsAutomationState(runtime: harness.runtime())
+
+    #expect(state == .notVerifiable)
+    // Force/negation form, NOT `== false`: `#expect(bool == false)` is a DEAD no-op
+    // under this repo's pinned swift-testing (it passes even when flipped to `== true`).
+    // `!expr` is the only reliable Bool form. This guards the honesty invariant that a
+    // could-not-run probe is NOT advertised as granted (would poison allGranted / #188).
+    #expect(!PermissionChecker.checkSystemEventsAutomation(runtime: harness.runtime()))
 }
 
 @Test func testPermissionCheckerCheckAccessibilityUsesInjectedRuntimeAndPrompt() {
@@ -60,7 +78,7 @@ private final class PermissionRuntimeHarness: @unchecked Sendable {
 
     let granted = PermissionChecker.checkAccessibility(prompt: true, runtime: harness.runtime())
 
-    #expect(granted == false)
+    #expect(!granted)
     #expect(harness.prompts == [true])
 }
 
@@ -71,7 +89,7 @@ private final class PermissionRuntimeHarness: @unchecked Sendable {
     let granted = PermissionChecker.checkAutomation(runtime: harness.runtime())
     let state = PermissionChecker.checkAutomationState(runtime: harness.runtime())
 
-    #expect(granted == false)
+    #expect(!granted)
     #expect(state == .notVerifiable)
     #expect(harness.probeCalls == 0)
 }
@@ -83,7 +101,7 @@ private final class PermissionRuntimeHarness: @unchecked Sendable {
 
     let granted = PermissionChecker.checkAutomation(runtime: harness.runtime())
 
-    #expect(granted == false)
+    #expect(!granted)
     #expect(harness.probeCalls == 1)
 }
 
@@ -94,12 +112,12 @@ private final class PermissionRuntimeHarness: @unchecked Sendable {
 
     let status = PermissionChecker.check(runtime: harness.runtime())
 
-    #expect(status.accessibility == false)
+    #expect(!status.accessibility)
     #expect(status.accessibilityState == .notGranted)
-    #expect(status.automationLogicPro == false)
+    #expect(!status.automationLogicPro)
     #expect(status.automationState == .notVerifiable)
-    #expect(status.automationVerifiable == false)
-    #expect(status.allGranted == false)
+    #expect(!status.automationVerifiable)
+    #expect(!status.allGranted)
     #expect(status.summary.contains("NOT VERIFIABLE"))
 }
 
