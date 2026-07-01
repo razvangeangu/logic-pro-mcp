@@ -33,18 +33,22 @@ enum MainEntrypoint {
             FileHandle.standardError.write(Data(message.utf8))
         }
     ) async -> Int {
-        // `--version` is a terminal global flag: print the version and exit
+        // `--version` and `--help` are terminal global flags: print and exit
         // WITHOUT creating the approval store, checking permissions, or —
-        // critically — starting the long-lived MCP server channels (#212).
+        // critically — starting the long-lived MCP server channels (#212/#213).
         // Placed before every other branch so no side effect runs first.
         //
-        // Emits the bare version string only: SetupLifecycle
+        // `--version` emits the bare version string only: SetupLifecycle
         // .productionInstalledBinaryVersion() runs the installed binary with
         // `--version`, requires exit 0, and compares the trimmed stdout for
         // EQUALITY against ServerConfig.serverVersion to detect install drift.
         // Any prefix (e.g. "logic-pro-mcp 3.7.4") would break that equality.
         if hasFlag("--version", or: "-V", in: arguments) {
             writeStdout(ServerConfig.serverVersion + "\n")
+            return 0
+        }
+        if hasFlag("--help", or: "-h", in: arguments) {
+            writeStdout(usageText + "\n")
             return 0
         }
 
@@ -191,6 +195,29 @@ enum MainEntrypoint {
             return 1
         }
     }
+
+    /// CLI usage printed by `--help`. Kept in sync with the command branches
+    /// below and the CLI surface documented in docs/SETUP.md.
+    static let usageText = """
+        \(ServerConfig.serverName) \(ServerConfig.serverVersion) — Logic Pro MCP server
+
+        USAGE:
+          LogicProMCP                          Start the MCP server over stdio (default; used by an MCP client)
+          LogicProMCP --help, -h               Print this help and exit
+          LogicProMCP --version, -V            Print the version and exit
+          LogicProMCP doctor [--json] [--verbose|--quiet] [--check-updates]
+                                               Print a diagnostic report and exit
+          LogicProMCP <install|update|uninstall> --dry-run [--json]
+                                               Print a read-only lifecycle plan and exit
+          LogicProMCP --check-permissions      Print macOS permission status and exit (non-zero if not ready)
+          LogicProMCP --list-approvals         List manual channel approvals and exit
+          LogicProMCP --approve-channel <MIDIKeyCommands|Scripter> [--approval-note <note>]
+                                               Record a manual channel approval and exit
+          LogicProMCP --revoke-channel <MIDIKeyCommands|Scripter>
+                                               Revoke a manual channel approval and exit
+
+        With no arguments the binary runs as an MCP stdio server. See docs/SETUP.md for setup.
+        """
 
     /// True when a terminal global flag (`--version`, `--help`, …) appears
     /// anywhere in the user-supplied arguments (the program path at index 0 is
