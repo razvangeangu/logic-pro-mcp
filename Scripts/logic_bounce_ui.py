@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os
 import subprocess
 import time
+from ctypes import CDLL, POINTER, Structure, byref, c_bool, c_double, c_int64, c_size_t, c_uint16, c_uint32, c_uint64, c_void_p
 from collections.abc import Callable
 from typing import Final, Literal, NoReturn, Optional, TypedDict, Union
 
@@ -15,19 +15,42 @@ RunOsa = Callable[[str, float], str]
 
 
 OSA_TIMEOUT_SEC: Final = 8.0
-CLICLICK_TIMEOUT_SEC: Final = 3.0
 BOUNCE_CONFIRM_BUTTONS: Final[tuple[str, str]] = ("OK", "확인")
 BOUNCE_DIALOG_KEYWORDS: Final[tuple[str, str]] = ("bounce", "바운스")
 BOUNCE_SETTINGS_MARKERS: Final[tuple[str, ...]] = ("pcm", "realtime", "offline", "normalize", "audio tail", "실시간", "오프라인", "노멀라이즈")
 SAVE_PANEL_CONFIRM_BUTTONS: Final[tuple[str, str]] = ("bounce", "바운스")
 SAVE_PANEL_CANCEL_BUTTONS: Final[tuple[str, str]] = ("cancel", "취소")
 SAVE_PANEL_NAME_LABELS: Final[tuple[str, str]] = ("save as:", "다른 이름으로 저장:", "이름으로 저장:")
-TRUSTED_CLICLICK_DIRS: Final[tuple[str, ...]] = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin")
-TRUSTED_CLICLICK_CANDIDATES: Final[tuple[str, ...]] = (
-    "/opt/homebrew/bin/cliclick",
-    "/usr/local/bin/cliclick",
-    "/usr/bin/cliclick",
-)
+KCG_HID_EVENT_TAP: Final = 0
+KCG_EVENT_LEFT_MOUSE_DOWN: Final = 1
+KCG_EVENT_LEFT_MOUSE_UP: Final = 2
+KCG_EVENT_KEYBOARD_DOWN: Final = True
+KCG_EVENT_KEYBOARD_UP: Final = False
+KCG_MOUSE_BUTTON_LEFT: Final = 0
+KCG_MOUSE_EVENT_CLICK_STATE: Final = 1
+KCG_EVENT_FLAG_MASK_SHIFT: Final = 0x00020000
+KCG_EVENT_FLAG_MASK_CONTROL: Final = 0x00040000
+KCG_EVENT_FLAG_MASK_ALTERNATE: Final = 0x00080000
+KCG_EVENT_FLAG_MASK_COMMAND: Final = 0x00100000
+MODIFIER_FLAGS: Final[dict[str, int]] = {
+    "cmd": KCG_EVENT_FLAG_MASK_COMMAND,
+    "command": KCG_EVENT_FLAG_MASK_COMMAND,
+    "shift": KCG_EVENT_FLAG_MASK_SHIFT,
+    "alt": KCG_EVENT_FLAG_MASK_ALTERNATE,
+    "option": KCG_EVENT_FLAG_MASK_ALTERNATE,
+    "ctrl": KCG_EVENT_FLAG_MASK_CONTROL,
+    "control": KCG_EVENT_FLAG_MASK_CONTROL,
+}
+KEY_CODES: Final[dict[str, int]] = {
+    "a": 0x00,
+    "delete": 0x33,
+    "return": 0x24,
+    "enter": 0x24,
+    "escape": 0x35,
+    "esc": 0x35,
+    "space": 0x31,
+    "tab": 0x30,
+}
 
 
 class SavePanelSnapshotOk(TypedDict):
@@ -67,6 +90,175 @@ class BounceFocusDiagnostics(TypedDict):
     save_panel_snapshot: SavePanelSnapshot
 
 
+class CGPoint(Structure):
+    _fields_ = [("x", c_double), ("y", c_double)]
+
+
+class NativeCGEventDriver:
+    def __init__(self) -> None:
+        app_services = CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        core_foundation = CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+
+        self._mouse_event = app_services.CGEventCreateMouseEvent
+        self._mouse_event.argtypes = [c_void_p, c_uint32, CGPoint, c_uint32]
+        self._mouse_event.restype = c_void_p
+
+        self._keyboard_event = app_services.CGEventCreateKeyboardEvent
+        self._keyboard_event.argtypes = [c_void_p, c_uint16, c_bool]
+        self._keyboard_event.restype = c_void_p
+
+        self._keyboard_unicode = app_services.CGEventKeyboardSetUnicodeString
+        self._keyboard_unicode.argtypes = [c_void_p, c_size_t, POINTER(c_uint16)]
+        self._keyboard_unicode.restype = None
+
+        self._set_integer = app_services.CGEventSetIntegerValueField
+        self._set_integer.argtypes = [c_void_p, c_uint32, c_int64]
+        self._set_integer.restype = None
+
+        self._set_flags = app_services.CGEventSetFlags
+        self._set_flags.argtypes = [c_void_p, c_uint64]
+        self._set_flags.restype = None
+
+        self._post = app_services.CGEventPost
+        self._post.argtypes = [c_uint32, c_void_p]
+        self._post.restype = None
+
+        self._release = core_foundation.CFRelease
+        self._release.argtypes = [c_void_p]
+        self._release.restype = None
+
+        self._held_flags = 0
+
+    def click(self, x: int, y: int) -> bool:
+        point = CGPoint(float(x), float(y))
+        return self._post_mouse(KCG_EVENT_LEFT_MOUSE_DOWN, point) and self._post_mouse(KCG_EVENT_LEFT_MOUSE_UP, point)
+
+    def key_down(self, key: str) -> bool:
+        flag = MODIFIER_FLAGS.get(key.lower())
+        if flag is None:
+            return self._post_key_name(key, key_down=True)
+        self._held_flags |= flag
+        return True
+
+    def key_up(self, key: str) -> bool:
+        flag = MODIFIER_FLAGS.get(key.lower())
+        if flag is None:
+            return self._post_key_name(key, key_down=False)
+        self._held_flags &= ~flag
+        return True
+
+    def key_press(self, key: str) -> bool:
+        return self._post_key_name(key, key_down=True) and self._post_key_name(key, key_down=False)
+
+    def reset_modifiers(self) -> None:
+        self._held_flags = 0
+
+    def type_text(self, text: str) -> bool:
+        for character in text:
+            if self._held_flags:
+                key_code = KEY_CODES.get(character.lower())
+                if key_code is None:
+                    return False
+                if not self._post_key_code(key_code, key_down=True) or not self._post_key_code(key_code, key_down=False):
+                    return False
+                continue
+            if not self._post_unicode_character(character):
+                return False
+        return True
+
+    def _post_mouse(self, event_type: int, point: CGPoint) -> bool:
+        event = self._mouse_event(None, event_type, point, KCG_MOUSE_BUTTON_LEFT)
+        if not event:
+            return False
+        try:
+            self._set_integer(event, KCG_MOUSE_EVENT_CLICK_STATE, 1)
+            self._post(KCG_HID_EVENT_TAP, event)
+            return True
+        finally:
+            self._release(event)
+
+    def _post_key_name(self, key: str, *, key_down: bool) -> bool:
+        key_code = KEY_CODES.get(key.lower())
+        if key_code is None:
+            return False
+        return self._post_key_code(key_code, key_down=key_down)
+
+    def _post_key_code(self, key_code: int, *, key_down: bool) -> bool:
+        event = self._keyboard_event(None, c_uint16(key_code), key_down)
+        if not event:
+            return False
+        try:
+            self._set_flags(event, c_uint64(self._held_flags))
+            self._post(KCG_HID_EVENT_TAP, event)
+            return True
+        finally:
+            self._release(event)
+
+    def _post_unicode_character(self, character: str) -> bool:
+        encoded = character.encode("utf-16-le")
+        units = (c_uint16 * (len(encoded) // 2)).from_buffer_copy(encoded)
+        down = self._keyboard_event(None, 0, KCG_EVENT_KEYBOARD_DOWN)
+        up = self._keyboard_event(None, 0, KCG_EVENT_KEYBOARD_UP)
+        if not down or not up:
+            if down:
+                self._release(down)
+            if up:
+                self._release(up)
+            return False
+        try:
+            self._keyboard_unicode(down, len(units), units)
+            self._keyboard_unicode(up, len(units), units)
+            self._post(KCG_HID_EVENT_TAP, down)
+            self._post(KCG_HID_EVENT_TAP, up)
+            return True
+        finally:
+            self._release(down)
+            self._release(up)
+
+
+_NATIVE_DRIVER: NativeCGEventDriver | None = None
+
+
+def _native_driver() -> NativeCGEventDriver:
+    global _NATIVE_DRIVER
+    if _NATIVE_DRIVER is None:
+        _NATIVE_DRIVER = NativeCGEventDriver()
+    return _NATIVE_DRIVER
+
+
+def send_ui_events(*commands: str, driver: NativeCGEventDriver | None = None) -> bool:
+    event_driver = driver if driver is not None else _native_driver()
+    try:
+        for command in commands:
+            prefix, separator, payload = command.partition(":")
+            if separator != ":":
+                return False
+            if prefix == "c":
+                try:
+                    x_raw, y_raw = payload.split(",", 1)
+                    if not event_driver.click(int(x_raw), int(y_raw)):
+                        return False
+                except ValueError:
+                    return False
+            elif prefix == "kd":
+                if not event_driver.key_down(payload):
+                    return False
+            elif prefix == "ku":
+                if not event_driver.key_up(payload):
+                    return False
+            elif prefix == "kp":
+                if not event_driver.key_press(payload):
+                    return False
+            elif prefix == "t":
+                if not event_driver.type_text(payload):
+                    return False
+            else:
+                return False
+        return True
+    finally:
+        event_driver.reset_modifiers()
+
+
 def osa(script: str, timeout: float = OSA_TIMEOUT_SEC) -> str:
     try:
         result = subprocess.run(
@@ -78,42 +270,6 @@ def osa(script: str, timeout: float = OSA_TIMEOUT_SEC) -> str:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return ""
     return result.stdout.strip()
-
-
-def trusted_cliclick_path(override: str | None = None) -> str | None:
-    candidates = [override, os.environ.get("LOGIC_PRO_MCP_CLICLICK"), *TRUSTED_CLICLICK_CANDIDATES]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        path = os.path.abspath(os.path.expanduser(candidate))
-        parent = os.path.dirname(path)
-        if parent not in TRUSTED_CLICLICK_DIRS:
-            continue
-        try:
-            parent_mode = os.stat(parent).st_mode
-        except OSError:
-            continue
-        if parent_mode & 0o022:
-            continue
-        if os.path.isfile(path) and os.access(path, os.X_OK):
-            return path
-    return None
-
-
-def cliclick(*args: str) -> bool:
-    executable = trusted_cliclick_path()
-    if executable is None:
-        return False
-    try:
-        result = subprocess.run(
-            [executable, *args],
-            capture_output=True,
-            text=True,
-            timeout=CLICLICK_TIMEOUT_SEC,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
 
 
 def _logic_front_container_name(container: str, run_osa: RunOsa = osa) -> str:

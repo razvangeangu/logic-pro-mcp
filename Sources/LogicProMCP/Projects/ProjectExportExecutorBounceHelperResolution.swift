@@ -16,12 +16,6 @@ struct ProjectExportBounceHelperResult: Sendable, Equatable {
 }
 
 extension ProjectExportExecutor {
-    private static let trustedCliclickPaths = [
-        "/opt/homebrew/bin/cliclick",
-        "/usr/local/bin/cliclick",
-        "/usr/bin/cliclick",
-    ]
-
     private static func lexicalPath(_ path: String) -> String {
         let isAbsolute = path.hasPrefix("/")
         var components: [Substring] = []
@@ -89,29 +83,6 @@ extension ProjectExportExecutor {
             }
         }
         return false
-    }
-
-    static func resolveTrustedCliclick(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        isExecutable: @Sendable (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        attributesOfItem: @Sendable (String) throws -> [FileAttributeKey: Any] = {
-            try FileManager.default.attributesOfItem(atPath: $0)
-        }
-    ) -> String? {
-        let candidates = ([environment["LOGIC_PRO_MCP_CLICLICK"]] + trustedCliclickPaths).compactMap { $0 }
-        for candidate in candidates {
-            let normalized = absoluteLexicalPath(candidate)
-            guard normalized.hasPrefix("/") else { continue }
-            let parent = parentPath(of: normalized)
-            guard trustedCliclickPaths.contains(normalized) else { continue }
-            guard let attrs = try? attributesOfItem(parent),
-                  let permissions = attrs[.posixPermissions] as? NSNumber,
-                  permissions.intValue & 0o022 == 0 else { continue }
-            if isExecutable(normalized) {
-                return normalized
-            }
-        }
-        return nil
     }
 
 

@@ -97,6 +97,11 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
         json["mcu"] = mcu
     }
 
+    if var permissions = json["permissions"] as? [String: Any] {
+        permissions.removeValue(forKey: "post_event_access")
+        json["permissions"] = permissions
+    }
+
     json.removeValue(forKey: "logic_pro_version")
     json.removeValue(forKey: "process")
     return json
@@ -352,6 +357,15 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     #expect(cpuPercentUnits == "single_core_lifetime_average")
     #expect((cpuSampleWindowSec ?? -1) >= 0)
     #expect((uptimeSec ?? -1) >= 0)
+}
+
+@Test func testHealthResponseOmitsRemovedExternalClickDependencySection() async throws {
+    let cache = StateCache()
+    let router = ChannelRouter()
+
+    let result = await SystemDispatcher.handle(command: "health", params: [:], router: router, cache: cache)
+    let json = try #require(sharedParseJSON(toolText(result)) as? [String: Any])
+    #expect(json["dependencies"] == nil)
 }
 
 @Test func testMixerResponseIncludesPluginParams() async {

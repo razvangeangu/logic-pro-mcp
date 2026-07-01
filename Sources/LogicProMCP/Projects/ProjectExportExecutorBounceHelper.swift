@@ -53,9 +53,6 @@ extension ProjectExportExecutor {
         executablePath: String? = nil,
         timeout: TimeInterval = bounceHelperTimeout,
         fileExists: @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
-        resolveCliclick: @Sendable ([String: String]) -> String? = { environment in
-            ProjectExportExecutor.resolveTrustedCliclick(environment: environment)
-        },
         runProcess: BounceHelperProcessRunner = { executable, arguments, timeout in
             BoundedProcessRunner.run(
                 executable: executable,
@@ -75,12 +72,9 @@ extension ProjectExportExecutor {
         guard fileExists(helper) else {
             return .failure("bounce_helper_missing: \(helper)")
         }
-        guard let cliclickPath = resolveCliclick(environment) else {
-            return .failure("bounce_helper_dependency_missing: cliclick")
-        }
         let result = runProcess(
             "/usr/bin/python3",
-            [helper, "--target-path", artifactPath, "--cliclick-path", cliclickPath],
+            [helper, "--target-path", artifactPath],
             timeout
         )
         switch result {

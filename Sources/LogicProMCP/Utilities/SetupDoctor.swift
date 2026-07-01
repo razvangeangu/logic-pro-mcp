@@ -159,10 +159,6 @@ enum SetupDoctor {
         let readClaudeRegistration: () -> ClaudeRegistration
         // v2 seams. Defaults keep every existing `Runtime(...)` construction site
         // compiling; `.production` and the test helper supply real/fake impls.
-        // `cliclickPath` reuses the runtime's own trusted resolver so the doctor
-        // can never green-light a cliclick the bounce/export path would reject.
-        var cliclickPath: () -> String? = { ProjectExportExecutor.resolveTrustedCliclick() }
-        var cliclickPresentOnPath: () -> Bool = { ProjectExportExecutor.commandExists("cliclick") }
         var macOSVersion: () -> OperatingSystemVersion? = { ProcessInfo.processInfo.operatingSystemVersion }
         // Monotonic millisecond clock for per-check timing. Monotonic (uptime),
         // never wall-clock, so a duration can never go negative across an NTP step.
@@ -220,7 +216,6 @@ enum SetupDoctor {
         "permissions.accessibility": "docs/SETUP.md#doctor-permissionsaccessibility",
         "permissions.automation_logic_pro": "docs/SETUP.md#doctor-permissionsautomation-logic-pro",
         "permissions.automation_system_events": "docs/SETUP.md#doctor-permissionsautomation-system-events",
-        "dependencies.cliclick": "docs/SETUP.md#doctor-dependenciescliclick",
         "system.macos_version": "docs/SETUP.md#doctor-systemmacos-version",
         "updates.latest_release": "docs/SETUP.md#doctor-updateslatest-release",
         "logic.application_state": "docs/SETUP.md#doctor-logicapplication-state",
@@ -261,7 +256,6 @@ enum SetupDoctor {
         checks.append(timed { accessibilityPermissionCheck(permissionStatus) })
         checks.append(timed { automationPermissionCheck(permissionStatus) })
         checks.append(timed { systemEventsAutomationCheck(permissionStatus) })
-        checks.append(timed { cliclickDependencyCheck(runtime: runtime) })
         checks.append(timed { macOSVersionCheck(runtime: runtime) })
         checks.append(timed { logicApplicationStateCheck(runtime: runtime) })
         checks.append(timed { manualValidationCheck(approvals: approvals) })
@@ -669,43 +663,6 @@ enum SetupDoctor {
             summary: systemEventsSummary(for: status.systemEventsAutomationState),
             evidence: ["state": status.systemEventsAutomationState.rawValue],
             remediationType: status.systemEventsAutomationState == .granted ? .none : .systemSettings
-        )
-    }
-
-    private static func cliclickDependencyCheck(runtime: Runtime) -> Check {
-        // Reuse the runtime's OWN trusted resolver so the doctor cannot green-light a
-        // cliclick the bounce/export path would reject (trusted canonical path +
-        // non-group/other-writable parent). cliclick gates only bounce/export, so a
-        // missing/untrusted binary is `warn` (→ degraded → exit 0), never `fail`.
-        if let path = runtime.cliclickPath() {
-            return check(
-                id: "dependencies.cliclick",
-                domain: "dependencies",
-                status: .pass,
-                summary: "cliclick is installed at a trusted path.",
-                evidence: ["path": path, "trusted": "true"],
-                remediationType: .none
-            )
-        }
-        if runtime.cliclickPresentOnPath() {
-            return check(
-                id: "dependencies.cliclick",
-                domain: "dependencies",
-                status: .warn,
-                summary: "cliclick is present but not at a trusted path (or its parent directory is writable); bounce/export will not use it.",
-                evidence: ["trusted": "false", "present_on_path": "true"],
-                remediationType: .command,
-                remediationValueOverride: "brew install cliclick"
-            )
-        }
-        return check(
-            id: "dependencies.cliclick",
-            domain: "dependencies",
-            status: .warn,
-            summary: "cliclick is not installed; bounce/export operations require it.",
-            evidence: ["trusted": "false", "present_on_path": "false"],
-            remediationType: .command,
-            remediationValueOverride: "brew install cliclick"
         )
     }
 

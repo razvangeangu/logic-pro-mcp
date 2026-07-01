@@ -15,8 +15,6 @@ private func doctorRuntime(
     registration: SetupDoctor.ClaudeRegistration = .registered(command: "/usr/local/bin/LogicProMCP"),
     // v2 seams — hermetic defaults (all-good) so the new checks pass by default and
     // existing tests keep their `.ok` aggregate. Tests override per-case.
-    cliclickPath: String? = "/opt/homebrew/bin/cliclick",
-    cliclickPresentOnPath: Bool = true,
     macOSVersion: OperatingSystemVersion? = OperatingSystemVersion(majorVersion: 14, minorVersion: 0, patchVersion: 0),
     monotonicNowMs: @escaping () -> Double = { 0 },
     latestReleaseLookup: (() -> SetupDoctor.UpdateOutcome)? = nil,
@@ -43,8 +41,6 @@ private func doctorRuntime(
         runCommand: commandHandler,
         readClaudeRegistration: { registration }
     )
-    runtime.cliclickPath = { cliclickPath }
-    runtime.cliclickPresentOnPath = { cliclickPresentOnPath }
     runtime.macOSVersion = { macOSVersion }
     runtime.monotonicNowMs = monotonicNowMs
     runtime.latestReleaseLookup = latestReleaseLookup
@@ -95,7 +91,6 @@ private func issue26RepositoryRootURL() -> URL {
         "permissions.accessibility",
         "permissions.automation_logic_pro",
         "permissions.automation_system_events",
-        "dependencies.cliclick",
         "system.macos_version",
         "logic.application_state",
         "channels.manual_validation",

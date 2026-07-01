@@ -34,11 +34,7 @@ STRICT_LIVE = os.environ.get("LOGIC_PRO_MCP_STRICT_LIVE", "0") == "1"
 TRANSPORT = os.environ.get("LOGIC_PRO_MCP_E2E_TRANSPORT", "tmux" if STRICT_LIVE else "popen")
 FRESH_BOOTSTRAP = os.environ.get("LOGIC_PRO_MCP_BOOTSTRAP_FRESH", "1" if STRICT_LIVE else "0") == "1"
 TIMEOUT = int(os.environ.get("LOGIC_PRO_MCP_E2E_TIMEOUT", "40" if STRICT_LIVE else "10"))
-TRUSTED_CLICLICK_PATHS = (
-    "/opt/homebrew/bin/cliclick",
-    "/usr/local/bin/cliclick",
-    "/usr/bin/cliclick",
-)
+from logic_bounce_ui import send_ui_events  # noqa: E402
 
 
 def coverage_environment():
@@ -52,26 +48,6 @@ def coverage_environment():
         env["LOGIC_PRO_MCP_PROFILE_DIR"] = profile_dir
         env["LLVM_PROFILE_FILE"] = os.path.join(profile_dir, "%m-%p.profraw")
     return env
-
-
-def trusted_cliclick_path() -> Optional[str]:
-    candidates = (os.environ.get("LOGIC_PRO_MCP_CLICLICK"), *TRUSTED_CLICLICK_PATHS)
-    for candidate in candidates:
-        if not candidate:
-            continue
-        path = os.path.abspath(os.path.expanduser(candidate))
-        if path not in TRUSTED_CLICLICK_PATHS:
-            continue
-        parent = os.path.dirname(path)
-        try:
-            parent_mode = os.stat(parent).st_mode
-        except OSError:
-            continue
-        if parent_mode & 0o022:
-            continue
-        if os.path.isfile(path) and os.access(path, os.X_OK):
-            return path
-    return None
 
 
 def coverage_shell_prefix():
@@ -622,18 +598,10 @@ def ui_stop_logic_transport():
     )
     if result.returncode == 0:
         return True
-    cliclick_path = trusted_cliclick_path()
-    if cliclick_path is None:
-        return False
     try:
-        fallback = subprocess.run(
-            [cliclick_path, "kp:space"],
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
+        return send_ui_events("kp:space")
+    except (OSError, RuntimeError):
         return False
-    return fallback.returncode == 0
 
 
 def dismiss_safe_logic_dialog():

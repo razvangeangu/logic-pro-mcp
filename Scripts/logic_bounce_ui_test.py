@@ -20,22 +20,53 @@ def _completed_jxa_snapshot(snapshot) -> subprocess.CompletedProcess[str]:
 
 
 class LogicBounceUITests(unittest.TestCase):
-    def test_trusted_cliclick_path_rejects_untrusted_override(self):
-        self.assertIsNone(logic_bounce.trusted_cliclick_path("/tmp/cliclick"))
+    def test_send_ui_events_drives_native_driver_without_external_click_tool(self):
+        class FakeDriver:
+            def __init__(self):
+                self.calls = []
 
-    def test_trusted_cliclick_path_accepts_trusted_executable(self):
-        class StatResult:
-            st_mode = 0o755
+            def click(self, x, y):
+                self.calls.append(("click", x, y))
+                return True
 
-        with (
-            mock.patch.object(logic_bounce.os.path, "isfile", return_value=True),
-            mock.patch.object(logic_bounce.os, "access", return_value=True),
-            mock.patch.object(logic_bounce.os, "stat", return_value=StatResult()),
-        ):
-            self.assertEqual(
-                logic_bounce.trusted_cliclick_path("/opt/homebrew/bin/cliclick"),
-                "/opt/homebrew/bin/cliclick",
-            )
+            def key_down(self, key):
+                self.calls.append(("key_down", key))
+                return True
+
+            def key_up(self, key):
+                self.calls.append(("key_up", key))
+                return True
+
+            def key_press(self, key):
+                self.calls.append(("key_press", key))
+                return True
+
+            def type_text(self, text):
+                self.calls.append(("type_text", text))
+                return True
+
+            def reset_modifiers(self):
+                self.calls.append(("reset_modifiers",))
+
+        driver = FakeDriver()
+        self.assertTrue(logic_bounce.send_ui_events("c:10,20", "kd:cmd", "t:a", "ku:cmd", "kp:delete", driver=driver))
+        self.assertEqual(
+            driver.calls,
+            [
+                ("click", 10, 20),
+                ("key_down", "cmd"),
+                ("type_text", "a"),
+                ("key_up", "cmd"),
+                ("key_press", "delete"),
+                ("reset_modifiers",),
+            ],
+        )
+
+    def test_send_ui_events_rejects_unknown_command(self):
+        driver = mock.Mock()
+        driver.reset_modifiers = mock.Mock()
+        self.assertFalse(logic_bounce.send_ui_events("bad:1", driver=driver))
+        driver.reset_modifiers.assert_called_once_with()
 
     def test_click_bounce_settings_confirm_accepts_korean_label(self):
         calls = []
