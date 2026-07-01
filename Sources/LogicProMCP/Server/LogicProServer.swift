@@ -782,15 +782,26 @@ actor LogicProServer {
     /// server must raise for a malformed request, or nil when the call is
     /// well-formed enough to dispatch.
     ///
-    /// #216: an unknown tool `name` is an invalid `tools/call` parameter, so it
-    /// is rejected with `-32602 invalidParams` at the protocol layer instead of
-    /// a successful `result` carrying `isError: true` (which protocol clients
-    /// classify as a tool-level failure, not an invalid MCP request). This is
-    /// the single source of truth for the wire behavior; the dispatch switch's
+    /// #216 + #217: reject a malformed `tools/call` at the protocol boundary
+    /// with `-32602 invalidParams` (not a `result` carrying `isError: true`,
+    /// which protocol clients classify as a tool-level failure). Two
+    /// malformations, checked in order:
+    ///  * #216 — the tool `name` is not a registered tool.
+    ///  * #217 — the schema-required `command` argument is missing or empty
+    ///    (previously dispatched as an empty command → misleading domain error
+    ///    "Unknown system command: ."). Validates command PRESENCE only; a
+    ///    present command whose command-specific params are missing (e.g.
+    ///    `set_tempo` with no `tempo`) still dispatches and returns the
+    ///    dispatcher's typed domain `invalid_params` State C.
+    /// Single source of truth for the wire behavior; the dispatch switch's
     /// `default: "Unknown tool"` branch remains only as unreachable defense.
     static func toolCallProtocolError(name: String, arguments: [String: Value]?) -> MCPError? {
         guard ServerCatalog.toolNames.contains(name) else {
             return .invalidParams("Unknown tool: \(name)")
+        }
+        let command = arguments?["command"]?.stringValue
+        if command == nil || command?.isEmpty == true {
+            return .invalidParams("Missing required argument 'command' for tool '\(name)'")
         }
         return nil
     }
@@ -801,8 +812,8 @@ actor LogicProServer {
             await handlers.listTools(params)
         }
         await server.withMethodHandler(CallTool.self) { params in
-            // #216: reject malformed tools/call requests at the protocol
-            // boundary with a JSON-RPC error before dispatch.
+            // #216/#217: reject a malformed tools/call (unknown tool name or
+            // missing/empty required command) with a JSON-RPC error before dispatch.
             if let error = Self.toolCallProtocolError(name: params.name, arguments: params.arguments) {
                 throw error
             }
