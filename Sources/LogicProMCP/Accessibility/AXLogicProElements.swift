@@ -161,6 +161,66 @@ enum AXLogicProElements {
     ) -> Bool {
         guard isDialogWindow(window, runtime: runtime) else { return false }
         return !isKeyboardLayoutOverlayWindow(window, runtime: runtime)
+            && !isPluginEditorWindow(window, runtime: runtime)
+    }
+
+    /// #234: Logic 12.3 tags plugin-EDITOR windows with subrole `AXDialog` and a
+    /// title equal to the track name, which tripped the v3.7.2 modal guard on
+    /// unrelated ops (`project.save`, `track.select`) while an editor was open.
+    /// On 12.2 those windows were plain (non-dialog), so this restores the 12.2
+    /// baseline by excluding them for BOTH `dialogPresent` consumers (dispatcher
+    /// modal guard AND StatePoller cache lifecycle — PRD D7).
+    ///
+    /// A plugin editor is told apart from a true modal by Logic's own plugin-
+    /// window chrome, required CONJUNCTIVELY — any missing conjunct ⇒ not an
+    /// editor ⇒ stays blocking (fail-closed):
+    ///   1. subrole `AXDialog` (an `AXSystemDialog` is never an editor);
+    ///   2. the window exposes `kAXCloseButtonAttribute` — the locale-neutral
+    ///      handle the live 2026-07-04 probe closed the editor through; true
+    ///      modal sheets do not carry one. This is the ATTRIBUTE, never the
+    ///      child button's localized `desc='close'` text (PRD D4);
+    ///   3. a bypass-labeled toggle among the DIRECT children;
+    ///   4. a compare-labeled OR link-labeled toggle among the DIRECT children.
+    /// A "toggle" is an `AXCheckBox` OR an `AXButton` (any subrole): the editor's
+    /// toggle chrome ROLE-FLAPS with window focus on 12.3 — checkbox when the
+    /// editor is key, button when it is not (live evidence `axwhy234b.out`,
+    /// 2026-07-05: same 'Audio 1' window dumped minutes apart; Logic exposes the
+    /// same toggle species as AXButton elsewhere, e.g. strip mute/solo). Compare
+    /// chrome is preset-state-dependent — absent on a freshly-inserted plugin —
+    /// while the channel-strip Link toggle is present from first open
+    /// (`axwhy234.out`); either satisfies conjunct 4, and a true modal carries
+    /// none of bypass/compare/link nor a close-button attribute. Follows the
+    /// `isKeyboardLayoutOverlayWindow` exclusion precedent; compare/link labels
+    /// are English-only (OQ-1) so non-EN locales stay blocking.
+    private static func isPluginEditorWindow(
+        _ window: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> Bool {
+        let subrole: String? = AXHelpers.getAttribute(window, kAXSubroleAttribute, runtime: runtime)
+        guard subrole == (kAXDialogSubrole as String) else { return false }
+
+        let closeButton: AXUIElement? = AXHelpers.getAttribute(
+            window, kAXCloseButtonAttribute, runtime: runtime
+        )
+        guard closeButton != nil else { return false }
+
+        // Scan AXCheckBox AND AXButton toggles — the labeled chrome role-flaps
+        // with window focus (see doc comment). The close-button attribute conjunct
+        // already gates out true modal sheets (they carry no close button), so
+        // widening the toggle role cannot promote a real modal to an editor.
+        let directToggles = AXHelpers.getChildren(window, runtime: runtime).filter {
+            let role = AXHelpers.getRole($0, runtime: runtime) ?? ""
+            return role == (kAXCheckBoxRole as String) || role == (kAXButtonRole as String)
+        }
+        let hasBypass = directToggles.contains { child in
+            AXLocalePolicy.pluginBypassControl.containsAny(in: elementSearchText(child, runtime: runtime))
+        }
+        let hasCompareOrLink = directToggles.contains { child in
+            let text = elementSearchText(child, runtime: runtime)
+            return AXLocalePolicy.pluginWindowCompareControl.containsAny(in: text)
+                || AXLocalePolicy.pluginWindowLinkControl.containsAny(in: text)
+        }
+        return hasBypass && hasCompareOrLink
     }
 
     private static func isKeyboardLayoutOverlayWindow(
@@ -629,11 +689,13 @@ enum AXLogicProElements {
             return mixer
         }
 
-        // Logic Pro 12.2 exposes the visible bottom Mixer as:
+        // #234: Logic Pro 12.2 exposes the visible bottom Mixer as:
         //   AXGroup(desc:"믹서") -> AXLayoutArea(desc:"믹서") -> AXLayoutItem strips
-        // with no AXIdentifier. Do not fall back to the Inspector's small
-        // two-strip "믹서" area; that would make a full mixer read silently
-        // return only selected-track + output strips.
+        // with no AXIdentifier. Logic Pro 12.3 wraps that layout area with an
+        // outer AXGroup(desc:"Mixer") and a sibling toolbar AXGroup(desc:"Mixer").
+        // Do not fall back to the Inspector's small two-strip "믹서" area; that
+        // would make a full mixer read silently return only selected-track +
+        // output strips.
         return mixerAreaCandidates(in: window, runtime: runtime.ax)
             .sorted { lhs, rhs in
                 if lhs.stripCount != rhs.stripCount { return lhs.stripCount > rhs.stripCount }
@@ -734,7 +796,7 @@ enum AXLogicProElements {
            isMixerNamedElement(element, runtime: runtime),
            isMixerContainerRole(AXHelpers.getRole(element, runtime: runtime)),
            hasDirectChannelStripChildren(element, runtime: runtime) {
-            let strips = mixerChannelStrips(in: element, runtime: runtime)
+            let strips = channelStripLayoutItems(in: element, runtime: runtime)
             candidates.append(MixerAreaCandidate(
                 element: element,
                 stripCount: strips.count,
@@ -777,7 +839,16 @@ enum AXLogicProElements {
         _ element: AXUIElement,
         runtime: AXHelpers.Runtime
     ) -> Bool {
-        !mixerChannelStrips(in: element, runtime: runtime).isEmpty
+        !channelStripLayoutItems(in: element, runtime: runtime).isEmpty
+    }
+
+    private static func channelStripLayoutItems(
+        in element: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> [AXUIElement] {
+        AXHelpers.getChildren(element, runtime: runtime).filter {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXLayoutItemRole as String)
+        }
     }
 
     static func mixerChannelStrips(
