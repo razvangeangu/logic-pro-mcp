@@ -150,6 +150,7 @@ enum HonestContract {
         /// live AX nav failed" (which still surfaces as `.axWriteFailed`).
         /// Recovery: pick a path present in scan_library. v3.6.x (#135/#141).
         case pathNotInLibrary
+        case folderNotPreset
         /// The requested operation cannot be performed in the front document's
         /// current state — e.g. `project.save` on an UNTITLED document that has
         /// no on-disk path. Firing `save front document` on such a document
@@ -211,6 +212,7 @@ enum HonestContract {
             case .libraryPanelUnavailable: return "library_panel_unavailable"
             case .unsupportedTrackType: return "unsupported_track_type"
             case .pathNotInLibrary: return "path_not_in_library"
+            case .folderNotPreset: return "folder_not_preset"
             case .unsupportedState: return "unsupported_state"
             case .commandNotExposed: return "command_not_exposed"
             case .indexOutOfRange: return "index_out_of_range"
@@ -390,6 +392,7 @@ enum HonestContract {
         // — retrying the same index against the same project state can't succeed;
         // the client must read the parent collection for valid indices.
         FailureError.indexOutOfRange.rawValue,
+        FailureError.folderNotPreset.rawValue,
         // #219: an unknown help category is terminal — no channel/retry can turn
         // a bad category token into a valid one; the caller must pick a listed
         // category. (help doesn't route through the fallback chain; listed for
