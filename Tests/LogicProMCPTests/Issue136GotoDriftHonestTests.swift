@@ -50,11 +50,10 @@ struct Issue136GotoDriftHonestTests {
     }
 
     private func text(_ r: CallTool.Result) -> String {
-        if case .text(let t, _, _) = r.content.first { return t }
-        return ""
+        sharedToolText(r)
     }
     private func obj(_ r: CallTool.Result) -> [String: Any]? {
-        (try? JSONSerialization.jsonObject(with: Data(text(r).utf8))) as? [String: Any]
+        sharedJSONObject(text(r))
     }
 
     /// The dialog channel's real "keystroke sent; not read back" State B — the
@@ -112,7 +111,8 @@ struct Issue136GotoDriftHonestTests {
 
         // The MCP-level error bit must also be set so non-JSON-parsing callers
         // still see the failure.
-        #expect(result.isError == true, "a drifted goto_position must surface isError == true")
+        let resultIsError = result.isError ?? false
+        #expect(resultIsError, "a drifted goto_position must surface isError == true")
 
         // Belt-and-suspenders: a bare verified-success payload would never carry
         // this combination. If success is reported, verified must NOT be.
@@ -147,6 +147,7 @@ struct Issue136GotoDriftHonestTests {
                 "exact readback match must verify true")
         #expect(o["observed"] as? String == "9.1.1.1")
         #expect(o["reason"] == nil, "a verified State-A envelope carries no uncertain reason")
-        #expect(result.isError != true)
+        let resultIsError = result.isError ?? false
+        #expect(!resultIsError)
     }
 }

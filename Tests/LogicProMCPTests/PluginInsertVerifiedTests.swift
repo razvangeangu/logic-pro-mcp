@@ -42,16 +42,6 @@ private func addOccupiedSlot(_ b: FakeAXRuntimeBuilder, _ id: Int, name: String?
     return group
 }
 
-private func axPoint(_ x: CGFloat, _ y: CGFloat) -> AXValue {
-    var point = CGPoint(x: x, y: y)
-    return AXValueCreate(.cgPoint, &point)!
-}
-
-private func axSize(_ width: CGFloat, _ height: CGFloat) -> AXValue {
-    var size = CGSize(width: width, height: height)
-    return AXValueCreate(.cgSize, &size)!
-}
-
 private func addMenu(_ b: FakeAXRuntimeBuilder, _ id: Int, children: [AXUIElement] = []) -> AXUIElement {
     let menu = b.element(id)
     b.setAttribute(menu, kAXRoleAttribute as String, kAXMenuRole as String)
@@ -346,7 +336,7 @@ private func insertParams(
     #expect(obj["error"] as? String == "insert_not_ax_automatable")
     #expect((obj["write_attempted"] as? Bool)!)
     #expect(!((obj["safe_to_retry"] as? Bool)!))
-    #expect((obj["what_was_observed"] as? String)?.contains("exact slot popup") == true)
+    #expect(((obj["what_was_observed"] as? String)?.contains("exact slot popup"))!)
 }
 
 @Test func testInsertVerifiedMountMismatchReportsObservedName() async {
@@ -578,7 +568,7 @@ private func insertParams(
         track: 0, strayPluginID: nil, straySlot: nil, runtime: runtime,
         maxRetries: 2, undoClick: { "ok" }
     )
-    #expect(result.succeeded == false, "unverifiable removal must never report succeeded:true")
+    #expect(!(result.succeeded), "unverifiable removal must never report succeeded:true")
 }
 
 @Test func testVerifiedUndoKnownSlotStillOccupiedReportsFailure() async {
@@ -591,7 +581,7 @@ private func insertParams(
         track: 0, strayPluginID: nil, straySlot: 0, runtime: runtime,
         maxRetries: 1, undoClick: { "ok" }
     )
-    #expect(result.succeeded == false, "a slot still occupied after undo is not a confirmed removal")
+    #expect(!(result.succeeded), "a slot still occupied after undo is not a confirmed removal")
 }
 
 @Test func testVerifiedUndoKnownSlotNowEmptyReportsSuccess() async {
@@ -602,8 +592,8 @@ private func insertParams(
         track: 0, strayPluginID: nil, straySlot: 0, runtime: runtime,
         maxRetries: 1, undoClick: { "ok" }
     )
-    #expect(result.succeeded == true, "an emptied slot is a confirmed removal")
-    #expect(result.attempted == true)
+    #expect(result.succeeded, "an emptied slot is a confirmed removal")
+    #expect(result.attempted)
 }
 
 @Test func testVerifiedUndoKnownIdRemovedReportsSuccess() async {
@@ -614,7 +604,7 @@ private func insertParams(
         track: 0, strayPluginID: "logic.stock.effect.gain", straySlot: nil, runtime: runtime,
         maxRetries: 1, undoClick: { "ok" }
     )
-    #expect(result.succeeded == true)
+    #expect(result.succeeded)
 }
 
 // P1-1: a non-allowlisted stray (nil id) is removable by NAME at its known slot.
@@ -626,7 +616,7 @@ private func insertParams(
         track: 0, strayPluginID: nil, straySlot: 0, strayName: "Roland TR-909",
         runtime: runtime, maxRetries: 1, undoClick: { "ok" }
     )
-    #expect(result.succeeded == true, "slot name differs from the stray → removal confirmed by name (P1-1)")
+    #expect(result.succeeded, "slot name differs from the stray → removal confirmed by name (P1-1)")
 }
 
 // P1-2 data-safety: an UNVERIFIABLE state must NOT trigger a second Undo click
@@ -639,7 +629,7 @@ private func insertParams(
         track: 0, strayPluginID: nil, straySlot: nil, runtime: runtime,
         maxRetries: 4, undoClick: { counter.bump(); return "ok" }
     )
-    #expect(result.succeeded == false)
+    #expect(!(result.succeeded))
     #expect(counter.count == 1, "unverifiable removal must click Undo at most once (no blind re-undo)")
 }
 

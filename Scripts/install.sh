@@ -6,7 +6,7 @@ BINARY="LogicProMCP"
 ARCHIVE="LogicProMCP-macOS-universal.tar.gz"
 INSTALL_DIR="${LOGIC_PRO_MCP_INSTALL_DIR:-/usr/local/bin}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION="${LOGIC_PRO_MCP_VERSION:-v3.7.4}"
+VERSION="${LOGIC_PRO_MCP_VERSION:-v3.8.0}"
 SHA256="${LOGIC_PRO_MCP_SHA256:-}"
 EXPECTED_TEAM_ID="${LOGIC_PRO_MCP_TEAM_ID:-}"
 REGISTER_CLAUDE="${LOGIC_PRO_MCP_REGISTER_CLAUDE:-1}"
@@ -24,8 +24,9 @@ else
 collapse_path_segments(){ local raw="$1" absolute="$1"; if [[ "$absolute" != /* ]]; then absolute="$PWD/$absolute"; fi; local IFS=/ part; local -a path_parts; local -a stack=(); read -r -a path_parts <<<"$absolute"; for part in "${path_parts[@]}"; do case "$part" in ""|".") ;; "..") if [ "${#stack[@]}" -gt 0 ]; then unset "stack[${#stack[@]}-1]"; fi ;; *) stack+=("$part") ;; esac; done; if [ "${#stack[@]}" -eq 0 ]; then printf "/\n"; return; fi; local normalized; printf -v normalized "/%s" "${stack[@]}"; printf "%s\n" "$normalized"; }
 normalize_path(){ local collapsed; collapsed="$(collapse_path_segments "$1")"; if [ -d "$collapsed" ]; then (cd "$collapsed" && pwd -P); return; fi; local parent base; parent="$(dirname "$collapsed")"; base="$(basename "$collapsed")"; if [ -d "$parent" ]; then printf "%s/%s\n" "$(cd "$parent" && pwd -P)" "$base"; return; fi; printf "%s\n" "$collapsed"; }
 require_absolute_path(){ local label="$1" path="$2"; case "$path" in /*) ;; *) fail_path_validation "$label must be an absolute path: $path" ;; esac; }
-validate_install_dir(){ local path="$1"; require_absolute_path "install_dir" "$path"; case "$path" in /|/System|/System/*|/private/var/db|/private/var/db/*|/etc|/etc/*|/bin|/bin/*|/sbin|/sbin/*|/usr/bin|/usr/bin/*|/usr/sbin|/usr/sbin/*) fail_path_validation "install_dir must not target a protected system path: $path" ;; esac; }
-validate_share_dir(){ local path="$1"; require_absolute_path "share_dir" "$path"; case "$path" in */share/logic-pro-mcp) ;; *) fail_path_validation "share_dir must end with /share/logic-pro-mcp: $path" ;; esac; }
+reject_protected_system_path(){ local label="$1" path="$2"; local had_nocasematch=0; if shopt -q nocasematch; then had_nocasematch=1; fi; shopt -s nocasematch; local matched=0; case "$path" in /|/System|/System/*|/etc|/etc/*|/private/etc|/private/etc/*|/tmp|/tmp/*|/private/tmp|/private/tmp/*|/private/var/db|/private/var/db/*|/bin|/bin/*|/sbin|/sbin/*|/usr/bin|/usr/bin/*|/usr/sbin|/usr/sbin/*) matched=1 ;; esac; if [ "$had_nocasematch" -eq 0 ]; then shopt -u nocasematch; fi; if [ "$matched" -eq 1 ]; then fail_path_validation "$label must not target a protected system path: $path"; fi; }
+validate_install_dir(){ local path="$1"; require_absolute_path "install_dir" "$path"; reject_protected_system_path "install_dir" "$path"; }
+validate_share_dir(){ local path="$1"; require_absolute_path "share_dir" "$path"; reject_protected_system_path "share_dir" "$path"; case "$path" in */share/logic-pro-mcp) ;; *) fail_path_validation "share_dir must end with /share/logic-pro-mcp: $path" ;; esac; }
 nearest_existing_path(){ local path="$1"; while [ ! -e "$path" ] && [ "$path" != "/" ]; do path="$(dirname "$path")"; done; printf "%s\n" "$path"; }
 path_writable_without_sudo(){ local path="$1"; if [ -e "$path" ]; then [ -w "$path" ]; return; fi; [ -w "$(nearest_existing_path "$path")" ]; }
 require_command(){ local name="$1" install_hint="$2"; if command -v "$name" >/dev/null 2>&1; then return 0; fi; echo "  Error: required dependency missing: $name"; echo "    $install_hint"; exit 1; }

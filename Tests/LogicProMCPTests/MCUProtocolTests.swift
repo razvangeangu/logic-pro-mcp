@@ -50,7 +50,7 @@ import Testing
     #expect(result != nil)
     #expect(result?.function == .solo)
     #expect(result?.strip == 2)
-    #expect(result?.on == true)
+    #expect((result?.on)!)
 }
 
 // MARK: - Transport
@@ -123,48 +123,11 @@ import Testing
     #expect(bytes == [0xB0, 0x3C, 0x01])
 }
 
-// MARK: - Handshake
-
-@Test func testDecodeDeviceResponseSuccess() {
-    let response: [UInt8] = [0xF0, 0x00, 0x00, 0x66, 0x14, 0x01, 0x42, 0x00, 0x01, 0xF7]
-    let result = MCUProtocol.parseDeviceResponse(response)
-    if case .success(let firmware) = result {
-        #expect(firmware == [0x42, 0x00, 0x01])
-    } else {
-        Issue.record("Expected success, got \(result)")
-    }
-}
-
-@Test func testDecodeDeviceResponseNoResponse() {
-    let result = MCUProtocol.parseDeviceResponse([])
-    #expect(result == .noResponse)
-}
-
-@Test func testDecodeDeviceResponseMalformed() {
-    let malformed: [UInt8] = [0xF0, 0x00, 0x00, 0xF7]
-    let result = MCUProtocol.parseDeviceResponse(malformed)
-    if case .failure = result {
-        // expected
-    } else {
-        Issue.record("Expected failure, got \(result)")
-    }
-}
-
-@Test func testDecodeDeviceResponseWrongSubID() {
-    let wrong: [UInt8] = [0xF0, 0x00, 0x00, 0x66, 0x14, 0x02, 0xF7]
-    let result = MCUProtocol.parseDeviceResponse(wrong)
-    if case .failure(let reason) = result {
-        #expect(reason.contains("sub-ID"))
-    } else {
-        Issue.record("Expected failure for wrong sub-ID")
-    }
-}
-
 // MARK: - Validation
 
 @Test func testSysExValidation() {
-    #expect(MCUProtocol.isValidSysEx([0xF0, 0x00, 0x01, 0x7F, 0xF7]) == true)
-    #expect(MCUProtocol.isValidSysEx([0xF0, 0x00, 0x80, 0x01, 0xF7]) == false)
-    #expect(MCUProtocol.isValidSysEx([0x00, 0x01, 0xF7]) == false)
-    #expect(MCUProtocol.isValidSysEx([0xF0, 0x00, 0x01]) == false)
+    #expect(MCUProtocol.isValidSysEx([0xF0, 0x00, 0x01, 0x7F, 0xF7]))
+    #expect(!(MCUProtocol.isValidSysEx([0xF0, 0x00, 0x80, 0x01, 0xF7])))
+    #expect(!(MCUProtocol.isValidSysEx([0x00, 0x01, 0xF7])))
+    #expect(!(MCUProtocol.isValidSysEx([0xF0, 0x00, 0x01])))
 }

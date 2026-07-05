@@ -164,6 +164,66 @@ import Testing
     #expect(result.combinedOutput.contains("install_dir must not target a protected system path: /usr/bin"))
 }
 
+@Test func testInstallScriptRejectsCaseVariedProtectedInstallDirBeforeMutation() throws {
+    // On a case-insensitive filesystem (APFS default) a case-varied protected
+    // root with a non-existent intermediate survives normalize_path lexically
+    // (pwd -P cannot canonicalize a missing dir), so a case-SENSITIVE blocklist
+    // would let it slip through and then install into a world-writable system
+    // dir (/TMP -> /private/tmp, /ETC -> /private/etc). The blocklist now matches
+    // case-insensitively, so these are refused before any mutation.
+    for caseVaried in ["/TMP/logicpromcp-missing/x", "/ETC/logicpromcp-missing/x"] {
+        let result = try runShellScript(
+            "Scripts/install.sh",
+            environment: [
+                "LOGIC_PRO_MCP_VERSION": "v3.7.1",
+                "LOGIC_PRO_MCP_SHA256": "deadbeef",
+                "LOGIC_PRO_MCP_TEAM_ID": "ADHOC",
+                "LOGIC_PRO_MCP_INSTALL_DIR": caseVaried,
+                "LOGIC_PRO_MCP_SKIP_SUDO": "1",
+                "LOGIC_PRO_MCP_REGISTER_CLAUDE": "0",
+                "LOGIC_PRO_MCP_INSTALL_KEYCMDS": "0",
+            ]
+        )
+
+        #expect(result.exitCode != 0)
+        #expect(result.combinedOutput.contains("install_dir must not target a protected system path: \(caseVaried)"))
+    }
+}
+
+@Test func testInstallScriptInlineFallbackRejectsCaseVariedProtectedInstallDir() throws {
+    // The two documented install methods (README §Quick Start: `curl -fsSL
+    // .../install.sh` then run, or `bash <(curl ...install.sh)`) fetch ONLY
+    // install.sh — install-common.sh is not alongside it, so install.sh runs its
+    // INLINE fallback copy of the path validators. That fallback must enforce the
+    // SAME case-insensitive protected-path guard as the sourced install-common.sh
+    // copy, or the case-varied bypass stays open on the primary install path.
+    // This runs install.sh standalone (no sibling install-common.sh) to force the
+    // fallback branch, and pins the two implementations to parity.
+    let standaloneDir = try makeInstallScriptTempDir("logicpromcp-install-fallback-\(UUID().uuidString)")
+    let standaloneScript = standaloneDir.appendingPathComponent("install.sh")
+    try writeExecutable(standaloneScript, contents: try scriptContents("Scripts/install.sh"))
+
+    for caseVaried in ["/TMP/logicpromcp-missing/x", "/ETC/logicpromcp-missing/x", "/PRIVATE/TMP"] {
+        let result = try runProcess(
+            executable: "/bin/bash",
+            arguments: [standaloneScript.path],
+            currentDirectoryURL: standaloneDir,
+            environment: [
+                "LOGIC_PRO_MCP_VERSION": "v3.7.1",
+                "LOGIC_PRO_MCP_SHA256": "deadbeef",
+                "LOGIC_PRO_MCP_TEAM_ID": "ADHOC",
+                "LOGIC_PRO_MCP_INSTALL_DIR": caseVaried,
+                "LOGIC_PRO_MCP_SKIP_SUDO": "1",
+                "LOGIC_PRO_MCP_REGISTER_CLAUDE": "0",
+                "LOGIC_PRO_MCP_INSTALL_KEYCMDS": "0",
+            ]
+        )
+
+        #expect(result.exitCode != 0)
+        #expect(result.combinedOutput.contains("must not target a protected system path: \(caseVaried)"))
+    }
+}
+
 @Test func testUninstallScriptRejectsUnsafeEnvOverridesBeforeRemoval() throws {
     let sandbox = try makeInstallScriptTempDir("logicpromcp-uninstall-reject-\(UUID().uuidString)")
     let fakeBin = sandbox.appendingPathComponent("fake-bin", isDirectory: true)

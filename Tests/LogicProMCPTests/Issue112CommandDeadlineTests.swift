@@ -75,13 +75,11 @@ struct Issue112CommandDeadlineTests {
     }
 
     private func text(_ result: CallTool.Result) -> String {
-        if case .text(let t, _, _) = result.content.first { return t }
-        return ""
+        sharedToolText(result)
     }
 
     private func json(_ result: CallTool.Result) -> [String: Any]? {
-        guard let data = text(result).data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        sharedJSONObject(text(result))
     }
 
     @Test("fast work passes through unchanged")
@@ -89,8 +87,9 @@ struct Issue112CommandDeadlineTests {
         let result = await LogicProServer.runWithDeadline(tool: "logic_transport", command: "stop", deadlineOverride: 5.0) {
             toolTextResult("{\"verified\":true,\"operation\":\"transport.stop\"}")
         }
-        #expect(result.isError != true)
-        #expect(json(result)?["verified"] as? Bool == true)
+        let resultIsError = result.isError ?? false
+        #expect(!resultIsError)
+        #expect((json(result)?["verified"] as? Bool)!)
     }
 
     @Test("mutation gate reclaims a stale holder so a wedged op cannot lock out all mutations")
@@ -141,7 +140,7 @@ struct Issue112CommandDeadlineTests {
         #expect(obj?["error"] as? String == "operation_timeout")
         #expect(obj?["operation"] as? String == "logic_tracks.rename")
         #expect(obj?["timeout_sec"] as? Double == 0.15)
-        #expect((obj?["hint"] as? String)?.isEmpty == false)
+        #expect(!(((obj?["hint"] as? String)?.isEmpty)!))
     }
 
     @Test("non-cooperative blocking work does not hold the deadline scope open")
@@ -164,7 +163,7 @@ struct Issue112CommandDeadlineTests {
 
         #expect(try await waitUntil(timeoutNanoseconds: 5_000_000_000) { blocker.hasEntered() })
         #expect(try await waitUntil(timeoutNanoseconds: 10_000_000_000) { await resultProbe.hasResult() })
-        #expect(blocker.isCompleted() == false)
+        #expect(!(blocker.isCompleted()))
 
         let refused = await LogicProServer.runWithDeadline(
             tool: "logic_tracks",
@@ -201,7 +200,8 @@ struct Issue112CommandDeadlineTests {
         ) {
             toolTextResult("{\"verified\":true}")
         }
-        #expect(afterDrain.isError != true)
+        let afterDrainIsError = afterDrain.isError ?? false
+        #expect(!afterDrainIsError)
     }
 
     @Test("operation_timeout is a terminal error code")
@@ -364,7 +364,8 @@ struct Issue112CommandDeadlineTests {
         ) {
             toolTextResult("{\"verified\":true}")
         }
-        #expect(recovered.isError != true)
+        let recoveredIsError = recovered.isError ?? false
+        #expect(!recoveredIsError)
         #expect((json(recovered)?["verified"] as? Bool)!)
 
         blocker.unblock()

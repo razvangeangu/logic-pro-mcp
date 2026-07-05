@@ -36,16 +36,6 @@ private func midiRegionForImport(trackIndex: Int) -> RegionInfo {
     )
 }
 
-private func axPoint(_ x: CGFloat, _ y: CGFloat) -> AXValue {
-    var point = CGPoint(x: x, y: y)
-    return AXValueCreate(.cgPoint, &point)!
-}
-
-private func axSize(_ width: CGFloat, _ height: CGFloat) -> AXValue {
-    var size = CGSize(width: width, height: height)
-    return AXValueCreate(.cgSize, &size)!
-}
-
 private final class AccessibilityRuntimeRecorder: @unchecked Sendable {
     var transportButtons: [String] = []
     var tempoParams: [[String: String]] = []
@@ -400,17 +390,17 @@ private func makeSetInstrumentFixture() -> (
     let missingRoot = AccessibilityChannel(runtime: makeAccessibilityRuntime(isTrusted: true, isRunning: true, appRoot: nil))
     let healthy = AccessibilityChannel(runtime: makeAccessibilityRuntime())
 
-    #expect(await untrusted.healthCheck().available == false)
+    #expect(!(await untrusted.healthCheck().available))
     #expect(await untrusted.healthCheck().detail.contains("Accessibility not trusted"))
 
-    #expect(await notRunning.healthCheck().available == false)
+    #expect(!(await notRunning.healthCheck().available))
     #expect(await notRunning.healthCheck().detail.contains("Logic Pro is not running"))
 
-    #expect(await missingRoot.healthCheck().available == false)
+    #expect(!(await missingRoot.healthCheck().available))
     #expect(await missingRoot.healthCheck().detail.contains("Cannot access Logic Pro AX element"))
 
     let healthyState = await healthy.healthCheck()
-    #expect(healthyState.available == true)
+    #expect(healthyState.available)
     #expect(healthyState.detail.contains("AX connected"))
 }
 
@@ -626,16 +616,6 @@ private func makeSetInstrumentFixture() -> (
 }
 
 @Test func testAccessibilityChannelAXBackedRegionReadReturnsParsedRegions() async throws {
-    func axPoint(_ x: CGFloat, _ y: CGFloat) -> AXValue {
-        var point = CGPoint(x: x, y: y)
-        return AXValueCreate(.cgPoint, &point)!
-    }
-
-    func axSize(_ width: CGFloat, _ height: CGFloat) -> AXValue {
-        var size = CGSize(width: width, height: height)
-        return AXValueCreate(.cgSize, &size)!
-    }
-
     let builder = FakeAXRuntimeBuilder()
     let app = builder.element(800)
     let window = builder.element(801)
@@ -1045,7 +1025,7 @@ private func makeSetInstrumentFixture() -> (
     #expect(object["action"] as? String == "mouse-click")
     #expect(mouse.mouseEvents.map(\.type) == [.leftMouseDown, .leftMouseUp])
     #expect(builder.actionCalls.isEmpty)
-    #expect((builder.attributeValue(cycle, kAXValueAttribute as String) as? NSNumber)?.boolValue == true)
+    #expect(((builder.attributeValue(cycle, kAXValueAttribute as String) as? NSNumber)?.boolValue)!)
 }
 
 @Test func testAccessibilityChannelControlBarToggleDoesNotTrustNoopAXPress() async {
@@ -1073,7 +1053,7 @@ private func makeSetInstrumentFixture() -> (
     #expect(!result.isSuccess)
     #expect(object["error"] as? String == "readback_mismatch")
     #expect(builder.actionCalls.contains { $0.elementID == builder.elementID(cycle) && $0.action == kAXPressAction as String })
-    #expect((builder.attributeValue(cycle, kAXValueAttribute as String) as? NSNumber)?.boolValue == false)
+    #expect(!(((builder.attributeValue(cycle, kAXValueAttribute as String) as? NSNumber)?.boolValue)!))
 }
 
 @Test func testAccessibilityChannelControlBarToggleAcceptsAXPressOnlyAfterReadbackChanges() async {
@@ -1116,7 +1096,7 @@ private func makeSetInstrumentFixture() -> (
     #expect(result.isSuccess)
     #expect((object["verified"] as? Bool)!)
     #expect(object["action"] as? String == "axpress")
-    #expect((builder.attributeValue(cycle, kAXValueAttribute as String) as? NSNumber)?.boolValue == true)
+    #expect(((builder.attributeValue(cycle, kAXValueAttribute as String) as? NSNumber)?.boolValue)!)
 }
 
 @Test func testAccessibilityChannelAXBackedTransportErrorPaths() async {
@@ -1236,11 +1216,11 @@ private func makeSetInstrumentFixture() -> (
 
     #expect(!result.isSuccess)
     let obj = decodeAccessibilityJSON(result.message)
-    #expect((obj["success"] as? Bool)! == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "permission_denied")
     #expect(obj["permission"] as? String == "automation_system_events")
     #expect(obj["failure_stage"] as? String == "preflight_system_events_permission")
-    #expect((obj["write_attempted"] as? Bool)! == false)
+    #expect(!((obj["write_attempted"] as? Bool)!))
     #expect((obj["safe_to_retry"] as? Bool)!)
 }
 
@@ -1288,7 +1268,7 @@ private func makeTempoSliderFixture(
 
     #expect(!result.isSuccess)
     let obj = decodeAccessibilityJSON(result.message)
-    #expect((obj["success"] as? Bool)! == false)
+    #expect(!((obj["success"] as? Bool)!))
     #expect(obj["error"] as? String == "readback_mismatch")
     #expect(obj["via"] as? String == "slider-increment")
     #expect((obj["requested"] as? Double) == 96)
@@ -1637,7 +1617,7 @@ private func makeTempoSliderFixture(
     #expect(!((object["dialog_present"] as? Bool)!))
     #expect((object["transport_slider_descriptions"] as? [String]) == [])
     #expect((object["control_bar_checkbox_labels"] as? [String]) == [])
-    #expect(fallbackBox.called == false)
+    #expect(!(fallbackBox.called))
 }
 
 @Test func testAccessibilityChannelCreateInstrumentVerifiesTrackCountIncrease() async {
@@ -1981,7 +1961,7 @@ private func makeTempoSliderFixture(
     #expect(obj["via"] as? String == "track_menu")
     #expect(obj["observed"] as? String == "Track Alpha")
     #expect(builder.attributeValue(nameField, kAXDescriptionAttribute as String) as? String == "Track Alpha")
-    #expect((builder.attributeValue(header, kAXDescriptionAttribute as String) as? String)?.contains("Track Alpha") == true)
+    #expect(((builder.attributeValue(header, kAXDescriptionAttribute as String) as? String)?.contains("Track Alpha"))!)
     #expect(session.selectionCommitted)
     #expect(session.renamePressed)
     #expect(mouseRecorder.keyEvents.contains(0x24))
@@ -2434,8 +2414,8 @@ private func makeGMDeviceTargetFixture() -> (builder: FakeAXRuntimeBuilder, app:
     #expect(obj["error"] as? String == "ax_write_failed")
     #expect(obj["precondition"] as? String == "library_nav_failed")
     // No-drift guarantee: the panel was re-staged and is left open.
-    #expect(obj["panel_restaged_after_failure"] as? Bool == true)
-    #expect(obj["panel_open_after_failure"] as? Bool == true)
+    #expect((obj["panel_restaged_after_failure"] as? Bool)!)
+    #expect((obj["panel_open_after_failure"] as? Bool)!)
     #expect(openCalls.count == 1)
 }
 
@@ -2470,8 +2450,8 @@ private func makeGMDeviceTargetFixture() -> (builder: FakeAXRuntimeBuilder, app:
     #expect(!result.isSuccess)
     let obj = decodeAccessibilityJSON(result.message)
     #expect(obj["error"] as? String == "ax_write_failed")
-    #expect(obj["panel_restaged_after_failure"] as? Bool == false)
-    #expect(obj["panel_open_after_failure"] as? Bool == true)
+    #expect(!((obj["panel_restaged_after_failure"] as? Bool)!))
+    #expect((obj["panel_open_after_failure"] as? Bool)!)
     #expect(openCalls.count == 0, "must never re-toggle an already-open panel shut")
 }
 
@@ -2798,7 +2778,7 @@ private final class LockedFlag: @unchecked Sendable {
     #expect(strips[0].plugins.count == 1)
     #expect(strips[0].plugins[0].index == 0)
     #expect(strips[0].plugins[0].name == "Drum Machine Designer")
-    #expect(strips[0].plugins[0].isBypassed == false)
+    #expect(!(strips[0].plugins[0].isBypassed))
 }
 
 @Test func testAccessibilityChannelInsertPluginRejectsOccupiedSlotBeforeMenuSelection() async {
@@ -2988,4 +2968,144 @@ private final class LockedFlag: @unchecked Sendable {
     let missingWindow = await missingWindowChannel.execute(operation: "project.get_info", params: [:])
     #expect(!missingWindow.isSuccess)
     #expect(missingWindow.message.contains("Cannot locate Logic Pro main window"))
+}
+
+// MARK: - scan cross-exclusion (library.scan_all ⊥ plugin.scan_presets)
+
+/// One-shot "scan A has entered `runLiveScan` (its flag is already set)" signal.
+/// Mirrors the `DispatchSemaphore` handshake used by `BlockingExecuteProbe`, but
+/// fires once and never blocks the producer, so it can be raised from the
+/// synchronous `hasVisibleWindow` seam WITHOUT holding the actor.
+private final class ScanEnteredSignal: @unchecked Sendable {
+    private let entered = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var fired = false
+
+    /// Raise the signal (idempotent). Safe from a `@Sendable` sync closure.
+    func fire() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !fired else { return }
+        fired = true
+        entered.signal()
+    }
+
+    func waitUntilEntered(timeout: DispatchTimeInterval = .seconds(5)) -> Bool {
+        entered.wait(timeout: .now() + timeout) == .success
+    }
+}
+
+/// Fake Logic runtime whose AX tree exposes an OPEN Library panel with two
+/// categories, so `library.scan_all {mode:ax}` clears its preflights
+/// (`isLibraryPanelOpen`), enumerates a non-empty root, and reaches the
+/// `enumerateTree` settle-suspension. Replicates the proven
+/// `makeLibraryPanelFixture` shape from `LibraryAccessorAXRuntimeTests`.
+private func makeOpenLibraryPanelLogicRuntime() -> AXLogicProElements.Runtime {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(20_000)
+    let window = builder.element(20_001)
+    let browser = builder.element(20_002)
+    let categoryList = builder.element(20_003)
+    let presetList = builder.element(20_004)
+    let bass = builder.element(20_005)
+    let drums = builder.element(20_006)
+    let sub = builder.element(20_007)
+    let funky = builder.element(20_008)
+    let horizontalScrollBar = builder.element(20_009)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [browser])
+    builder.setAttribute(browser, kAXRoleAttribute as String, kAXBrowserRole as String)
+    builder.setAttribute(browser, kAXDescriptionAttribute as String, "Library")
+    builder.setAttribute(browser, kAXParentAttribute as String, window)
+    builder.setChildren(browser, [categoryList, presetList, horizontalScrollBar])
+
+    builder.setAttribute(categoryList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setChildren(categoryList, [bass, drums])
+    builder.setAttribute(presetList, kAXRoleAttribute as String, kAXListRole as String)
+    builder.setChildren(presetList, [sub, funky])
+    builder.setAttribute(horizontalScrollBar, kAXRoleAttribute as String, kAXScrollBarRole as String)
+    builder.setAttribute(horizontalScrollBar, kAXOrientationAttribute as String, kAXHorizontalOrientationValue as String)
+    builder.setAttribute(horizontalScrollBar, kAXValueAttribute as String, NSNumber(value: 1))
+
+    for (element, value, x, y, parent) in [
+        (bass, "Bass", CGFloat(100), CGFloat(100), categoryList),
+        (drums, "Drums", CGFloat(100), CGFloat(130), categoryList),
+        (sub, "Sub", CGFloat(260), CGFloat(100), presetList),
+        (funky, "Funky", CGFloat(260), CGFloat(130), presetList),
+    ] {
+        builder.setAttribute(element, kAXRoleAttribute as String, kAXStaticTextRole as String)
+        builder.setAttribute(element, kAXValueAttribute as String, value)
+        builder.setAttribute(element, kAXPositionAttribute as String, axPoint(x, y))
+        builder.setAttribute(element, kAXSizeAttribute as String, axSize(80, 20))
+        builder.setAttribute(element, kAXParentAttribute as String, parent)
+    }
+
+    builder.setAttribute(categoryList, kAXSelectedChildrenAttribute as String, [bass])
+    builder.setAttribute(presetList, kAXSelectedChildrenAttribute as String, [sub])
+
+    return builder.makeLogicRuntime(appElement: app)
+}
+
+/// Restores the pre-split cross-exclusion between `library.scan_all` and
+/// `plugin.scan_presets` (both traverse Logic's AX tree; running them at the
+/// same time launches two simultaneous traversals). Splitting the single
+/// `scanInProgress` flag into two independent flags dropped the cross guard;
+/// this pins the original truth table.
+///
+/// Determinism (NOT timing-based): scan A sets `libraryScanInProgress` BEFORE
+/// its first suspension (the `enumerateTree` settle-sleep). `hasVisibleWindow` —
+/// invoked on the actor right after the flag is set and before any `await` —
+/// raises `entered`. Once `entered` is observed, the single-threaded actor can
+/// only service the next `execute` after A suspends, at which point A's `defer`
+/// (which clears the flag) has NOT run. So B provably observes the flag; the
+/// production settle-sleep is merely the suspension window, never a race the
+/// test bets on.
+@Test("library.scan_all and plugin.scan_presets are mutually exclusive (restored cross-flag guard)")
+func testLibraryAndPluginScansAreMutuallyExclusive() async {
+    // `runLiveScan` writes `Resources/library-inventory.json` on completion, a
+    // fixture other suites read (LibraryDiskScannerTests). Snapshot and restore
+    // it so this test leaves the shared file byte-identical (or absent).
+    let inventoryURL = URL(
+        fileURLWithPath: FileManager.default.currentDirectoryPath + "/Resources/library-inventory.json"
+    )
+    let originalInventory = try? Data(contentsOf: inventoryURL)
+    defer {
+        if let originalInventory {
+            try? originalInventory.write(to: inventoryURL, options: .atomic)
+        } else {
+            try? FileManager.default.removeItem(at: inventoryURL)
+        }
+    }
+
+    let entered = ScanEnteredSignal()
+    let runtime = AccessibilityChannel.Runtime.axBacked(
+        isTrusted: { true },
+        isLogicProRunning: { true },
+        hasVisibleWindow: { entered.fire(); return true },
+        logicRuntime: makeOpenLibraryPanelLogicRuntime()
+    )
+    let channel = AccessibilityChannel(runtime: runtime)
+
+    let scanA = Task.detached(priority: .userInitiated) {
+        await channel.execute(operation: "library.scan_all", params: ["mode": "ax"])
+    }
+    #expect(entered.waitUntilEntered())
+
+    // CROSS (the regression): a plugin scan must be refused while a library scan
+    // is suspended in-flight. Pre-fix this returned the "no plugin window" error
+    // instead, because `pluginScanInProgress` was still false.
+    let crossResult = await channel.execute(operation: "plugin.scan_presets", params: [:])
+    #expect(!crossResult.isSuccess)
+    #expect(crossResult.message.contains("already in progress"))
+
+    // SELF: a second library scan is refused (held before and after the fix;
+    // pins the rest of the truth table).
+    let selfResult = await channel.execute(operation: "library.scan_all", params: ["mode": "ax"])
+    #expect(!selfResult.isSuccess)
+    #expect(selfResult.message.contains("already in progress"))
+
+    // A finishes on its own and is not itself the rejected scan.
+    let aResult = await scanA.value
+    #expect(!aResult.message.contains("already in progress"))
 }

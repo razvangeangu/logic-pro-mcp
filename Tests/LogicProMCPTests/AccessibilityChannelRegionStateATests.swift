@@ -13,16 +13,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func axPoint(_ x: CGFloat, _ y: CGFloat) -> AXValue {
-    var p = CGPoint(x: x, y: y)
-    return AXValueCreate(.cgPoint, &p)!
-}
-
-private func axSize(_ w: CGFloat, _ h: CGFloat) -> AXValue {
-    var s = CGSize(width: w, height: h)
-    return AXValueCreate(.cgSize, &s)!
-}
-
 private func decodeJSON(_ s: String) -> [String: Any] {
     (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
 }
@@ -214,7 +204,7 @@ private func makeRegionFixture(
     #expect(obj["reason"] as? String == "readback_mismatch")
     #expect(obj["pre_start_bar"] as? Int == 4)
     #expect(obj["post_start_bar"] as? Int == 4)
-    #expect((obj["note"] as? String)?.contains("no position change") == true)
+    #expect(((obj["note"] as? String)?.contains("no position change"))!)
 }
 
 @Test func testMoveToPlayheadReturnsStateBWhenNoSelectedRegion() async {

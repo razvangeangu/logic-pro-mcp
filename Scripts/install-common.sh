@@ -67,19 +67,54 @@ require_absolute_path() {
     esac
 }
 
+# Reject protected system paths for either install_dir or share_dir. The
+# blocklist is evaluated on the REALPATH: install.sh/uninstall.sh run
+# normalize_path (which resolves symlinks via `pwd -P`) before calling the
+# validators. On macOS the top-level /etc and /tmp are symlinks into /private,
+# so a value like `/etc` arrives here already rewritten to `/private/etc` —
+# the /private mirrors below are what actually close that sudo-mv/rm-rf bypass
+# (the bare spellings stay as belt-and-suspenders for paths normalize_path
+# cannot resolve). /private/var is NOT blanket-denied because the macOS
+# per-user temp dir lives under /private/var/folders; only the sensitive
+# /private/var/db subtree is listed.
+reject_protected_system_path() {
+    local label="$1"
+    local path="$2"
+    # Match the blocklist case-INSENSITIVELY. On a case-insensitive filesystem
+    # (APFS default) a case-varied spelling — /TMP, /Private/Tmp, /ETC — resolves
+    # to the same world-writable/system dir, but normalize_path preserves lexical
+    # casing (a non-existent intermediate can't be resolved via `pwd -P`), so a
+    # case-sensitive glob would let it slip past and then `sudo mv`/install into
+    # e.g. /private/tmp. Save/restore the caller's nocasematch so we don't leak it.
+    local had_nocasematch=0
+    if shopt -q nocasematch; then
+        had_nocasematch=1
+    fi
+    shopt -s nocasematch
+    local matched=0
+    case "$path" in
+        /|/System|/System/*|/etc|/etc/*|/private/etc|/private/etc/*|/tmp|/tmp/*|/private/tmp|/private/tmp/*|/private/var/db|/private/var/db/*|/bin|/bin/*|/sbin|/sbin/*|/usr/bin|/usr/bin/*|/usr/sbin|/usr/sbin/*)
+            matched=1
+            ;;
+    esac
+    if [ "$had_nocasematch" -eq 0 ]; then
+        shopt -u nocasematch
+    fi
+    if [ "$matched" -eq 1 ]; then
+        fail_path_validation "$label must not target a protected system path: $path"
+    fi
+}
+
 validate_install_dir() {
     local path="$1"
     require_absolute_path "install_dir" "$path"
-    case "$path" in
-        /|/System|/System/*|/private/var/db|/private/var/db/*|/etc|/etc/*|/bin|/bin/*|/sbin|/sbin/*|/usr/bin|/usr/bin/*|/usr/sbin|/usr/sbin/*)
-            fail_path_validation "install_dir must not target a protected system path: $path"
-            ;;
-    esac
+    reject_protected_system_path "install_dir" "$path"
 }
 
 validate_share_dir() {
     local path="$1"
     require_absolute_path "share_dir" "$path"
+    reject_protected_system_path "share_dir" "$path"
     case "$path" in
         */share/logic-pro-mcp) ;;
         *) fail_path_validation "share_dir must end with /share/logic-pro-mcp: $path" ;;

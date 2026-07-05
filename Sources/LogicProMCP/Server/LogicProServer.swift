@@ -1005,10 +1005,40 @@ actor LogicProServer {
 
 /// Real MIDI transport for MCU channel using MIDIPortManager.
 actor ProductionMCUTransport: MCUTransportProtocol {
+    // v3.8.0 (P1 restart fix) — the CURRENT feedback sink, held in a stable
+    // lock-guarded box rather than captured by value inside the CoreMIDI
+    // callback. `MIDIPortManager.createBidirectionalPort` REUSES an existing
+    // destination on restart WITHOUT re-registering the callback, so the
+    // closure installed by the FIRST start() is the one CoreMIDI keeps firing.
+    // If that closure captured the sink by value it would forever yield into
+    // the first (now-finished) AsyncStream continuation — every feedback event
+    // after any stop→start silently dropped. Holding the sink in a box that
+    // the callback dereferences per event lets a restart's fresh continuation
+    // yield be picked up by the reused callback. The box is read on the
+    // CoreMIDI real-time thread, so access is NSLock-guarded and lock-light:
+    // the lock spans only the pointer read/write, never the delivery call.
+    private final class FeedbackSink: @unchecked Sendable {
+        private let lock = NSLock()
+        private var sink: (@Sendable (MIDIFeedback.Event) -> Void)?
+
+        func set(_ newSink: (@Sendable (MIDIFeedback.Event) -> Void)?) {
+            lock.lock()
+            sink = newSink
+            lock.unlock()
+        }
+
+        func deliver(_ event: MIDIFeedback.Event) {
+            lock.lock()
+            let current = sink
+            lock.unlock()
+            current?(event)
+        }
+    }
+
     private let portManager: any VirtualPortManaging
     private let packetSink: @Sendable (MIDIEndpointRef, [UInt8]) -> Void
+    private let feedbackSink = FeedbackSink()
     private var port: MIDIPortManager.MIDIPortPair?
-    private var onReceive: (@Sendable (MIDIFeedback.Event) -> Void)?
 
     init(
         portManager: any VirtualPortManaging,
@@ -1028,10 +1058,16 @@ actor ProductionMCUTransport: MCUTransportProtocol {
     }
 
     func start(onReceive: @escaping @Sendable (MIDIFeedback.Event) -> Void) async throws {
-        self.onReceive = onReceive
+        // Publish the new sink BEFORE (re)creating the port so a reused
+        // destination's already-registered callback immediately routes feedback
+        // into this start()'s AsyncStream continuation.
+        feedbackSink.set(onReceive)
+        // Capture the stable box (NOT `onReceive` by value, NOT `self`): the
+        // callback registered here may be reused verbatim across restarts, so
+        // it must dereference whatever sink is current at delivery time.
+        let sink = feedbackSink
         do {
-            port = try await portManager.createBidirectionalPort(name: "LogicProMCP-MCU-Internal") { [weak self] eventList, _ in
-                guard let self else { return }
+            port = try await portManager.createBidirectionalPort(name: "LogicProMCP-MCU-Internal") { eventList, _ in
                 // Parse UMP event list → MIDI 1.0 bytes → MIDIFeedback.Event
                 // Use original eventList pointer (not a stack copy) for safe traversal
                 let numPackets = Int(eventList.pointee.numPackets)
@@ -1046,9 +1082,17 @@ actor ProductionMCUTransport: MCUTransportProtocol {
                             Array(raw.prefix(wordCount * 4))
                         }
                         MCUTrace.emit(.rx, bytes)
-                        let events = MIDIFeedback.parseBytes(bytes)
-                        for event in events {
-                            Task { [weak self] in await self?.onReceive?(event) }
+                        // v3.8.0 (WS6 / AC1) — deliver each parsed event to the
+                        // CURRENT sink SYNCHRONOUSLY in arrival order. The
+                        // previous per-event `Task { self.onReceive?(event) }`
+                        // hop admitted events out of order (the 2-site race), so
+                        // there is NO per-event Task here — FIFO is preserved.
+                        // `sink` is a stable box (see FeedbackSink), so a restart
+                        // that reuses this very callback still delivers into the
+                        // fresh AsyncStream yield. Packets arriving after stop()
+                        // read a nil sink (box cleared) and are dropped.
+                        for event in MIDIFeedback.parseBytes(bytes) {
+                            sink.deliver(event)
                         }
                     }
                     packetPtr = UnsafePointer(MIDIEventPacketNext(packetPtr))
@@ -1061,12 +1105,11 @@ actor ProductionMCUTransport: MCUTransportProtocol {
     }
 
     func stop() async {
+        // Clear the sink first so any packet delivered on a reused destination
+        // after stop() reads nil and is dropped (post-stop-ignored contract),
+        // then release the port reference.
+        feedbackSink.set(nil)
         port = nil
-        // Phase 6 P2: drop the receive sink so a late inbound packet (the
-        // MIDIPortManager destination callback can outlive `port = nil` until
-        // portManager teardown) cannot deliver feedback into the cache after
-        // the channel has stopped.
-        onReceive = nil
     }
 }
 
