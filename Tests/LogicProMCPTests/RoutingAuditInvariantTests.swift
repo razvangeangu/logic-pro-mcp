@@ -152,4 +152,10 @@ struct RoutingAuditInvariantTests {
             #expect(cgIndex < axIndex, "\(operation) chain \(chain) must use CGEvent before AX once the dispatcher has confirmed transport is running")
         }
     }
+
+    @Test("transport.toggle_autopunch is AX-only and has no set_autopunch sibling")
+    func autopunchRoutesOnlyThroughAXToggle() throws {
+        #expect(try #require(ChannelRouter.routingTable["transport.toggle_autopunch"]) == [.accessibility])
+        #expect(ChannelRouter.routingTable["transport.set_autopunch"] == nil)
+    }
 }

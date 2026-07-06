@@ -307,6 +307,31 @@ private func expectCoreMIDIStateB(
     #expect(names == ["Session-Port"])
 }
 
+@Test func testCoreMIDIChannelCreateVirtualPortModeConflictReturnsStateC() async throws {
+    let harness = MIDIPortRuntimeHarness()
+    let manager = MIDIPortManager(runtime: harness.runtime())
+    try await manager.start()
+    _ = try await manager.createBidirectionalPort(name: "Session-Port") { _, _ in }
+
+    let channel = CoreMIDIChannel(engine: MockCoreMIDIEngine(), portManager: manager)
+    let result = await channel.execute(
+        operation: "midi.create_virtual_port",
+        params: ["name": "Session-Port"]
+    )
+
+    await manager.stop()
+
+    #expect(!result.isSuccess)
+    let object = try coreMIDIHCObject(result)
+    #expect(object["success"] as? Bool == false)
+    #expect(object["state"] as? String == "C")
+    #expect(object["error"] as? String == "port_unavailable")
+    #expect(object["port_name"] as? String == "Session-Port")
+    #expect(object["existing_mode"] as? String == "bidirectional")
+    #expect(object["requested_mode"] as? String == "send_only")
+    #expect((object["hint"] as? String)?.contains("collides with an existing port of a different mode") == true)
+}
+
 @Test func testCoreMIDIChannelCreateVirtualPortErrorsWithoutManager() async {
     let channel = CoreMIDIChannel(engine: MockCoreMIDIEngine())
     let result = await channel.execute(

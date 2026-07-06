@@ -234,6 +234,7 @@ struct Issue112CommandDeadlineTests {
         let mutatingTransportCommands = [
             "play", "stop", "record", "pause", "rewind", "fast_forward", "toggle_cycle",
             "toggle_metronome", "set_tempo", "goto_position", "set_cycle_range", "toggle_count_in",
+            "toggle_autopunch",
         ]
 
         for command in mutatingTransportCommands {

@@ -91,6 +91,20 @@ extension AXLogicProElements {
         return nil
     }
 
+    static func findControlBarCheckbox(
+        matching labels: AXLocalePolicy.LabelSet,
+        runtime: Runtime = .production
+    ) -> AXUIElement? {
+        guard let controlBar = getControlBar(runtime: runtime) else { return nil }
+        return AXLocalePolicy.findDescendant(
+            of: controlBar,
+            role: kAXCheckBoxRole,
+            matching: labels,
+            maxDepth: 4,
+            runtime: runtime.ax
+        )
+    }
+
     /// Find the 마디 (bar) slider in Logic Pro's control bar. Setting this
     /// slider's value moves the playhead to the given bar.
     static func findControlBarBarSlider(runtime: Runtime = .production) -> AXUIElement? {

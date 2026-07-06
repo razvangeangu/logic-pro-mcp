@@ -4,7 +4,7 @@ import MCP
 struct TransportDispatcher {
     static let tool = Tool(
         name: "logic_transport",
-        description: "Control Logic Pro transport. Commands: play, stop, record, pause, rewind, fast_forward, toggle_cycle, toggle_metronome, set_tempo, goto_position, set_cycle_range, toggle_count_in. Params: set_tempo -> { tempo: Float } (5.0-999.0); goto_position -> { bar: Int (1..9999) } or { position: String } where String is bar.beat.sub.tick (e.g. \"9.1.1.1\") or HH:MM:SS:FF SMPTE (e.g. \"00:00:08:12\"); set_cycle_range -> { start: Int, end: Int } (UNSUPPORTED/best-effort: Logic 12.x exposes no numeric cycle-locator fields, so this fails closed with State C not_implemented and CANNOT verify a write); others -> {}.",
+        description: "Control Logic Pro transport. Commands: play, stop, record, pause, rewind, fast_forward, toggle_cycle, toggle_metronome, set_tempo, goto_position, set_cycle_range, toggle_count_in, toggle_autopunch. Params: set_tempo -> { tempo: Float } (5.0-999.0); goto_position -> { bar: Int (1..9999) } or { position: String } where String is bar.beat.sub.tick (e.g. \"9.1.1.1\") or HH:MM:SS:FF SMPTE (e.g. \"00:00:08:12\"); set_cycle_range -> { start: Int, end: Int } (UNSUPPORTED/best-effort: Logic 12.x exposes no numeric cycle-locator fields, so this fails closed with State C not_implemented and CANNOT verify a write); others -> {}.",
         inputSchema: commandParamsToolSchema(commandDescription: "Transport command to execute")
     )
 
@@ -65,6 +65,10 @@ struct TransportDispatcher {
 
         case "toggle_count_in":
             let result = await router.route(operation: "transport.toggle_count_in")
+            return toolTextResult(result)
+
+        case "toggle_autopunch":
+            let result = await router.route(operation: "transport.toggle_autopunch")
             return toolTextResult(result)
 
         case "set_tempo":
@@ -186,7 +190,7 @@ struct TransportDispatcher {
 
         default:
             return toolTextResult(
-                "Unknown transport command: \(command). Available: play, stop, record, pause, rewind, fast_forward, toggle_cycle, toggle_metronome, set_tempo, goto_position, set_cycle_range, toggle_count_in",
+                "Unknown transport command: \(command). Available: play, stop, record, pause, rewind, fast_forward, toggle_cycle, toggle_metronome, set_tempo, goto_position, set_cycle_range, toggle_count_in, toggle_autopunch",
                 isError: true
             )
         }
@@ -206,6 +210,7 @@ struct TransportDispatcher {
         case "goto_position": return "transport.goto_position"
         case "set_cycle_range": return "transport.set_cycle_range"
         case "toggle_count_in": return "transport.toggle_count_in"
+        case "toggle_autopunch": return "transport.toggle_autopunch"
         default: return nil
         }
     }

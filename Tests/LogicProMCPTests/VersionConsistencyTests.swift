@@ -176,7 +176,10 @@ private func latestChangelogReleaseHeading() throws -> ChangelogReleaseHeading? 
 
     let api = try readRepoFile("docs/API.md")
     #expect(api.contains("| `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |"))
+    #expect(api.contains("| `toggle_autopunch` | — | State A/B/C contract envelope | Accessibility |"))
     #expect(api.contains("| `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility |"))
+    #expect(api.contains("`set_automation`"))
+    #expect(api.contains("State B (MCU write, no readback echo)"))
 }
 
 /// Issue #22 (thomas-doesburg): `brew install` broke at v3.4.6/v3.5.0 because

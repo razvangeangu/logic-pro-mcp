@@ -507,7 +507,7 @@ enum WorkflowSkillCatalog {
     static let publicCommands: [String: Set<String>] = [
         "logic_transport": [
             "play", "stop", "record", "pause", "rewind", "fast_forward",
-            "toggle_cycle", "toggle_metronome", "toggle_count_in",
+            "toggle_cycle", "toggle_metronome", "toggle_count_in", "toggle_autopunch",
             "set_tempo", "goto_position", "set_cycle_range",
         ],
         "logic_tracks": [

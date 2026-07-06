@@ -250,6 +250,8 @@ actor AccessibilityChannel: Channel {
             return runtime.toggleTransportButton("Metronome")
         case "transport.toggle_count_in":
             return runtime.toggleTransportButton("CountIn")
+        case "transport.toggle_autopunch":
+            return runtime.toggleTransportButton("AutoPunch")
 
         case "transport.play":
             return runtime.toggleTransportButton("Play")

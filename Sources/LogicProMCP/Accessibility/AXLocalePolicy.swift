@@ -212,6 +212,12 @@ enum AXLocalePolicy {
         rationale: "Identifies the Metronome/Click transport control; read-only."
     )
 
+    static let transportAutopunchControl = LabelSet(
+        canonical: "Autopunch",
+        variants: ["Auto Punch", "Auto-Punch"],
+        rationale: "Locates Logic's Control Bar Autopunch checkbox for AXPress; State A is still gated by readback."
+    )
+
     /// Record-arm disambiguation tokens. Their PRESENCE on a Record control
     /// EXCLUDES it from being treated as the transport Record button.
     static let transportRecordArmExclusion = LabelSet(
