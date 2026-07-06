@@ -40,6 +40,9 @@ jobs:
         # withThrowingTaskGroup syntax. Keep in sync with .github/workflows/ci.yml.
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
 
+      - name: Run test suite
+        run: swift test --no-parallel
+
       - name: Detect release mode
         id: mode
         env:

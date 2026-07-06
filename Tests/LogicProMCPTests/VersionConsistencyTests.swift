@@ -16,6 +16,30 @@ private func readRepoFile(_ relativePath: String) throws -> String {
     )
 }
 
+private struct ChangelogReleaseHeading {
+    let version: String
+    let date: String
+}
+
+private func latestChangelogReleaseHeading() throws -> ChangelogReleaseHeading? {
+    let changelog = try readRepoFile("CHANGELOG.md")
+    let regex = try NSRegularExpression(
+        pattern: #"^## \[([0-9]+\.[0-9]+\.[0-9]+)\] — ([0-9]{4}-[0-9]{2}-[0-9]{2})$"#
+    )
+
+    for line in changelog.components(separatedBy: .newlines) {
+        let range = NSRange(line.startIndex..<line.endIndex, in: line)
+        guard let match = regex.firstMatch(in: line, range: range) else { continue }
+        let versionRange = Range(match.range(at: 1), in: line)!
+        let dateRange = Range(match.range(at: 2), in: line)!
+        return ChangelogReleaseHeading(
+            version: String(line[versionRange]),
+            date: String(line[dateRange])
+        )
+    }
+    return nil
+}
+
 /// Prevents the kind of drift we cleaned up in the v2.2 census:
 /// ServerConfig said 2.2.0 while Formula was 2.1.0 and manifest/install.sh
 /// were pinned to v2.0.0. Any future version bump has to touch all four
@@ -48,6 +72,47 @@ private func readRepoFile(_ relativePath: String) throws -> String {
         installScript.contains("LOGIC_PRO_MCP_VERSION:-v\(sourceVersion)"),
         "Scripts/install.sh default VERSION must match v\(sourceVersion)"
     )
+}
+
+@Test func versionReleaseTimestamp_matches_latest_changelog_release_date() throws {
+    let latestRelease = try #require(
+        try latestChangelogReleaseHeading(),
+        "CHANGELOG.md must contain a release heading like '## [3.8.0] — 2026-07-05'"
+    )
+    #expect(latestRelease.version == ServerConfig.serverVersion)
+
+    let timestamps = ResourceProvider.resources.compactMap { $0.annotations?.lastModified }
+    #expect(
+        timestamps.count == ResourceProvider.resources.count,
+        "every public resource annotation must expose lastModified"
+    )
+    let uniqueTimestamps = Set(timestamps)
+    #expect(uniqueTimestamps.count == 1, "resource annotations must use one release timestamp: \(uniqueTimestamps)")
+    let timestamp = try #require(uniqueTimestamps.first)
+    #expect(
+        timestamp == "\(latestRelease.date)T00:00:00Z",
+        "resource lastModified must match the latest CHANGELOG release date"
+    )
+}
+
+@Test func readme_version_references_match_server_version() throws {
+    let readme = try readRepoFile("README.md")
+    let version = ServerConfig.serverVersion
+    let requiredCurrentVersionReferences = [
+        "stable-v\(version)-",
+        "[v\(version)](https://github.com/MongLong0214/logic-pro-mcp/releases/tag/v\(version))",
+        "The current published stable release is `v\(version)`",
+        "**Published stable**: `v\(version)`",
+        "/v\(version)/Scripts/install.sh",
+        "stable release (`v\(version)`)",
+    ]
+
+    for reference in requiredCurrentVersionReferences {
+        #expect(
+            readme.contains(reference),
+            "README.md must keep current-version reference in sync: \(reference)"
+        )
+    }
 }
 
 @Test func testManifestResourceSurfaceMatchesPublishedStableRelease() throws {
