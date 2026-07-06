@@ -652,6 +652,7 @@ actor LogicProServer {
         "logic_transport": [
             "play", "stop", "record", "pause", "rewind", "fast_forward", "toggle_cycle",
             "toggle_metronome", "set_tempo", "goto_position", "set_cycle_range", "toggle_count_in",
+            "toggle_autopunch",
         ],
         "logic_tracks": [
             "select", "create_audio", "create_instrument", "create_drummer", "create_external_midi",

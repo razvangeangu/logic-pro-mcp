@@ -39,6 +39,7 @@ extension ChannelRouter {
         "transport.goto_position":    [.accessibility, .mcu, .coreMIDI, .cgEvent],
         "transport.set_cycle_range":  [.accessibility],
         "transport.toggle_count_in":  [.accessibility, .midiKeyCommands, .cgEvent],
+        "transport.toggle_autopunch": [.accessibility],
         "transport.capture_recording":[.midiKeyCommands, .cgEvent],
 
         // Track state reading

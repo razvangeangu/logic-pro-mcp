@@ -291,6 +291,7 @@ struct SystemDispatcher {
                   toggle_cycle      -> {} — Toggle cycle/loop mode
                   toggle_metronome  -> {} — Toggle metronome
                   toggle_count_in   -> {} — Toggle count-in
+                  toggle_autopunch  -> {} — Toggle Autopunch
                   set_tempo         -> { tempo: Float } — Set BPM (5-999)
                   goto_position     -> { bar: Int (1..9999) } or { position: String } — bar.beat.sub.tick or HH:MM:SS:FF SMPTE
                   set_cycle_range   -> { start: Int, end: Int } — Bar numbers (UNSUPPORTED/best-effort: Logic 12.x exposes no numeric cycle-locator fields; fails closed with State C not_implemented, cannot verify a write)

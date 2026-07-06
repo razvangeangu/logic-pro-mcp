@@ -61,6 +61,12 @@ extension AccessibilityChannel {
                 mouseRuntime: mouseRuntime
             )
         }
+        if name == "AutoPunch" {
+            return AccessibilityChannel.defaultToggleAutopunch(
+                runtime: runtime,
+                mouseRuntime: mouseRuntime
+            )
+        }
         if let mapping = controlBarMapping[name] {
             if let desired = mapping.desired {
                 // Conditional toggle: only click if current != desired
@@ -900,6 +906,83 @@ extension AccessibilityChannel {
     }
 
     // MARK: - Control-bar checkbox helpers (Logic Pro 12 transport)
+
+    static func defaultToggleAutopunch(
+        runtime: AXLogicProElements.Runtime = .production,
+        mouseRuntime: AXMouseHelper.Runtime = .production
+    ) -> ChannelResult {
+        guard let button = AXLogicProElements.findControlBarCheckbox(
+            matching: AXLocalePolicy.transportAutopunchControl,
+            runtime: runtime
+        ) else {
+            let controlBar = AXLogicProElements.getControlBar(runtime: runtime)
+            return .error(HonestContract.encodeStateC(
+                error: .elementNotFound,
+                hint: "Autopunch was not found in Logic Pro's Control Bar. Customize the Control Bar to show Autopunch, then retry.",
+                extras: [
+                    "button": "Autopunch",
+                    "operation": "transport.toggle_autopunch",
+                    "control_bar_present": controlBar != nil,
+                    "control_bar_checkboxes": controlBar.map {
+                        transportLandmarkLabels(root: $0, role: kAXCheckBoxRole, runtime: runtime)
+                    } ?? [],
+                    "recovery_hint": "Customize Logic Pro's Control Bar and enable the Autopunch button."
+                ]
+            ))
+        }
+
+        let before = controlBarCheckboxValue(button, runtime: runtime)
+        let pressed = AXHelpers.performAction(button, kAXPressAction, runtime: runtime.ax)
+        guard pressed else {
+            return .error(HonestContract.encodeStateC(
+                error: .axWriteFailed,
+                hint: "AXPress failed on Control Bar Autopunch",
+                extras: [
+                    "button": "Autopunch",
+                    "operation": "transport.toggle_autopunch",
+                    "action": "axpress",
+                    "safe_to_retry": true
+                ]
+            ))
+        }
+
+        let after: Bool?
+        if let before {
+            after = waitForControlBarCheckboxValue(
+                button,
+                runtime: runtime,
+                matching: { $0 != before }
+            ) ?? controlBarCheckboxValue(button, runtime: runtime)
+        } else {
+            after = controlBarCheckboxValue(button, runtime: runtime)
+        }
+
+        var extras: [String: Any] = [
+            "button": "Autopunch",
+            "control": AXLocalePolicy.transportAutopunchControl.canonical,
+            "operation": "transport.toggle_autopunch",
+            "action": "axpress",
+            "previous": before as Any? ?? NSNull(),
+            "observed": after as Any? ?? NSNull()
+        ]
+
+        guard let before, let after else {
+            return .success(HonestContract.encodeStateB(
+                reason: .readbackUnavailable,
+                extras: extras
+            ))
+        }
+
+        let requested = !before
+        extras["requested"] = requested
+        if after == requested {
+            return .success(HonestContract.encodeStateA(extras: extras))
+        }
+        return .success(HonestContract.encodeStateB(
+            reason: .readbackMismatch,
+            extras: extras
+        ))
+    }
 
     /// Click a control-bar checkbox by Korean/English name, toggling its value.
     /// Returns nil if the checkbox couldn't be located — callers may fall back.

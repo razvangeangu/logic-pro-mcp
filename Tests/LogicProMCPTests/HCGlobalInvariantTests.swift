@@ -69,6 +69,7 @@ struct HCGlobalInvariantTests {
             RouteCase(tool: "logic_transport", command: "goto_position", params: ["bar": .int(1)], operation: "transport.goto_position", destinations: [], invariant: .minimumV1),
             RouteCase(tool: "logic_transport", command: "set_cycle_range", params: ["start": .int(1), "end": .int(2)], operation: "transport.set_cycle_range", destinations: [], invariant: .minimumV1),
             RouteCase(tool: "logic_transport", command: "toggle_count_in", params: [:], operation: "transport.toggle_count_in", destinations: [], invariant: .minimumV1),
+            RouteCase(tool: "logic_transport", command: "toggle_autopunch", params: [:], operation: "transport.toggle_autopunch", destinations: [], invariant: .minimumV1),
 
             RouteCase(tool: "logic_tracks", command: "select", params: ["index": .int(0)], operation: "track.select", destinations: [], invariant: .minimumV1),
             RouteCase(tool: "logic_tracks", command: "create_audio", params: [:], operation: "track.create_audio", destinations: [], invariant: .minimumV1),

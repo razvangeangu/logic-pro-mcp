@@ -605,6 +605,22 @@ actor CoreMIDIChannel: Channel {
                     legacyMessage: "Virtual port '\(name)' ready",
                     extras: ["port_name": name]
                 )
+            } catch MIDIPortError.modeConflict(
+                name: let conflictName,
+                existing: let existingMode,
+                requested: let requestedMode
+            ) {
+                return .error(HonestContract.encodeStateC(
+                    error: .portUnavailable,
+                    hint: "Virtual port name collides with an existing port of a different mode",
+                    extras: [
+                        "operation": operation,
+                        "channel": "CoreMIDI",
+                        "port_name": conflictName,
+                        "existing_mode": existingMode.rawValue,
+                        "requested_mode": requestedMode.rawValue,
+                    ]
+                ))
             } catch {
                 return .error("Failed to create virtual port '\(name)': \(error)")
             }

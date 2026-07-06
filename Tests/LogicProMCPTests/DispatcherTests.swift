@@ -396,7 +396,7 @@ private func liveTransportJSON(
 
 // MARK: - TransportDispatcher
 
-@Test func testTransportDispatcherRoutesPrimaryCommands() async {
+@Test func testTransportDispatcherRoutesPrimaryCommands() async throws {
     // NOTE: `pause` is intentionally absent here — it is now a verified
     // Honest-Contract command (see verifiedPauseResult / the dedicated
     // pause tests below) and can no longer succeed against a plain
@@ -409,11 +409,13 @@ private func liveTransportJSON(
         ("toggle_cycle", "transport.toggle_cycle"),
         ("toggle_metronome", "transport.toggle_metronome"),
         ("toggle_count_in", "transport.toggle_count_in"),
+        ("toggle_autopunch", "transport.toggle_autopunch"),
     ]
 
     for testCase in cases {
         let router = ChannelRouter()
         let channelID: ChannelID = switch testCase.operation {
+        case "transport.toggle_autopunch": .accessibility
         case "transport.toggle_metronome", "transport.toggle_count_in": .midiKeyCommands
         default: .mcu
         }
@@ -430,15 +432,46 @@ private func liveTransportJSON(
         )
 
         if testCase.command == "play" || testCase.command == "record" {
-            #expect(result.isError!, "Expected \(testCase.command) State B to be surfaced as an error")
+            #expect(try #require(result.isError as Bool?), "Expected \(testCase.command) State B to be surfaced as an error")
             #expect(dispatcherText(result).contains(#""verified":false"#))
         } else {
-            #expect(!result.isError!, "Expected \(testCase.command) to succeed")
+            #expect(try #require(result.isError as Bool?) == false, "Expected \(testCase.command) to succeed")
         }
         let ops = await channel.executedOps
+        let op = try #require(ops.first, "\(testCase.command) should execute exactly one route")
         #expect(ops.count == 1)
-        #expect(ops[0].0 == testCase.operation)
+        #expect(op.0 == testCase.operation)
     }
+}
+
+@Test func transport_help_and_routing_include_autopunch() async throws {
+    let description = try #require(TransportDispatcher.tool.description)
+    #expect(description.contains("toggle_autopunch"))
+    #expect(try #require(ChannelRouter.routingTable["transport.toggle_autopunch"]) == [.accessibility])
+    #expect(ChannelRouter.routingTable["transport.set_autopunch"] == nil)
+
+    let router = ChannelRouter()
+    let channel = MockChannel(id: .accessibility)
+    await router.register(channel)
+    let result = await TransportDispatcher.handle(
+        command: "toggle_autopunch",
+        params: [:],
+        router: router,
+        cache: StateCache(),
+        sleep: { _ in }
+    )
+
+    #expect(try #require(result.isError as Bool?) == false)
+    let executed = await channel.executedOps
+    #expect(try #require(executed.first?.0) == "transport.toggle_autopunch")
+
+    let helpResult = await SystemDispatcher.handle(
+        command: "help",
+        params: ["category": .string("transport")],
+        router: ChannelRouter(),
+        cache: StateCache()
+    )
+    #expect(dispatcherText(helpResult).contains("toggle_autopunch"))
 }
 
 @Test func testTransportDispatcherSetTempoGotoPositionAndCycleRange() async {

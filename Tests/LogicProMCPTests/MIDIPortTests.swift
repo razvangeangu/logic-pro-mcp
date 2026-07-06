@@ -175,6 +175,67 @@ final class MIDIPortRuntimeHarness: @unchecked Sendable {
     #expect(await manager.portCount == 1)
 }
 
+@Test func sendOnly_then_bidirectional_same_name_throws_modeConflict() async throws {
+    let harness = MIDIPortRuntimeHarness()
+    let manager = MIDIPortManager(runtime: harness.runtime())
+    try await manager.start()
+
+    _ = try await manager.createSendOnlyPort(name: "LogicProMCP-Shared-Internal")
+
+    do {
+        _ = try await manager.createBidirectionalPort(name: "LogicProMCP-Shared-Internal") { _, _ in }
+        Issue.record("Expected modeConflict when reusing send-only name as bidirectional")
+    } catch MIDIPortError.modeConflict(name: let name, existing: let existing, requested: let requested) {
+        #expect(name == "LogicProMCP-Shared-Internal")
+        #expect(existing == .sendOnly)
+        #expect(requested == .bidirectional)
+    } catch {
+        Issue.record("Unexpected non-MIDIPortError: \(error)")
+    }
+
+    #expect(harness.createdSources == ["LogicProMCP-Shared-Internal"])
+    #expect(harness.createdDestinations.isEmpty)
+    #expect(await manager.portCount == 1)
+}
+
+@Test func bidirectional_then_sendOnly_same_name_throws_modeConflict() async throws {
+    let harness = MIDIPortRuntimeHarness()
+    let manager = MIDIPortManager(runtime: harness.runtime())
+    try await manager.start()
+
+    _ = try await manager.createBidirectionalPort(name: "LogicProMCP-Shared-Internal") { _, _ in }
+
+    do {
+        _ = try await manager.createSendOnlyPort(name: "LogicProMCP-Shared-Internal")
+        Issue.record("Expected modeConflict when reusing bidirectional name as send-only")
+    } catch MIDIPortError.modeConflict(name: let name, existing: let existing, requested: let requested) {
+        #expect(name == "LogicProMCP-Shared-Internal")
+        #expect(existing == .bidirectional)
+        #expect(requested == .sendOnly)
+    } catch {
+        Issue.record("Unexpected non-MIDIPortError: \(error)")
+    }
+
+    #expect(harness.createdSources == ["LogicProMCP-Shared-Internal"])
+    #expect(harness.createdDestinations == ["LogicProMCP-Shared-Internal"])
+    #expect(await manager.portCount == 1)
+}
+
+@Test func same_name_same_mode_reuse_preserved_across_restart() async throws {
+    let harness = MIDIPortRuntimeHarness()
+    let manager = MIDIPortManager(runtime: harness.runtime())
+    try await manager.start()
+
+    let first = try await manager.createBidirectionalPort(name: "LogicProMCP-MCU-Internal") { _, _ in }
+    let restarted = try await manager.createBidirectionalPort(name: "LogicProMCP-MCU-Internal") { _, _ in }
+
+    #expect(restarted.source == first.source)
+    #expect(restarted.destination == first.destination)
+    #expect(harness.createdSources == ["LogicProMCP-MCU-Internal"])
+    #expect(harness.createdDestinations == ["LogicProMCP-MCU-Internal"])
+    #expect(await manager.portCount == 1)
+}
+
 @Test func testMIDIPortManagerClientCreationFailureSurfacesError() async {
     let harness = MIDIPortRuntimeHarness()
     harness.clientStatus = -50

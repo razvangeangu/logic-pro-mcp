@@ -472,6 +472,7 @@ private func makeSetInstrumentFixture() -> (
         ("transport.toggle_cycle", [:]),
         ("transport.toggle_metronome", [:]),
         ("transport.toggle_count_in", [:]),
+        ("transport.toggle_autopunch", [:]),
         ("transport.play", [:]),
         ("transport.stop", [:]),
         ("transport.record", [:]),
@@ -497,7 +498,7 @@ private func makeSetInstrumentFixture() -> (
         #expect(result.isSuccess, "Expected \(operation) to route through runtime")
     }
 
-    #expect(recorder.transportButtons == ["Cycle", "Metronome", "CountIn", "Play", "Stop", "Record"])
+    #expect(recorder.transportButtons == ["Cycle", "Metronome", "CountIn", "AutoPunch", "Play", "Stop", "Record"])
     #expect(recorder.tempoParams == [["tempo": "128"]])
     #expect(recorder.cycleRangeParams == [["start": "1.1.1.1", "end": "9.1.1.1"]])
     #expect(recorder.selectParams == [["index": "4"]])
@@ -1097,6 +1098,107 @@ private func makeSetInstrumentFixture() -> (
     #expect((object["verified"] as? Bool)!)
     #expect(object["action"] as? String == "axpress")
     #expect(((builder.attributeValue(cycle, kAXValueAttribute as String) as? NSNumber)?.boolValue)!)
+}
+
+@Test func toggle_autopunch_returns_stateA_on_verified_button_toggle() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(1_010)
+    let window = builder.element(1_011)
+    let controlBar = builder.element(1_012)
+    let autopunch = builder.element(1_013)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [controlBar])
+    builder.setAttribute(controlBar, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(controlBar, kAXDescriptionAttribute as String, "Control Bar")
+    builder.setChildren(controlBar, [autopunch])
+    builder.setAttribute(autopunch, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(autopunch, kAXTitleAttribute as String, "Autopunch")
+    builder.setAttribute(autopunch, kAXValueAttribute as String, NSNumber(value: false))
+
+    let logicRuntime = builder.makeLogicRuntime(
+        appElement: app,
+        setAttributeHandler: nil,
+        performActionHandler: { element, action in
+            if element == autopunch && action == kAXPressAction as String {
+                builder.setAttribute(autopunch, kAXValueAttribute as String, NSNumber(value: true))
+                return true
+            }
+            return true
+        }
+    )
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app, logicRuntime: logicRuntime)
+
+    let result = await channel.execute(operation: "transport.toggle_autopunch", params: [:])
+    let object = decodeAccessibilityJSON(result.message)
+
+    #expect(result.isSuccess)
+    #expect(try #require(object["success"] as? Bool))
+    #expect(try #require(object["verified"] as? Bool))
+    #expect(try #require(object["state"] as? String) == "A")
+    #expect(try #require(object["button"] as? String) == "Autopunch")
+    #expect(try #require(object["observed"] as? Bool))
+    #expect(try #require(object["previous"] as? Bool) == false)
+    #expect(try #require(object["action"] as? String) == "axpress")
+}
+
+@Test func toggle_autopunch_returns_stateB_when_state_readback_unavailable() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(1_020)
+    let window = builder.element(1_021)
+    let controlBar = builder.element(1_022)
+    let autopunch = builder.element(1_023)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [controlBar])
+    builder.setAttribute(controlBar, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(controlBar, kAXDescriptionAttribute as String, "Control Bar")
+    builder.setChildren(controlBar, [autopunch])
+    builder.setAttribute(autopunch, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(autopunch, kAXDescriptionAttribute as String, "Autopunch")
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+
+    let result = await channel.execute(operation: "transport.toggle_autopunch", params: [:])
+    let object = decodeAccessibilityJSON(result.message)
+
+    #expect(result.isSuccess)
+    #expect(try #require(object["success"] as? Bool))
+    #expect(try #require(object["verified"] as? Bool) == false)
+    #expect(try #require(object["state"] as? String) == "B")
+    #expect(try #require(object["reason"] as? String) == "readback_unavailable")
+    #expect(try #require(object["button"] as? String) == "Autopunch")
+}
+
+@Test func toggle_autopunch_returns_stateC_when_button_not_found() async throws {
+    let builder = FakeAXRuntimeBuilder()
+    let app = builder.element(1_030)
+    let window = builder.element(1_031)
+    let controlBar = builder.element(1_032)
+    let cycle = builder.element(1_033)
+
+    builder.setAttribute(app, kAXMainWindowAttribute as String, window)
+    builder.setChildren(window, [controlBar])
+    builder.setAttribute(controlBar, kAXRoleAttribute as String, kAXGroupRole as String)
+    builder.setAttribute(controlBar, kAXDescriptionAttribute as String, "Control Bar")
+    builder.setChildren(controlBar, [cycle])
+    builder.setAttribute(cycle, kAXRoleAttribute as String, kAXCheckBoxRole as String)
+    builder.setAttribute(cycle, kAXTitleAttribute as String, "Cycle")
+    builder.setAttribute(cycle, kAXValueAttribute as String, NSNumber(value: false))
+
+    let channel = makeAXBackedAccessibilityChannel(builder: builder, app: app)
+
+    let result = await channel.execute(operation: "transport.toggle_autopunch", params: [:])
+    let object = decodeAccessibilityJSON(result.message)
+
+    #expect(!result.isSuccess)
+    #expect(try #require(object["success"] as? Bool) == false)
+    #expect(try #require(object["state"] as? String) == "C")
+    #expect(try #require(object["error"] as? String) == "element_not_found")
+    let hint = try #require(object["hint"] as? String)
+    #expect(hint.contains("Control Bar"))
+    #expect(hint.contains("Autopunch"))
+    #expect(hint.lowercased().contains("customize"))
 }
 
 @Test func testAccessibilityChannelAXBackedTransportErrorPaths() async {

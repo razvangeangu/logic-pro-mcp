@@ -9,6 +9,11 @@ protocol VirtualPortManaging: Actor {
     ) throws -> MIDIPortManager.MIDIPortPair
 }
 
+enum MIDIPortMode: String, Sendable {
+    case sendOnly = "send_only"
+    case bidirectional
+}
+
 /// Manages multiple virtual MIDI port pairs for the MCP server.
 /// Each channel (MCU, CoreMIDI, KeyCommands, Scripter) gets its own named port.
 actor MIDIPortManager: VirtualPortManaging {
@@ -61,6 +66,19 @@ actor MIDIPortManager: VirtualPortManaging {
         let name: String
         let source: MIDIEndpointRef       // MCP → Logic Pro
         let destination: MIDIEndpointRef?  // Logic Pro → MCP (nil for send-only)
+        let mode: MIDIPortMode
+
+        init(
+            name: String,
+            source: MIDIEndpointRef,
+            destination: MIDIEndpointRef?,
+            mode: MIDIPortMode? = nil
+        ) {
+            self.name = name
+            self.source = source
+            self.destination = destination
+            self.mode = mode ?? (destination == nil ? .sendOnly : .bidirectional)
+        }
     }
 
     /// Start the MIDI client.
@@ -81,9 +99,7 @@ actor MIDIPortManager: VirtualPortManaging {
     ) throws -> MIDIPortPair {
         guard isRunning else { throw MIDIPortError.notRunning }
 
-        // Check for existing port with same name
-        if let existing = ports[name] {
-            Log.info("Reusing existing port: \(name)", subsystem: "midi")
+        if let existing = try cachedPort(named: name, requestedMode: .bidirectional) {
             return existing
         }
 
@@ -100,7 +116,7 @@ actor MIDIPortManager: VirtualPortManaging {
             throw MIDIPortError.destinationCreationFailed(name, status)
         }
 
-        let pair = MIDIPortPair(name: name, source: source, destination: dest)
+        let pair = MIDIPortPair(name: name, source: source, destination: dest, mode: .bidirectional)
         ports[name] = pair
         Log.info("Created bidirectional port: \(name) (src: \(source), dst: \(dest))", subsystem: "midi")
         return pair
@@ -110,8 +126,7 @@ actor MIDIPortManager: VirtualPortManaging {
     func createSendOnlyPort(name: String) throws -> MIDIPortPair {
         guard isRunning else { throw MIDIPortError.notRunning }
 
-        if let existing = ports[name] {
-            Log.info("Reusing existing port: \(name)", subsystem: "midi")
+        if let existing = try cachedPort(named: name, requestedMode: .sendOnly) {
             return existing
         }
 
@@ -121,10 +136,19 @@ actor MIDIPortManager: VirtualPortManaging {
             throw MIDIPortError.sourceCreationFailed(name, status)
         }
 
-        let pair = MIDIPortPair(name: name, source: source, destination: nil)
+        let pair = MIDIPortPair(name: name, source: source, destination: nil, mode: .sendOnly)
         ports[name] = pair
         Log.info("Created send-only port: \(name) (src: \(source))", subsystem: "midi")
         return pair
+    }
+
+    private func cachedPort(named name: String, requestedMode: MIDIPortMode) throws -> MIDIPortPair? {
+        guard let existing = ports[name] else { return nil }
+        guard existing.mode == requestedMode else {
+            throw MIDIPortError.modeConflict(name: name, existing: existing.mode, requested: requestedMode)
+        }
+        Log.info("Reusing existing port: \(name)", subsystem: "midi")
+        return existing
     }
 
     /// Get an existing port by name.
@@ -159,4 +183,5 @@ enum MIDIPortError: Error {
     case notRunning
     case sourceCreationFailed(String, OSStatus)
     case destinationCreationFailed(String, OSStatus)
+    case modeConflict(name: String, existing: MIDIPortMode, requested: MIDIPortMode)
 }

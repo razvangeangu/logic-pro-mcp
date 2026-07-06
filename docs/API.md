@@ -12,8 +12,8 @@ Use tools for actions. Use resources for state. Treat every mutating result as o
 
 | Tool | Purpose |
 |------|---------|
-| `logic_transport` | play, stop, record, locate, tempo, cycle, metronome, count-in |
-| `logic_tracks` | create, select, rename, delete, duplicate, arm, mute, solo, set instrument |
+| `logic_transport` | play, stop, record, locate, tempo, cycle, metronome, count-in, autopunch |
+| `logic_tracks` | create, select, rename, delete, duplicate, arm, mute, solo, automation, set instrument |
 | `logic_mixer` | volume, pan, master volume, mixer strip reads, guarded legacy plugin insertion |
 | `logic_plugins` | verified stock-plugin inventory, exact-slot insertion, verified parameter write/readback |
 | `logic_midi` | send notes/CC/MMC, import MIDI, create/list virtual ports |
@@ -69,6 +69,7 @@ Track objects do **not** carry a sample rate. Sample rate is a project/transport
 | `play`, `record` | none | text / contract envelope | Accessibility -> MCU -> CoreMIDI -> CGEvent -> AppleScript |
 | `stop` | none | text / contract envelope | CGEvent -> Accessibility -> MCU -> CoreMIDI -> AppleScript |
 | `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |
+| `toggle_autopunch` | — | State A/B/C contract envelope | Accessibility |
 | `set_cycle_range` | `{ startBar, endBar }` | State C `not_implemented` on current public surface | none |
 | `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility |
 | `goto_bar` | `{ bar: number }` | text / contract envelope | Accessibility -> MIDIKeyCommands -> MMC |
@@ -79,7 +80,9 @@ Read current state from `logic://transport/state` after any transport mutation.
 
 Use explicit indices or names. Track mutation fails closed when the target cannot be identified or read back.
 
-Common commands: `create_audio`, `create_instrument`, `create_drummer`, `create_external_midi`, `select`, `rename`, `delete`, `duplicate`, `mute`, `solo`, `arm`, `set_instrument`, `record_sequence`, `get_regions`.
+Common commands: `create_audio`, `create_instrument`, `create_drummer`, `create_external_midi`, `select`, `rename`, `delete`, `duplicate`, `mute`, `solo`, `arm`, `set_automation`, `set_instrument`, `record_sequence`, `get_regions`.
+
+`set_automation` is State B (MCU write, no readback echo).
 
 For Library patches, treat `presetsByCategory` as a browse/catalog view. Default `scan_library` uses the local filesystem catalog from the user Logic Library plus Logic Pro's app bundle, dedupes relative `.patch` candidates, and reports `candidatePatchCount` plus `nonApplicablePatchCount` when a file candidate has no Panel-taxonomy route. Before calling `set_instrument`, call `resolve_path` and require `exists: true`, `kind: "leaf"`, and `loadable: true`. Folder/category rows return `loadable: false` and `set_instrument` fails closed with `folder_not_preset` instead of treating a selected row as a loaded patch.
 

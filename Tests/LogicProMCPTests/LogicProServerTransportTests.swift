@@ -216,7 +216,14 @@ private func waitForFeedbackEvents(
         portName: "LogicProMCP-KeyCmd-Smoke-\(UUID().uuidString)"
     )
 
-    try await manager.start()
+    do {
+        try await manager.start()
+    } catch let error as MIDIPortError {
+        if case .clientCreationFailed(let status) = error, [-50].contains(status) {
+            return
+        }
+        throw error
+    }
     try await transport.send([0x90, 0x3C, 0x64])
 
     let readiness = await transport.readiness()
