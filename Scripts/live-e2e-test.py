@@ -297,6 +297,7 @@ def initialize(client):
     })
     if not resp or "result" not in resp:
         return False
+    client.initialize_response = resp
     client.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
     time.sleep(3)
     return True
@@ -375,6 +376,16 @@ def list_resources(client, req_id=None):
 def list_resource_templates(client, req_id=None):
     return client.send({"jsonrpc": "2.0", "id": req_id or nid(),
                         "method": "resources/templates/list", "params": {}})
+
+
+def list_prompts(client, req_id=None):
+    return client.send({"jsonrpc": "2.0", "id": req_id or nid(),
+                        "method": "prompts/list", "params": {}})
+
+
+def get_prompt(client, name, req_id=None):
+    return client.send({"jsonrpc": "2.0", "id": req_id or nid(),
+                        "method": "prompts/get", "params": {"name": name}})
 
 
 # ── Test runner ──
@@ -859,9 +870,15 @@ def main():
             sys.exit(2)
 
     # ═══════════════════════════════════════════════════════════════
-    # §1 Protocol Contract (10 tests)
+    # §1 Protocol Contract
     # ═══════════════════════════════════════════════════════════════
     section("§1 Protocol Contract")
+
+    init_caps = getattr(client, "initialize_response", {}).get("result", {}).get("capabilities", {})
+    T("initialize advertises resources subscribe", getattr(client, "initialize_response", None),
+      lambda _: init_caps.get("resources", {}).get("subscribe") is True)
+    T("initialize advertises prompts capability", getattr(client, "initialize_response", None),
+      lambda _: init_caps.get("prompts", {}).get("listChanged") is False)
 
     r = list_tools(client)
     tools = r.get("result", {}).get("tools", []) if r else []
@@ -871,6 +888,30 @@ def main():
                  "logic_edit", "logic_navigate", "logic_project", "logic_system",
                  "logic_audio", "logic_plugins"]:
         T(f"  tool '{name}' present", r, lambda _, n=name: n in tool_names)
+    T("tools/list advertises outputSchema for every tool", r,
+      lambda _: len(tools) == 10 and all(isinstance(t.get("outputSchema"), dict) for t in tools))
+
+    r = call_tool(client, "logic_system", "health")
+    health_text = tool_text(r)
+    health_json = safe_json(health_text)
+    T("tools/call includes structuredContent for JSON object text", r,
+      lambda _: isinstance(r.get("result", {}).get("structuredContent"), dict)
+      and r.get("result", {}).get("structuredContent") == health_json)
+
+    r = list_prompts(client)
+    prompts = r.get("result", {}).get("prompts", []) if r else []
+    T("prompts/list returns workflow prompts", r,
+      lambda _: any(p.get("name") == "logic.workflow.readiness.project" for p in prompts))
+    if prompts:
+        prompt_name = prompts[0].get("name")
+        r = get_prompt(client, prompt_name)
+        prompt_messages = r.get("result", {}).get("messages", []) if r else []
+        prompt_text = prompt_messages[0].get("content", {}).get("text", "") if prompt_messages else ""
+        prompt_json = safe_json(prompt_text)
+        T("prompts/get returns workflow JSON", r,
+          lambda _: isinstance(prompt_json, dict) and prompt_json.get("id") == prompt_name)
+    else:
+        T("prompts/get returns workflow JSON", r, lambda _: False)
 
     r = list_resources(client)
     resources = r.get("result", {}).get("resources", []) if r else []

@@ -26,16 +26,16 @@ struct ServerCompositionSnapshot: Sendable, Equatable {
 
 enum ServerCatalog {
     static let tools: [Tool] = [
-        TransportDispatcher.tool,
-        TrackDispatcher.tool,
-        MixerDispatcher.tool,
-        MIDIDispatcher.tool,
-        EditDispatcher.tool,
-        NavigateDispatcher.tool,
-        ProjectDispatcher.tool,
-        AudioDispatcher.tool,
-        SystemDispatcher.tool,
-        PluginsDispatcher.tool,
+        toolWithOutputSchema(TransportDispatcher.tool, outputSchema: honestContractOutputSchema()),
+        toolWithOutputSchema(TrackDispatcher.tool, outputSchema: honestContractOutputSchema()),
+        toolWithOutputSchema(MixerDispatcher.tool, outputSchema: honestContractOutputSchema()),
+        toolWithOutputSchema(MIDIDispatcher.tool, outputSchema: honestContractOutputSchema()),
+        toolWithOutputSchema(EditDispatcher.tool, outputSchema: honestContractOutputSchema()),
+        toolWithOutputSchema(NavigateDispatcher.tool, outputSchema: honestContractOutputSchema()),
+        toolWithOutputSchema(ProjectDispatcher.tool, outputSchema: honestContractOutputSchema()),
+        toolWithOutputSchema(AudioDispatcher.tool, outputSchema: genericObjectOutputSchema()),
+        toolWithOutputSchema(SystemDispatcher.tool, outputSchema: genericObjectOutputSchema()),
+        toolWithOutputSchema(PluginsDispatcher.tool, outputSchema: honestContractOutputSchema()),
     ]
 
     /// O(1) membership set for the registered tool names — used by the
@@ -234,6 +234,8 @@ actor LogicProServer {
     private let router: ChannelRouter
     private let cache: StateCache
     private let poller: StatePoller
+    private let resourceSubscriptions: ResourceSubscriptionRegistry
+    private let resourceNotifier: ResourceUpdateNotifier
     private let portManager: MIDIPortManager
     private let manualValidationStore: ManualValidationStore
 
@@ -257,18 +259,26 @@ actor LogicProServer {
         runtimeOverrides: LogicProServerRuntimeOverrides? = nil,
         pollerRuntime: StatePoller.Runtime = .production
     ) {
-        self.runtimeOverrides = runtimeOverrides
-        self.server = Server(
+        let server = Server(
             name: ServerConfig.serverName,
             version: ServerConfig.serverVersion,
             capabilities: .init(
-                resources: .init(subscribe: false, listChanged: false),
+                prompts: .init(listChanged: false),
+                resources: .init(subscribe: true, listChanged: false),
                 tools: .init(listChanged: false)
             )
         )
+        let router = ChannelRouter()
+        let cache = StateCache()
+        let resourceSubscriptions = ResourceSubscriptionRegistry()
+        let resourceNotifier = ResourceUpdateNotifier(registry: resourceSubscriptions)
 
-        self.router = ChannelRouter()
-        self.cache = StateCache()
+        self.runtimeOverrides = runtimeOverrides
+        self.server = server
+        self.router = router
+        self.cache = cache
+        self.resourceSubscriptions = resourceSubscriptions
+        self.resourceNotifier = resourceNotifier
         self.portManager = MIDIPortManager()
         self.manualValidationStore = ManualValidationStore()
 
@@ -307,7 +317,20 @@ actor LogicProServer {
             approvalStore: manualValidationStore
         )
 
-        self.poller = StatePoller(axChannel: axChannel, cache: cache, runtime: pollerRuntime)
+        self.poller = StatePoller(
+            axChannel: axChannel,
+            cache: cache,
+            runtime: pollerRuntime,
+            postPoll: { cacheKeys in
+                await resourceNotifier.publishChangedResources(
+                    cacheKeys: cacheKeys,
+                    cache: cache,
+                    router: router
+                ) { uri in
+                    try await server.notify(ResourceUpdatedNotification.message(.init(uri: uri)))
+                }
+            }
+        )
     }
 
     enum StartupError: Error, CustomStringConvertible {
@@ -843,6 +866,7 @@ actor LogicProServer {
 
     private func registerResources() async {
         let handlers = makeHandlers()
+        let subscriptions = self.resourceSubscriptions
         await server.withMethodHandler(ListResources.self) { params in
             if let error = Self.invalidCursorError(params.cursor, method: "resources/list") { throw error }
             return await handlers.listResources(params)
@@ -855,6 +879,27 @@ actor LogicProServer {
         await server.withMethodHandler(ListResourceTemplates.self) { params in
             if let error = Self.invalidCursorError(params.cursor, method: "resources/templates/list") { throw error }
             return await handlers.listResourceTemplates(params)
+        }
+
+        await server.withMethodHandler(ResourceSubscribe.self) { params in
+            try await subscriptions.subscribe(uri: params.uri)
+            return Empty()
+        }
+
+        await server.withMethodHandler(ResourceUnsubscribe.self) { params in
+            try await subscriptions.unsubscribe(uri: params.uri)
+            return Empty()
+        }
+    }
+
+    private func registerPrompts() async {
+        await server.withMethodHandler(ListPrompts.self) { params in
+            if let error = Self.invalidCursorError(params.cursor, method: "prompts/list") { throw error }
+            return WorkflowPromptProvider.list()
+        }
+
+        await server.withMethodHandler(GetPrompt.self) { params in
+            try WorkflowPromptProvider.get(name: params.name)
         }
     }
 
@@ -895,6 +940,35 @@ actor LogicProServer {
             await stopPorts()
         } else {
             await portManager.stop()
+        }
+        await resourceSubscriptions.clear()
+        await resourceNotifier.reset()
+    }
+
+    func startProtocolProbe(transport: any Transport) async throws {
+        await registerTools()
+        await registerResources()
+        await registerPrompts()
+        try await server.start(transport: transport)
+    }
+
+    func stopProtocolProbe() async {
+        await server.stop()
+        await resourceSubscriptions.clear()
+        await resourceNotifier.reset()
+    }
+
+    func replaceTracksForTesting(_ tracks: [TrackState]) async {
+        await cache.updateTracks(tracks)
+    }
+
+    func publishResourceChangesForTesting(_ cacheKeys: [ResourceCacheKey]) async {
+        await resourceNotifier.publishChangedResources(
+            cacheKeys: cacheKeys,
+            cache: cache,
+            router: router
+        ) { uri in
+            try await server.notify(ResourceUpdatedNotification.message(.init(uri: uri)))
         }
     }
 
@@ -946,6 +1020,7 @@ actor LogicProServer {
                 } else {
                     await self.registerTools()
                     await self.registerResources()
+                    await self.registerPrompts()
                 }
             },
             serve: {
@@ -968,6 +1043,8 @@ actor LogicProServer {
                 } else {
                     await poller.stopImmediately()
                 }
+                await self.resourceSubscriptions.clear()
+                await self.resourceNotifier.reset()
             },
             stopChannels: {
                 if let stopChannels = self.runtimeOverrides?.stopChannels {
