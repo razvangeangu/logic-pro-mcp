@@ -238,56 +238,76 @@ struct TrackDispatcher {
             // of a structured success payload. Partial-disarm visibility still
             // available in the error detail.
             guard armResult.isSuccess else {
+                let extras = armOnlyExtras(
+                    targetIndex: index,
+                    armResult: armResult,
+                    armedSuccess: false,
+                    verified: false,
+                    disarmed: disarmed,
+                    unverifiedDisarm: unverifiedDisarm,
+                    failedDisarm: failedDisarm
+                )
                 return toolStateCResult(
                     .axWriteFailed,
                     hint: "arm_only failed: target arm rejected — \(armResult.message)",
-                    extras: [
-                        "operation": "track.arm_only",
-                        "requested_index": index,
-                        "disarmed": disarmed,
-                        "failed_disarm": failedDisarm,
-                    ]
+                    extras: extras
                 )
             }
             if !trackToggleResultIsVerified(armResult) {
-                return toolTextResult(
-                    armOnlyResponse(
-                        targetIndex: index,
-                        armResult: armResult,
-                        armedSuccess: false,
-                        verified: false,
-                        disarmed: disarmed,
-                        unverifiedDisarm: unverifiedDisarm,
-                        failedDisarm: failedDisarm
-                    ),
-                    isError: true
-                )
-            }
-            // Report partial disarm failures explicitly — the target arm
-            // succeeded, but some other tracks may still be armed.
-            if !failedDisarm.isEmpty || !unverifiedDisarm.isEmpty {
-                return toolTextResult(
-                    armOnlyResponse(
-                        targetIndex: index,
-                        armResult: armResult,
-                        armedSuccess: false,
-                        verified: false,
-                        disarmed: disarmed,
-                        unverifiedDisarm: unverifiedDisarm,
-                        failedDisarm: failedDisarm
-                    ),
-                    isError: true
-                )
-            }
-            return toolTextResult(.success(
-                armOnlyResponse(
+                let extras = armOnlyExtras(
                     targetIndex: index,
                     armResult: armResult,
-                    armedSuccess: true,
-                    verified: true,
+                    armedSuccess: false,
+                    verified: false,
                     disarmed: disarmed,
-                    unverifiedDisarm: [],
-                    failedDisarm: []
+                    unverifiedDisarm: unverifiedDisarm,
+                    failedDisarm: failedDisarm
+                )
+                return toolTextResult(.success(
+                    HonestContract.encodeStateB(reason: armOnlyUncertainReason(from: armResult), extras: extras)
+                ))
+            }
+            if !failedDisarm.isEmpty {
+                let extras = armOnlyExtras(
+                    targetIndex: index,
+                    armResult: armResult,
+                    armedSuccess: false,
+                    verified: false,
+                    disarmed: disarmed,
+                    unverifiedDisarm: unverifiedDisarm,
+                    failedDisarm: failedDisarm
+                )
+                return toolStateCResult(
+                    .axWriteFailed,
+                    hint: "arm_only failed: disarm rejected",
+                    extras: extras
+                )
+            }
+            if !unverifiedDisarm.isEmpty {
+                let extras = armOnlyExtras(
+                    targetIndex: index,
+                    armResult: armResult,
+                    armedSuccess: false,
+                    verified: false,
+                    disarmed: disarmed,
+                    unverifiedDisarm: unverifiedDisarm,
+                    failedDisarm: failedDisarm
+                )
+                return toolTextResult(.success(
+                    HonestContract.encodeStateB(reason: .readbackUnavailable, extras: extras)
+                ))
+            }
+            return toolTextResult(.success(
+                HonestContract.encodeStateA(
+                    extras: armOnlyExtras(
+                        targetIndex: index,
+                        armResult: armResult,
+                        armedSuccess: true,
+                        verified: true,
+                        disarmed: disarmed,
+                        unverifiedDisarm: [],
+                        failedDisarm: []
+                    )
                 )
             ))
 
@@ -521,7 +541,14 @@ struct TrackDispatcher {
         return json
     }
 
-    private static func armOnlyResponse(
+    private static func armOnlyUncertainReason(from result: ChannelResult) -> HonestContract.UncertainReason {
+        guard let reason = trackArmEnvelope(result)?["reason"] as? String else {
+            return .readbackUnavailable
+        }
+        return reason == "readback_mismatch" ? .readbackMismatch : .readbackUnavailable
+    }
+
+    private static func armOnlyExtras(
         targetIndex: Int,
         armResult: ChannelResult,
         armedSuccess: Bool,
@@ -529,8 +556,9 @@ struct TrackDispatcher {
         disarmed: [Int],
         unverifiedDisarm: [Int],
         failedDisarm: [Int]
-    ) -> String {
+    ) -> [String: Any] {
         var response: [String: Any] = [
+            "operation": "track.arm_only",
             "armed": targetIndex,
             "target_track": targetIndex,
             "armedSuccess": armedSuccess,
@@ -564,7 +592,7 @@ struct TrackDispatcher {
                 response["write_source"] = writeSource
             }
         }
-        return HonestContract.jsonString(response)
+        return response
     }
 
 }

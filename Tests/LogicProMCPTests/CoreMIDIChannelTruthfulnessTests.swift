@@ -159,6 +159,114 @@ actor MockVirtualPortManager: VirtualPortManaging {
     }
 }
 
+private func coreMIDIHCObject(_ result: ChannelResult) throws -> [String: Any] {
+    try #require(sharedJSONObject(result.message))
+}
+
+private func expectCoreMIDIStateB(
+    _ result: ChannelResult,
+    operation: String,
+    legacyMessage: String
+) throws -> [String: Any] {
+    #expect(result.isSuccess)
+    let object = try coreMIDIHCObject(result)
+    let success = try #require(object["success"] as? Bool)
+    let verified = try #require(object["verified"] as? Bool)
+    #expect(success)
+    #expect(!verified)
+    #expect(object["state"] as? String == "B")
+    #expect(object["reason"] as? String == "send_only_no_readback")
+    #expect(object["operation"] as? String == operation)
+    #expect(object["legacy_message"] as? String == legacyMessage)
+    return object
+}
+
+@Test func coreMIDI_sendNote_success_returns_stateB_envelope() async throws {
+    let channel = CoreMIDIChannel(engine: MockCoreMIDIEngine())
+
+    let result = await channel.execute(
+        operation: "midi.send_note",
+        params: ["note": "60", "channel": "2", "velocity": "90", "duration_ms": "1"]
+    )
+
+    _ = try expectCoreMIDIStateB(
+        result,
+        operation: "midi.send_note",
+        legacyMessage: "Note 60 on ch 2 vel 90 dur 1ms"
+    )
+}
+
+@Test func coreMIDI_sendOnly_successes_return_stateB_envelopes() async throws {
+    let channel = CoreMIDIChannel(engine: MockCoreMIDIEngine())
+    let cases: [(operation: String, params: [String: String], legacyMessage: String)] = [
+        ("transport.play", [:], "MMC play sent"),
+        ("transport.stop", [:], "MMC stop sent"),
+        ("transport.pause", [:], "MMC pause sent"),
+        ("transport.record_strobe", [:], "MMC record strobe sent"),
+        ("transport.record_exit", [:], "MMC record exit sent"),
+        ("transport.fast_forward", [:], "MMC fast forward sent"),
+        ("transport.rewind", [:], "MMC rewind sent"),
+        (
+            "transport.locate",
+            ["hours": "1", "minutes": "2", "seconds": "3", "frames": "4", "subframes": "5"],
+            "MMC locate sent to 1:2:3:4.5"
+        ),
+        ("midi.note_on", ["note": "61", "channel": "1", "velocity": "91"], "Note on 61 ch 1 vel 91"),
+        ("midi.note_off", ["note": "61", "channel": "1"], "Note off 61 ch 1"),
+        ("midi.send_cc", ["controller": "74", "value": "80", "channel": "3"], "CC 74=80 on ch 3"),
+        ("midi.send_program_change", ["program": "11", "channel": "5"], "Program change 11 on ch 5"),
+        ("midi.send_pitch_bend", ["value": "0", "channel": "6"], "Pitch bend 0 on ch 6"),
+        ("midi.send_aftertouch", ["value": "71", "channel": "9"], "Aftertouch 71 on ch 9"),
+        ("midi.send_sysex", ["bytes": "F0 7F 7F 06 02 F7"], "SysEx sent (6 bytes)"),
+        ("midi.send_chord", ["notes": "60,64,67", "velocity": "88", "channel": "3", "duration_ms": "1"], "Chord sent: 3 notes"),
+        ("midi.play_sequence", ["notes": "60,0,1,100,1"], "Sequence sent: 1 events"),
+        ("midi.step_input", ["note": "62", "duration": "1"], "Step input: note 62, duration 1ms"),
+        ("transport.record", [:], "MMC record strobe"),
+        ("mmc.play", [:], "MMC play"),
+        ("mmc.stop", [:], "MMC stop"),
+        ("mmc.record_strobe", [:], "MMC record strobe"),
+        ("mmc.record_exit", [:], "MMC record exit"),
+        ("mmc.locate", ["time": "06:07:08:09"], "MMC locate sent to 06:07:08:09"),
+        ("mmc.pause", [:], "MMC pause"),
+    ]
+
+    for testCase in cases {
+        let result = await channel.execute(operation: testCase.operation, params: testCase.params)
+        _ = try expectCoreMIDIStateB(
+            result,
+            operation: testCase.operation,
+            legacyMessage: testCase.legacyMessage
+        )
+    }
+}
+
+@Test func stateB_extras_preserve_legacy_info() async throws {
+    let manager = MockVirtualPortManager()
+    let channel = CoreMIDIChannel(engine: MockCoreMIDIEngine(), portManager: manager)
+
+    let sysex = await channel.execute(
+        operation: "midi.send_sysex",
+        params: ["bytes": "F0 7F 7F 06 02 F7"]
+    )
+    let sysexObject = try expectCoreMIDIStateB(
+        sysex,
+        operation: "midi.send_sysex",
+        legacyMessage: "SysEx sent (6 bytes)"
+    )
+    #expect(sysexObject["byte_count"] as? Int == 6)
+
+    let port = await channel.execute(
+        operation: "midi.create_virtual_port",
+        params: ["name": "Session-Port"]
+    )
+    let portObject = try expectCoreMIDIStateB(
+        port,
+        operation: "midi.create_virtual_port",
+        legacyMessage: "Virtual port 'Session-Port' ready"
+    )
+    #expect(portObject["port_name"] as? String == "Session-Port")
+}
+
 @Test func testCoreMIDIChannelMMCLocateSendsSysExForTimecode() async {
     let engine = MockCoreMIDIEngine()
     let channel = CoreMIDIChannel(engine: engine)

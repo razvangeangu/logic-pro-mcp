@@ -515,6 +515,19 @@ def verified_or_readback_mismatch(resp):
     )
 
 
+def logic_midi_state_b(resp):
+    payload = tool_json(resp)
+    return (
+        isinstance(resp, dict)
+        and not is_error(resp)
+        and isinstance(payload, dict)
+        and payload.get("success") is True
+        and payload.get("verified") is False
+        and payload.get("state") == "B"
+        and payload.get("reason") == "send_only_no_readback"
+    )
+
+
 def read_tracks_data(client):
     envelope = safe_json(resource_text(read_resource(client, "logic://tracks")))
     if not isinstance(envelope, dict):
@@ -2016,7 +2029,7 @@ def main():
             ready=midi_live_execute_ready,
             reason=midi_live_execute_reason,
         )
-        T_LIVE(f"midi.send_note({note}) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+        T_LIVE(f"midi.send_note({note}) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Velocity range
     for vel in [1, 64, 127]:
@@ -2027,7 +2040,7 @@ def main():
             ready=midi_live_execute_ready,
             reason=midi_live_execute_reason,
         )
-        T_LIVE(f"midi.send_note vel={vel} succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+        T_LIVE(f"midi.send_note vel={vel} returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Channel range
     for ch in [1, 8, 16]:
@@ -2038,7 +2051,7 @@ def main():
             ready=midi_live_execute_ready,
             reason=midi_live_execute_reason,
         )
-        T_LIVE(f"midi.send_note ch={ch} succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+        T_LIVE(f"midi.send_note ch={ch} returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Chord
     r = guarded_live_midi_call(
@@ -2048,7 +2061,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.send_chord C major succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.send_chord C major returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     r = guarded_live_midi_call(
         client,
@@ -2057,7 +2070,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.send_chord Cm7 succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.send_chord Cm7 returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # CC range
     for cc in [1, 7, 10, 11, 64, 120, 123]:
@@ -2068,7 +2081,7 @@ def main():
             ready=midi_live_execute_ready,
             reason=midi_live_execute_reason,
         )
-        T_LIVE(f"midi.send_cc({cc}) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+        T_LIVE(f"midi.send_cc({cc}) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Program change
     r = guarded_live_midi_call(
@@ -2078,7 +2091,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.send_program_change(0) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.send_program_change(0) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     r = guarded_live_midi_call(
         client,
@@ -2087,7 +2100,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.send_program_change(127) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.send_program_change(127) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Pitch bend
     r = guarded_live_midi_call(
@@ -2097,7 +2110,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.send_pitch_bend(center) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.send_pitch_bend(center) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     r = guarded_live_midi_call(
         client,
@@ -2106,7 +2119,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.send_pitch_bend(max) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.send_pitch_bend(max) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Aftertouch
     r = guarded_live_midi_call(
@@ -2116,7 +2129,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.send_aftertouch succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.send_aftertouch returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # MMC
     r = guarded_live_midi_call(
@@ -2125,7 +2138,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.mmc_play succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.mmc_play returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
     guarded_live_midi_call(
         client,
         "mmc_stop",
@@ -2139,7 +2152,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.mmc_stop succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.mmc_stop returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     r = guarded_live_midi_call(
         client,
@@ -2164,7 +2177,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.step_input(1/4) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.step_input(1/4) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     r = guarded_live_midi_call(
         client,
@@ -2173,7 +2186,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.step_input(1/8) succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.step_input(1/8) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # Duration cap (our P2 fix)
     r = guarded_live_midi_call(
@@ -2183,7 +2196,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("midi.send_note small duration succeeds", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("midi.send_note small duration returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # ═══════════════════════════════════════════════════════════════
     # §7 Edit Commands (14 tests)
@@ -2512,7 +2525,7 @@ def main():
             ready=midi_live_execute_ready,
             reason=midi_live_execute_reason,
         )
-        if r and not is_error(r):
+        if logic_midi_state_b(r):
             rapid_ok += 1
     T_LIVE(
         f"20 rapid MIDI notes: {rapid_ok}/20 ok",
@@ -2680,19 +2693,19 @@ def main():
         reason=midi_live_execute_reason,
     )
     T_LIVE(
-        "midi.send_note short duration ok",
+        "midi.send_note short duration returns State B",
         r,
-        lambda _: r is not None and not is_error(r),
+        lambda _: logic_midi_state_b(r),
         midi_live_execute_ready,
         midi_live_execute_reason,
     )
 
     # MIDI port name edge case
     r = call_tool(client, "logic_midi", "create_virtual_port", {"name": "a" * 200})
-    T("midi.create_virtual_port long name handled", r, lambda _: r is not None)
+    T("midi.create_virtual_port long name returns State B", r, lambda _: logic_midi_state_b(r))
 
     r = call_tool(client, "logic_midi", "create_virtual_port", {"name": "evil\nport"})
-    T("midi.create_virtual_port newline sanitized", r, lambda _: r is not None)
+    T("midi.create_virtual_port newline sanitized returns State B", r, lambda _: logic_midi_state_b(r))
 
     # ═══════════════════════════════════════════════════════════════
     # §16 Routing Fallback Behavior (5 tests)
@@ -2747,7 +2760,7 @@ def main():
         ready=midi_live_execute_ready,
         reason=midi_live_execute_reason,
     )
-    T_LIVE("send chord (4 notes) completes", r, lambda _: not is_error(r), midi_live_execute_ready, midi_live_execute_reason)
+    T_LIVE("send chord (4 notes) returns State B", r, lambda _: logic_midi_state_b(r), midi_live_execute_ready, midi_live_execute_reason)
 
     # ═══════════════════════════════════════════════════════════════
     # §17b Fresh Record Modal Guard (7 tests)
@@ -2871,7 +2884,7 @@ def main():
         and midi_record_pass is not None
         and stop_after_record is not None
         and not is_error(record_resp)
-        and not is_error(midi_record_pass)
+        and logic_midi_state_b(midi_record_pass)
         and not is_error(stop_after_record),
         fresh_record_execute_ready,
         fresh_record_execute_reason,
@@ -2953,7 +2966,7 @@ def main():
     T_LIVE(
         f"MIDI CC send < 0.5s ({elapsed:.3f}s)",
         r,
-        lambda _: elapsed < 0.5 and not is_error(r),
+        lambda _: elapsed < 0.5 and logic_midi_state_b(r),
         midi_live_execute_ready,
         midi_live_execute_reason,
     )

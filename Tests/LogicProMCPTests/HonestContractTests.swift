@@ -13,6 +13,7 @@ import Testing
     ) as! [String: Any]
     #expect((obj["success"] as? Bool)!)
     #expect((obj["verified"] as? Bool)!)
+    #expect(obj["state"] as? String == "A")
     #expect(obj["requested"] as? String == "Piano")
     #expect(obj["observed"] as? String == "Piano")
     #expect(obj["reason"] == nil, "State A must not carry reason")
@@ -29,6 +30,7 @@ import Testing
     ) as! [String: Any]
     #expect((obj["success"] as? Bool)!)
     #expect(!((obj["verified"] as? Bool)!))
+    #expect(obj["state"] as? String == "B")
     #expect(obj["reason"] as? String == "echo_timeout_500ms")
     #expect(obj["error"] == nil, "State B must not carry error")
 }
@@ -60,6 +62,7 @@ import Testing
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
     #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "ax_write_failed")
     #expect(obj["axCode"] as? Int == -25212)
     #expect(obj["hint"] as? String == "permission?")
@@ -73,6 +76,7 @@ import Testing
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
     #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "element_not_found")
     #expect(obj["axCode"] == nil)
     #expect(obj["hint"] == nil)
@@ -87,6 +91,7 @@ import Testing
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
     #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "readback_unavailable")
     #expect(obj["hint"] as? String == "write executed but could not be verified")
 }

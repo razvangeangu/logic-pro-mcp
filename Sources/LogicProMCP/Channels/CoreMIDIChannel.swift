@@ -113,6 +113,24 @@ actor CoreMIDIChannel: Channel {
         return .success(bytes)
     }
 
+    private static func sendOnlySuccess(
+        operation: String,
+        legacyMessage: String,
+        extras: [String: Any] = [:]
+    ) -> ChannelResult {
+        var merged: [String: Any] = [
+            "operation": operation,
+            "legacy_message": legacyMessage,
+        ]
+        for (key, value) in extras {
+            merged[key] = value
+        }
+        return .success(HonestContract.encodeStateB(
+            reason: .sendOnlyNoReadback,
+            extras: merged
+        ))
+    }
+
     func execute(operation: String, params: [String: String]) async -> ChannelResult {
         // Guard: refuse work when CoreMIDI client / virtual source not active.
         // Without this, every send returns .success even though no MIDI is
@@ -129,32 +147,67 @@ actor CoreMIDIChannel: Channel {
         // MARK: - Transport (MMC)
 
         case "transport.play":
-            try await engine.sendSysEx(MMCCommands.play())
-            return .success("MMC play sent")
+            let bytes = MMCCommands.play()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC play sent",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "transport.stop":
-            try await engine.sendSysEx(MMCCommands.stop())
-            return .success("MMC stop sent")
+            let bytes = MMCCommands.stop()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC stop sent",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "transport.pause":
-            try await engine.sendSysEx(MMCCommands.pause())
-            return .success("MMC pause sent")
+            let bytes = MMCCommands.pause()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC pause sent",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "transport.record_strobe":
-            try await engine.sendSysEx(MMCCommands.recordStrobe())
-            return .success("MMC record strobe sent")
+            let bytes = MMCCommands.recordStrobe()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC record strobe sent",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "transport.record_exit":
-            try await engine.sendSysEx(MMCCommands.recordExit())
-            return .success("MMC record exit sent")
+            let bytes = MMCCommands.recordExit()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC record exit sent",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "transport.fast_forward":
-            try await engine.sendSysEx(MMCCommands.fastForward())
-            return .success("MMC fast forward sent")
+            let bytes = MMCCommands.fastForward()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC fast forward sent",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "transport.rewind":
-            try await engine.sendSysEx(MMCCommands.rewind())
-            return .success("MMC rewind sent")
+            let bytes = MMCCommands.rewind()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC rewind sent",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "transport.locate":
             guard let h = params["hours"].flatMap(UInt8.init),
@@ -164,8 +217,16 @@ actor CoreMIDIChannel: Channel {
                 return .error("locate requires hours, minutes, seconds, frames")
             }
             let sf = params["subframes"].flatMap(UInt8.init) ?? 0
-            try await engine.sendSysEx(MMCCommands.locate(hours: h, minutes: m, seconds: s, frames: f, subframes: sf))
-            return .success("MMC locate sent to \(h):\(m):\(s):\(f).\(sf)")
+            let bytes = MMCCommands.locate(hours: h, minutes: m, seconds: s, frames: f, subframes: sf)
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC locate sent to \(h):\(m):\(s):\(f).\(sf)",
+                extras: [
+                    "byte_count": bytes.count,
+                    "time": "\(h):\(m):\(s):\(f).\(sf)",
+                ]
+            )
 
         // MARK: - Note Send
 
@@ -199,7 +260,17 @@ actor CoreMIDIChannel: Channel {
                 await bestEffortCoreMIDINoteOffs([note], channel: channel)
                 throw error
             }
-            return .success("Note \(note) on ch \(channel) vel \(velocity) dur \(durationMs)ms")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Note \(note) on ch \(channel) vel \(velocity) dur \(durationMs)ms",
+                extras: [
+                    "note": Int(note),
+                    "velocity": Int(velocity),
+                    "channel_wire": Int(channel),
+                    "duration_ms": Int(durationMs),
+                    "message_count": 2,
+                ]
+            )
 
         case "midi.note_on":
             guard let note = Self.midiData7(params["note"]) else {
@@ -216,7 +287,16 @@ actor CoreMIDIChannel: Channel {
             case .failure(let failure): return .error(failure.message)
             }
             try await engine.sendNoteOn(channel: channel, note: note, velocity: velocity)
-            return .success("Note on \(note) ch \(channel) vel \(velocity)")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Note on \(note) ch \(channel) vel \(velocity)",
+                extras: [
+                    "note": Int(note),
+                    "velocity": Int(velocity),
+                    "channel_wire": Int(channel),
+                    "message_count": 1,
+                ]
+            )
 
         case "midi.note_off":
             guard let note = Self.midiData7(params["note"]) else {
@@ -228,7 +308,16 @@ actor CoreMIDIChannel: Channel {
             case .failure(let failure): return .error(failure.message)
             }
             try await engine.sendNoteOff(channel: channel, note: note, velocity: 0)
-            return .success("Note off \(note) ch \(channel)")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Note off \(note) ch \(channel)",
+                extras: [
+                    "note": Int(note),
+                    "velocity": 0,
+                    "channel_wire": Int(channel),
+                    "message_count": 1,
+                ]
+            )
 
         // MARK: - CC
 
@@ -245,7 +334,16 @@ actor CoreMIDIChannel: Channel {
             case .failure(let failure): return .error(failure.message)
             }
             try await engine.sendCC(channel: channel, controller: controller, value: value)
-            return .success("CC \(controller)=\(value) on ch \(channel)")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "CC \(controller)=\(value) on ch \(channel)",
+                extras: [
+                    "controller": Int(controller),
+                    "value": Int(value),
+                    "channel_wire": Int(channel),
+                    "message_count": 1,
+                ]
+            )
 
         // MARK: - Program Change
 
@@ -259,7 +357,15 @@ actor CoreMIDIChannel: Channel {
             case .failure(let failure): return .error(failure.message)
             }
             try await engine.sendProgramChange(channel: channel, program: program)
-            return .success("Program change \(program) on ch \(channel)")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Program change \(program) on ch \(channel)",
+                extras: [
+                    "program": Int(program),
+                    "channel_wire": Int(channel),
+                    "message_count": 1,
+                ]
+            )
 
         // MARK: - Pitch Bend
 
@@ -275,7 +381,15 @@ actor CoreMIDIChannel: Channel {
             case .failure(let failure): return .error(failure.message)
             }
             try await engine.sendPitchBend(channel: channel, value: value)
-            return .success("Pitch bend \(value) on ch \(channel)")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Pitch bend \(value) on ch \(channel)",
+                extras: [
+                    "value": Int(value),
+                    "channel_wire": Int(channel),
+                    "message_count": 1,
+                ]
+            )
 
         // MARK: - Aftertouch
 
@@ -289,7 +403,15 @@ actor CoreMIDIChannel: Channel {
             case .failure(let failure): return .error(failure.message)
             }
             try await engine.sendAftertouch(channel: channel, pressure: pressure)
-            return .success("Aftertouch \(pressure) on ch \(channel)")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Aftertouch \(pressure) on ch \(channel)",
+                extras: [
+                    "pressure": Int(pressure),
+                    "channel_wire": Int(channel),
+                    "message_count": 1,
+                ]
+            )
 
         // MARK: - Raw SysEx
 
@@ -318,7 +440,11 @@ actor CoreMIDIChannel: Channel {
                 return .error("SysEx body bytes must be 0x00-0x7F; only first F0 and final F7 may be status bytes")
             }
             try await engine.sendSysEx(bytes)
-            return .success("SysEx sent (\(bytes.count) bytes)")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "SysEx sent (\(bytes.count) bytes)",
+                extras: ["byte_count": bytes.count]
+            )
 
         // Aliases for router operation keys
         case "midi.send_chord":
@@ -351,7 +477,17 @@ actor CoreMIDIChannel: Channel {
             }
             try? await Task.sleep(nanoseconds: durMs * 1_000_000)
             try await sendCoreMIDINoteOffs(notes, channel: ch)
-            return .success("Chord sent: \(notes.count) notes")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Chord sent: \(notes.count) notes",
+                extras: [
+                    "note_count": notes.count,
+                    "velocity": Int(vel),
+                    "channel_wire": Int(ch),
+                    "duration_ms": Int(durMs),
+                    "message_count": notes.count * 2,
+                ]
+            )
 
         case "midi.play_sequence":
             // Tight-rhythm sequencer: parse `notes` as semicolon-separated
@@ -412,7 +548,14 @@ actor CoreMIDIChannel: Channel {
                 }
             }
             try await waitForCoreMIDINoteOffTasks(noteOffTasks)
-            return .success("Sequence sent: \(events.count) events")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Sequence sent: \(events.count) events",
+                extras: [
+                    "event_count": events.count,
+                    "message_count": events.count * 2,
+                ]
+            )
 
         case "midi.step_input":
             guard let note = Self.midiData7(params["note"]) else {
@@ -433,7 +576,17 @@ actor CoreMIDIChannel: Channel {
                 await bestEffortCoreMIDINoteOffs([note], channel: 0)
                 throw error
             }
-            return .success("Step input: note \(note), duration \(durationMs)ms")
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "Step input: note \(note), duration \(durationMs)ms",
+                extras: [
+                    "note": Int(note),
+                    "velocity": Int(vel),
+                    "channel_wire": 0,
+                    "duration_ms": durationMs,
+                    "message_count": 2,
+                ]
+            )
 
         case "midi.list_ports":
             return .success(listMIDIPortsJSON())
@@ -447,7 +600,11 @@ actor CoreMIDIChannel: Channel {
                 .prefix(63))
             do {
                 _ = try await portManager.createSendOnlyPort(name: name)
-                return .success("Virtual port '\(name)' ready")
+                return Self.sendOnlySuccess(
+                    operation: operation,
+                    legacyMessage: "Virtual port '\(name)' ready",
+                    extras: ["port_name": name]
+                )
             } catch {
                 return .error("Failed to create virtual port '\(name)': \(error)")
             }
@@ -456,27 +613,52 @@ actor CoreMIDIChannel: Channel {
             return .success("{\"active\":true}")
 
         case "transport.record":
-            try await engine.sendSysEx(MMCCommands.recordStrobe())
-            return .success("MMC record strobe")
+            let bytes = MMCCommands.recordStrobe()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC record strobe",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "transport.goto_position":
             return .error("CoreMIDI cannot position the playhead directly; use MCU or CGEvent fallback")
 
         case "mmc.play":
-            try await engine.sendSysEx(MMCCommands.play())
-            return .success("MMC play")
+            let bytes = MMCCommands.play()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC play",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "mmc.stop":
-            try await engine.sendSysEx(MMCCommands.stop())
-            return .success("MMC stop")
+            let bytes = MMCCommands.stop()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC stop",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "mmc.record_strobe":
-            try await engine.sendSysEx(MMCCommands.recordStrobe())
-            return .success("MMC record strobe")
+            let bytes = MMCCommands.recordStrobe()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC record strobe",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "mmc.record_exit":
-            try await engine.sendSysEx(MMCCommands.recordExit())
-            return .success("MMC record exit")
+            let bytes = MMCCommands.recordExit()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC record exit",
+                extras: ["byte_count": bytes.count]
+            )
 
         case "mmc.locate":
             guard
@@ -485,19 +667,30 @@ actor CoreMIDIChannel: Channel {
             else {
                 return .error("MMC locate requires time in HH:MM:SS:FF")
             }
-            try await engine.sendSysEx(
-                MMCCommands.locate(
-                    hours: components.hours,
-                    minutes: components.minutes,
-                    seconds: components.seconds,
-                    frames: components.frames
-                )
+            let bytes = MMCCommands.locate(
+                hours: components.hours,
+                minutes: components.minutes,
+                seconds: components.seconds,
+                frames: components.frames
             )
-            return .success("MMC locate sent to \(time)")
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC locate sent to \(time)",
+                extras: [
+                    "byte_count": bytes.count,
+                    "time": time,
+                ]
+            )
 
         case "mmc.pause":
-            try await engine.sendSysEx(MMCCommands.pause())
-            return .success("MMC pause")
+            let bytes = MMCCommands.pause()
+            try await engine.sendSysEx(bytes)
+            return Self.sendOnlySuccess(
+                operation: operation,
+                legacyMessage: "MMC pause",
+                extras: ["byte_count": bytes.count]
+            )
 
         default:
             return .error("Unknown CoreMIDI operation: \(operation)")

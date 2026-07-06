@@ -8,7 +8,7 @@ import Testing
 // composing MIDI wire bytes locally and pushing them through the KeyCmd
 // virtual transport (no CoreMIDI engine). Because Logic's KeyCmd port is
 // send-only and gives us no echo, every success is encoded as Honest
-// Contract State B `readback_unavailable`.
+// Contract State B `send_only_no_readback`.
 //
 // Conventions (per ticket §3.3 + Phase 4 Loop 1 review):
 // • The `channel` param arriving here is the wire byte (0..15). The dispatcher
@@ -47,11 +47,13 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     #expect(result.isSuccess)
     let sent = await transport.sentBytes
     #expect(sent.count == 1)
-    let envelope = decodeEnvelope(result.message)
-    #expect((envelope?["success"] as? Bool)!)
-    #expect(!((envelope?["verified"] as? Bool)!))
-    #expect(envelope?["reason"] as? String == "readback_unavailable")
-    #expect(envelope?["via"] as? String == "midi-keycmd-direct-send")
+    let envelope = try #require(decodeEnvelope(result.message))
+    let success = try #require(envelope["success"] as? Bool)
+    let verified = try #require(envelope["verified"] as? Bool)
+    #expect(success)
+    #expect(!verified)
+    #expect(envelope["reason"] as? String == "send_only_no_readback")
+    #expect(envelope["via"] as? String == "midi-keycmd-direct-send")
 }
 
 @Test func testKeycmdSendCCWireBytesCorrect() async throws {
@@ -105,11 +107,13 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     ])
 
     #expect(!result.isSuccess)
-    let envelope = decodeEnvelope(result.message)
-    #expect(envelope?["error"] as? String == "ax_write_failed")
-    #expect(envelope?["operation"] as? String == "midi.send_note.keycmd")
-    #expect((envelope?["note_off_failed"] as? Bool)!)
-    #expect((envelope?["note_on_sent"] as? Bool)!)
+    let envelope = try #require(decodeEnvelope(result.message))
+    #expect(envelope["error"] as? String == "ax_write_failed")
+    #expect(envelope["operation"] as? String == "midi.send_note.keycmd")
+    let noteOffFailed = try #require(envelope["note_off_failed"] as? Bool)
+    let noteOnSent = try #require(envelope["note_on_sent"] as? Bool)
+    #expect(noteOffFailed)
+    #expect(noteOnSent)
     // Note-on (attempt 1) succeeded; the reliable note-off (attempt 2) failed and
     // is reported as note_off_failed; the best-effort retry note-off (attempt 3)
     // then succeeds and is recorded, so the note is still silenced.
@@ -208,7 +212,7 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     #expect(noteOnCount == 3)
 
     let envelope = decodeEnvelope(result.message)
-    #expect(envelope?["reason"] as? String == "readback_unavailable")
+    #expect(envelope?["reason"] as? String == "send_only_no_readback")
     #expect(envelope?["via"] as? String == "midi-keycmd-direct-send")
     #expect(envelope?["note_count"] as? Int == 3)
 }
@@ -222,12 +226,13 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     ])
 
     #expect(!result.isSuccess)
-    let envelope = decodeEnvelope(result.message)
-    #expect(envelope?["error"] as? String == "ax_write_failed")
-    #expect(envelope?["operation"] as? String == "midi.play_sequence.keycmd")
-    #expect((envelope?["note_off_failed"] as? Bool)!)
-    #expect(envelope?["failed_note_off_count"] as? Int == 1)
-    #expect(envelope?["note_on_count"] as? Int == 1)
+    let envelope = try #require(decodeEnvelope(result.message))
+    #expect(envelope["error"] as? String == "ax_write_failed")
+    #expect(envelope["operation"] as? String == "midi.play_sequence.keycmd")
+    let noteOffFailed = try #require(envelope["note_off_failed"] as? Bool)
+    #expect(noteOffFailed)
+    #expect(envelope["failed_note_off_count"] as? Int == 1)
+    #expect(envelope["note_on_count"] as? Int == 1)
     #expect(await transport.sentBytes == [[0x90, 60, 100]])
 }
 
@@ -242,9 +247,10 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     ])
 
     #expect(!result.isSuccess)
-    let envelope = decodeEnvelope(result.message)
-    #expect(!((envelope?["success"] as? Bool)!))
-    #expect(envelope?["error"] as? String == "invalid_params")
+    let envelope = try #require(decodeEnvelope(result.message))
+    let success = try #require(envelope["success"] as? Bool)
+    #expect(!success)
+    #expect(envelope["error"] as? String == "invalid_params")
 
     // No notes should have been sent.
     let sent = await transport.sentBytes
@@ -263,12 +269,14 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     ])
 
     #expect(result.isSuccess)
-    let envelope = decodeEnvelope(result.message)
-    #expect((envelope?["success"] as? Bool)!)
-    #expect(!((envelope?["verified"] as? Bool)!))
-    #expect(envelope?["reason"] as? String == "readback_unavailable")
-    #expect(envelope?["operation"] as? String == "midi.send_cc.keycmd")
-    #expect(envelope?["via"] as? String == "midi-keycmd-direct-send")
+    let envelope = try #require(decodeEnvelope(result.message))
+    let success = try #require(envelope["success"] as? Bool)
+    let verified = try #require(envelope["verified"] as? Bool)
+    #expect(success)
+    #expect(!verified)
+    #expect(envelope["reason"] as? String == "send_only_no_readback")
+    #expect(envelope["operation"] as? String == "midi.send_cc.keycmd")
+    #expect(envelope["via"] as? String == "midi-keycmd-direct-send")
 }
 
 // MARK: - 10. mappingTable lookup regression
@@ -316,9 +324,10 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
     ])
 
     #expect(!result.isSuccess)
-    let envelope = decodeEnvelope(result.message)
-    #expect(!((envelope?["success"] as? Bool)!))
-    #expect(envelope?["error"] as? String == "invalid_params")
+    let envelope = try #require(decodeEnvelope(result.message))
+    let success = try #require(envelope["success"] as? Bool)
+    #expect(!success)
+    #expect(envelope["error"] as? String == "invalid_params")
 
     let sent = await transport.sentBytes
     #expect(sent.isEmpty)
@@ -334,7 +343,7 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
 // Honest Contract State C `port_unavailable` envelope rather than a silent
 // "no fallback" fall-through. This test exercises the real channel + real
 // router integration path (T1 + T4 + T6 wired together).
-@Test func testKeyCmdChannelTransportNotPublishedReturnsPortUnavailable() async {
+    @Test func testKeyCmdChannelTransportNotPublishedReturnsPortUnavailable() async throws {
     let transport = MockKeyCmdTransport()
     // NOTE: intentionally do NOT call `channel.start()` — transport stays
     // unprepared, so readiness().available == false.
@@ -351,13 +360,15 @@ private func decodeEnvelope(_ message: String) -> [String: Any]? {
 
     #expect(!result.isSuccess, "unstarted KeyCmd channel must surface State C, not silent success")
 
-    let envelope = decodeEnvelope(result.message)
-    #expect(!((envelope?["success"] as? Bool)!))
-    #expect(envelope?["error"] as? String == "port_unavailable")
-    #expect(envelope?["operation"] as? String == "midi.send_cc.keycmd")
+    let envelope = try #require(decodeEnvelope(result.message))
+    let success = try #require(envelope["success"] as? Bool)
+    #expect(!success)
+    #expect(envelope["error"] as? String == "port_unavailable")
+    #expect(envelope["operation"] as? String == "midi.send_cc.keycmd")
     // Hint must propagate the channel's health detail so the agent gets an
     // actionable diagnostic (see T1 / ChannelRouter §4.1 step 7).
-    #expect(!(((envelope?["hint"] as? String)?.isEmpty)!))
+    let hint = try #require(envelope["hint"] as? String)
+    #expect(!hint.isEmpty)
 
     // The transport must NOT have received any bytes — bypass + unavailable
     // short-circuits before execute() is invoked.

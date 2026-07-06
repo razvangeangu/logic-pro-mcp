@@ -123,7 +123,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
         // 7 "midi.*.keycmd" ops. These bypass the CC mapping table and
         // push raw MIDI bytes through the KeyCmd virtual transport. The
         // KeyCmd port is send-only with no echo, so every success is
-        // encoded as Honest Contract State B `readback_unavailable`.
+        // encoded as Honest Contract State B `send_only_no_readback`.
         if operation.hasSuffix(".keycmd"), operation.hasPrefix("midi.") {
             return await executeDirectSend(operation: operation, params: params)
         }
@@ -167,7 +167,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
     /// Routes the 7 `midi.*.keycmd` ops to wire-byte construction + raw
     /// transport.send. Channel param arriving here is already a wire byte
     /// (0..15); the dispatcher (T5) handles the 1-based → 0-based shift.
-    /// All successes return Honest Contract State B `readback_unavailable`
+    /// All successes return Honest Contract State B `send_only_no_readback`
     /// because the KeyCmd port gives no echo back from Logic.
     private func executeDirectSend(
         operation: String,
@@ -258,7 +258,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
         if let failure = await runValidated(operation: "midi.send_cc.keycmd", { try await transport.send(bytes) }) {
             return failure
         }
-        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+        return .success(HonestContract.encodeStateB(reason: .sendOnlyNoReadback, extras: [
             "operation": "midi.send_cc.keycmd",
             "via": "midi-keycmd-direct-send",
             "controller": Int(controller),
@@ -303,7 +303,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
                 ]
             ))
         }
-        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+        return .success(HonestContract.encodeStateB(reason: .sendOnlyNoReadback, extras: [
             "operation": "midi.send_note.keycmd",
             "via": "midi-keycmd-direct-send",
             "note": Int(note),
@@ -361,7 +361,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
                 ]
             ))
         }
-        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+        return .success(HonestContract.encodeStateB(reason: .sendOnlyNoReadback, extras: [
             "operation": "midi.send_chord.keycmd",
             "via": "midi-keycmd-direct-send",
             "note_count": notes.count,
@@ -384,7 +384,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
         if let failure = await runValidated(operation: "midi.send_program_change.keycmd", { try await transport.send(bytes) }) {
             return failure
         }
-        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+        return .success(HonestContract.encodeStateB(reason: .sendOnlyNoReadback, extras: [
             "operation": "midi.send_program_change.keycmd",
             "via": "midi-keycmd-direct-send",
             "program": Int(program),
@@ -409,7 +409,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
         if let failure = await runValidated(operation: "midi.send_pitch_bend.keycmd", { try await transport.send(bytes) }) {
             return failure
         }
-        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+        return .success(HonestContract.encodeStateB(reason: .sendOnlyNoReadback, extras: [
             "operation": "midi.send_pitch_bend.keycmd",
             "via": "midi-keycmd-direct-send",
             "value": raw,
@@ -432,7 +432,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
         if let failure = await runValidated(operation: "midi.send_aftertouch.keycmd", { try await transport.send(bytes) }) {
             return failure
         }
-        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+        return .success(HonestContract.encodeStateB(reason: .sendOnlyNoReadback, extras: [
             "operation": "midi.send_aftertouch.keycmd",
             "via": "midi-keycmd-direct-send",
             "value": Int(pressure),
@@ -532,7 +532,7 @@ actor MIDIKeyCommandsChannel: KeyCmdCCChannel {
                 ]
             ))
         }
-        return .success(HonestContract.encodeStateB(reason: .readbackUnavailable, extras: [
+        return .success(HonestContract.encodeStateB(reason: .sendOnlyNoReadback, extras: [
             "operation": "midi.play_sequence.keycmd",
             "via": "midi-keycmd-direct-send",
             "note_count": events.count,

@@ -234,7 +234,7 @@ private actor UnverifiedCreateChannel: Channel {
     }
 }
 
-private actor StaticResultChannel: Channel {
+actor StaticResultChannel: Channel {
     nonisolated let id: ChannelID
     let results: [String: ChannelResult]
     let defaultResult: ChannelResult
@@ -2057,17 +2057,10 @@ private actor SelectiveFailChannel: Channel {
     }
 }
 
-@Test func testArmOnlyReportsPartialDisarmFailureAsError() async {
-    // All channels fail for track.set_arm → both disarm of track 0 AND arm of
-    // track 1 fail. The dispatcher must surface this as an error, not a
-    // structured success payload that buries the failure in `failedDisarm`.
+@Test func testArmOnlyReportsPartialDisarmFailureAsError() async throws {
     let router = ChannelRouter()
-    let ax = FailingExecuteChannel(id: .accessibility, message: "AX fail")
-    let mcu = FailingExecuteChannel(id: .mcu, message: "MCU fail")
-    let cg = FailingExecuteChannel(id: .cgEvent, message: "CG fail")
+    let ax = TrackArmEnvelopeChannel(failedIndices: [0])
     await router.register(ax)
-    await router.register(mcu)
-    await router.register(cg)
     let cache = StateCache()
     await cache.updateTracks([
         TrackState(id: 0, name: "Track 1", type: .audio, isArmed: true),
@@ -2081,8 +2074,14 @@ private actor SelectiveFailChannel: Channel {
         cache: cache
     )
 
-    #expect(result.isError!)
-    #expect(dispatcherText(result).contains("arm_only failed"))
+    let isError = try #require(result.isError as Bool?)
+    #expect(isError)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    #expect(object["state"] as? String == "C")
+    #expect(object["error"] as? String == "ax_write_failed")
+    #expect(object["failedDisarm"] as? [Int] == [0])
+    let armedSuccess = try #require(object["armedSuccess"] as? Bool)
+    #expect(!armedSuccess)
 }
 
 @Test func testArmOnlyRequiresExplicitIndex() async {
@@ -2102,7 +2101,7 @@ private actor SelectiveFailChannel: Channel {
     #expect(dispatcherText(result).contains("explicit 'index'"))
 }
 
-@Test func testArmOnlySuccessPathReportsArmedSuccess() async {
+@Test func testArmOnlySuccessPathReportsArmedSuccess() async throws {
     let router = ChannelRouter()
     let ax = TrackArmEnvelopeChannel()
     await router.register(ax)
@@ -2119,13 +2118,20 @@ private actor SelectiveFailChannel: Channel {
         cache: cache
     )
 
-    let text = dispatcherText(result)
-    #expect(text.contains("\"armedSuccess\":true"))
-    #expect(text.contains("\"armed\":1"))
-    #expect(text.contains("\"verified\":true"))
-    #expect(text.contains("\"requested_enabled\":true"))
-    #expect(text.contains("\"observed_enabled\":true"))
-    #expect(text.contains("\"verification_source\":\"mock_ax_readback\""))
+    let isError = try #require(result.isError as Bool?)
+    #expect(!isError)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    let success = try #require(object["success"] as? Bool)
+    let verified = try #require(object["verified"] as? Bool)
+    let armedSuccess = try #require(object["armedSuccess"] as? Bool)
+    #expect(success)
+    #expect(verified)
+    #expect(armedSuccess)
+    #expect(object["state"] as? String == "A")
+    #expect(object["armed"] as? Int == 1)
+    #expect(object["requested_enabled"] as? Bool == true)
+    #expect(object["observed_enabled"] as? Bool == true)
+    #expect(object["verification_source"] as? String == "mock_ax_readback")
 }
 
 @Test func testArmReturnsErrorForUnverifiedEnvelope() async {
@@ -2148,7 +2154,7 @@ private actor SelectiveFailChannel: Channel {
     #expect(text.contains("\"verification_source\":\"mock_ax_readback\""))
 }
 
-@Test func testArmOnlyTreatsUnverifiedTargetArmAsError() async {
+@Test func testArmOnlyTreatsUnverifiedTargetArmAsStateB() async throws {
     let router = ChannelRouter()
     let ax = TrackArmEnvelopeChannel(unverifiedIndices: [1])
     await router.register(ax)
@@ -2164,17 +2170,24 @@ private actor SelectiveFailChannel: Channel {
         cache: cache
     )
 
-    let text = dispatcherText(result)
-    #expect(result.isError!)
-    #expect(text.contains("\"armedSuccess\":false"))
-    #expect(text.contains("\"verified\":false"))
-    #expect(text.contains("\"unverifiedDisarm\":[]"))
-    #expect(text.contains("\"requested_enabled\":true"))
-    #expect(text.contains("\"observed_enabled\":null"))
-    #expect(text.contains("\"verification_source\":\"mock_ax_readback\""))
+    let isError = try #require(result.isError as Bool?)
+    #expect(!isError)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    let success = try #require(object["success"] as? Bool)
+    let verified = try #require(object["verified"] as? Bool)
+    let armedSuccess = try #require(object["armedSuccess"] as? Bool)
+    #expect(success)
+    #expect(!verified)
+    #expect(!armedSuccess)
+    #expect(object["state"] as? String == "B")
+    #expect(object["reason"] as? String == "readback_unavailable")
+    #expect(object["unverifiedDisarm"] as? [Int] == [])
+    #expect(object["requested_enabled"] as? Bool == true)
+    #expect(object["observed_enabled"] is NSNull)
+    #expect(object["verification_source"] as? String == "mock_ax_readback")
 }
 
-@Test func testArmOnlyTreatsUnverifiedDisarmAsError() async {
+@Test func testArmOnlyTreatsUnverifiedDisarmAsStateB() async throws {
     let router = ChannelRouter()
     let ax = TrackArmEnvelopeChannel(unverifiedIndices: [0])
     await router.register(ax)
@@ -2191,14 +2204,20 @@ private actor SelectiveFailChannel: Channel {
         cache: cache
     )
 
-    let text = dispatcherText(result)
-    #expect(result.isError!)
-    #expect(text.contains("\"armed\":1"))
-    #expect(text.contains("\"unverifiedDisarm\":[0]"))
-    #expect(text.contains("\"verified\":false"))
-    #expect(text.contains("\"requested_enabled\":true"))
-    #expect(text.contains("\"observed_enabled\":true"))
-    #expect(text.contains("\"verification_source\":\"mock_ax_readback\""))
+    let isError = try #require(result.isError as Bool?)
+    #expect(!isError)
+    let object = try #require(parseDispatcherObject(dispatcherText(result)))
+    let success = try #require(object["success"] as? Bool)
+    let verified = try #require(object["verified"] as? Bool)
+    #expect(success)
+    #expect(!verified)
+    #expect(object["state"] as? String == "B")
+    #expect(object["reason"] as? String == "readback_unavailable")
+    #expect(object["armed"] as? Int == 1)
+    #expect(object["unverifiedDisarm"] as? [Int] == [0])
+    #expect(object["requested_enabled"] as? Bool == true)
+    #expect(object["observed_enabled"] as? Bool == true)
+    #expect(object["verification_source"] as? String == "mock_ax_readback")
 }
 
 // MARK: - EditDispatcher

@@ -31,6 +31,7 @@ enum HonestContract {
         /// may bounce silent. Downgrades State A → State B so a caller never treats
         /// a count-delta success as an audible arrangement. v3.6.x (#128).
         case importedAsGMDevice
+        case sendOnlyNoReadback
 
         var rawValue: String {
             switch self {
@@ -39,6 +40,7 @@ enum HonestContract {
             case .readbackMismatch: return "readback_mismatch"
             case .retryExhausted: return "retry_exhausted"
             case .importedAsGMDevice: return "imported_as_gm_device"
+            case .sendOnlyNoReadback: return "send_only_no_readback"
             }
         }
     }
@@ -82,9 +84,6 @@ enum HonestContract {
         case dialogNotFound = "dialog_not_found"
 
         // HC v2 (logic_plugins.* verified plugin path) — §4 error table.
-        // These codes only originate from the verified-plugin surface; the
-        // existing 8-tool surface never emits them, so adding them here is
-        // additive and leaves every prior State C byte-identical.
         case unsupportedMode = "unsupported_mode"
         case projectPathRequired = "project_path_required"
         case projectIdentityMismatch = "project_identity_mismatch"
@@ -179,7 +178,7 @@ enum HonestContract {
     /// State A — confirmed success (write + read-back matched). Extra fields
     /// (e.g. the original requested/observed payload) are merged in.
     static func encodeStateA(extras: [String: Any] = [:]) -> String {
-        var dict: [String: Any] = ["success": true, "verified": true]
+        var dict: [String: Any] = ["success": true, "verified": true, "state": "A"]
         for (k, v) in extras { dict[k] = v }
         return jsonString(dict)
     }
@@ -188,7 +187,7 @@ enum HonestContract {
     /// `reason` is mandatory per the contract.
     static func encodeStateB(reason: UncertainReason, extras: [String: Any] = [:]) -> String {
         var dict: [String: Any] = [
-            "success": true, "verified": false, "reason": reason.rawValue
+            "success": true, "verified": false, "state": "B", "reason": reason.rawValue
         ]
         for (k, v) in extras { dict[k] = v }
         return jsonString(dict)
@@ -203,7 +202,7 @@ enum HonestContract {
         extras: [String: Any] = [:]
     ) -> String {
         var dict: [String: Any] = [
-            "success": false, "error": error.rawValue
+            "success": false, "state": "C", "error": error.rawValue
         ]
         if let axCode { dict["axCode"] = axCode }
         if let hint { dict["hint"] = hint }
@@ -219,14 +218,11 @@ enum HonestContract {
     static let schemaVersionV2 = 2
 
     /// HC v2 is an ADDITIVE superset used exclusively by `logic_plugins.*`:
-    /// every envelope additionally carries `state` ("A"|"B"|"C") and
-    /// `hc_schema`, and State C additionally carries `verified:false`. The v1
-    /// encoders above are intentionally left byte-identical — the existing
-    /// 8-tool surface and its 1276 tests must not observe any change, and
-    /// `HonestContractTests` asserts v1 State C has no `verified` key. Phase /
-    /// success-vs-failure field requirements (what_was_*, safe_to_retry,
-    /// target_identity, write_source, verify_source) are supplied by the
-    /// caller through `extras` per the requirements §5.3 field table.
+    /// every envelope additionally carries `hc_schema`, and State C additionally
+    /// carries `verified:false`. The v1 encoders above carry `state` but remain
+    /// schema-free. Phase / success-vs-failure field requirements (what_was_*,
+    /// safe_to_retry, target_identity, write_source, verify_source) are supplied
+    /// by the caller through `extras` per the requirements §5.3 field table.
     static func encodeV2StateA(extras: [String: Any] = [:]) -> String {
         var dict: [String: Any] = [
             "success": true, "verified": true, "state": "A",
