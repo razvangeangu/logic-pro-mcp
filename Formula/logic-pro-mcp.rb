@@ -68,14 +68,15 @@ class LogicProMcp < Formula
 
   test do
     # Verify the binary runs and prints the expected report shape on
-    # `--check-permissions`. Exit code is 0 when both Accessibility and
-    # Logic Automation are granted (typical Logic-installed dev box) and
-    # non-zero when at least one is missing (typical CI). Don't constrain
-    # the test to a specific code — both are valid; the report contents
-    # are the contract this test guards.
+    # `--check-permissions`. Exit code is 0 only when Accessibility,
+    # Logic/System Events Automation, and PostEvent are granted; it is
+    # non-zero when at least one is missing. Don't constrain the test to a
+    # specific code — both are valid; the report contents are the contract
+    # this test guards.
     output = shell_output("#{bin}/LogicProMCP --check-permissions 2>&1; echo \"exit=$?\"")
     assert_match(/Accessibility/, output)
     assert_match(/Automation/, output)
+    assert_match(/PostEvent/, output)
     assert_match(/exit=[01]/, output, "exit code should be 0 (granted) or 1 (missing)")
   end
 end
