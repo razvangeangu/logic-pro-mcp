@@ -59,12 +59,24 @@ echo "  version: $VERSION"
 echo "  dry-run: $DRY_RUN"
 echo ""
 
-# 1. Verify working tree + tag availability
+if [ "$(git branch --show-current)" != "main" ]; then
+    echo "Error: stable releases must be tagged from the main branch."
+    exit 1
+fi
 if [ -n "$(git status --porcelain)" ]; then
     echo "Error: working tree is not clean. Commit or stash first."
     git status --short
     exit 1
 fi
+
+run "git fetch --quiet origin main --tags"
+
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+    echo "Error: HEAD must match origin/main before publishing a release tag."
+    echo "       Push or pull main first, then rerun this script."
+    exit 1
+fi
+
 if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
     echo "Error: tag $VERSION already exists locally."
     exit 1
@@ -82,6 +94,9 @@ else
         exit 1
     fi
 fi
+
+run "swift test --no-parallel"
+run "git diff --exit-code Package.resolved"
 
 # 2. Build + adhoc-sign
 STAGE_DIR="$(mktemp -d)"
