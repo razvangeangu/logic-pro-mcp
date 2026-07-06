@@ -86,12 +86,12 @@
 ### US-5 (WS5): MIDI 읽기 경로
 **As a** natural-language user, **I want** 선택 region의 노트를 JSON으로 읽기를, **so that** 읽기→편집→쓰기 루프가 가능하다.
 
-**AC:**
-- [ ] AC-5.1: T0 라이브 스파이크 PASS가 본 구현 게이트 (boomer#5 강화) — **알려진 sentinel region**(record_sequence로 생성한 기지 노트 세트)을 선택 → Export Selection as MIDI File 메뉴(locale-agnostic) → save 다이얼로그를 통제 디렉토리로 유도 → 파일 생성 + **파싱된 노트가 sentinel과 일치**까지 확인. 실패 시 WS5 전체 honest defer
+**AC:** — **T0 게이트 결과 2026-07-07: FAILED → AC-5.3/5.4/5.5(라이브 표면) honest-deferred. AC-5.2(SMFReader)+임시파일 매니저만 T5a로 출하.** 상세 증거: `docs/spikes/midi-export-t0-evidence.md`.
+- [x] AC-5.1 (게이트, **FAILED**): 라이브 스파이크로 File>Export>Selection as MIDI File 메뉴 도달·record_sequence sentinel·region 열거까지는 성공했으나, export **저장 패널이 out-of-process remote-view**라 (a) 내부 컨트롤 AX-불투명, (b) 합성 키보드 입력 미도달(Secure Input OFF 확인, osascript/cliclick/focus-click 3채널 검증), (c) 마우스만으로는 통제 디렉토리+파일명 입력 불가 → 통제-저장 계약 충족 불가. 자동화 시도가 Logic을 modal-stack hang으로 유발(force-quit 복구). 이 repo가 반복 honest-defer해온 라이브-UI 월과 동일 계열.
 - [ ] AC-5.2: `SMFReader` — format 0/1, tempo/time-sig meta, note on/off 페어링, division 기반 tick→bar/beat 변환. **필수 fixture** (boomer#8): running status, velocity-0 note-off, 동일 pitch/channel 중첩 노트, SMPTE division 거부, VLQ/track-length 경계, format-1 멀티트랙 tempo 병합, channel 1-based 출력. malformed SMF는 fail-closed(부분 결과 반환 금지)
-- [ ] AC-5.3: `logic_midi.read_selection_notes` — **State A 조건 강화** (boomer#5): (a) export 파일이 신규 생성(사전 부재+mtime/size 검증), (b) 파싱 성공, (c) export 직전 AX로 선택 identity(region/track) 캡처 후 evidence에 포함. identity 캡처 불가 시 State B. 임시 파일은 **전용 export 레지스트리 매니저** (boomer#7: SMFWriter+TemporaryFiles 대칭 — 전용 디렉토리 생성, symlink escape 방지, 파싱 후 cleanup, 테스트 포함) 경유
-- [ ] AC-5.4: `record_sequence verify_notes:true` (boomer#6 강화) — (a) 기존 선택/플레이헤드 캡처, (b) **생성된 region을 결정론적으로 선택**(기존 region-enumeration 결과의 identity 사용), 선택 검증 실패 시 export 시도 없이 State B, (c) export→파싱→요청 노트 대조 일치 시 State A(노트 evidence), (d) 이전 선택 복원. 기본값 false
-- [ ] AC-5.5: 선택이 없거나 MIDI region이 아닐 때 명시적 typed 에러(State C), 다이얼로그 잔류 없음(Escape 폴백)
+- [~] AC-5.3 (**DEFERRED**, T0 실패): `logic_midi.read_selection_notes` — **State A 조건 강화** (boomer#5): (a) export 파일이 신규 생성(사전 부재+mtime/size 검증), (b) 파싱 성공, (c) export 직전 AX로 선택 identity(region/track) 캡처 후 evidence에 포함. identity 캡처 불가 시 State B. 임시 파일은 **전용 export 레지스트리 매니저** (boomer#7: SMFWriter+TemporaryFiles 대칭 — 전용 디렉토리 생성, symlink escape 방지, 파싱 후 cleanup, 테스트 포함) 경유
+- [~] AC-5.4 (**DEFERRED**, T0 실패): `record_sequence verify_notes:true` (boomer#6 강화) — (a) 기존 선택/플레이헤드 캡처, (b) **생성된 region을 결정론적으로 선택**(기존 region-enumeration 결과의 identity 사용), 선택 검증 실패 시 export 시도 없이 State B, (c) export→파싱→요청 노트 대조 일치 시 State A(노트 evidence), (d) 이전 선택 복원. 기본값 false
+- [~] AC-5.5 (**DEFERRED**, T0 실패): 선택이 없거나 MIDI region이 아닐 때 명시적 typed 에러(State C), 다이얼로그 잔류 없음(Escape 폴백)
 
 ### US-6 (WS6): Channel EQ verified 파라미터 확장
 **AC:**
