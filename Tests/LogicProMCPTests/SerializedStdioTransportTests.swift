@@ -103,4 +103,57 @@ struct SerializedStdioTransportTests {
 
         #expect(received == frames)
     }
+
+    @Test("notifications_do_not_corrupt_concurrent_frames")
+    func notificationsDoNotCorruptConcurrentFrames() async throws {
+        var fds: [Int32] = [-1, -1]
+        #expect(pipe(&fds) == 0)
+        let readEnd = fds[0]
+        let writeEnd = fds[1]
+
+        let collected = DataBox()
+        Thread.detachNewThread {
+            var buf = [UInt8](repeating: 0, count: 65536)
+            while true {
+                let r = buf.withUnsafeMutableBytes { Darwin.read(readEnd, $0.baseAddress, $0.count) }
+                if r <= 0 { break }
+                collected.append(buf[0..<r])
+            }
+            collected.finish()
+        }
+
+        let transport = SerializedStdioTransport(output: writeEnd)
+        let responseFrames = (0..<30).map { i in
+            #"{"jsonrpc":"2.0","id":\#(i),"result":{"marker":\#(i),"pad":"\#(String(repeating: "r", count: 2000))"}}"#
+        }
+        let notificationFrames = (0..<30).map { i in
+            #"{"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"logic://tracks/\#(i)","pad":"\#(String(repeating: "n", count: 2000))"}}"#
+        }
+        let frames = zip(responseFrames, notificationFrames).flatMap { [$0, $1] }
+
+        await withTaskGroup(of: Void.self) { group in
+            for frame in frames {
+                group.addTask { try? await transport.send(Data(frame.utf8)) }
+            }
+        }
+        close(writeEnd)
+        for _ in 0..<600 where !collected.isDone { try await Task.sleep(nanoseconds: 5_000_000) }
+        #expect(collected.isDone)
+        close(readEnd)
+
+        let lines = collected.snapshot().split(separator: UInt8(ascii: "\n")).filter { !$0.isEmpty }
+        #expect(lines.count == frames.count)
+        var responseCount = 0
+        var notificationCount = 0
+        for line in lines {
+            let object = try #require(JSONSerialization.jsonObject(with: Data(line)) as? [String: Any])
+            if object["id"] != nil {
+                responseCount += 1
+            } else if object["method"] as? String == "notifications/resources/updated" {
+                notificationCount += 1
+            }
+        }
+        #expect(responseCount == responseFrames.count)
+        #expect(notificationCount == notificationFrames.count)
+    }
 }

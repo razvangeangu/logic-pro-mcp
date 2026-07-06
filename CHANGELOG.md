@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- **MCP resource subscriptions.** `initialize` now advertises `resources.subscribe:true`, and the server handles `resources/subscribe` / `resources/unsubscribe` for listed resources and concrete resource-template URIs. State-poller updates emit `notifications/resources/updated` for subscribed URIs only when the stable cache payload `data` changes; volatile envelope fields such as `fetched_at`, `cache_age_sec`, and `ax_occluded` are excluded from the diff.
+- **Workflow prompts.** `initialize` now advertises prompts support and `prompts/list` / `prompts/get` expose the existing `WorkflowSkillCatalog` data as MCP prompts, without duplicating workflow definitions.
+- **Tool output schemas and structured content.** All 10 tools now advertise `outputSchema`. `tools/call` preserves the original text response and additionally attaches `structuredContent` whenever that text is a JSON object.
+
 ### Changed
 
 - **BREAKING: `logic_midi` send-only success responses now return Honest Contract State B JSON envelopes.** CoreMIDI/MMC send-only paths (`send_*`, `play_sequence`, `step_input`, `create_virtual_port`, and time-based MMC commands) no longer return plain text on success. Those CoreMIDI/MMC responses now include `success`, `verified`, `state`, `reason`, `operation`, `legacy_message`, and operation-specific byte/message/port details. `mmc_locate` with `bar` is unchanged and keeps its transport readback path.

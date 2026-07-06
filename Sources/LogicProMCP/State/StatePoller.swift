@@ -69,12 +69,19 @@ actor StatePoller {
     private let axChannel: AccessibilityChannel
     private let cache: StateCache
     private let runtime: Runtime
+    private let postPoll: @Sendable ([ResourceCacheKey]) async -> Void
     private var pollingTask: Task<Void, Never>?
 
-    init(axChannel: AccessibilityChannel, cache: StateCache, runtime: Runtime = .production) {
+    init(
+        axChannel: AccessibilityChannel,
+        cache: StateCache,
+        runtime: Runtime = .production,
+        postPoll: @escaping @Sendable ([ResourceCacheKey]) async -> Void = { _ in }
+    ) {
         self.axChannel = axChannel
         self.cache = cache
         self.runtime = runtime
+        self.postPoll = postPoll
     }
 
     /// Start the background polling loop.
@@ -137,6 +144,7 @@ actor StatePoller {
     }
 
     private func pollOnce(axChannel: AccessibilityChannel, cache: StateCache) async {
+        var cacheKeys: [ResourceCacheKey] = []
         guard runtime.hasVisibleWindow() else {
             // Be conservative: a single missed window check is often a transient
             // AX query glitch (Logic mid-paint, plugin window briefly grabbing
@@ -147,7 +155,9 @@ actor StatePoller {
             if consecutiveWindowMisses >= Self.failureThreshold {
                 await cache.updateDocumentState(false)
                 await cache.updateAXOccluded(false)
+                cacheKeys.append(.document)
             }
+            if !cacheKeys.isEmpty { await postPoll(cacheKeys) }
             return
         }
         consecutiveWindowMisses = 0
@@ -156,10 +166,12 @@ actor StatePoller {
             operation: "project.get_info", label: "ProjectInfo",
             axChannel: axChannel, cache: cache, as: ProjectInfo.self
         ) { cache, info in await cache.updateProject(info) }
+        if projectReady { cacheKeys.append(.project) }
         let tracksReady = await poll(
             operation: "track.get_tracks", label: "Track",
             axChannel: axChannel, cache: cache, as: [TrackState].self
         ) { cache, tracks in await cache.updateTracks(tracks) }
+        if tracksReady { cacheKeys.append(.tracks) }
         let hasDocument = projectReady || tracksReady
         if hasDocument {
             consecutivePollMisses = 0
@@ -185,33 +197,42 @@ actor StatePoller {
                 // do NOT clear hasDocument. fetchedAt timestamps continue
                 // ageing so `cache_age_sec` keeps growing — clients that
                 // treat freshness as a contract still see staleness.
+                if !cacheKeys.isEmpty { await postPoll(cacheKeys) }
                 return
             }
             consecutivePollMisses += 1
             if consecutivePollMisses >= Self.failureThreshold {
                 await cache.updateDocumentState(false)
                 await cache.updateAXOccluded(false)
+                cacheKeys.append(.document)
             }
         }
 
-        guard hasDocument else { return }
+        guard hasDocument else {
+            if !cacheKeys.isEmpty { await postPoll(cacheKeys) }
+            return
+        }
 
-        await poll(
+        let transportReady = await poll(
             operation: "transport.get_state", label: "Transport",
             axChannel: axChannel, cache: cache, as: TransportState.self
         ) { cache, state in await cache.updateTransport(state) }
-        await poll(
+        if transportReady { cacheKeys.append(.transport) }
+        let mixerReady = await poll(
             operation: "mixer.get_state", label: "Mixer",
             axChannel: axChannel, cache: cache, as: [ChannelStripState].self
         ) { cache, strips in await cache.updateChannelStrips(strips) }
+        if mixerReady { cacheKeys.append(.mixer) }
         markerPollTick += 1
         if markerPollTick >= Self.markerPollInterval {
             markerPollTick = 0
-            await poll(
+            let markersReady = await poll(
                 operation: "nav.get_markers", label: "Marker",
                 axChannel: axChannel, cache: cache, as: [MarkerState].self
             ) { cache, markers in await cache.updateMarkers(markers) }
+            if markersReady { cacheKeys.append(.markers) }
         }
+        if !cacheKeys.isEmpty { await postPoll(cacheKeys) }
     }
 
     /// 3 consecutive misses (~9s at the 3s poll interval) before declaring

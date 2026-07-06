@@ -1,3 +1,4 @@
+import Foundation
 import MCP
 
 func toolTextContent(_ text: String) -> Tool.Content {
@@ -5,11 +6,15 @@ func toolTextContent(_ text: String) -> Tool.Content {
 }
 
 func toolTextResult(_ text: String, isError: Bool = false) -> CallTool.Result {
-    CallTool.Result(content: [toolTextContent(text)], isError: isError)
+    CallTool.Result(
+        content: [toolTextContent(text)],
+        structuredContent: structuredContentValue(fromToolText: text),
+        isError: isError
+    )
 }
 
 func toolTextResult(_ result: ChannelResult) -> CallTool.Result {
-    CallTool.Result(content: [toolTextContent(result.message)], isError: !result.isSuccess)
+    toolTextResult(result.message, isError: !result.isSuccess)
 }
 
 func toolStateCResult(
@@ -63,5 +68,46 @@ func commandTool(name: String, description: String, commandDescription: String) 
         name: name,
         description: description,
         inputSchema: commandParamsToolSchema(commandDescription: commandDescription)
+    )
+}
+
+func structuredContentValue(fromToolText text: String) -> Value? {
+    let data = Data(text.utf8)
+    guard (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else {
+        return nil
+    }
+    return try? JSONDecoder().decode(Value.self, from: data)
+}
+
+func genericObjectOutputSchema() -> Value {
+    .object([
+        "type": .string("object"),
+        "additionalProperties": .bool(true),
+    ])
+}
+
+func honestContractOutputSchema() -> Value {
+    .object([
+        "type": .string("object"),
+        "description": .string("Mutating commands return the Honest Contract envelope (success/verified/state, additional operation-specific keys); read-only commands return command-specific JSON objects."),
+        "properties": .object([
+            "success": .object(["type": .string("boolean")]),
+            "verified": .object(["type": .string("boolean")]),
+            "state": .object(["type": .string("string")]),
+        ]),
+        "additionalProperties": .bool(true),
+    ])
+}
+
+func toolWithOutputSchema(_ tool: Tool, outputSchema: Value) -> Tool {
+    Tool(
+        name: tool.name,
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: tool.annotations,
+        outputSchema: outputSchema,
+        icons: tool.icons,
+        _meta: tool._meta
     )
 }

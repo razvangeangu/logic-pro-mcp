@@ -8,6 +8,16 @@ Use tools for actions. Use resources for state. Treat every mutating result as o
 - State B: uncertain success. The server attempted the action but could not verify the result.
 - State C: hard failure. The action did not land and is safe to retry only when `retry_safe` says so.
 
+## MCP Capabilities
+
+`initialize` advertises `resources.subscribe: true`, `resources.listChanged: false`, `prompts.listChanged: false`, and `tools.listChanged: false`.
+
+Resource subscriptions are session-scoped. `resources/subscribe` and `resources/unsubscribe` accept any listed resource URI or concrete resource-template URI. When a subscribed state resource changes, the server sends `notifications/resources/updated` with the changed `uri`. Change detection hashes the stable `data` payload of cache-envelope resources, or the whole payload for non-envelope resources, after recursively excluding volatile keys: `generated_at`, `fetched_at`, `cache_age_sec`, and `mcu_last_feedback_age_ms`.
+
+`prompts/list` and `prompts/get` expose the workflow skill catalog as prompt templates. Prompt definitions are derived from `WorkflowSkillCatalog`, the same source used by `logic://workflow-skills`.
+
+Every tool in `tools/list` advertises an `outputSchema`. Mixed command tools advertise the Honest Contract envelope for mutating commands: mutating commands return the Honest Contract envelope (`success`/`verified`/`state`, additional operation-specific keys); read-only commands return command-specific JSON objects. Honest Contract properties are non-required so read-only responses validate against the mixed-tool schema. Read-only/read-ish tools advertise a generic JSON object. For `tools/call`, when the text response is already a JSON object, the same object is also attached as `structuredContent`; the text payload is unchanged for backward compatibility.
+
 ## Tools
 
 | Tool | Purpose |
