@@ -3,11 +3,6 @@ import Testing
 @testable import LogicProMCP
 
 // HC v2 (logic_plugins.* verified-plugin surface) contract-shape tests.
-// v2 is an ADDITIVE superset of v1: every envelope carries `state` +
-// `hc_schema`, and State C additionally carries `verified:false`. These tests
-// pin that superset AND prove the v1 encoders stay byte-identical so the
-// existing 8-tool surface is untouched (requirements §5.3, AC13).
-
 private func decode(_ json: String) -> [String: Any] {
     try! JSONSerialization.jsonObject(with: json.data(using: .utf8)!, options: []) as! [String: Any]
 }
@@ -141,20 +136,21 @@ private func decode(_ json: String) -> [String: Any] {
     }
 }
 
-// MARK: - v1 invariance (the existing surface must not change)
-
-@Test func testV1StateCStillHasNoVerifiedOrStateKeys() {
-    // Guards the byte-identical promise: v1 encoders gain no v2 fields.
+@Test func testV1StateCStillHasStateButNoVerifiedOrSchemaKeys() {
     let obj = decode(HonestContract.encodeStateC(error: .axWriteFailed))
     #expect(obj["verified"] == nil, "v1 State C must not carry verified")
-    #expect(obj["state"] == nil, "v1 State C must not carry state")
+    #expect(obj["state"] as? String == "C", "v1 State C must carry state")
     #expect(obj["hc_schema"] == nil, "v1 State C must not carry hc_schema")
 }
 
-@Test func testV1StateAStillHasNoStateOrSchemaKeys() {
-    let obj = decode(HonestContract.encodeStateA())
-    #expect(obj["state"] == nil, "v1 State A must not carry state")
-    #expect(obj["hc_schema"] == nil, "v1 State A must not carry hc_schema")
+@Test func testV1StateAAndBStillHaveStateButNoSchemaKeys() {
+    let stateA = decode(HonestContract.encodeStateA())
+    #expect(stateA["state"] as? String == "A", "v1 State A must carry state")
+    #expect(stateA["hc_schema"] == nil, "v1 State A must not carry hc_schema")
+
+    let stateB = decode(HonestContract.encodeStateB(reason: .readbackUnavailable))
+    #expect(stateB["state"] as? String == "B", "v1 State B must carry state")
+    #expect(stateB["hc_schema"] == nil, "v1 State B must not carry hc_schema")
 }
 
 @Test func testReadbackMismatchNotAddedToTerminalCodes() {

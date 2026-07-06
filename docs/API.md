@@ -130,6 +130,26 @@ Channels are 1-based (`1..16`) to match Logic's UI.
 
 `send_sysex` accepts `{ bytes: [Int] }` or `{ data: "F0 ... F7" }` and rejects payloads over 1024 bytes before routing to CoreMIDI.
 
+Send-only success responses return an Honest Contract State B JSON envelope because CoreMIDI/MMC writes have no deterministic readback:
+
+```json
+{
+  "success": true,
+  "verified": false,
+  "state": "B",
+  "reason": "send_only_no_readback",
+  "operation": "midi.send_note",
+  "legacy_message": "Note 60 on ch 0 vel 100 dur 30ms",
+  "note": 60,
+  "velocity": 100,
+  "channel_wire": 0,
+  "duration_ms": 30,
+  "message_count": 2
+}
+```
+
+`mmc_locate` with a `bar` parameter is the exception: it routes through `transport.goto_position` and keeps the transport readback contract. Time-based `mmc_locate` remains send-only State B.
+
 ### `logic_navigate`
 
 Common commands: `goto_bar`, `goto_marker`, `create_marker`, `delete_marker`, `rename_marker`, `zoom_to_fit`, `set_zoom`, `toggle_view`.

@@ -35,6 +35,7 @@ import Testing
         with: json.data(using: .utf8)!, options: []
     ) as! [String: Any]
     #expect(!((obj["success"] as? Bool)!))
+    #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "port_unavailable")
     #expect(obj["hint"] as? String == "CoreMIDI virtual port not configured")
     #expect(obj["channel"] as? String == "coremidi")
