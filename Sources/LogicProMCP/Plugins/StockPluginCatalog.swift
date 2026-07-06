@@ -848,6 +848,24 @@ enum StockPluginCatalog {
         ),
     ]
 
+    /// TODO(channel-eq-census): fill from docs/spikes/channel-eq-census.md only after live AX census.
+    private static let channelEQParameters = [
+        StockPluginParameterMetadata(
+            id: "todo_channel_eq_census_param_1",
+            displayName: "TODO Channel EQ census parameter 1",
+            unit: nil,
+            valueRange: nil,
+            writeMethod: nil,
+            readbackMethod: nil,
+            tolerance: nil,
+            axDescription: nil,
+            availabilityState: .inferred,
+            provenance: .inferred(
+                reason: "census-gated TODO placeholder; fill canonical id, AX description, unit/range/tolerance, and readback evidence from docs/spikes/channel-eq-census.md"
+            )
+        ),
+    ]
+
     /// Compressor `threshold` — the first verified-writable stock parameter.
     /// Current public release evidence records the AX write/readback boundary:
     /// the control is an
@@ -885,7 +903,14 @@ enum StockPluginCatalog {
     /// (e.g. "Ringshifter", "DeEsser 2", "Vintage B3").
     private static let seeds: [Seed] = [
         // EQ
-        fx("channel_eq", "Channel EQ", "EQ", write: .insertOnly),
+        fx(
+            "channel_eq",
+            "Channel EQ",
+            "EQ",
+            write: .insertOnly,
+            parameters: channelEQParameters,
+            notes: ["Channel EQ parameter registry is census-gated; fill TODO placeholders from docs/spikes/channel-eq-census.md"]
+        ),
         fx("linear_phase_eq", "Linear Phase EQ", "EQ"),
         fx("match_eq", "Match EQ", "EQ"),
         fx("single_band_eq", "Single Band EQ", "EQ"),

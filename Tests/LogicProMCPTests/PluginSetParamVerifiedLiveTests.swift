@@ -39,6 +39,7 @@ private final class LiveFixture: @unchecked Sendable {
         insert: Int = 6,
         trackSelected: Bool = true,
         thresholdDescription: String = "Threshold",
+        pluginSlotName: String = "Compressor",
         beforeValue: Double = 51,
         pluginWindowPresent: Bool = true,
         forcedAfterValue: Double? = nil,
@@ -84,7 +85,7 @@ private final class LiveFixture: @unchecked Sendable {
                 } else {
                     var slots: [AXUIElement] = []
                     for s in 0...insert {
-                        slots.append(LiveFixture.occupiedSlot(b, 1300 + s, name: s == insert ? "Compressor" : "Plugin \(s)"))
+                        slots.append(LiveFixture.occupiedSlot(b, 1300 + s, name: s == insert ? pluginSlotName : "Plugin \(s)"))
                     }
                     b.setChildren(strip, slots)
                 }
@@ -204,6 +205,102 @@ private func thresholdParams(
     return p
 }
 
+private let channelEQFixtureParamID = "__test_channel_eq_band_gain"
+private let channelEQFixtureAXDescription = "__TEST Channel EQ Band Gain"
+
+private func channelEQFixtureEntryLookup(pluginID: String) -> StockPluginCatalogEntry? {
+    guard pluginID == "logic.stock.effect.channel_eq" else {
+        return StockPluginCatalog.entry(id: pluginID)
+    }
+    let provenance = StockPluginProvenance.verified(
+        source: "test_fixture",
+        method: "ax_plugin_window",
+        observedAt: "2026-07-07T00:00:00Z",
+        logicVersion: nil,
+        locale: "en_US",
+        evidence: ["parameter_readback", "test_fixture_only"]
+    )
+    return StockPluginCatalogEntry(
+        id: "logic.stock.effect.channel_eq",
+        displayName: "Channel EQ",
+        type: .effect,
+        category: "EQ",
+        availabilityState: .verified,
+        provenance: provenance,
+        insertPaths: [
+            StockPluginInsertPath(
+                path: ["Audio FX", "EQ", "Channel EQ"],
+                availabilityState: .verified,
+                provenance: provenance
+            ),
+        ],
+        slotSupport: StockPluginSlotSupport(audio: true, instrument: false, midiFX: false, aux: true),
+        knownPresets: [],
+        parameters: [
+            StockPluginParameterMetadata(
+                id: channelEQFixtureParamID,
+                displayName: "Test Channel EQ Band Gain",
+                unit: "dB",
+                valueRange: StockPluginValueRange(min: -24, max: 24, defaultValue: 0),
+                writeMethod: "ax_slider_axvalue",
+                readbackMethod: "ax_slider_axvalue",
+                tolerance: 0.5,
+                axDescription: channelEQFixtureAXDescription,
+                availabilityState: .verified,
+                provenance: provenance
+            ),
+        ],
+        safeWriteCapabilities: .parameterWriteReadback,
+        limitations: ["test fixture only; production Channel EQ registry is census-gated"]
+    )
+}
+
+private func channelEQFixtureParamAlias(pluginID: String, alias: String) -> String? {
+    guard pluginID == "logic.stock.effect.channel_eq" else {
+        return VerifiedPluginCatalog.canonicalParamKey(pluginID: pluginID, alias: alias)
+    }
+    let normalized = alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    switch normalized {
+    case channelEQFixtureParamID.lowercased():
+        return channelEQFixtureParamID
+    default:
+        return nil
+    }
+}
+
+private func channelEQFixtureParams(
+    param: String = channelEQFixtureParamID,
+    value: String = "3.0",
+    unit: String = "dB"
+) -> [String: String] {
+    thresholdParams(value: value, unit: unit).merging([
+        "plugin": "Channel EQ",
+        "param": param,
+    ]) { _, new in new }
+}
+
+private func runChannelEQFixture(
+    forcedAfterValue: Double? = nil,
+    params: [String: String] = channelEQFixtureParams()
+) async throws -> [String: Any] {
+    let fixture = LiveFixture(
+        thresholdDescription: channelEQFixtureAXDescription,
+        pluginSlotName: "Channel EQ",
+        beforeValue: 0,
+        forcedAfterValue: forcedAfterValue
+    )
+    let result = await AccessibilityChannel.defaultSetParamVerified(
+        params: params,
+        runtime: fixture.runtime,
+        frontDocumentPath: { expectedPath },
+        entryLookup: channelEQFixtureEntryLookup,
+        paramAliasLookup: channelEQFixtureParamAlias
+    )
+    let data = try #require(result.message.data(using: .utf8))
+    let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    return obj
+}
+
 // MARK: - State A: full round-trip (before 51 → set 60 → after 60)
 
 @Test func testCompressorThresholdVerifiedWriteReachesStateA() async {
@@ -235,6 +332,48 @@ private func thresholdParams(
     let obj = await runLive(fixture: fixture, params: thresholdParams(value: "60"))
     #expect(obj["state"] as? String == "A")
     #expect(obj["observed_normalized"] as? Double == 60.7)
+}
+
+@Test func testChannelEQFixtureParamResolvesAndVerifiesStateAWithinTolerance() async throws {
+    let canonical = VerifiedPluginCatalog.canonicalParamKey(
+        pluginID: "logic.stock.effect.channel_eq",
+        alias: channelEQFixtureParamID,
+        paramAliasLookup: channelEQFixtureParamAlias
+    )
+    #expect(canonical == channelEQFixtureParamID)
+    #expect(VerifiedPluginCatalog.paramCapability(
+        pluginID: "logic.stock.effect.channel_eq",
+        paramKey: channelEQFixtureParamID,
+        entryLookup: channelEQFixtureEntryLookup
+    ) == .writeReadback)
+
+    let obj = try await runChannelEQFixture(forcedAfterValue: 3.4)
+
+    #expect(obj["state"] as? String == "A")
+    #expect(try #require(obj["verified"] as? Bool))
+    #expect(obj["observed_normalized"] as? Double == 3.4)
+    #expect(obj["tolerance"] as? Double == 0.5)
+    let identity = try #require(obj["target_identity"] as? [String: Any])
+    #expect(identity["plugin_id"] as? String == "logic.stock.effect.channel_eq")
+}
+
+@Test func testChannelEQFixtureParamOutsideToleranceIsReadbackMismatch() async throws {
+    let obj = try await runChannelEQFixture(forcedAfterValue: 1.0)
+
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "readback_mismatch")
+    #expect(try #require(obj["verified"] as? Bool) == false)
+    #expect(try #require(obj["write_attempted"] as? Bool))
+    #expect(obj["requested_normalized"] as? Double == 3.0)
+    #expect(obj["observed_normalized"] as? Double == 1.0)
+}
+
+@Test func testChannelEQFixtureUnsupportedParamFailsClosedUnsupportedParamReadback() async throws {
+    let obj = try await runChannelEQFixture(params: channelEQFixtureParams(param: "unregistered_channel_eq_param"))
+
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "unsupported_param_readback")
+    #expect(try #require(obj["write_attempted"] as? Bool) == false)
 }
 
 // MARK: - State C: tolerance exceeded → readback_mismatch + rollback
