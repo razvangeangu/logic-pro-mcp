@@ -2,17 +2,27 @@ import Foundation
 
 extension SetupDoctor {
     static func staticVersion(fromStringsOutput output: String) -> StaticVersionResult {
+        let markerPrefix = "LOGIC_PRO_MCP_VERSION="
+        let markerVersions = output
+            .split(separator: "\n")
+            .compactMap { line -> String? in
+                let value = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard value.hasPrefix(markerPrefix) else { return nil }
+                let version = String(value.dropFirst(markerPrefix.count))
+                return Self.SemanticVersion(version)?.normalizedCore
+            }
+        if let marker = markerVersions.first {
+            return .version(marker)
+        }
+
         var versions: [String] = []
         for line in output.split(separator: "\n") {
             let value = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            let parts = value.split(separator: ".", omittingEmptySubsequences: false)
-            guard parts.count == 3,
-                  parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
-                  let major = Int(parts[0]), major > 0 else {
+            guard let version = Self.SemanticVersion(value), version.major > 0 else {
                 continue
             }
-            if !versions.contains(value) {
-                versions.append(value)
+            if !versions.contains(version.normalizedCore) {
+                versions.append(version.normalizedCore)
             }
         }
         return versions.count == 1 ? .version(versions[0]) : .indeterminate(versions)

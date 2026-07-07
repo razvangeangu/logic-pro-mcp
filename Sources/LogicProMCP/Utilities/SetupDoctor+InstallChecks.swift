@@ -16,6 +16,7 @@ extension SetupDoctor {
 
     static func installBinaryInventoryCheck(
         executablePath: String?,
+        installSource: InstallSource,
         runtime: Runtime,
         claudeRegistration: ClaudeRegistration,
         staticVersionForPath: (String) -> StaticVersionResult
@@ -61,8 +62,8 @@ extension SetupDoctor {
             status: warn ? .warn : .pass,
             summary: binaryInventorySummary(stale: stale, indeterminateStaleRisk: indeterminateStaleRisk),
             evidence: evidence,
-            remediationType: warn ? .command : .none,
-            remediationValueOverride: warn ? "brew upgrade logic-pro-mcp" : nil
+            remediationType: warn ? binaryInventoryRemediationType(installSource: installSource) : .none,
+            remediationValueOverride: warn ? binaryInventoryRemediation(installSource: installSource) : nil
         )
     }
 
@@ -75,6 +76,30 @@ extension SetupDoctor {
             return "A canonical LogicProMCP binary's static version could not be determined; staleness cannot be ruled out."
         }
         return "Canonical LogicProMCP binary inventory found no stale installed binary."
+    }
+
+
+    static func binaryInventoryRemediationType(installSource: InstallSource) -> RemediationType {
+        switch installSource {
+        case .homebrew, .sourceBuild:
+            return .command
+        case .releaseBinary, .unknown:
+            return .docs
+        }
+    }
+
+
+    static func binaryInventoryRemediation(installSource: InstallSource) -> String {
+        switch installSource {
+        case .homebrew:
+            return "brew upgrade logic-pro-mcp"
+        case .sourceBuild:
+            return "git pull && swift build -c release"
+        case .releaseBinary:
+            return "Download and replace the pinned LogicProMCP release binary."
+        case .unknown:
+            return remediationAnchorsByCheckID["install.binary_inventory"] ?? "docs/SETUP.md#doctor"
+        }
     }
 
 
@@ -106,7 +131,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Share directory could not be resolved; source builds may not have packaged helper assets.",
                 evidence: ["reason": "share_dir_unresolved"],
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: "source_build_no_share_dir"
             )
         case let .invalid(path, source):
             return check(
@@ -115,7 +141,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Resolved share directory is not a directory.",
                 evidence: shareDirEvidence(path: path, source: source, extra: ["reason": "share_dir_invalid"]),
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: "share_dir_invalid"
             )
         }
     }

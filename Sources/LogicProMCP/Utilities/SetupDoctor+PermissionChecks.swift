@@ -74,11 +74,14 @@ extension SetupDoctor {
 
     static func launchContextCheck(runtime: Runtime) -> Check {
         let context = runtime.launchContext()
+        let summary = context.context == "unknown"
+            ? "Launch context is unknown; re-run doctor from the same app that will launch the server."
+            : "This report measures the TCC principal of \(context.context); re-verify under a different app if it spawns the server."
         return check(
             id: "permissions.launch_context",
             domain: "permissions",
             status: .pass,
-            summary: "This report measures the TCC principal of \(context.context); re-verify under a different app if it spawns the server.",
+            summary: summary,
             evidence: ["launch_context": context.context, "responsible_hint": context.responsibleHint],
             remediationType: .none
         )
@@ -121,7 +124,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Cross-context TCC enrichment could not answer; live permission probes remain authoritative.",
                 evidence: ["tcc_db_readable": readable, "full_disk_access": readable, "reason": reason],
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: reason
             )
         }
     }

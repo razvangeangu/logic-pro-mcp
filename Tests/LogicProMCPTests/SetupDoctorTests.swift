@@ -87,13 +87,13 @@ private func issue26RepositoryRootURL() -> URL {
 
 @Test func testSetupDoctorJSONContractStableCheckIDsAndOKAggregation() throws {
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime()
     )
 
-    #expect(report.schema == "logic_pro_mcp_doctor.v3")
+    #expect(report.schema == "logic_pro_mcp_doctor.v4")
     #expect(report.status == .ok)
     #expect(report.installSource == .homebrew)
 
@@ -129,7 +129,7 @@ private func issue26RepositoryRootURL() -> URL {
 
     let json = encodeJSON(report)
     let object = try #require(sharedJSONObject(json))
-    #expect(object["schema"] as? String == "logic_pro_mcp_doctor.v3")
+    #expect(object["schema"] as? String == "logic_pro_mcp_doctor.v4")
     #expect(object["status"] as? String == "ok")
     #expect(object["install_source"] as? String == "homebrew")
     #expect(object["version"] as? String == ServerConfig.serverVersion)
@@ -153,7 +153,7 @@ private func issue26RepositoryRootURL() -> URL {
 
 @Test func testSetupDoctorReportsActionableRemediationForNonPassStates() {
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--profile", "full", "--client", "claude-code"],
         permissionStatus: .init(accessibilityState: .notGranted, automationState: .notVerifiable),
         approvals: [:],
         runtime: doctorRuntime(
@@ -167,7 +167,7 @@ private func issue26RepositoryRootURL() -> URL {
     )
 
     #expect(report.status == .failed)
-    for check in report.checks where check.status != .pass {
+    for check in report.checks where check.status != .pass && !check.optional {
         #expect(check.remediation.type != .none, "\(check.id) has no remediation type")
         #expect(!check.remediation.value.isEmpty, "\(check.id) has no remediation value")
     }
@@ -200,7 +200,7 @@ private func issue26RepositoryRootURL() -> URL {
     #expect(exitCode == 0)
     #expect(stderr.isEmpty)
     let json = try #require(sharedJSONObject(stdout))
-    #expect(json["schema"] as? String == "logic_pro_mcp_doctor.v3")
+    #expect(json["schema"] as? String == "logic_pro_mcp_doctor.v4")
     #expect(json["status"] as? String == "ok")
 }
 
@@ -248,7 +248,7 @@ private func issue26RepositoryRootURL() -> URL {
 @Test func testSetupDoctorClassifiesSourceBuildEvenWhenBrewProbeSucceeds() throws {
     // .build path component must win over a succeeding brew probe (precedence pin).
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime(executablePath: "/Users/x/proj/.build/release/LogicProMCP")
@@ -259,9 +259,45 @@ private func issue26RepositoryRootURL() -> URL {
     #expect(object["install_source"] as? String == "source_build")
 }
 
+@Test func testDoctorSourceBuildDoesNotSuggestBrewUpgrade() throws {
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: doctorRuntime(
+            executablePath: "/Users/x/logic-pro-mcp/.build/release/LogicProMCP",
+            commandHandler: { executable, arguments in
+                if executable == "/usr/bin/codesign" {
+                    return .init(exitCode: 0, stdout: "", stderr: "")
+                }
+                if executable == "/usr/bin/xattr" {
+                    return .init(exitCode: 1, stdout: "", stderr: "No such xattr")
+                }
+                if executable == "/usr/bin/lipo" {
+                    return .init(exitCode: 0, stdout: "arm64\n", stderr: "")
+                }
+                if executable == "/usr/bin/strings", arguments.count == 2 {
+                    return .init(exitCode: 0, stdout: "0.0.1\n", stderr: "")
+                }
+                if executable == "/opt/homebrew/bin/brew" || executable == "/usr/local/bin/brew",
+                   arguments == ["list", "--versions", "logic-pro-mcp"] {
+                    return .init(exitCode: 0, stdout: "logic-pro-mcp 3.7.4\n", stderr: "")
+                }
+                return nil
+            }
+        )
+    )
+    let inventory = try #require(report.checks.first { $0.id == "install.binary_inventory" })
+    #expect(report.installSource == .sourceBuild)
+    #expect(inventory.status == .warn)
+    #expect(inventory.remediation.type == .command)
+    #expect(inventory.remediation.value.contains("swift build -c release"))
+    #expect(!inventory.remediation.value.contains("brew upgrade"))
+}
+
 @Test func testSetupDoctorClassifiesReleaseBinaryWhenBrewProbeFails() {
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime(
@@ -278,7 +314,7 @@ private func issue26RepositoryRootURL() -> URL {
 
 @Test func testSetupDoctorClassifiesUnknownWhenNoSignalMatches() throws {
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--profile", "full"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime(
@@ -297,7 +333,7 @@ private func issue26RepositoryRootURL() -> URL {
     // A directory whose component merely ENDS in .build (not the SwiftPM `.build`
     // component) must NOT be classified as source_build.
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime(
@@ -314,7 +350,7 @@ private func issue26RepositoryRootURL() -> URL {
     // brew is NOT resolvable via /usr/bin/env (stripped PATH), only at its canonical
     // absolute path — doctor must still classify .homebrew.
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime(
@@ -381,6 +417,81 @@ private func issue26RepositoryRootURL() -> URL {
     #expect(quarantine.remediation.type == .command)
 }
 
+@Test func testDoctorRemediationShellQuotesPaths() throws {
+    let path = "/Users/x/My Build/LogicProMCP"
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: doctorRuntime(
+            executablePath: path,
+            executable: false,
+            commandHandler: { executable, _ in
+                if executable == "/usr/bin/codesign" {
+                    return .init(exitCode: 0, stdout: "", stderr: "")
+                }
+                if executable == "/usr/bin/xattr" {
+                    return .init(exitCode: 0, stdout: "0081;Safari;\n", stderr: "")
+                }
+                return nil
+            }
+        )
+    )
+    let executable = try #require(report.checks.first { $0.id == "binary.executable" })
+    let quarantine = try #require(report.checks.first { $0.id == "release.quarantine" })
+    #expect(executable.remediation.value == "chmod +x '\(path)'")
+    #expect(quarantine.remediation.value == "xattr -d com.apple.quarantine '\(path)'")
+}
+
+@Test func testDoctorXattrEvidenceKeepsStdoutStderrSummary() throws {
+    let longError = String(repeating: "permission denied ", count: 400)
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: doctorRuntime(commandHandler: { executable, _ in
+            if executable == "/usr/bin/codesign" {
+                return .init(exitCode: 0, stdout: "", stderr: "")
+            }
+            if executable == "/usr/bin/xattr" {
+                return .init(exitCode: 0, stdout: "0081;Safari;\n", stderr: longError)
+            }
+            return nil
+        })
+    )
+    let quarantine = try #require(report.checks.first { $0.id == "release.quarantine" })
+    #expect(quarantine.evidence["exit_code"] == "0")
+    #expect(quarantine.evidence["stdout"] == "present")
+    #expect(quarantine.evidence["stdout_truncated"] == "false")
+    #expect(quarantine.evidence["stderr"] == "present")
+    #expect(quarantine.evidence["stderr_truncated"] == "true")
+}
+
+@Test func testDoctorCodesignEvidenceKeepsStdoutStderrSummary() throws {
+    let longOutput = String(repeating: "authority ", count: 600)
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: doctorRuntime(commandHandler: { executable, _ in
+            if executable == "/usr/bin/codesign" {
+                return .init(exitCode: 1, stdout: longOutput, stderr: "invalid signature\n")
+            }
+            if executable == "/usr/bin/xattr" {
+                return .init(exitCode: 1, stdout: "", stderr: "No such xattr")
+            }
+            return nil
+        })
+    )
+    let signature = try #require(report.checks.first { $0.id == "release.signature" })
+    #expect(signature.status == .warn)
+    #expect(signature.evidence["exit_code"] == "1")
+    #expect(signature.evidence["stdout"] == "present")
+    #expect(signature.evidence["stdout_truncated"] == "true")
+    #expect(signature.evidence["stderr"] == "present")
+    #expect(signature.evidence["stderr_truncated"] == "false")
+}
+
 @Test func testReleaseQuarantineReportsWarnWhenStateUndeterminable() throws {
     // Non-zero exit that is NOT the recognized "No such xattr" must NOT be reported
     // as a clean pass — it conflates "not quarantined" with "could not determine".
@@ -407,11 +518,29 @@ private func issue26RepositoryRootURL() -> URL {
     #expect(quarantine.evidence["exit_code"] == "13")
 }
 
+@Test func testDoctorUnknownLaunchContextIsExplainedButAggregateNeutral() throws {
+    var runtime = doctorRuntime()
+    runtime.launchContext = {
+        SetupDoctor.LaunchContextInfo(context: "unknown", responsibleHint: "unknown")
+    }
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: runtime
+    )
+    let launch = try #require(report.checks.first { $0.id == "permissions.launch_context" })
+    #expect(report.status == .ok)
+    #expect(launch.status == .pass)
+    #expect(launch.summary.localizedCaseInsensitiveContains("unknown"))
+    #expect(SetupDoctor.renderHuman(report, useColor: false).contains("Launch context is unknown"))
+}
+
 // MARK: - Claude registration (config-based, read-only)
 
 @Test func testClaudeRegistrationPassWhenConfigHasMatchingEntry() throws {
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime(registration: .registered(command: "/usr/local/bin/some-wrapper/LogicProMCP"))
@@ -423,7 +552,7 @@ private func issue26RepositoryRootURL() -> URL {
 
 @Test func testClaudeRegistrationWarnWhenConfigHasNoMatchingEntry() throws {
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime(registration: .notRegistered)
@@ -438,7 +567,7 @@ private func issue26RepositoryRootURL() -> URL {
     // The config-unavailable path must say the CONFIG could not be read — NOT that
     // the Claude CLI was unavailable.
     let report = SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: grantedPermissionStatus(),
         approvals: allApprovals(),
         runtime: doctorRuntime(registration: .configUnavailable(reason: "config file not found at /x/.claude.json"))
@@ -529,7 +658,7 @@ private func issue26RepositoryRootURL() -> URL {
 @Test func testMainEntrypointDoctorExitsOneAndReportsFailedStatus() async throws {
     var stdout = ""
     let exitCode = await MainEntrypoint.run(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--profile", "full"],
         permissionCheck: { .init(accessibilityState: .notGranted, automationState: .notVerifiable) },
         serverFactory: {
             Issue.record("Server should not start for doctor")
@@ -565,7 +694,7 @@ private func issue26RepositoryRootURL() -> URL {
     // just because operator approvals are outstanding).
     var stdout = ""
     let exitCode = await MainEntrypoint.run(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--profile", "full"],
         permissionCheck: { grantedPermissionStatus() },
         serverFactory: {
             Issue.record("Server should not start for doctor")

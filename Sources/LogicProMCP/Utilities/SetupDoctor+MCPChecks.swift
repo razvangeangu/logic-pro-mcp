@@ -1,7 +1,19 @@
 import Foundation
 
 extension SetupDoctor {
-    static func claudeRegistrationCheck(registration: ClaudeRegistration) -> Check {
+    static func claudeRegistrationCheck(registration: ClaudeRegistration, clientProfile: ClientProfile) -> Check {
+        guard clientProfile == .claudeCode else {
+            return check(
+                id: "mcp.claude_code_registration",
+                domain: "mcp",
+                status: .skipped,
+                summary: "Claude Code registration is not required for client profile \(clientProfile.rawValue).",
+                evidence: ["client_profile": clientProfile.rawValue],
+                remediationType: .none,
+                optional: true,
+                skipReason: "client_not_selected"
+            )
+        }
         // Read-only registration detection: inspect the Claude Code config file
         // directly instead of shelling out to `claude mcp list`. `claude mcp list`
         // health-checks every registered MCP server, which spawns the registered
@@ -47,7 +59,21 @@ extension SetupDoctor {
         runtime: Runtime,
         checks: [Check],
         staticVersionForPath: (String) -> StaticVersionResult
+        ,
+        clientProfile: ClientProfile
     ) -> Check {
+        guard clientProfile == .claudeCode else {
+            return check(
+                id: "mcp.registration_target",
+                domain: "mcp",
+                status: .skipped,
+                summary: "Claude Code registration target is not required for client profile \(clientProfile.rawValue).",
+                evidence: ["client_profile": clientProfile.rawValue],
+                remediationType: .none,
+                optional: true,
+                skipReason: "client_not_selected"
+            )
+        }
         if let cause = blockingCause(for: "mcp.registration_target", checks: checks) {
             return check(
                 id: "mcp.registration_target",
@@ -70,22 +96,26 @@ extension SetupDoctor {
                 blockedBy: "mcp.claude_code_registration"
             )
         }
-        guard command.hasPrefix("/") else {
+        let resolution = resolveRegisteredCommand(command, runtime: runtime)
+        guard let resolvedCommand = resolution.path else {
             return check(
                 id: "mcp.registration_target",
                 domain: "mcp",
                 status: .skipped,
-                summary: "Claude Code registration uses a relative or PATH-dependent command; install.binary_inventory covers canonical binary staleness.",
-                evidence: ["command_path": command, "reason": "relative_command"],
+                summary: "Claude Code registration uses an unresolved PATH-dependent command; the MCP client's launch PATH may differ.",
+                evidence: ["command_path": command, "reason": "path_dependent_unresolved"],
                 remediationType: .command,
-                remediationValueOverride: "claude mcp add --scope user logic-pro -- LogicProMCP"
+                remediationValueOverride: "claude mcp add --scope user logic-pro -- LogicProMCP",
+                skipReason: "path_dependent_unresolved"
             )
         }
-        let exists = runtime.fileExistsAtPath(command)
-        let regular = exists && runtime.isRegularFile(command)
-        let executable = regular && runtime.isExecutableFile(command)
+        let exists = runtime.fileExistsAtPath(resolvedCommand)
+        let regular = exists && runtime.isRegularFile(resolvedCommand)
+        let executable = regular && runtime.isExecutableFile(resolvedCommand)
         var evidence = [
             "command_path": command,
+            "resolved_path": resolvedCommand,
+            "resolution_basis": resolution.basis,
             "regular_file": String(regular),
             "executable": String(executable),
             "running_version": ServerConfig.serverVersion,
@@ -97,7 +127,7 @@ extension SetupDoctor {
             shareDirMissing = !valid
         }
         var versionMismatch = false
-        if executable, case let .version(version) = staticVersionForPath(command) {
+        if executable, case let .version(version) = staticVersionForPath(resolvedCommand) {
             evidence["registered_version"] = version
             evidence["version_match"] = String(version == ServerConfig.serverVersion)
             versionMismatch = version != ServerConfig.serverVersion
@@ -111,7 +141,7 @@ extension SetupDoctor {
             status: warn ? .warn : .pass,
             summary: warn
                 ? "Claude Code registration target is missing, not a regular executable, has a missing share dir, or is stale."
-                : "Claude Code registration target is present and executable.",
+                : "Claude Code registration target is present and executable. If it was resolved from PATH, this report used the doctor's environment; the MCP client's spawn PATH may differ.",
             evidence: evidence,
             remediationType: warn ? .command : .none,
             remediationValueOverride: warn ? "claude mcp add --scope user logic-pro -- LogicProMCP" : nil
@@ -119,7 +149,19 @@ extension SetupDoctor {
     }
 
 
-    static func claudeDesktopRegistrationCheck(runtime: Runtime) -> Check {
+    static func claudeDesktopRegistrationCheck(runtime: Runtime, clientProfile: ClientProfile) -> Check {
+        guard clientProfile == .claudeDesktop else {
+            return check(
+                id: "mcp.claude_desktop_registration",
+                domain: "mcp",
+                status: .skipped,
+                summary: "Claude Desktop registration is not required for client profile \(clientProfile.rawValue).",
+                evidence: ["client_profile": clientProfile.rawValue],
+                remediationType: .none,
+                optional: true,
+                skipReason: "client_not_selected"
+            )
+        }
         switch runtime.readClaudeDesktopRegistration() {
         case .registered:
             return check(
@@ -144,15 +186,43 @@ extension SetupDoctor {
             return check(
                 id: "mcp.claude_desktop_registration",
                 domain: "mcp",
-                status: .skipped,
+                status: absent ? .warn : .manual,
                 summary: absent
-                    ? "Claude Desktop not configured (optional)."
+                    ? "Claude Desktop config is absent."
                     : "Claude Desktop config could not be read.",
                 evidence: ["config_present": absent ? "false" : "true", "reason": reason],
-                remediationType: absent ? .none : .manual,
-                optional: absent
+                remediationType: .manual
             )
         }
+    }
+
+    struct RegisteredCommandResolution: Equatable, Sendable {
+        let path: String?
+        let basis: String
+    }
+
+    static func resolveRegisteredCommand(_ command: String, runtime: Runtime) -> RegisteredCommandResolution {
+        if command.hasPrefix("/") {
+            return RegisteredCommandResolution(path: command, basis: "absolute")
+        }
+        guard !command.contains("/") else {
+            return RegisteredCommandResolution(path: nil, basis: "relative_path_unresolved")
+        }
+        for prefix in ["/opt/homebrew/bin", "/usr/local/bin"] {
+            let candidate = "\(prefix)/\(command)"
+            if runtime.fileExistsAtPath(candidate), runtime.isRegularFile(candidate) {
+                return RegisteredCommandResolution(path: candidate, basis: "canonical_path")
+            }
+        }
+        guard let output = runtime.runCommand("/usr/bin/which", [command]),
+              output.exitCode == 0 else {
+            return RegisteredCommandResolution(path: nil, basis: "doctor_path")
+        }
+        let resolved = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard resolved.hasPrefix("/") else {
+            return RegisteredCommandResolution(path: nil, basis: "doctor_path")
+        }
+        return RegisteredCommandResolution(path: resolved, basis: "doctor_path")
     }
 
 

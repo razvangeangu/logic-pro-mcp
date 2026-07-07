@@ -66,7 +66,7 @@ private func doctorV3Runtime(
 
 private func doctorV3Report(_ runtime: SetupDoctor.Runtime) -> SetupDoctor.Report {
     SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
         permissionStatus: doctorV3Permissions(),
         approvals: doctorV3Approvals(),
         runtime: runtime
@@ -145,12 +145,13 @@ private func doctorV3Check(_ report: SetupDoctor.Report, _ id: String) throws ->
     #expect(check.summary == "Canonical LogicProMCP binary inventory found no stale installed binary.")
 }
 
-@Test func testDoctorV3RelativeRegisteredCommandIsSkippedNotWarn() throws {
+@Test func testDoctorV3BareRegisteredCommandResolvesCanonicalPath() throws {
     let report = doctorV3Report(doctorV3Runtime(registration: .registered(command: "LogicProMCP")))
     let check = try doctorV3Check(report, "mcp.registration_target")
-    #expect(check.status == .skipped)
-    #expect(check.evidence["reason"] == "relative_command")
-    #expect(check.summary.contains("install.binary_inventory"))
+    #expect(check.status == .pass)
+    #expect(check.evidence["command_path"] == "LogicProMCP")
+    #expect(check.evidence["resolved_path"] == "/opt/homebrew/bin/LogicProMCP")
+    #expect(check.evidence["resolution_basis"] == "canonical_path")
 }
 
 @Test func testDoctorV3RegisteredCommandMustBeRegularFile() throws {

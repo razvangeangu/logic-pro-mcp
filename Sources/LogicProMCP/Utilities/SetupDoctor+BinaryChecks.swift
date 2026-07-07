@@ -37,7 +37,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Executable bit could not be checked because the binary path is missing.",
                 evidence: [:],
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: "binary_path_missing"
             )
         }
         let executable = runtime.isExecutableFile(executablePath)
@@ -48,7 +49,7 @@ extension SetupDoctor {
             summary: executable ? "Binary has executable permission." : "Binary is not executable.",
             evidence: ["path": executablePath, "executable": String(executable)],
             remediationType: executable ? .none : .command,
-            remediationValueOverride: executable ? nil : "chmod +x \(executablePath)"
+            remediationValueOverride: executable ? nil : "chmod +x \(shellQuote(executablePath))"
         )
     }
 
@@ -78,7 +79,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Signature verification skipped because the binary path is missing.",
                 evidence: [:],
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: "binary_path_missing"
             )
         }
         guard let output = runtime.runCommand("/usr/bin/codesign", ["--verify", "--strict", "--verbose=2", executablePath]) else {
@@ -96,11 +98,7 @@ extension SetupDoctor {
             domain: "release",
             status: output.exitCode == 0 ? .pass : .warn,
             summary: output.exitCode == 0 ? "Binary signature verifies." : "Binary signature did not verify.",
-            evidence: [
-                "path": executablePath,
-                "exit_code": String(output.exitCode),
-                "stderr": output.stderr.trimmingCharacters(in: .whitespacesAndNewlines),
-            ],
+            evidence: commandEvidence(path: executablePath, output: output),
             remediationType: output.exitCode == 0 ? .none : .docs
         )
     }
@@ -114,7 +112,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Quarantine check skipped because the binary path is missing.",
                 evidence: [:],
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: "binary_path_missing"
             )
         }
         guard let output = runtime.runCommand("/usr/bin/xattr", ["-p", "com.apple.quarantine", executablePath]) else {
@@ -134,11 +133,7 @@ extension SetupDoctor {
         // never verified.
         let trimmedStderr = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedStdout = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        let evidence: [String: String] = [
-            "path": executablePath,
-            "exit_code": String(output.exitCode),
-            "stderr": trimmedStderr,
-        ]
+        let evidence = commandEvidence(path: executablePath, output: output)
         if output.exitCode == 0 {
             return check(
                 id: "release.quarantine",
@@ -147,7 +142,7 @@ extension SetupDoctor {
                 summary: "Binary has a macOS quarantine attribute.",
                 evidence: evidence,
                 remediationType: .command,
-                remediationValueOverride: "xattr -d com.apple.quarantine \(executablePath)"
+                remediationValueOverride: "xattr -d com.apple.quarantine \(shellQuote(executablePath))"
             )
         }
         let attributeAbsent = output.exitCode == 1

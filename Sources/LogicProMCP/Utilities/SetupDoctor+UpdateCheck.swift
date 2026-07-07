@@ -16,7 +16,8 @@ extension SetupDoctor {
                     status: .skipped,
                     summary: "Could not parse the latest release version.",
                     evidence: ["reason": "parse_error"],
-                    remediationType: .docs
+                    remediationType: .docs,
+                    skipReason: "parse_error"
                 )
             }
             let order = Self.compareVersions(installed, latest)
@@ -48,7 +49,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Could not check for the latest release.",
                 evidence: ["reason": updateReason(outcome)],
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: updateReason(outcome)
             )
         }
     }
