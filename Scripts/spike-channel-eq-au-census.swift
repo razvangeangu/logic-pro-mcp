@@ -66,11 +66,10 @@ func enumerateParameters(
     name: String,
     description: AudioComponentDescription
 ) {
-    var unit: AudioUnit?
-    guard AudioComponentInstanceNew(component, &unit) == noErr, let unit else {
+    func emitComponentStatus(_ status: String, note: String) {
         emit(JSONRecord(
             record_type: "channel_eq_au_component",
-            status: "instantiate_failed",
+            status: status,
             component_name: name,
             component_type: fourCC(description.componentType),
             component_subtype: fourCC(description.componentSubType),
@@ -84,8 +83,16 @@ func enumerateParameters(
             flags: nil,
             provenance: "factory_metadata",
             activation_evidence: false,
-            note: "Factory metadata cannot prove active Logic insert write/read-back."
+            note: note
         ))
+    }
+
+    var unit: AudioUnit?
+    guard AudioComponentInstanceNew(component, &unit) == noErr, let unit else {
+        emitComponentStatus(
+            "instantiate_failed",
+            note: "Factory metadata cannot prove active Logic insert write/read-back."
+        )
         return
     }
     defer { AudioComponentInstanceDispose(unit) }
@@ -101,40 +108,53 @@ func enumerateParameters(
         &writable
     )
     guard infoStatus == noErr, byteSize > 0 else {
-        emit(JSONRecord(
-            record_type: "channel_eq_au_component",
-            status: "no_parameter_list",
-            component_name: name,
-            component_type: fourCC(description.componentType),
-            component_subtype: fourCC(description.componentSubType),
-            component_manufacturer: fourCC(description.componentManufacturer),
-            parameter_id: nil,
-            parameter_name: nil,
-            min_value: nil,
-            max_value: nil,
-            default_value: nil,
-            unit: nil,
-            flags: nil,
-            provenance: "factory_metadata",
-            activation_evidence: false,
+        emitComponentStatus(
+            "no_parameter_list",
             note: "No active Logic insert handle was obtained."
-        ))
+        )
+        return
+    }
+
+    let parameterIDStride = UInt32(MemoryLayout<AudioUnitParameterID>.stride)
+    guard byteSize % parameterIDStride == 0 else {
+        emitComponentStatus(
+            "parameter_list_size_mismatch",
+            note: "AudioUnit parameter list reported \(byteSize) bytes, not a whole AudioUnitParameterID count."
+        )
         return
     }
 
     var parameterIDs = [AudioUnitParameterID](
         repeating: 0,
-        count: Int(byteSize) / MemoryLayout<AudioUnitParameterID>.size
+        count: Int(byteSize / parameterIDStride)
     )
     var listSize = byteSize
-    guard AudioUnitGetProperty(
-        unit,
-        kAudioUnitProperty_ParameterList,
-        kAudioUnitScope_Global,
-        0,
-        &parameterIDs,
-        &listSize
-    ) == noErr else {
+    let listStatus = parameterIDs.withUnsafeMutableBufferPointer { buffer in
+        guard let baseAddress = buffer.baseAddress else {
+            return OSStatus(-50)
+        }
+        return AudioUnitGetProperty(
+            unit,
+            kAudioUnitProperty_ParameterList,
+            kAudioUnitScope_Global,
+            0,
+            baseAddress,
+            &listSize
+        )
+    }
+    guard listStatus == noErr else {
+        emitComponentStatus(
+            "parameter_list_read_failed",
+            note: "AudioUnitGetProperty(kAudioUnitProperty_ParameterList) failed with OSStatus \(listStatus)."
+        )
+        return
+    }
+    guard listSize % parameterIDStride == 0,
+          Int(listSize / parameterIDStride) == parameterIDs.count else {
+        emitComponentStatus(
+            "parameter_list_size_mismatch",
+            note: "AudioUnit parameter list returned \(listSize) bytes for \(parameterIDs.count) allocated ids."
+        )
         return
     }
 
