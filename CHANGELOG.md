@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ---
 
+## [3.9.1] — 2026-07-08
+
+Docs + demo release. **No functional or runtime changes from v3.9.0** — the 10-tool / 18-resource / 11-template surface, every contract, and binary behavior are identical. Only the version string, packaging metadata, documentation, and README demo assets change.
+
+### Changed
+
+- **New README demo (with sound).** Replaced the demo capture with a 36-second Logic Pro 12.3 recording: an 82 BPM D-minor lofi loop composed live by the MCP — `set_tempo 82`, three `record_sequence` MIDI parts (Chords `Dm7–B♭maj7–Gm7–A7` / Bass / Lead, all Studio Grand), `create_drummer`, `rename`, piano roll, and real-time playback. The audio bed is Logic's own bounce of the loop; the video was assembled in Palmier Pro.
+- **Reference docs synced to the shipped surface.** README / `docs/API.md` / `docs/SETUP.md` / `docs/TROUBLESHOOTING.md` / `SECURITY.md` / `CONTRIBUTING.md` were reconciled with the v3.9.x runtime, including a first-class **Setup Doctor** section documenting the `logic_pro_mcp_doctor.v4` schema (intent-aware profiles, client profiles, capability readiness, the four TCC grants incl. `-1743`/System Events, and strict exit codes `0/1/2/3`).
+
+### Added
+
+- **`docs/demo/FEATURE-COVERAGE.md`.** A full-surface MCP exercise run during demo production — 10 tools, 18 resources, ~90 commands, with hang/crash detection (0 crashes, 0 hangs) — and the classification of every result as verified / attempted-unverified / honest-wall.
+
+### Known issues (filed during demo QA, deferred to a follow-up)
+
+- [#253](https://github.com/MongLong0214/logic-pro-mcp/issues/253) — `logic_system.help` rejects the `audio` and `plugins` categories though both are real tools.
+- [#254](https://github.com/MongLong0214/logic-pro-mcp/issues/254) — marker surface: `create_marker` no-ops and `logic://markers` reads empty even when a marker exists.
+- [#255](https://github.com/MongLong0214/logic-pro-mcp/issues/255) — `transport.toggle_count_in` / `edit.toggle_step_input` fail with `channels_exhausted` despite a working menu / Control-Bar path.
+- [#256](https://github.com/MongLong0214/logic-pro-mcp/issues/256) — `project.bounce` fails with `channels_exhausted`; the native `File ▸ Bounce` menu works.
+
 ## [3.9.0] — 2026-07-07
 
 Hardening + MIDI-read-foundation sweep, shipped as six sequential reviewed PRs (#240–#245) on top of the doctor diagnostic surface (#239), now emitted as `logic_pro_mcp_doctor.v4`. Every PR passed a two-round adversarial review gate plus a whole-integration gate; `swift test --no-parallel` → **2169 passed**. Two live-only surfaces (MIDI export read-back, Channel EQ per-band verified write) hit hard Logic UI walls and are **honestly deferred** with evidence rather than shipped unverified — see **Deferred** below.
