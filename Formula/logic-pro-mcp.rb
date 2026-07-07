@@ -3,7 +3,7 @@ class LogicProMcp < Formula
   homepage "https://github.com/MongLong0214/logic-pro-mcp"
   # Single source of truth is Sources/LogicProMCP/Server/ServerConfig.swift
   # (ServerConfig.serverVersion). Bump both together.
-  version "3.8.0"
+  version "3.9.0"
   license "MIT"
 
   # GitHub Actions release artifacts are expected to be true universal
@@ -11,7 +11,7 @@ class LogicProMcp < Formula
   # arm64-only metadata, so inspect RELEASE-METADATA.json when auditing a
   # specific tag.
   #
-  # SHA256 is copied from the published v3.8.0 SHA256SUMS.txt for
+  # SHA256 is copied from the published v3.9.0 SHA256SUMS.txt for
   # LogicProMCP-macOS-universal.tar.gz.
   on_macos do
     url "https://github.com/MongLong0214/logic-pro-mcp/releases/download/v#{version}/LogicProMCP-macOS-universal.tar.gz"

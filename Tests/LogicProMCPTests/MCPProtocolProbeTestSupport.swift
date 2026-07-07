@@ -112,4 +112,3 @@ func waitForProbeNotification(
 func canonicalJSONObjectData(_ object: Any) throws -> Data {
     try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
 }
-

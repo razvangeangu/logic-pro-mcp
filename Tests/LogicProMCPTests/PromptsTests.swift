@@ -62,4 +62,3 @@ struct PromptsTests {
         #expect(try #require(prompts["listChanged"] as? Bool) == false)
     }
 }
-

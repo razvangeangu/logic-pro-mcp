@@ -88,11 +88,11 @@ import Testing
     #expect(VerifiedPluginCatalog.paramAXDescription(pluginID: id, paramKey: "threshold") == "Threshold")
 }
 
-@Test func testChannelEQCensusPlaceholderStaysUnsupportedUntilCensus() {
+@Test func testChannelEQParamsAreUnregisteredUntilCensus() {
     let id = "logic.stock.effect.channel_eq"
-    let param = "todo_channel_eq_census_param_1"
-    #expect(VerifiedPluginCatalog.canonicalParamKey(pluginID: id, alias: param) == param)
-    #expect(VerifiedPluginCatalog.paramCapability(pluginID: id, paramKey: param) == .unsupported)
+    let param = "band_gain"
+    #expect(VerifiedPluginCatalog.canonicalParamKey(pluginID: id, alias: param) == nil)
+    #expect(VerifiedPluginCatalog.paramCapability(pluginID: id, paramKey: param) == .unknownParameter)
     #expect(VerifiedPluginCatalog.paramTolerance(pluginID: id, paramKey: param) == nil)
     #expect(VerifiedPluginCatalog.paramAXDescription(pluginID: id, paramKey: param) == nil)
 }

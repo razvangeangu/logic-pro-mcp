@@ -60,9 +60,6 @@ enum VerifiedPluginCatalog {
         "logic.stock.effect.compressor": [
             "threshold": "threshold",
         ],
-        "logic.stock.effect.channel_eq": [
-            "todo_channel_eq_census_param_1": "todo_channel_eq_census_param_1",
-        ],
     ]
 
     /// Resolve a caller-supplied plugin alias to its canonical catalog id, or
