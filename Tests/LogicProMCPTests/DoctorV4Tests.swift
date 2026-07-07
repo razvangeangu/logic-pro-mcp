@@ -148,6 +148,26 @@ private func doctorV4Report(
     #expect(report.status == .manualActionRequired)
 }
 
+@Test func doctorV4IntentionalSkipDoesNotClaimCapabilityReady() throws {
+    let report = doctorV4Report(
+        arguments: ["LogicProMCP", "doctor", "--json", "--profile", "keycmd"],
+        approvals: [
+            .midiKeyCommands: ManualValidationApproval(
+                approvedAt: Date(timeIntervalSince1970: 0),
+                note: "operator does not use key commands",
+                kind: .intentionallySkipped
+            ),
+        ]
+    )
+
+    let manual = try #require(report.checks.first { $0.id == "channels.manual_validation" })
+    #expect(manual.status == .skipped)
+    #expect(manual.skipReason == "intentionally_skipped")
+    #expect(!manual.optional)
+    #expect(report.status == .degraded)
+    #expect(report.capabilities["keycmd_only_ops"]?.status == .unknownLiveVerifyRequired)
+}
+
 @Test func doctorV4CursorClientDoesNotRequireClaudeRegistration() throws {
     let report = doctorV4Report(
         arguments: ["LogicProMCP", "doctor", "--json", "--client", "cursor"],
@@ -270,4 +290,29 @@ private func doctorV4Report(
     #expect(sanitized["api_key"] == "redacted")
     #expect(sanitized["stderr"] == "present")
     #expect(sanitized["path"] == "~/secret-project")
+}
+
+@Test func doctorV4ReportPrivacyScanRejectsHomePathsAndSecrets() throws {
+    let homePath = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("private-bin/LogicProMCP")
+        .path
+    let runtime = doctorV4Runtime(
+        executablePath: homePath,
+        registration: .registered(command: homePath, environment: [
+            "LOGIC_PRO_MCP_SHARE_DIR": homePath,
+            "API_TOKEN": "token=super-secret",
+        ])
+    ) { executable, arguments in
+        if executable == "/usr/bin/strings", arguments.count == 2 {
+            return .init(exitCode: 0, stdout: "token=super-secret\n\(ServerConfig.versionMarker)\n", stderr: "token=super-secret")
+        }
+        if executable == "/usr/bin/codesign" || executable == "/usr/bin/xattr" || executable == "/usr/bin/lipo" {
+            return .init(exitCode: executable == "/usr/bin/xattr" ? 1 : 0, stdout: executable == "/usr/bin/lipo" ? "arm64\n" : "", stderr: executable == "/usr/bin/xattr" ? "No such xattr" : "")
+        }
+        return nil
+    }
+
+    let encoded = encodeJSON(doctorV4Report(runtime: runtime))
+    #expect(!encoded.contains(homePath))
+    #expect(!encoded.contains("token=super-secret"))
 }

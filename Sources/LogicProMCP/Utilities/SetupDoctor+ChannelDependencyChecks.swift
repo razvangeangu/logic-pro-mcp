@@ -41,6 +41,17 @@ extension SetupDoctor {
         if !intentionallySkipped.isEmpty {
             evidence["intentionally_skipped"] = intentionallySkipped.joined(separator: ",")
         }
+        if missing.isEmpty && !intentionallySkipped.isEmpty {
+            return check(
+                id: "channels.manual_validation",
+                domain: "channels",
+                status: .skipped,
+                summary: "Manual-validation channels were explicitly skipped by the operator; live readiness is not claimed for those channels.",
+                evidence: evidence,
+                remediationType: .none,
+                skipReason: "intentionally_skipped"
+            )
+        }
         return check(
             id: "channels.manual_validation",
             domain: "channels",

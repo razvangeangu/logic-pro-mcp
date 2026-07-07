@@ -223,6 +223,10 @@ extension SetupDoctor {
         }
     }
 
+    static func profileRequiredCheckIDs(for profile: DoctorProfile) -> Set<String> {
+        Set(orderedCheckIDs.filter { isProfileRequired($0, profile: profile) })
+    }
+
     static func capabilities(for checks: [Check], profile: DoctorProfile) -> [String: CapabilityReadiness] {
         let definitions: [(String, [String], Set<DoctorProfile>, String?)] = [
             ("core_transport", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state"], [.core, .mixer, .keycmd, .legacyScripter, .full], nil),
