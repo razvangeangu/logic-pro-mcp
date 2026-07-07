@@ -2,8 +2,8 @@
 
 These binary media files are intentionally tracked release/demo assets, not generated build output.
 
-- `logic-pro-mcp-demo.mp4`: six-second Logic Pro 12.2 live screen capture used by the README.
-- `logic-pro-mcp-demo.gif`: README-friendly derivative of the MP4 capture.
+- `logic-pro-mcp-demo.mp4`: 36-second Logic Pro 12.3 capture with sound — an 82 BPM D-minor lofi loop composed live by the MCP (tempo, three `record_sequence` MIDI parts, a Drummer, piano roll, real-time playback). Assembled in Palmier Pro; audio bed is Logic's own bounce of the loop. Used by the README.
+- `logic-pro-mcp-demo.gif`: README-friendly silent derivative (reveal + playback) of the MP4 capture.
 - `logic-pro-mcp-thumbnail.png`: static thumbnail derivative for release/social surfaces.
 
 Retention policy:

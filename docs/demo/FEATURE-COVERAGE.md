@@ -1,0 +1,39 @@
+# Logic Pro MCP — full-surface exercise & bug report (demo QA)
+
+**Environment:** logic-pro-mcp `main @ 8586d9f` (v3.9.x) · Logic Pro 12.3 · macOS 26.3 (Tahoe) · Apple Silicon
+**Method:** every dispatcher command + every resource was driven against a live Logic project via JSON-RPC stdio, with per-call hang/crash detection and full raw-response capture. Each result classified: **verified** (State A, confirmed by readback) · **attempted-unverified** (State B, sent but not readback-verified — by design for send-only/no-readback ops) · **unsupported/honest-wall** (State C fail-closed) · **failed** (crash/hang/false-success).
+
+## Coverage summary
+- **Tools:** 10 / 10 exercised · **Resources:** 18 / 18 read · **Commands:** ~90 unique commands driven.
+- **0 crashes, 0 hangs** across the full sweep (server stayed alive through ~90 commands).
+- Classification (sweep batch): **17 verified**, **60 attempted-unverified (State B by design)**, **14 unsupported/honest-wall**, **0 hard failures**.
+- 21 responses were bug-flagged and adversarially triaged → **4 confirmed bugs filed**, the remainder were correct honest-contract behavior or caller param mistakes (verified by re-running with correct params).
+
+## Verified working (State A, readback-confirmed) — used in the demo
+- `transport.set_tempo` (82 BPM), `goto_position`, `goto_bar`, `toggle_cycle`
+- `tracks.record_sequence` (SMF import → new Studio Grand track, region readback), `create_instrument`, `create_audio`, `create_external_midi`, `create_drummer`, `select`, `rename`, `mute`, `solo`, `arm`, `arm_only`, `set_instrument` (category+preset)
+- `mixer.set_volume`, `set_pan`
+- `plugins.get_inventory` (drift-safe insert chain, hc_schema 2)
+- `navigate.goto_bar`, `set_zoom`
+- `transport.record` / `stop`, `project.save` (AppleScript), `audio.analyze_file` (loudness/peak/duration)
+- `midi.mmc_locate`
+- **Bounce:** `File ▸ Bounce ▸ Project or Section…` renders a valid AIFF (used for the demo audio) — see bug #256 for the MCP-command gap.
+
+## Honest State-B (attempted, readback-unavailable — not failures)
+Send-only or cgevent ops that correctly report "sent, unverified": all `midi.send_*` / `play_sequence` / `step_input` / `mmc_*`, `edit.*` (undo/redo/cut/copy/paste/split/join/quantize/select_all/bounce_in_place), `navigate.toggle_view` / `zoom_to_fit`, `tracks.duplicate` / `set_automation`, `transport.rewind` / `fast_forward` / `toggle_metronome`, `mixer.set_master_volume` (MCU, no readback). `logic://mixer` returns `ax_poll` strips **after `refresh_cache`** (the read-only resource reflects the poller cache; `mixer_not_visible` before a poll is expected).
+
+## Honest walls (State C, correctly fail-closed — NOT bugs)
+`transport.set_cycle_range` (no numeric cycle locator on 12.x), `navigate.rename_marker` (documented not_implemented), `transport.toggle_autopunch` (Autopunch not in Control Bar — with recovery hint), `mixer.set_plugin_param` (Scripter not installed on this host).
+
+## 🐛 Bugs filed (4)
+| # | Issue | Severity | Summary |
+|---|-------|----------|---------|
+| [#253](https://github.com/MongLong0214/logic-pro-mcp/issues/253) | help category gap | p3 | `logic_system.help audio` / `plugins` → `unknown_category` though both are real tools |
+| [#254](https://github.com/MongLong0214/logic-pro-mcp/issues/254) | marker surface | p2 | `create_marker` no-ops (cgevent; native menu works) **and** `logic://markers` reads empty even when a marker exists → goto/delete unusable |
+| [#255](https://github.com/MongLong0214/logic-pro-mcp/issues/255) | keycmd routing | p3 | `toggle_count_in` / `toggle_step_input` → `channels_exhausted` despite a working Control-Bar/menu path |
+| [#256](https://github.com/MongLong0214/logic-pro-mcp/issues/256) | bounce routing | p2 | `project.bounce` → `channels_exhausted` (no key mapping); native `File ▸ Bounce` works — export non-functional via MCP |
+
+Root theme for #254/#255/#256: several commands route only through an unbound Logic key command and fail with `channels_exhausted` instead of using the available menu/Control-Bar path.
+
+## Demo composition (what's on screen)
+82 BPM, D minor lofi. `record_sequence` × 3 → **Chords** (Dm7–B♭maj7–Gm7–A7), **Bass** (D–B♭–G–A roots), **Lead** (D-pentatonic motif), all Studio Grand piano; **Drummer** (SoCal). Piano roll opened on Chords; real-time playback. Audio bed = Logic's own bounce of this loop (11.7 s, 48 kHz/24-bit, −0.1 dBFS peak).
