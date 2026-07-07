@@ -20,13 +20,13 @@
 
 <p align="center">
   <a href="docs/media/logic-pro-mcp-demo.mp4">
-    <img src="docs/media/logic-pro-mcp-demo.gif" alt="6 second actual Logic Pro 12.2 screen capture showing live playback, moving playhead, meters, MCP-created MIDI regions, and live track headers" width="920" />
+    <img src="docs/media/logic-pro-mcp-demo.gif" alt="Actual Logic Pro 12.3 screen capture: an 82 BPM D-minor lofi loop composed live by the MCP — Chords, Bass, Lead, and Drummer tracks with MIDI regions, an open piano roll, and real-time playback with a moving playhead and meters" width="920" />
   </a>
 </p>
 
 <p align="center">
-  Actual Logic Pro 12.2 capture, cropped from a live playback recording.<br/>
-  <a href="docs/media/logic-pro-mcp-demo.mp4">6 sec MP4</a>
+  An 82 BPM D-minor lofi loop composed live in Logic Pro 12.3 by the MCP — tempo, three MIDI parts, a Drummer, and playback, all from prompts.<br/>
+  <a href="docs/media/logic-pro-mcp-demo.mp4">▶ Watch the 36-sec demo (with sound)</a>
 </p>
 
 ---
