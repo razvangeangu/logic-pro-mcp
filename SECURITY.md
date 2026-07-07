@@ -21,13 +21,13 @@ You should expect an initial response within 5 business days and a remediation p
 
 ## Threat Model
 
-The MCP server runs locally as a subprocess of an MCP host (Claude Code, Claude Desktop). Input flows from an authenticated MCP client → the server → Logic Pro.
+The MCP server runs locally as a subprocess of an MCP host (Claude Code, Claude Desktop, Cursor, VS Code, Terminal, or a custom stdio client). Input flows from an authenticated MCP client -> the server -> Logic Pro.
 
 ### Trust boundary
 
 | Source | Trust | Notes |
 |--------|-------|-------|
-| MCP client (Claude) | Semi-trusted | Requests are from the user's AI assistant, but inputs may be influenced by external content |
+| MCP client/host | Semi-trusted | Requests are from the user's AI assistant or automation host, but inputs may be influenced by external content |
 | Logic Pro | Trusted | Apple-signed application |
 | Virtual MIDI wire | Trusted | No external network path |
 
@@ -121,7 +121,7 @@ Approvals are persisted in `~/Library/Application Support/LogicProMCP/operator-a
 
 ### Permission verification honesty (tri-state)
 
-`--check-permissions`, `logic_system health`, and `doctor` report each TCC grant as a **three-state** value — `granted`, `not_granted`, or `not_verifiable` — rather than a Bool. This is a deliberate fail-closed-vs-honest distinction: a probe that *ran and was denied* reports `not_granted`, but a probe that could not complete (it timed out or failed to spawn) reports `not_verifiable` — an infrastructure failure is **not** the same as a denial. Collapsing the latter into a false "Automation NOT GRANTED" (the pre-v3.8.0 behavior) would have misdirected an operator into re-granting an already-correct permission while hiding the real fault. Security posture: the readiness gate still refuses to report green for a capability the server cannot use, but it never fabricates a denial it did not observe.
+`--check-permissions`, `logic_system health`, and `doctor` report each TCC grant as a **three-state** value — `granted`, `not_granted`, or `not_verifiable` — rather than a Bool. The readiness set covers Accessibility, Automation to Logic Pro, Automation to System Events, and trusted PostEvent access. This is a deliberate fail-closed-vs-honest distinction: a probe that *ran and was denied* reports `not_granted`, but a probe that could not complete (it timed out or failed to spawn) reports `not_verifiable` — an infrastructure failure is **not** the same as a denial. Collapsing the latter into a false "Automation NOT GRANTED" (the pre-v3.8.0 behavior) would have misdirected an operator into re-granting an already-correct permission while hiding the real fault. Security posture: the readiness gate still refuses to report green for a capability the server cannot use, but it never fabricates a denial it did not observe.
 
 ### Graceful shutdown
 

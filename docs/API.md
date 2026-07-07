@@ -23,13 +23,13 @@ Every tool in `tools/list` advertises an `outputSchema`. Mixed command tools adv
 | Tool | Purpose |
 |------|---------|
 | `logic_transport` | play, stop, record, locate, tempo, cycle, metronome, count-in, autopunch |
-| `logic_tracks` | create, select, rename, delete, duplicate, arm, mute, solo, automation, set instrument |
+| `logic_tracks` | create, select, rename, delete, duplicate, arm/arm_only, mute, solo, automation, set instrument, library scans |
 | `logic_mixer` | volume, pan, master volume, mixer strip reads, guarded legacy plugin insertion |
 | `logic_plugins` | verified stock-plugin inventory, exact-slot insertion, verified parameter write/readback |
-| `logic_midi` | send notes/CC/MMC, import MIDI, create/list virtual ports |
-| `logic_edit` | undo, redo, cut, copy, paste, quantize, split, join, normalize, duplicate |
+| `logic_midi` | send notes/CC/SysEx/MMC, import MIDI, step input, create/list virtual ports |
+| `logic_edit` | undo, redo, cut, copy, paste, quantize, split, join, bounce-in-place, normalize, duplicate |
 | `logic_navigate` | bars, markers, zoom, view toggles |
-| `logic_project` | new, open, save, save_as, close, bounce, export plan/run/resume, audit, cleanup |
+| `logic_project` | new, open, save, save_as, close, bounce, launch/quit, is_running, regions, export plan/run/resume, audit, cleanup |
 | `logic_audio` | read-only audio artifact analysis |
 | `logic_system` | health, permissions, command help |
 
@@ -78,11 +78,13 @@ Track objects do **not** carry a sample rate. Sample rate is a project/transport
 |---------|--------|--------|-------|
 | `play`, `record` | none | text / contract envelope | Accessibility -> MCU -> CoreMIDI -> CGEvent -> AppleScript |
 | `stop` | none | text / contract envelope | CGEvent -> Accessibility -> MCU -> CoreMIDI -> AppleScript |
+| `pause`, `rewind`, `fast_forward` | none | text / contract envelope | routed transport fallback chain |
 | `toggle_cycle` | — | text | Accessibility → MIDIKeyCommands → CGEvent → MCU |
+| `toggle_count_in` | — | text / contract envelope | routed transport fallback chain |
 | `toggle_autopunch` | — | State A/B/C contract envelope | Accessibility |
-| `set_cycle_range` | `{ startBar, endBar }` | State C `not_implemented` on current public surface | none |
+| `set_cycle_range` | `{ start, end }` | fails closed: current Logic builds expose no verifiable numeric cycle-locator automation path, so it returns State C (`not_implemented` / `readback_unavailable`) rather than claim an unverified success | Accessibility (attempted) |
 | `set_tempo` | `{ tempo: number }` (5–999, matches Logic's actual accepted range) | text | Accessibility |
-| `goto_bar` | `{ bar: number }` | text / contract envelope | Accessibility -> MIDIKeyCommands -> MMC |
+| `goto_position` | `{ bar: number }` or `{ position: string }` | text / contract envelope | Accessibility -> MIDIKeyCommands -> MMC |
 
 Read current state from `logic://transport/state` after any transport mutation.
 
@@ -90,7 +92,7 @@ Read current state from `logic://transport/state` after any transport mutation.
 
 Use explicit indices or names. Track mutation fails closed when the target cannot be identified or read back.
 
-Common commands: `create_audio`, `create_instrument`, `create_drummer`, `create_external_midi`, `select`, `rename`, `delete`, `duplicate`, `mute`, `solo`, `arm`, `set_automation`, `set_instrument`, `record_sequence`, `get_regions`.
+Common commands: `select`, `create_audio`, `create_instrument`, `create_drummer`, `create_external_midi`, `delete`, `duplicate`, `rename`, `mute`, `solo`, `arm`, `arm_only`, `record_sequence`, `set_automation`, `set_instrument`, `list_library`, `scan_library`, `resolve_path`, `scan_plugin_presets`.
 
 `set_automation` is State B (MCU write, no readback echo).
 
@@ -100,7 +102,9 @@ For Library patches, treat `presetsByCategory` as a browse/catalog view. Default
 
 ### `logic_mixer`
 
-`set_volume` and `set_pan` use Accessibility write/readback against the visible strip. `set_master_volume` requires MCU. `set_output`, `set_input`, `set_send`, `toggle_eq`, and `reset_strip` are refused until their targets are deterministic.
+Public commands: `set_volume`, `set_pan`, `set_master_volume`, `set_plugin_param`, `insert_plugin`.
+
+`set_volume` and `set_pan` use Accessibility write/readback against the visible strip. `set_master_volume` requires MCU. `set_output`, `set_input`, `set_send`, `toggle_eq`, `reset_strip`, and `bypass_plugin` are recognized only to return State C `command_not_exposed` until their targets are deterministic.
 
 Read `logic://mixer` before and after mixer mutations.
 
@@ -126,18 +130,20 @@ Minimal `set_param_verified` shape:
 ```json
 {
   "command": "set_param_verified",
-  "track_index": 5,
-  "insert_index": 6,
-  "plugin_id": "logic.stock.effect.compressor",
-  "parameter_id": "threshold",
-  "normalized_value": 60,
+  "track": 5,
+  "insert": 6,
+  "plugin": "logic.stock.effect.compressor",
+  "param": "threshold",
+  "value": 60,
+  "unit": "normalized",
+  "mode": "duplicate_applyback",
   "project_expected_path": "/path/to/project.logicx"
 }
 ```
 
 ### `logic_midi`
 
-Common commands: `send_note`, `send_chord`, `send_cc`, `send_program_change`, `send_pitch_bend`, `send_aftertouch`, `play_sequence`, `import_file`, `list_ports`, `create_virtual_port`, `mmc_play`, `mmc_stop`, `mmc_locate`.
+Common commands: `send_note`, `send_chord`, `send_cc`, `send_program_change`, `send_pitch_bend`, `send_aftertouch`, `send_sysex`, `play_sequence`, `import_file`, `list_ports`, `create_virtual_port`, `step_input`, `mmc_play`, `mmc_stop`, `mmc_record`, `mmc_locate`.
 
 Channels are 1-based (`1..16`) to match Logic's UI.
 
@@ -163,6 +169,16 @@ Send-only success responses return an Honest Contract State B JSON envelope beca
 
 `mmc_locate` with a `bar` parameter is the exception: it routes through `transport.goto_position` and keeps the transport readback contract. Time-based `mmc_locate` remains send-only State B.
 
+`create_virtual_port` reuses same-name/same-mode ports. Reusing a name across modes fails closed with State C `port_unavailable` and includes `port_name`, `existing_mode`, and `requested_mode`.
+
+No MIDI read-back command is shipped in v3.9.0: `read_selection_notes` and `record_sequence verify_notes` are deferred.
+
+### `logic_edit`
+
+Common commands: `undo`, `redo`, `cut`, `copy`, `paste`, `delete`, `select_all`, `split`, `join`, `quantize`, `bounce_in_place`, `normalize`, `duplicate`, `toggle_step_input`.
+
+`quantize` requires `{ value: String }` or `{ grid: String }` and accepts the dispatcher grids `1/1`, `1/2`, `1/4`, `1/8`, `1/16`, `1/32`, `1/64`, `1/4T`, `1/8T`, and `1/16T`.
+
 ### `logic_navigate`
 
 Common commands: `goto_bar`, `goto_marker`, `create_marker`, `delete_marker`, `rename_marker`, `zoom_to_fit`, `set_zoom`, `toggle_view`.
@@ -171,7 +187,7 @@ Common commands: `goto_bar`, `goto_marker`, `create_marker`, `delete_marker`, `r
 
 ### `logic_project`
 
-Common commands: `new`, `open`, `save`, `save_as`, `close`, `bounce`, `launch`, `quit`, `get_regions`, `export_plan`, `export_run`, `export_resume`, `audit`, `cleanup_plan`, `cleanup_apply`.
+Common commands: `new`, `open`, `save`, `save_as`, `close`, `bounce`, `is_running`, `launch`, `quit`, `get_regions`, `export_plan`, `export_run`, `export_resume`, `audit`, `cleanup_plan`, `cleanup_apply`.
 
 Destructive or file-writing paths require confirmation. `save_as` verifies the resulting `.logicx` package. `audit` marks GM Device / External MIDI tracks with MIDI regions as `external_midi_regions_bounce_risk` export blockers. `bounce` runs that preflight and returns `export_readiness_blocked` before opening the Bounce dialog when blockers are present. `export_plan` is read-only; `export_run` and `export_resume` re-plan, open, verify project identity, bounce, and verify artifacts via `logic_audio`.
 
@@ -181,7 +197,9 @@ Destructive or file-writing paths require confirmation. `save_as` verifies the r
 
 ### `logic_system`
 
-Use `health` for channel readiness and `help` for command summaries.
+Common commands: `health`, `permissions`, `refresh_cache`, `help`.
+
+Use `health` for channel readiness and `help` for command summaries. `help` accepts category `all`, `transport`, `tracks`, `mixer`, `midi`, `edit`, `navigate`, `project`, or `system`.
 
 ### Not-exposed commands
 

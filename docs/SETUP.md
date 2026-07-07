@@ -56,7 +56,9 @@ claude mcp add --scope user logic-pro -- /absolute/path/to/.build/release/LogicP
 Open **System Settings -> Privacy & Security**:
 
 1. **Accessibility**: enable the app that launches `LogicProMCP` (Claude Code, Terminal, Cursor, or Claude Desktop).
-2. **Automation**: allow that app to control **Logic Pro**.
+2. **Automation**: allow that app to control **Logic Pro** and **System Events**.
+
+`--check-permissions` and doctor readiness cover Accessibility, Automation for Logic Pro, Automation for System Events, and trusted PostEvent access. PostEvent is granted through the same launcher-app Accessibility control, but is reported separately because CGEvent fallback paths need it.
 
 Verify:
 
@@ -122,9 +124,16 @@ From your MCP client:
 
 Fully configured hosts should show Accessibility, AppleScript, CoreMIDI, MCU, MIDIKeyCommands, Scripter, and CGEvent as available. Skipping Key Commands or Scripter is valid when you do not need those paths.
 
-## Doctor (`logic_pro_mcp_doctor.v3`)
+<a id="setup-doctor"></a>
+## Doctor (`logic_pro_mcp_doctor.v4`)
 
-`doctor` is read-only and safe to run before starting the server. Flags:
+`doctor` is read-only and safe to run before starting the server.
+
+```bash
+LogicProMCP doctor [--json] [--profile core|mixer|keycmd|legacy-scripter|full] [--client claude-code|claude-desktop|cursor|vscode|terminal|custom] [--strict] [--check-updates] [--verbose|--quiet]
+```
+
+Flags:
 
 | Flag | Effect |
 |------|--------|
@@ -132,14 +141,16 @@ Fully configured hosts should show Accessibility, AppleScript, CoreMIDI, MCU, MI
 | `--verbose` | Adds each check's evidence and `duration_ms`. |
 | `--quiet` | Headline + summary + failing/non-pass checks only. |
 | `--json` | Machine report. Identical bytes regardless of `--verbose`/`--quiet`/color. |
+| `--profile core\|mixer\|keycmd\|legacy-scripter\|full` | Selects the intent-aware readiness profile. Omit to infer from launch context and manual-validation approvals. |
+| `--client claude-code\|claude-desktop\|cursor\|vscode\|terminal\|custom` | Selects the MCP client profile for registration checks. Omit to infer from launch context/config. |
 | `--check-updates` | Opt-in: adds an `updates.latest_release` check (unauthenticated GitHub releases read). The default run never touches the network. |
 | `--strict` | Scripted exit codes: `ok=0`, `failed=1`, `manual_action_required=2`, `degraded=3`. |
 
 Color and unicode symbols are emitted only when stdout is a TTY and `NO_COLOR` is unset; otherwise output is plain ASCII (`[pass]`-style), so pipes and CI logs stay clean.
 
-The `v3` report is a **field-superset** of `v1`/`v2`: every prior key keeps its name, semantics, and value. New fields are additive — top-level `fix_plan`, per-check `optional`, and optional per-check `blocked_by`. Consumers should prefix-match `logic_pro_mcp_doctor.`, not exact-equal a version. Default exit code is unchanged: `failed` → 1, otherwise 0.
+The `v4` report is a **field-superset** of `v1`/`v2`/`v3`: every prior key keeps its name, semantics, and value. Additive fields include top-level `fix_plan`, `doctor_profile`, `doctor_profile_basis`, `client_profile`, `client_profile_basis`, `capabilities`, per-check `optional`, optional per-check `blocked_by`, optional per-check `skip_reason`, and per-check/report timing (`duration_ms`). Consumers should prefix-match `logic_pro_mcp_doctor.`, not exact-equal a version. Default exit code is unchanged: `failed` → 1, otherwise 0.
 
-Strict exit codes `2` and `3` are doctor status codes, not usage errors, and intentionally sit below the `sysexits.h` 64-78 range. Capability-gap skips still degrade to code `3`; optional skips such as an absent Claude Desktop config remain counted as skipped but do not degrade the aggregate status. For a boolean gate, test non-zero; for routing, branch on the exact code. With `set -e`, capture the code before branching:
+Strict exit codes `2` and `3` are doctor status codes, not usage errors, and intentionally sit below the `sysexits.h` 64-78 range. Required capability-gap skips still degrade to code `3`; optional skips such as an absent non-selected client config remain counted as skipped but do not degrade the aggregate status. For a boolean gate, test non-zero; for routing, branch on the exact code. With `set -e`, capture the code before branching:
 
 ```bash
 set +e
@@ -160,10 +171,11 @@ Consumer compatibility notes:
 
 | Consumer type | Upgrade note |
 |---------------|--------------|
-| Exact 13-check arrays | Switch to ID-based lookup; Doctor v3 emits 26 base checks and 27 with `--check-updates`. |
-| Strict schema validators | Allow additive top-level `fix_plan` and per-check `optional` / `blocked_by`. |
-| Skipped-count alarms | Expect a higher baseline; v3 reports diagnostic-capability gaps instead of hiding them. Optional skips do not imply degraded status. |
+| Exact 13-check arrays | Switch to ID-based lookup; Doctor v4 emits 26 base checks and 27 with `--check-updates`. |
+| Strict schema validators | Allow additive top-level `fix_plan`, profile/client/capability fields, per-check `optional` / `blocked_by` / `skip_reason`, and timing. |
+| Skipped-count alarms | Expect a higher baseline; v4 reports diagnostic-capability gaps instead of hiding them. Optional skips do not imply degraded status. |
 | UIs unaware of `fix_plan` | Continue rendering checks normally; `fix_plan` only orders the next actions. |
+| Readiness dashboards | Prefer `capabilities.<id>.status` for profile-aware readiness over hand-rolled check groups. |
 
 ## Doctor Remediation Anchors
 
