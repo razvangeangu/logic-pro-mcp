@@ -513,6 +513,8 @@ extension AccessibilityChannel {
         params: [String: String],
         runtime: AXLogicProElements.Runtime = .production,
         frontDocumentPath: FrontDocumentPathProvider = liveFrontDocumentPath,
+        entryLookup: VerifiedPluginCatalog.EntryLookup = VerifiedPluginCatalog.productionEntryLookup,
+        paramAliasLookup: VerifiedPluginCatalog.ParamAliasLookup = VerifiedPluginCatalog.canonicalParamKey,
         pluginWindowOpener: PluginWindowOpener = liveNoOpPluginWindowOpener
     ) async -> ChannelResult {
         let operation = "logic_plugins.set_param_verified"
@@ -569,23 +571,16 @@ extension AccessibilityChannel {
                 ]
             ))
         }
-        guard let paramKey = VerifiedPluginCatalog.canonicalParamKey(pluginID: pluginID, alias: paramAlias) else {
-            return .error(HonestContract.encodeV2StateC(
-                error: .unknownPluginIdentity,
-                extras: [
-                    "operation": operation,
-                    "target_identity": resolvedIdentity(track: track, insert: insert, pluginID: pluginID),
-                    "what_was_attempted": "resolve parameter '\(paramAlias)' for \(pluginID)",
-                    "what_was_observed": "no parameter alias mapping for this plugin",
-                    "safe_to_retry": false,
-                    "write_attempted": false,
-                ]
-            ))
-        }
+        let paramKey = VerifiedPluginCatalog.canonicalParamKey(
+            pluginID: pluginID,
+            alias: paramAlias,
+            paramAliasLookup: paramAliasLookup
+        ) ?? paramAlias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         // Unit honesty (R8): a caller unit that disagrees with the declared
         // canonical unit is invalid_params.
-        if let unit, let expectedUnit = VerifiedPluginCatalog.paramUnit(pluginID: pluginID, paramKey: paramKey),
+        if let unit,
+           let expectedUnit = VerifiedPluginCatalog.paramUnit(pluginID: pluginID, paramKey: paramKey, entryLookup: entryLookup),
            unit.caseInsensitiveCompare(expectedUnit) != .orderedSame {
             return .error(invalidParamsStateC(
                 operation,
@@ -593,7 +588,7 @@ extension AccessibilityChannel {
             ))
         }
         // Range validation (R6 step 1) against the declared display range.
-        if let range = VerifiedPluginCatalog.paramRange(pluginID: pluginID, paramKey: paramKey),
+        if let range = VerifiedPluginCatalog.paramRange(pluginID: pluginID, paramKey: paramKey, entryLookup: entryLookup),
            value < range.min || value > range.max {
             return .error(invalidParamsStateC(
                 operation,
@@ -604,7 +599,7 @@ extension AccessibilityChannel {
         // Step 5 — capability preflight. Only `.writeReadback` (Compressor
         // threshold, T0 spike) proceeds to the live write; every other parameter
         // has no write/readback method and fail-closes BEFORE any write (AC10).
-        let capability = VerifiedPluginCatalog.paramCapability(pluginID: pluginID, paramKey: paramKey)
+        let capability = VerifiedPluginCatalog.paramCapability(pluginID: pluginID, paramKey: paramKey, entryLookup: entryLookup)
         switch capability {
         case .unknownParameter, .unsupported:
             return .error(HonestContract.encodeV2StateC(
@@ -632,6 +627,7 @@ extension AccessibilityChannel {
                 paramAlias: paramAlias,
                 requested: value,
                 runtime: runtime,
+                entryLookup: entryLookup,
                 pluginWindowOpener: pluginWindowOpener
             )
         }
@@ -654,10 +650,15 @@ extension AccessibilityChannel {
         paramAlias: String,
         requested: Double,
         runtime: AXLogicProElements.Runtime,
+        entryLookup: VerifiedPluginCatalog.EntryLookup,
         pluginWindowOpener: PluginWindowOpener
     ) async -> ChannelResult {
         let identity = resolvedIdentity(track: track, insert: insert, pluginID: pluginID)
-        guard let axDescription = VerifiedPluginCatalog.paramAXDescription(pluginID: pluginID, paramKey: paramKey) else {
+        guard let axDescription = VerifiedPluginCatalog.paramAXDescription(
+            pluginID: pluginID,
+            paramKey: paramKey,
+            entryLookup: entryLookup
+        ) else {
             // A `.writeReadback` parameter must declare its AX matcher; absence is
             // a catalog defect, surfaced honestly rather than guessed around.
             return .error(HonestContract.encodeV2StateC(
@@ -673,7 +674,11 @@ extension AccessibilityChannel {
                 ]
             ))
         }
-        let tolerance = VerifiedPluginCatalog.paramTolerance(pluginID: pluginID, paramKey: paramKey) ?? 1.0
+        let tolerance = VerifiedPluginCatalog.paramTolerance(
+            pluginID: pluginID,
+            paramKey: paramKey,
+            entryLookup: entryLookup
+        ) ?? 1.0
 
         // Step 6 — track verified select. Drive the AX-native selection ladder,
         // then confirm the target header reads back as selected (a write that the

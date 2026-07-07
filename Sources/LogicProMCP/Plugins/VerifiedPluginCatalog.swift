@@ -19,6 +19,11 @@ import Foundation
 ///
 /// This module is deterministic and contains NO live AX interaction.
 enum VerifiedPluginCatalog {
+    typealias EntryLookup = @Sendable (_ pluginID: String) -> StockPluginCatalogEntry?
+    typealias ParamAliasLookup = @Sendable (_ pluginID: String, _ alias: String) -> String?
+
+    static let productionEntryLookup: EntryLookup = { StockPluginCatalog.entry(id: $0) }
+
 
     /// Display-name / alias → canonical `logic.stock.*` id table.
     ///
@@ -55,6 +60,9 @@ enum VerifiedPluginCatalog {
         "logic.stock.effect.compressor": [
             "threshold": "threshold",
         ],
+        "logic.stock.effect.channel_eq": [
+            "todo_channel_eq_census_param_1": "todo_channel_eq_census_param_1",
+        ],
     ]
 
     /// Resolve a caller-supplied plugin alias to its canonical catalog id, or
@@ -75,6 +83,14 @@ enum VerifiedPluginCatalog {
         let normalized = alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return nil }
         return paramAliases[pluginID]?[normalized]
+    }
+
+    static func canonicalParamKey(
+        pluginID: String,
+        alias: String,
+        paramAliasLookup: ParamAliasLookup
+    ) -> String? {
+        paramAliasLookup(pluginID, alias)
     }
 
     /// Map a slot's observed display name (from AX readback) to a canonical
@@ -107,8 +123,12 @@ enum VerifiedPluginCatalog {
     /// "param map이 선언하지 않은 unit은 State C `invalid_params`"); a mismatch is
     /// reported by the caller as `invalid_params`, so this returns the capability
     /// independent of unit and exposes the expected unit separately.
-    static func paramCapability(pluginID: String, paramKey: String) -> ParamCapability {
-        guard let entry = StockPluginCatalog.entry(id: pluginID),
+    static func paramCapability(
+        pluginID: String,
+        paramKey: String,
+        entryLookup: EntryLookup = productionEntryLookup
+    ) -> ParamCapability {
+        guard let entry = entryLookup(pluginID),
               let param = entry.parameters.first(where: { $0.id == paramKey }) else {
             return .unknownParameter
         }
@@ -120,15 +140,23 @@ enum VerifiedPluginCatalog {
     /// The canonical unit a (canonical) plugin parameter declares, or nil when
     /// the parameter is unknown. Used to enforce unit honesty (R8) before a
     /// write: a caller `unit` that disagrees is `invalid_params`.
-    static func paramUnit(pluginID: String, paramKey: String) -> String? {
-        StockPluginCatalog.entry(id: pluginID)?
+    static func paramUnit(
+        pluginID: String,
+        paramKey: String,
+        entryLookup: EntryLookup = productionEntryLookup
+    ) -> String? {
+        entryLookup(pluginID)?
             .parameters.first(where: { $0.id == paramKey })?.unit
     }
 
     /// The valid display-value range a (canonical) plugin parameter declares, or
     /// nil when unknown. Used for range validation (R6 step 1).
-    static func paramRange(pluginID: String, paramKey: String) -> StockPluginValueRange? {
-        StockPluginCatalog.entry(id: pluginID)?
+    static func paramRange(
+        pluginID: String,
+        paramKey: String,
+        entryLookup: EntryLookup = productionEntryLookup
+    ) -> StockPluginValueRange? {
+        entryLookup(pluginID)?
             .parameters.first(where: { $0.id == paramKey })?.valueRange
     }
 
@@ -137,16 +165,24 @@ enum VerifiedPluginCatalog {
     /// the parameter has no stable description matcher. The verified write path
     /// (R6 step 9) matches a window slider by this description; a parameter
     /// without one cannot reach a verified write (it stays `.unsupported`).
-    static func paramAXDescription(pluginID: String, paramKey: String) -> String? {
-        StockPluginCatalog.entry(id: pluginID)?
+    static func paramAXDescription(
+        pluginID: String,
+        paramKey: String,
+        entryLookup: EntryLookup = productionEntryLookup
+    ) -> String? {
+        entryLookup(pluginID)?
             .parameters.first(where: { $0.id == paramKey })?.axDescription
     }
 
     /// The verified write/readback tolerance (in the parameter's own unit) for a
     /// (canonical) plugin parameter, or nil when unknown / not verified-writable.
     /// R6 step 13: |observed - requested| <= tolerance ⇒ State A.
-    static func paramTolerance(pluginID: String, paramKey: String) -> Double? {
-        StockPluginCatalog.entry(id: pluginID)?
+    static func paramTolerance(
+        pluginID: String,
+        paramKey: String,
+        entryLookup: EntryLookup = productionEntryLookup
+    ) -> Double? {
+        entryLookup(pluginID)?
             .parameters.first(where: { $0.id == paramKey })?.tolerance
     }
 }
