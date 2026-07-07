@@ -142,8 +142,36 @@ private func assertRegionDragSpikeBlocked(
     defer { try? FileManager.default.removeItem(at: link) }
 
     try assertRegionDragSpikeBlocked(
-        exportDir: link.appendingPathComponent("LogicProMCP").path,
+        exportDir: link.appendingPathComponent("LogicProMCP-\(UUID().uuidString)").path,
         noteContains: "controlled_scratch_root"
+    )
+}
+
+@Test func regionDragSpikeAcceptsTmpSymlinkStayingInsideScratchRoot() throws {
+    let target = URL(fileURLWithPath: "/tmp/LogicProMCP-region-drag-spike-target-\(UUID().uuidString)")
+    let link = URL(fileURLWithPath: "/tmp/LogicProMCP-region-drag-spike-link-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+    defer {
+        try? FileManager.default.removeItem(at: link)
+        try? FileManager.default.removeItem(at: target)
+    }
+
+    let trailingDirectory = "LogicProMCP-\(UUID().uuidString)"
+    let run = try runRegionDragSpike(
+        exportDir: link.appendingPathComponent(trailingDirectory).path,
+        source: nil,
+        destination: nil
+    )
+    #expect(run.status == 2)
+
+    let records = try regionDragSpikeRecords(run.output)
+    let armedRecord = try #require(records.first)
+    #expect(armedRecord["record_type"] as? String == "region_drag_preflight")
+    #expect(armedRecord["status"] as? String == "armed")
+    #expect(
+        armedRecord["export_dir"] as? String
+            == target.resolvingSymlinksInPath().appendingPathComponent(trailingDirectory).path
     )
 }
 

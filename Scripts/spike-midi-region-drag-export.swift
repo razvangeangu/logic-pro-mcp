@@ -56,7 +56,37 @@ func expandedPath(_ path: String) -> String {
 }
 
 func resolvedStandardizedPath(_ path: String) -> String {
-    URL(fileURLWithPath: expandedPath(path)).standardizedFileURL.resolvingSymlinksInPath().path
+    let standardizedURL = URL(fileURLWithPath: expandedPath(path)).standardizedFileURL
+    let fileManager = FileManager.default
+    var existingAncestor = standardizedURL
+    var unresolvedComponents: [String] = []
+
+    while true {
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: existingAncestor.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            let resolvedAncestor = existingAncestor.resolvingSymlinksInPath()
+            return unresolvedComponents.reversed()
+                .reduce(resolvedAncestor) { url, component in
+                    url.appendingPathComponent(component)
+                }
+                .standardizedFileURL
+                .path
+        }
+
+        let parent = existingAncestor.deletingLastPathComponent()
+        if parent.path == existingAncestor.path {
+            return unresolvedComponents.reversed()
+                .reduce(existingAncestor.resolvingSymlinksInPath()) { url, component in
+                    url.appendingPathComponent(component)
+                }
+                .standardizedFileURL
+                .path
+        }
+
+        unresolvedComponents.append(existingAncestor.lastPathComponent)
+        existingAncestor = parent
+    }
 }
 
 func isPath(_ path: String, under directory: String) -> Bool {
@@ -80,8 +110,9 @@ func controlledExportScratchRoots() -> [String] {
 }
 
 func isControlledExportScratchPath(_ path: String) -> Bool {
-    controlledExportScratchRoots().contains { root in
-        isPath(path, under: root)
+    let resolvedPath = resolvedStandardizedPath(path)
+    return controlledExportScratchRoots().contains { root in
+        isPath(resolvedPath, under: root)
     }
 }
 
