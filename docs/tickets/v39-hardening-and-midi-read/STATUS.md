@@ -2,20 +2,21 @@
 
 **PRD**: docs/prd/PRD-v39-hardening-and-midi-read.md (v0.2)
 **Size**: XL
-**Current Phase**: 5 (TDD 개발 — PR-1부터 순차)
+**Current Phase**: 7 (완료) — 6 PR 전부 main 머지(#240-#245), 통합 검증 PASS
 **실행 모델**: 코드 100% codex gpt-5.5 xhigh / 오케스트레이터는 판단·문서·리뷰만 / 리뷰 게이트 boomer(codex xhigh)
 
 ## Tickets
 
 | Ticket | Title | Status | Review | Notes |
 |--------|-------|--------|--------|-------|
-| T1 | 릴리스 무결성 팩 (PR-1) | Todo | - | |
-| T2 | HC 전역화 마감 (PR-2) | Todo | - | BREAKING |
-| T3 | 소형 수정 팩 (PR-3) | Todo | - | |
-| T4 | MCP 프로토콜 팩 (PR-4) | Todo | - | SDK 0.12.1 확인됨 |
-| T5a | SMFReader + Export 임시파일 (PR-5) | In Review | - | 순수 유닛 (T5 분할), 파서 boomer 정독 중 |
-| T5b | MIDI 읽기 표면 (PR-5) | **Deferred** | - | **T0 라이브 게이트 FAIL** — export 저장 패널 하드 월(docs/spikes/midi-export-t0-evidence.md). 신규 공개 커맨드 없음 |
-| T6 | Channel EQ registry + rename_marker 스파이크 (PR-6) | In Review | - | **라이브 census 게이트 FAIL** → registry 활성화 defer, 스캐폴드만 출하. rename_marker도 defer. (docs/spikes/channel-eq-census.md) |
+| T1 | 릴리스 무결성 팩 (PR-1 #240) | **Done** | PASS | main merged |
+| T2 | HC 전역화 마감 (PR-2 #241) | **Done** | PASS 2R | BREAKING; 전역 HC invariant |
+| T3 | 소형 수정 팩 (PR-3 #242) | **Done** | PASS 2R | toggle_autopunch + modeConflict |
+| T4 | MCP 프로토콜 팩 (PR-4 #243) | **Done** | PASS 2R | subscribe/prompts/structuredContent |
+| T5a | SMFReader + Export 임시파일 (PR-5 #244) | **Done** | PASS 2R | 파서 검증 완료 |
+| T5b | MIDI 읽기 표면 (PR-5 #244) | **Deferred** | - | **T0 게이트 FAIL** — export 저장 패널 하드 월(docs/spikes/midi-export-t0-evidence.md). 신규 공개 커맨드 없음 |
+| T6 | Channel EQ registry (PR-6 #245) | **Done(scaffold)** | PASS | 스캐폴드 출하; **registry 활성화 defer**(census 게이트 FAIL, docs/spikes/channel-eq-census.md) |
+| T6b | rename_marker 스파이크 | **Deferred** | - | 라이브 판정: AX 텍스트-편집 경로 부재, not_implemented 유지 |
 | D-1 | applyback 브랜치 처분 | **Done** | - | 델타 0 (PR #24 기머지), origin+로컬 삭제 2026-07-06 |
 
 ## Review History
