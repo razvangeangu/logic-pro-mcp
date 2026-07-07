@@ -350,6 +350,7 @@ enum SetupDoctor {
         checks.append(timed {
             installBinaryInventoryCheck(
                 executablePath: executablePath,
+                installSource: installSource,
                 runtime: runtime,
                 claudeRegistration: claudeRegistration,
                 staticVersionForPath: staticVersionForPath
@@ -448,7 +449,10 @@ enum SetupDoctor {
 
     private static func sanitizedEvidence(_ evidence: [String: String]) -> [String: String] {
         Dictionary(uniqueKeysWithValues: evidence.map { key, value in
-            if key == "stderr" {
+            if key == "stdout" || key == "stderr" {
+                if value == "empty" || value == "present" {
+                    return (key, value)
+                }
                 return (key, value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "empty" : "present")
             }
             let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -591,6 +595,32 @@ enum SetupDoctor {
         case .command, .docs, .manual:
             return remediationAnchorsByCheckID[id] ?? "docs/SETUP.md#doctor"
         }
+    }
+
+    static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    static func commandEvidence(
+        path: String,
+        output: CommandOutput
+    ) -> [String: String] {
+        [
+            "path": path,
+            "exit_code": String(output.exitCode),
+            "stdout": streamSummary(output.stdout),
+            "stdout_truncated": streamTruncated(output.stdout),
+            "stderr": streamSummary(output.stderr),
+            "stderr_truncated": streamTruncated(output.stderr),
+        ]
+    }
+
+    private static func streamSummary(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "empty" : "present"
+    }
+
+    private static func streamTruncated(_ value: String, limit: Int = 4_096) -> String {
+        String(value.utf8.count > limit)
     }
 
 }

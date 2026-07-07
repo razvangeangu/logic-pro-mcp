@@ -259,6 +259,42 @@ private func issue26RepositoryRootURL() -> URL {
     #expect(object["install_source"] as? String == "source_build")
 }
 
+@Test func testDoctorSourceBuildDoesNotSuggestBrewUpgrade() throws {
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: doctorRuntime(
+            executablePath: "/Users/x/logic-pro-mcp/.build/release/LogicProMCP",
+            commandHandler: { executable, arguments in
+                if executable == "/usr/bin/codesign" {
+                    return .init(exitCode: 0, stdout: "", stderr: "")
+                }
+                if executable == "/usr/bin/xattr" {
+                    return .init(exitCode: 1, stdout: "", stderr: "No such xattr")
+                }
+                if executable == "/usr/bin/lipo" {
+                    return .init(exitCode: 0, stdout: "arm64\n", stderr: "")
+                }
+                if executable == "/usr/bin/strings", arguments.count == 2 {
+                    return .init(exitCode: 0, stdout: "0.0.1\n", stderr: "")
+                }
+                if executable == "/opt/homebrew/bin/brew" || executable == "/usr/local/bin/brew",
+                   arguments == ["list", "--versions", "logic-pro-mcp"] {
+                    return .init(exitCode: 0, stdout: "logic-pro-mcp 3.7.4\n", stderr: "")
+                }
+                return nil
+            }
+        )
+    )
+    let inventory = try #require(report.checks.first { $0.id == "install.binary_inventory" })
+    #expect(report.installSource == .sourceBuild)
+    #expect(inventory.status == .warn)
+    #expect(inventory.remediation.type == .command)
+    #expect(inventory.remediation.value.contains("swift build -c release"))
+    #expect(!inventory.remediation.value.contains("brew upgrade"))
+}
+
 @Test func testSetupDoctorClassifiesReleaseBinaryWhenBrewProbeFails() {
     let report = SetupDoctor.generate(
         arguments: ["LogicProMCP", "doctor", "--json"],
@@ -381,6 +417,81 @@ private func issue26RepositoryRootURL() -> URL {
     #expect(quarantine.remediation.type == .command)
 }
 
+@Test func testDoctorRemediationShellQuotesPaths() throws {
+    let path = "/Users/x/My Build/LogicProMCP"
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: doctorRuntime(
+            executablePath: path,
+            executable: false,
+            commandHandler: { executable, _ in
+                if executable == "/usr/bin/codesign" {
+                    return .init(exitCode: 0, stdout: "", stderr: "")
+                }
+                if executable == "/usr/bin/xattr" {
+                    return .init(exitCode: 0, stdout: "0081;Safari;\n", stderr: "")
+                }
+                return nil
+            }
+        )
+    )
+    let executable = try #require(report.checks.first { $0.id == "binary.executable" })
+    let quarantine = try #require(report.checks.first { $0.id == "release.quarantine" })
+    #expect(executable.remediation.value == "chmod +x '\(path)'")
+    #expect(quarantine.remediation.value == "xattr -d com.apple.quarantine '\(path)'")
+}
+
+@Test func testDoctorXattrEvidenceKeepsStdoutStderrSummary() throws {
+    let longError = String(repeating: "permission denied ", count: 400)
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: doctorRuntime(commandHandler: { executable, _ in
+            if executable == "/usr/bin/codesign" {
+                return .init(exitCode: 0, stdout: "", stderr: "")
+            }
+            if executable == "/usr/bin/xattr" {
+                return .init(exitCode: 0, stdout: "0081;Safari;\n", stderr: longError)
+            }
+            return nil
+        })
+    )
+    let quarantine = try #require(report.checks.first { $0.id == "release.quarantine" })
+    #expect(quarantine.evidence["exit_code"] == "0")
+    #expect(quarantine.evidence["stdout"] == "present")
+    #expect(quarantine.evidence["stdout_truncated"] == "false")
+    #expect(quarantine.evidence["stderr"] == "present")
+    #expect(quarantine.evidence["stderr_truncated"] == "true")
+}
+
+@Test func testDoctorCodesignEvidenceKeepsStdoutStderrSummary() throws {
+    let longOutput = String(repeating: "authority ", count: 600)
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: doctorRuntime(commandHandler: { executable, _ in
+            if executable == "/usr/bin/codesign" {
+                return .init(exitCode: 1, stdout: longOutput, stderr: "invalid signature\n")
+            }
+            if executable == "/usr/bin/xattr" {
+                return .init(exitCode: 1, stdout: "", stderr: "No such xattr")
+            }
+            return nil
+        })
+    )
+    let signature = try #require(report.checks.first { $0.id == "release.signature" })
+    #expect(signature.status == .warn)
+    #expect(signature.evidence["exit_code"] == "1")
+    #expect(signature.evidence["stdout"] == "present")
+    #expect(signature.evidence["stdout_truncated"] == "true")
+    #expect(signature.evidence["stderr"] == "present")
+    #expect(signature.evidence["stderr_truncated"] == "false")
+}
+
 @Test func testReleaseQuarantineReportsWarnWhenStateUndeterminable() throws {
     // Non-zero exit that is NOT the recognized "No such xattr" must NOT be reported
     // as a clean pass — it conflates "not quarantined" with "could not determine".
@@ -405,6 +516,24 @@ private func issue26RepositoryRootURL() -> URL {
     #expect(quarantine.status == .warn)
     #expect(quarantine.summary == "Quarantine state could not be determined.")
     #expect(quarantine.evidence["exit_code"] == "13")
+}
+
+@Test func testDoctorUnknownLaunchContextIsExplainedButAggregateNeutral() throws {
+    var runtime = doctorRuntime()
+    runtime.launchContext = {
+        SetupDoctor.LaunchContextInfo(context: "unknown", responsibleHint: "unknown")
+    }
+    let report = SetupDoctor.generate(
+        arguments: ["LogicProMCP", "doctor", "--json"],
+        permissionStatus: grantedPermissionStatus(),
+        approvals: allApprovals(),
+        runtime: runtime
+    )
+    let launch = try #require(report.checks.first { $0.id == "permissions.launch_context" })
+    #expect(report.status == .ok)
+    #expect(launch.status == .pass)
+    #expect(launch.summary.localizedCaseInsensitiveContains("unknown"))
+    #expect(SetupDoctor.renderHuman(report, useColor: false).contains("Launch context is unknown"))
 }
 
 // MARK: - Claude registration (config-based, read-only)

@@ -175,7 +175,7 @@ Install with Homebrew, copy the release binary into PATH, or invoke the source b
 
 <a id="doctor-binaryexecutable"></a>
 ### `binary.executable`
-Run `chmod +x /path/to/LogicProMCP`.
+Run `chmod +x '/path/to/LogicProMCP'`. Quote the path if it contains spaces or shell metacharacters.
 
 <a id="doctor-installsource"></a>
 ### `install.source`
@@ -183,7 +183,7 @@ Prefer the Homebrew install. For source builds, launch `.build/release/LogicProM
 
 <a id="doctor-installbinary-inventory"></a>
 ### `install.binary_inventory`
-Reinstall or upgrade when a canonical installed binary has a stale static version.
+Reinstall or upgrade when a canonical installed binary has a stale static version. Homebrew installs use `brew upgrade logic-pro-mcp`; source builds use `git pull && swift build -c release`.
 
 <a id="doctor-installshare-dir"></a>
 ### `install.share_dir`
@@ -195,7 +195,7 @@ Reinstall from the pinned release artifact, or ad-hoc sign a local source build 
 
 <a id="doctor-releasequarantine"></a>
 ### `release.quarantine`
-After verifying SHA256 and signature, remove quarantine with `xattr -d com.apple.quarantine /path/to/LogicProMCP`.
+After verifying SHA256 and signature, remove quarantine with `xattr -d com.apple.quarantine '/path/to/LogicProMCP'`. Quote the path if it contains spaces or shell metacharacters.
 
 <a id="doctor-mcpclaude-code-registration"></a>
 ### `mcp.claude_code_registration`
@@ -227,7 +227,7 @@ Grant Accessibility/PostEvent access to the app that launches LogicProMCP; CGEve
 
 <a id="doctor-permissionslaunch-context"></a>
 ### `permissions.launch_context`
-Informational. Re-run doctor from the same app that will launch the server when cross-context TCC is in doubt.
+Informational. If the launch context is unknown, re-run doctor from the same app that will launch the server when cross-context TCC is in doubt.
 
 <a id="doctor-permissionstcc-cross-context"></a>
 ### `permissions.tcc_cross_context`
