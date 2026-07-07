@@ -220,6 +220,46 @@ bash <(curl -fsSL https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/v
 
 See [SECURITY.md §Installer trust model](SECURITY.md#installer-trust-model) for the trust tiers and threat model.
 
+## Setup Doctor
+
+Getting an agent to reliably drive Logic Pro is mostly a permissions-and-environment problem: TCC grants, the right Logic version, a live document, a registered control surface, no blocking modal. `LogicProMCP doctor` is a first-class, **intent-aware readiness platform** built for exactly this — not a boolean "is it installed" check, but a diagnostic that tells you *which capabilities are ready, which are blocked, why, and what to do next* — and never reports green for something it could not actually verify.
+
+```bash
+LogicProMCP doctor                 # human-readable report, color when a TTY
+LogicProMCP doctor --json          # stable machine contract (schema logic_pro_mcp_doctor.v4)
+LogicProMCP doctor --strict        # exit code encodes overall status (CI gate)
+LogicProMCP doctor --profile core --client claude-desktop
+LogicProMCP doctor --check-updates # opt-in: also checks for a newer release
+```
+
+**Intent-aware profiles.** You are not forced through checks you'll never use. `--profile` scopes the required set to how you actually drive Logic — `core` (transport/tracks/AX), `mixer`, `keycmd`, `legacy-scripter`, or `full`. `--client` (`claude-code`, `claude-desktop`, `cursor`, `vscode`, `terminal`, `custom`) adds the registration checks that matter for that host. Aggregate status is scoped to the *selected* profile's required checks, so an MCU-only workflow isn't marked unhealthy for a Scripter gap it will never hit.
+
+**Capability readiness, not just check pass/fail.** Every check is mapped to the capabilities it gates (`track_management`, `midi_import`, `mixer_ax`, `mixer_mcu`, `keycmd_only_ops`, `verified_plugin_applyback`, `project_lifecycle`, …). The report tells you *"MIDI import is ready; verified-plugin apply-back is blocked by PostEvent"* — the language an agent (or an operator) can act on directly.
+
+**Causal chain — `fix_plan` and `blocked_by`.** Failures are ordered into a `fix_plan` (the next actions, most-unblocking first), and each downstream check names the upstream check that `blocked_by` it — so you fix the root, not the symptom. The `headline` restates the single next action.
+
+**Honesty is the whole point.** A check that could not run (missing capability, unreadable TCC db) is reported as an explicit `skipped` with a reason — it is never silently folded into a pass. Intentional skips (`--skip-channel <MIDIKeyCommands|Scripter>` with an optional `--skip-note`, e.g. you deliberately didn't register Scripter) are recorded and excluded from readiness without faking green. TCC findings are redacted to service/principal/state summaries — no raw local paths in the report.
+
+**Permission surface it verifies.** `--check-permissions` folds the four TCC grants a real agent needs and exits non-zero if any is missing: **Accessibility**, **Automation → Logic Pro**, **Automation → System Events** (a *separate* target — Logic being granted does not imply it), and **PostEvent** (Input Monitoring, required by the CGEvent bounce/click fallback). The doctor treats these as distinct capabilities because they fail independently: e.g. a `-1743` / `errAEEventNotPermitted` from System Events is a *launcher-permission* gap (the process responsible for launching the server is denied Automation → System Events), reported as such with the exact fix — not misattributed to Logic.
+
+**Strict exit codes** (`--strict`, for CI/agent gating): `0` ok · `1` failed · `2` manual_action_required · `3` degraded. Codes `2`/`3` are status codes, not usage errors, and sit below the `sysexits.h` range.
+
+A real (redacted) run on a box mid-setup:
+
+```jsonc
+{
+  "schema": "logic_pro_mcp_doctor.v4",
+  "doctor_profile": "core",
+  "status": "failed",
+  "headline": "Next action [permissions.accessibility]: Accessibility permission is not granted",
+  "fix_plan": ["permissions.accessibility", "permissions.post_event_access", "install.binary_inventory"],
+  "summary": { "total": 26, "passed": 15, "warnings": 1, "failed": 2, "skipped": 8, "manual": 0, "duration_ms": 333 },
+  "checks": [ { "id": "binary.path", "status": "pass", "category": "installation", "severity": "info" } /* … */ ]
+}
+```
+
+The same run in a terminal prints a grouped, color-coded report with per-check remediation anchors into [docs/SETUP.md](docs/SETUP.md). Full flag reference and every check's remediation live in [docs/SETUP.md](docs/SETUP.md#setup-doctor); the `--json` bytes are a stable contract you can assert against in your own onboarding automation.
+
 ## Architecture at a Glance
 
 MCP clients launch the Swift stdio server. Dispatchers validate tool parameters, `ChannelRouter` chooses the strongest available macOS channel, resources expose cached/live state, and high-risk writes return explicit confirmed/uncertain/failed envelopes. The core channels are MCU, Accessibility, AppleScript, CoreMIDI, CGEvent, Scripter, and MIDI Key Commands.

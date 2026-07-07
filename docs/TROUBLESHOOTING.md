@@ -67,7 +67,7 @@ Enable Accessibility for the launcher app in **System Settings -> Privacy & Secu
 
 Launch Logic Pro once, then grant Automation access for the launcher app under **Privacy & Security -> Automation -> Logic Pro**.
 
-`--check-permissions`, `logic_system health`, and `doctor` report Automation as one of three states — read them differently:
+`--check-permissions`, `logic_system health`, and `doctor` report each TCC target as one of three states — read them differently:
 
 - **`not_granted`**: the probe ran and macOS denied it. Grant Automation as above.
 - **`not_verifiable`**: the probe itself could not complete (it timed out or failed to spawn). This is an infrastructure failure, **not** a denial — do not assume the permission is missing. Re-run the check on a responsive session; if it persists, investigate what is blocking the probe (a wedged Logic UI, a stuck modal, or a sandbox that prevents spawning `osascript`) rather than re-granting an already-correct permission.
@@ -77,7 +77,7 @@ Launch Logic Pro once, then grant Automation access for the launcher app under *
 
 ### `-1743` / System Events Automation denied
 
-`-1743`, `errAEEventNotPermitted`, or "not authorized to send Apple events" from `tell application "System Events"` means the responsible process for the server or harness is denied Automation to System Events. This is a launcher-permission gap, not a Logic Pro limitation, and Logic Pro Automation being granted is separate and not sufficient.
+`-1743`, `errAEEventNotPermitted`, or "not authorized to send Apple events" from `tell application "System Events"` means the responsible process for the server or harness is denied Automation to System Events. This is a launcher-permission gap, not a Logic Pro limitation, and Logic Pro Automation being granted is separate and not sufficient. System Events Automation is part of both `--check-permissions` and doctor readiness.
 
 Fix it one of two ways:
 
