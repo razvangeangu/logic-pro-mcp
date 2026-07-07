@@ -96,7 +96,7 @@ Destructive project operations (`quit`, `close`, `open`, `save_as`, `bounce`) re
 
 ### Verified plugin apply-back gate
 
-`logic_plugins` is the v3.6.0+ verified apply-back surface and remains unchanged as a security boundary in v3.8.0. Its mutating commands (`insert_verified`, `set_param_verified`) are scoped to `mode:"duplicate_applyback"` and require an explicit `project_expected_path`. The server reads the live front Logic project path at call time and returns State C `project_identity_mismatch` before any write if the document changed.
+`logic_plugins` is the v3.6.0+ verified apply-back surface and remains unchanged as a security boundary in v3.9.0. Its mutating commands (`insert_verified`, `set_param_verified`) are scoped to `mode:"duplicate_applyback"` and require an explicit `project_expected_path`. The server reads the live front Logic project path at call time and returns State C `project_identity_mismatch` before any write if the document changed.
 
 The insert path is fail-closed:
 

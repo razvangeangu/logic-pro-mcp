@@ -1,6 +1,6 @@
 # API Reference
 
-Current surface: Logic Pro MCP exposes 10 tools, 18 static resources, and 11 resource templates. The published stable release is v3.8.0, which keeps this exact surface over v3.7.4 (a behavior-preserving internal refactor plus honesty and security fixes — no tool/resource/template added or removed).
+Current surface: Logic Pro MCP exposes 10 tools, 18 static resources, and 11 resource templates. The published stable release is v3.9.0. It keeps the 10-tool / 18-resource / 11-template surface and adds the additive `transport.toggle_autopunch` command plus new MCP capabilities (resource subscriptions, workflow prompts, and per-tool `outputSchema` / `structuredContent`). `logic_midi` send-only successes and `logic_tracks.arm_only` now return Honest Contract JSON envelopes (BREAKING response shape — see CHANGELOG).
 
 Use tools for actions. Use resources for state. Treat every mutating result as one of:
 
