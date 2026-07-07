@@ -180,6 +180,23 @@ private func doctorV4Report(
     #expect(report.clientProfile == .cursor)
 }
 
+@Test func doctorV4ExplicitClaudeDesktopAbsentConfigIsRequiredAndNotOk() throws {
+    let report = doctorV4Report(
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-desktop"],
+        runtime: doctorV4Runtime(
+            registration: .notRegistered,
+            desktopRegistration: .configUnavailable(reason: "config_absent")
+        )
+    )
+
+    let desktop = try #require(report.checks.first { $0.id == "mcp.claude_desktop_registration" })
+    let isOptional = desktop.optional
+    #expect(desktop.status == .warn || desktop.status == .manual)
+    #expect(isOptional == false)
+    #expect(desktop.skipReason != "client_not_selected")
+    #expect(report.status != .ok)
+}
+
 @Test func doctorV4BareRegisteredCommandCanResolveThroughDoctorPath() throws {
     var runtime = doctorV4Runtime(
         registration: .registered(command: "logic-pro-mcp-dev"),
@@ -255,6 +272,48 @@ private func doctorV4Report(
 
     #expect(Set(reportIDs).isSubset(of: registryIDs))
     #expect(reportIDs == orderedRenderedIDs)
+}
+
+@Test func doctorV4DroppedRequiredCheckIsSynthesizedAsFailure() throws {
+    let report = doctorV4Report(
+        arguments: ["LogicProMCP", "doctor", "--json", "--profile", "core", "--client", "claude-code"],
+        approvals: [:]
+    )
+    let dropped = report.checks.filter { $0.id != "binary.executable" }
+    let closed = SetupDoctor.checksClosingRequiredGaps(
+        dropped,
+        profile: report.doctorProfile,
+        clientProfile: report.clientProfile
+    )
+    let synthesized = try #require(closed.first { $0.id == "binary.executable" })
+    let isOptional = synthesized.optional
+    #expect(synthesized.status == .fail)
+    #expect(isOptional == false)
+    #expect(synthesized.evidence["reason"] == "required_check_missing")
+
+    let requiredIDs = SetupDoctor.requiredCheckIDs(
+        for: report.doctorProfile,
+        clientProfile: report.clientProfile
+    )
+    let scoped = closed.filter { requiredIDs.contains($0.id) && !$0.optional }
+    #expect(SetupDoctor.aggregateStatus(scoped) != .ok)
+}
+
+@Test func doctorV4CapabilityChecksAreConsistentWithRegistryGroups() throws {
+    let report = doctorV4Report()
+    let grouped = Dictionary(grouping: SetupDoctor.checkDefinitions.flatMap { definition in
+        definition.capabilityGroups.map { ($0, definition.id.rawValue) }
+    }) { pair in
+        pair.0
+    }
+    let registryCapabilityIDs = Set(grouped.keys)
+
+    #expect(Set(report.capabilities.keys) == registryCapabilityIDs)
+    for capabilityID in report.capabilities.keys.sorted() {
+        let rendered = try #require(report.capabilities[capabilityID])
+        let registryCheckIDs = (grouped[capabilityID] ?? []).map { $0.1 }
+        #expect(rendered.checks == registryCheckIDs, "\(capabilityID) drifted from checkDefinitions.capabilityGroups")
+    }
 }
 
 @Test func doctorV4BlockedByTableIsDerivedFromCheckRegistry() {

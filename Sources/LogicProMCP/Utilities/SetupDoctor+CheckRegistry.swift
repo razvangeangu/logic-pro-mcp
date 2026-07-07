@@ -59,9 +59,33 @@ extension SetupDoctor {
         }
     }
 
+    struct DoctorCapabilityDefinition: Equatable, Sendable {
+        let id: String
+        let profiles: Set<DoctorProfile>
+        let liveVerification: String?
+
+        init(_ id: String, profiles: Set<DoctorProfile>, liveVerification: String? = nil) {
+            self.id = id
+            self.profiles = profiles
+            self.liveVerification = liveVerification
+        }
+    }
+
+    private static let allCapabilityGroups = [
+        "core_transport",
+        "track_management",
+        "midi_import",
+        "mixer_ax",
+        "mixer_mcu",
+        "project_lifecycle",
+        "keycmd_only_ops",
+        "legacy_scripter",
+        "verified_plugin_applyback",
+    ]
+
     static let checkDefinitions: [DoctorCheckDefinition] = [
-        .init(.binaryPath, capabilityGroups: ["core_transport"], remediationAnchor: "docs/SETUP.md#doctor-binarypath"),
-        .init(.binaryExecutable, capabilityGroups: ["core_transport"], remediationAnchor: "docs/SETUP.md#doctor-binaryexecutable"),
+        .init(.binaryPath, capabilityGroups: allCapabilityGroups, remediationAnchor: "docs/SETUP.md#doctor-binarypath"),
+        .init(.binaryExecutable, capabilityGroups: allCapabilityGroups, remediationAnchor: "docs/SETUP.md#doctor-binaryexecutable"),
         .init(.binaryVersion),
         .init(.installSource, remediationAnchor: "docs/SETUP.md#doctor-installsource"),
         .init(.installBinaryInventory, remediationAnchor: "docs/SETUP.md#doctor-installbinary-inventory"),
@@ -71,16 +95,16 @@ extension SetupDoctor {
         .init(.mcpClaudeCodeRegistration, remediationAnchor: "docs/SETUP.md#doctor-mcpclaude-code-registration", clientRule: "claude-code"),
         .init(.mcpRegistrationTarget, dependencies: [.mcpClaudeCodeRegistration], remediationAnchor: "docs/SETUP.md#doctor-mcpregistration-target", clientRule: "claude-code"),
         .init(.mcpClaudeDesktopRegistration, remediationAnchor: "docs/SETUP.md#doctor-mcpclaude-desktop-registration", clientRule: "claude-desktop"),
-        .init(.permissionsAccessibility, capabilityGroups: ["core_transport"], remediationAnchor: "docs/SETUP.md#doctor-permissionsaccessibility"),
+        .init(.permissionsAccessibility, capabilityGroups: allCapabilityGroups, remediationAnchor: "docs/SETUP.md#doctor-permissionsaccessibility"),
         .init(.permissionsAutomationLogicPro, capabilityGroups: ["track_management", "project_lifecycle", "mixer_ax", "verified_plugin_applyback"], remediationAnchor: "docs/SETUP.md#doctor-permissionsautomation-logic-pro"),
         .init(.permissionsAutomationSystemEvents, capabilityGroups: ["midi_import", "project_lifecycle"], remediationAnchor: "docs/SETUP.md#doctor-permissionsautomation-system-events"),
-        .init(.permissionsPostEventAccess, capabilityGroups: ["core_transport"], remediationAnchor: "docs/SETUP.md#doctor-permissionspost-event-access"),
+        .init(.permissionsPostEventAccess, capabilityGroups: allCapabilityGroups, remediationAnchor: "docs/SETUP.md#doctor-permissionspost-event-access"),
         .init(.permissionsLaunchContext, remediationAnchor: "docs/SETUP.md#doctor-permissionslaunch-context"),
         .init(.permissionsTCCCrossContext, remediationAnchor: "docs/SETUP.md#doctor-permissionstcc-cross-context"),
         .init(.systemMacOSVersion, remediationAnchor: "docs/SETUP.md#doctor-systemmacos-version"),
-        .init(.logicInstallation, capabilityGroups: ["core_transport"], remediationAnchor: "docs/SETUP.md#doctor-logicinstallation"),
-        .init(.logicVersionSupport, dependencies: [.logicInstallation], capabilityGroups: ["core_transport"], remediationAnchor: "docs/SETUP.md#doctor-logicversion-support"),
-        .init(.logicApplicationState, capabilityGroups: ["core_transport"], remediationAnchor: "docs/SETUP.md#doctor-logicapplication-state"),
+        .init(.logicInstallation, capabilityGroups: allCapabilityGroups, remediationAnchor: "docs/SETUP.md#doctor-logicinstallation"),
+        .init(.logicVersionSupport, dependencies: [.logicInstallation], capabilityGroups: allCapabilityGroups, remediationAnchor: "docs/SETUP.md#doctor-logicversion-support"),
+        .init(.logicApplicationState, capabilityGroups: allCapabilityGroups, remediationAnchor: "docs/SETUP.md#doctor-logicapplication-state"),
         .init(.logicBlockingDialog, dependencies: [.logicApplicationState, .permissionsAccessibility], capabilityGroups: ["track_management", "mixer_ax", "verified_plugin_applyback"], remediationAnchor: "docs/SETUP.md#doctor-logicblocking-dialog"),
         .init(.channelsManualValidation, capabilityGroups: ["keycmd_only_ops", "legacy_scripter"], remediationAnchor: "docs/SETUP.md#doctor-channelsmanual-validation", profileRule: "keycmd|legacy-scripter|full"),
         .init(.channelsKeycmdReference, capabilityGroups: ["keycmd_only_ops"], remediationAnchor: "docs/SETUP.md#doctor-channelskeycmd-reference", profileRule: "keycmd|full"),
@@ -94,4 +118,22 @@ extension SetupDoctor {
     )
 
     static let orderedCheckIDs: [String] = checkDefinitions.map(\.id.rawValue)
+
+    static let capabilityDefinitions: [DoctorCapabilityDefinition] = [
+        .init("core_transport", profiles: [.core, .mixer, .keycmd, .legacyScripter, .full]),
+        .init("track_management", profiles: [.core, .mixer, .full]),
+        .init("midi_import", profiles: [.full]),
+        .init("mixer_ax", profiles: [.mixer, .full]),
+        .init("mixer_mcu", profiles: [.full], liveVerification: "logic://system/health mcu.connected"),
+        .init("project_lifecycle", profiles: [.core, .mixer, .full]),
+        .init("keycmd_only_ops", profiles: [.keycmd, .full]),
+        .init("legacy_scripter", profiles: [.legacyScripter, .full]),
+        .init("verified_plugin_applyback", profiles: [.mixer, .full]),
+    ]
+
+    static func capabilityCheckIDs(for capabilityID: String) -> [String] {
+        checkDefinitions.compactMap { definition in
+            definition.capabilityGroups.contains(capabilityID) ? definition.id.rawValue : nil
+        }
+    }
 }

@@ -50,17 +50,7 @@ extension SetupDoctor {
     }
 
     private static func appendCapabilitySummary(_ report: Report, to lines: inout [String]) {
-        let ordered = [
-            "core_transport",
-            "track_management",
-            "midi_import",
-            "mixer_ax",
-            "mixer_mcu",
-            "project_lifecycle",
-            "keycmd_only_ops",
-            "legacy_scripter",
-            "verified_plugin_applyback",
-        ]
+        let ordered = capabilityDefinitions.map(\.id)
         let rendered = ordered.compactMap { id -> String? in
             guard let capability = report.capabilities[id] else { return nil }
             return "\(id)=\(capability.status.rawValue)"

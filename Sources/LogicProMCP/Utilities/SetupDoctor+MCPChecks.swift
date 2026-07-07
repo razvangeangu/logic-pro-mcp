@@ -186,14 +186,12 @@ extension SetupDoctor {
             return check(
                 id: "mcp.claude_desktop_registration",
                 domain: "mcp",
-                status: .skipped,
+                status: absent ? .warn : .manual,
                 summary: absent
-                    ? "Claude Desktop not configured (optional)."
+                    ? "Claude Desktop config is absent."
                     : "Claude Desktop config could not be read.",
                 evidence: ["config_present": absent ? "false" : "true", "reason": reason],
-                remediationType: absent ? .none : .manual,
-                optional: absent,
-                skipReason: absent ? "config_absent_optional" : "config_unreadable"
+                remediationType: .manual
             )
         }
     }

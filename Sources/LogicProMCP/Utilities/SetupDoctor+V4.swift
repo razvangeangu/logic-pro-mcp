@@ -196,53 +196,87 @@ extension SetupDoctor {
     }
 
     static func isProfileRequired(_ checkID: String, profile: DoctorProfile) -> Bool {
-        switch profile {
-        case .full:
-            return true
-        case .core:
-            return ![
-                "channels.manual_validation",
-                "channels.keycmd_reference",
-                "channels.mcu_wiring_hint",
-            ].contains(checkID)
-        case .mixer:
-            return ![
-                "channels.manual_validation",
-                "channels.keycmd_reference",
-                "channels.mcu_wiring_hint",
-            ].contains(checkID)
-        case .keycmd:
-            return checkID != "channels.mcu_wiring_hint"
-        case .legacyScripter:
-            return ![
-                "channels.keycmd_reference",
-                "channels.mcu_wiring_hint",
-            ].contains(checkID)
-        case .auto:
-            return isProfileRequired(checkID, profile: .core)
-        }
+        guard let definition = checkDefinitionByID[checkID] else { return false }
+        return !definition.optionalByDefault && profileRuleMatches(definition.profileRule, profile: profile)
     }
 
     static func profileRequiredCheckIDs(for profile: DoctorProfile) -> Set<String> {
         Set(orderedCheckIDs.filter { isProfileRequired($0, profile: profile) })
     }
 
+    static func requiredCheckIDs(for profile: DoctorProfile, clientProfile: ClientProfile) -> Set<String> {
+        Set(checkDefinitions.compactMap { definition in
+            guard !definition.optionalByDefault,
+                  profileRuleMatches(definition.profileRule, profile: profile),
+                  clientRuleMatches(definition.clientRule, clientProfile: clientProfile) else {
+                return nil
+            }
+            return definition.id.rawValue
+        })
+    }
+
+    static func checksClosingRequiredGaps(
+        _ checks: [Check],
+        profile: DoctorProfile,
+        clientProfile: ClientProfile
+    ) -> [Check] {
+        let requiredIDs = requiredCheckIDs(for: profile, clientProfile: clientProfile)
+        let closed = checks.map { check in
+            requiredIDs.contains(check.id) && check.optional
+                ? requiredCheckFailure(id: check.id, reason: "required_check_marked_optional")
+                : check
+        }
+        let emittedIDs = Set(closed.map(\.id))
+        let missing = orderedCheckIDs.filter { requiredIDs.contains($0) && !emittedIDs.contains($0) }
+        guard !missing.isEmpty else { return closed }
+        return closed + missing.map { requiredCheckFailure(id: $0, reason: "required_check_missing") }
+    }
+
+    private static func requiredCheckFailure(id: String, reason: String) -> Check {
+        let domain = id.split(separator: ".", maxSplits: 1).first.map(String.init) ?? "runtime"
+        let summary = reason == "required_check_missing"
+            ? "Required doctor check was not emitted; readiness cannot be claimed."
+            : "Required doctor check was emitted as optional; readiness cannot be claimed."
+        return check(
+            id: id,
+            domain: domain,
+            status: .fail,
+            summary: summary,
+            evidence: ["reason": reason],
+            remediationType: .manual,
+            remediationValueOverride: "Report this doctor bug with the missing check id: \(id)"
+        )
+    }
+
+    private static func profileRuleMatches(_ rule: String?, profile: DoctorProfile) -> Bool {
+        let effectiveProfile = profile == .auto ? DoctorProfile.core : profile
+        return ruleMatches(rule, value: effectiveProfile.rawValue)
+    }
+
+    private static func clientRuleMatches(_ rule: String?, clientProfile: ClientProfile) -> Bool {
+        guard clientProfile != .auto else { return rule == nil }
+        return ruleMatches(rule, value: clientProfile.rawValue)
+    }
+
+    private static func ruleMatches(_ rule: String?, value: String) -> Bool {
+        guard let rule else { return true }
+        return rule.split(separator: "|").contains { $0 == value }
+    }
+
     static func capabilities(for checks: [Check], profile: DoctorProfile) -> [String: CapabilityReadiness] {
-        let definitions: [(String, [String], Set<DoctorProfile>, String?)] = [
-            ("core_transport", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state"], [.core, .mixer, .keycmd, .legacyScripter, .full], nil),
-            ("track_management", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state", "permissions.automation_logic_pro", "logic.blocking_dialog"], [.core, .mixer, .full], nil),
-            ("midi_import", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state", "permissions.automation_system_events"], [.full], nil),
-            ("mixer_ax", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state", "permissions.automation_logic_pro", "logic.blocking_dialog"], [.mixer, .full], nil),
-            ("mixer_mcu", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state", "channels.mcu_wiring_hint"], [.full], "logic://system/health mcu.connected"),
-            ("project_lifecycle", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state", "permissions.automation_logic_pro", "permissions.automation_system_events"], [.core, .mixer, .full], nil),
-            ("keycmd_only_ops", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state", "channels.keycmd_reference", "channels.manual_validation"], [.keycmd, .full], nil),
-            ("legacy_scripter", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state", "channels.manual_validation"], [.legacyScripter, .full], nil),
-            ("verified_plugin_applyback", ["binary.path", "binary.executable", "permissions.accessibility", "permissions.post_event_access", "logic.installation", "logic.version_support", "logic.application_state", "permissions.automation_logic_pro", "logic.blocking_dialog"], [.mixer, .full], nil),
-        ]
+        let effectiveProfile = profile == .auto ? DoctorProfile.core : profile
         let byID = Dictionary(uniqueKeysWithValues: checks.map { ($0.id, $0) })
-        return Dictionary(uniqueKeysWithValues: definitions.map { name, required, profiles, liveVerification in
-            guard profiles.contains(profile) else {
-                return (name, CapabilityReadiness(status: .notInProfile, checks: required, liveVerification: liveVerification))
+        return Dictionary(uniqueKeysWithValues: capabilityDefinitions.map { definition in
+            let required = capabilityCheckIDs(for: definition.id)
+            guard definition.profiles.contains(effectiveProfile) else {
+                return (
+                    definition.id,
+                    CapabilityReadiness(
+                        status: .notInProfile,
+                        checks: required,
+                        liveVerification: definition.liveVerification
+                    )
+                )
             }
             let statuses = required.compactMap { byID[$0]?.status }
             let missingRequired = statuses.count != required.count
@@ -251,12 +285,19 @@ extension SetupDoctor {
                 status = .notReady
             } else if statuses.contains(.manual) || statuses.contains(.skipped) {
                 status = .unknownLiveVerifyRequired
-            } else if name == "mixer_mcu" {
+            } else if definition.id == "mixer_mcu" {
                 status = .unknownLiveVerifyRequired
             } else {
                 status = .ready
             }
-            return (name, CapabilityReadiness(status: status, checks: required, liveVerification: liveVerification))
+            return (
+                definition.id,
+                CapabilityReadiness(
+                    status: status,
+                    checks: required,
+                    liveVerification: definition.liveVerification
+                )
+            )
         })
     }
 

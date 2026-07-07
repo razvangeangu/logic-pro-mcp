@@ -400,8 +400,15 @@ enum SetupDoctor {
         // required permission is ungranted. Extracted to a pure helper so the invariant
         // is OWNED and directly unit-tested here, not left emergent on each permission
         // check happening to be non-pass.
-        let requiredCheckIDs = profileRequiredCheckIDs(for: doctorProfile)
-        let scopedChecks = checks.filter { requiredCheckIDs.contains($0.id) && !$0.optional }
+        checks = checksClosingRequiredGaps(checks, profile: doctorProfile, clientProfile: clientProfile)
+
+        let requiredIDs = requiredCheckIDs(for: doctorProfile, clientProfile: clientProfile)
+        let scopedChecks = checks.filter { check in
+            !check.optional && (
+                requiredIDs.contains(check.id)
+                    || checkDefinitionByID[check.id]?.optionalByDefault == true
+            )
+        }
         let status = clampStatusForPermissions(
             aggregateStatus(scopedChecks),
             allGranted: permissionStatus.allGranted
