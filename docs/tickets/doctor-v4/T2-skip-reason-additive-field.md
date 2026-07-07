@@ -1,7 +1,7 @@
 # T2: `skip_reason` Additive Field
 
 **Priority**: P0
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T1
 
 ## Objective

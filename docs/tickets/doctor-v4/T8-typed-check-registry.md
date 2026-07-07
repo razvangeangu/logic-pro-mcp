@@ -1,7 +1,7 @@
 # T8: Typed Check Registry
 
 **Priority**: P0
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T2
 
 ## Objective

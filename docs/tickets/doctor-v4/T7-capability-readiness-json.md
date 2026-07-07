@@ -1,7 +1,7 @@
 # T7: Capability Readiness JSON
 
 **Priority**: P0
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T2, T4, T6
 
 ## Objective

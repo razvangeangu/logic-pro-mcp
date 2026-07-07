@@ -1,7 +1,7 @@
 # T6: Client Profile / Generic MCP Client
 
 **Priority**: P1
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T3
 
 ## Objective

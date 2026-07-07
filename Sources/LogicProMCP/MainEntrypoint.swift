@@ -66,7 +66,8 @@ enum MainEntrypoint {
                 arguments: arguments,
                 permissionStatus: permissionCheck(),
                 approvals: await approvalStore.list(),
-                runtime: runtime
+                runtime: runtime,
+                manualStoreHealth: await approvalStore.health()
             )
             if arguments.contains("--json") {
                 // --json is the machine contract: identical bytes regardless of
@@ -152,6 +153,21 @@ enum MainEntrypoint {
             }
         }
 
+        if let rawChannel = optionValue("--skip-channel", in: arguments) {
+            guard let channel = ManualValidationChannel.parse(rawChannel) else {
+                writeStderr("Unknown manual-validation channel: \(rawChannel)\n")
+                return 1
+            }
+            do {
+                try await approvalStore.skip(channel, note: optionValue("--skip-note", in: arguments))
+                writeStderr("Intentionally skipped \(channel.rawValue) for doctor readiness.\n")
+                return 0
+            } catch {
+                writeStderr("Failed to persist skip decision for \(channel.rawValue): \(error)\n")
+                return 1
+            }
+        }
+
         if let rawChannel = optionValue("--revoke-channel", in: arguments) {
             guard let channel = ManualValidationChannel.parse(rawChannel) else {
                 writeStderr("Unknown approval channel: \(rawChannel)\n")
@@ -232,7 +248,7 @@ enum MainEntrypoint {
           LogicProMCP                          Start the MCP server over stdio (default; used by an MCP client)
           LogicProMCP --help, -h               Print this help and exit
           LogicProMCP --version, -V            Print the version and exit
-          LogicProMCP doctor [--json] [--verbose|--quiet] [--check-updates] [--strict]
+          LogicProMCP doctor [--json] [--verbose|--quiet] [--check-updates] [--strict] [--profile <core|mixer|keycmd|legacy-scripter|full>] [--client <claude-code|claude-desktop|cursor|vscode|terminal|custom>]
                                                Print a diagnostic report and exit
           LogicProMCP lifecycle <install|update|uninstall> [--json]
                                                Print a read-only lifecycle plan and exit
@@ -242,6 +258,8 @@ enum MainEntrypoint {
           LogicProMCP --list-approvals         List manual channel approvals and exit
           LogicProMCP --approve-channel <MIDIKeyCommands|Scripter> [--approval-note <note>]
                                                Record a manual channel approval and exit
+          LogicProMCP --skip-channel <MIDIKeyCommands|Scripter> [--skip-note <note>]
+                                               Record an intentional doctor skip decision and exit
           LogicProMCP --revoke-channel <MIDIKeyCommands|Scripter>
                                                Revoke a manual channel approval and exit
 

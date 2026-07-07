@@ -131,7 +131,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Share directory could not be resolved; source builds may not have packaged helper assets.",
                 evidence: ["reason": "share_dir_unresolved"],
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: "source_build_no_share_dir"
             )
         case let .invalid(path, source):
             return check(
@@ -140,7 +141,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Resolved share directory is not a directory.",
                 evidence: shareDirEvidence(path: path, source: source, extra: ["reason": "share_dir_invalid"]),
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: "share_dir_invalid"
             )
         }
     }

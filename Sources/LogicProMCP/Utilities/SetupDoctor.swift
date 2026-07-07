@@ -69,6 +69,7 @@ enum SetupDoctor {
         // keeping v3 a strict superset a v1/v2 decoder never trips over. Set only at
         // construction via the `check(...)` factory (no post-construction mutation, R9).
         var blockedBy: String?
+        var skipReason: String?
         let optional: Bool
 
         // Explicit CodingKeys enumerate EVERY key — the six v1 keys keep their
@@ -85,6 +86,7 @@ enum SetupDoctor {
             case severity
             case durationMs = "duration_ms"
             case blockedBy = "blocked_by"
+            case skipReason = "skip_reason"
             case optional
         }
     }
@@ -122,6 +124,11 @@ enum SetupDoctor {
         // v3 additive top-level field (G2). Ordered check ids of the root-cause-collapsed,
         // severity-ordered actionable set (see `computeFixPlan`). Always present (may be []).
         let fixPlan: [String]
+        let doctorProfile: DoctorProfile
+        let doctorProfileBasis: String
+        let clientProfile: ClientProfile
+        let clientProfileBasis: String
+        let capabilities: [String: CapabilityReadiness]
 
         enum CodingKeys: String, CodingKey {
             case schema
@@ -132,6 +139,11 @@ enum SetupDoctor {
             case summary
             case headline
             case fixPlan = "fix_plan"
+            case doctorProfile = "doctor_profile"
+            case doctorProfileBasis = "doctor_profile_basis"
+            case clientProfile = "client_profile"
+            case clientProfileBasis = "client_profile_basis"
+            case capabilities
         }
     }
 
@@ -276,46 +288,34 @@ enum SetupDoctor {
         case timeout
     }
 
-    static let schema = "logic_pro_mcp_doctor.v3"
+    static let schema = "logic_pro_mcp_doctor.v4"
 
-    static let remediationAnchorsByCheckID: [String: String] = [
-        "binary.path": "docs/SETUP.md#doctor-binarypath",
-        "binary.executable": "docs/SETUP.md#doctor-binaryexecutable",
-        "install.source": "docs/SETUP.md#doctor-installsource",
-        "install.binary_inventory": "docs/SETUP.md#doctor-installbinary-inventory",
-        "install.share_dir": "docs/SETUP.md#doctor-installshare-dir",
-        "release.signature": "docs/SETUP.md#doctor-releasesignature",
-        "release.quarantine": "docs/SETUP.md#doctor-releasequarantine",
-        "mcp.claude_code_registration": "docs/SETUP.md#doctor-mcpclaude-code-registration",
-        "mcp.registration_target": "docs/SETUP.md#doctor-mcpregistration-target",
-        "mcp.claude_desktop_registration": "docs/SETUP.md#doctor-mcpclaude-desktop-registration",
-        "permissions.accessibility": "docs/SETUP.md#doctor-permissionsaccessibility",
-        "permissions.automation_logic_pro": "docs/SETUP.md#doctor-permissionsautomation-logic-pro",
-        "permissions.automation_system_events": "docs/SETUP.md#doctor-permissionsautomation-system-events",
-        "permissions.post_event_access": "docs/SETUP.md#doctor-permissionspost-event-access",
-        "permissions.launch_context": "docs/SETUP.md#doctor-permissionslaunch-context",
-        "permissions.tcc_cross_context": "docs/SETUP.md#doctor-permissionstcc-cross-context",
-        "system.macos_version": "docs/SETUP.md#doctor-systemmacos-version",
-        "updates.latest_release": "docs/SETUP.md#doctor-updateslatest-release",
-        "logic.installation": "docs/SETUP.md#doctor-logicinstallation",
-        "logic.version_support": "docs/SETUP.md#doctor-logicversion-support",
-        "logic.application_state": "docs/SETUP.md#doctor-logicapplication-state",
-        "logic.blocking_dialog": "docs/SETUP.md#doctor-logicblocking-dialog",
-        "channels.manual_validation": "docs/SETUP.md#doctor-channelsmanual-validation",
-        "channels.keycmd_reference": "docs/SETUP.md#doctor-channelskeycmd-reference",
-        "channels.mcu_wiring_hint": "docs/SETUP.md#doctor-channelsmcu-wiring-hint",
-        "dependencies.click_fallback": "docs/SETUP.md#doctor-dependenciesclick-fallback",
-    ]
+    static let remediationAnchorsByCheckID: [String: String] = Dictionary(
+        uniqueKeysWithValues: checkDefinitions.compactMap { definition in
+            definition.remediationAnchor.map { (definition.id.rawValue, $0) }
+        }
+    )
 
     static func generate(
         arguments: [String],
         permissionStatus: PermissionChecker.PermissionStatus,
         approvals: [ManualValidationChannel: ManualValidationApproval],
-        runtime: Runtime = .production
+        runtime: Runtime = .production,
+        manualStoreHealth: ManualValidationStoreHealth = .ok
     ) -> Report {
         let executablePath = runtime.resolveExecutablePath(arguments.first)
         let installSource = detectInstallSource(executablePath: executablePath, runtime: runtime)
         let claudeRegistration = runtime.readClaudeRegistration()
+        let (doctorProfile, doctorProfileBasis) = selectedDoctorProfile(
+            arguments: arguments,
+            runtime: runtime,
+            approvals: approvals
+        )
+        let (clientProfile, clientProfileBasis) = selectedClientProfile(
+            arguments: arguments,
+            runtime: runtime,
+            claudeRegistration: claudeRegistration
+        )
         let logicApps = runtime.logicApps()
         var staticVersionCache: [String: StaticVersionResult] = [:]
 
@@ -359,16 +359,17 @@ enum SetupDoctor {
         checks.append(timed { installShareDirCheck(runtime: runtime) })
         checks.append(timed { releaseSignatureCheck(executablePath: executablePath, runtime: runtime) })
         checks.append(timed { releaseQuarantineCheck(executablePath: executablePath, runtime: runtime) })
-        checks.append(timed { claudeRegistrationCheck(registration: claudeRegistration) })
+        checks.append(timed { claudeRegistrationCheck(registration: claudeRegistration, clientProfile: clientProfile) })
         checks.append(timed {
             mcpRegistrationTargetCheck(
                 registration: claudeRegistration,
                 runtime: runtime,
                 checks: checks,
-                staticVersionForPath: staticVersionForPath
+                staticVersionForPath: staticVersionForPath,
+                clientProfile: clientProfile
             )
         })
-        checks.append(timed { claudeDesktopRegistrationCheck(runtime: runtime) })
+        checks.append(timed { claudeDesktopRegistrationCheck(runtime: runtime, clientProfile: clientProfile) })
         checks.append(timed { accessibilityPermissionCheck(permissionStatus) })
         checks.append(timed { automationPermissionCheck(permissionStatus) })
         checks.append(timed { systemEventsAutomationCheck(permissionStatus) })
@@ -380,9 +381,15 @@ enum SetupDoctor {
         checks.append(timed { logicVersionSupportCheck(logicApps: logicApps, checks: checks) })
         checks.append(timed { logicApplicationStateCheck(runtime: runtime) })
         checks.append(timed { logicBlockingDialogCheck(runtime: runtime, checks: checks) })
-        checks.append(timed { manualValidationCheck(approvals: approvals) })
-        checks.append(timed { keycmdReferenceCheck(runtime: runtime) })
-        checks.append(timed { mcuWiringHintCheck(runtime: runtime) })
+        checks.append(timed {
+            manualValidationCheck(
+                approvals: approvals,
+                profile: doctorProfile,
+                storeHealth: manualStoreHealth
+            )
+        })
+        checks.append(timed { keycmdReferenceCheck(runtime: runtime, profile: doctorProfile) })
+        checks.append(timed { mcuWiringHintCheck(runtime: runtime, profile: doctorProfile) })
         checks.append(timed { clickFallbackCheck(runtime: runtime, permissionStatus: permissionStatus) })
         // Opt-in update check: emitted only when `--check-updates` armed the lookup seam.
         if let lookup = runtime.latestReleaseLookup {
@@ -393,8 +400,9 @@ enum SetupDoctor {
         // required permission is ungranted. Extracted to a pure helper so the invariant
         // is OWNED and directly unit-tested here, not left emergent on each permission
         // check happening to be non-pass.
+        let scopedChecks = checks.filter { !$0.optional }
         let status = clampStatusForPermissions(
-            aggregateStatus(checks),
+            aggregateStatus(scopedChecks),
             allGranted: permissionStatus.allGranted
         )
 
@@ -407,7 +415,12 @@ enum SetupDoctor {
             checks: checks,
             summary: calculateSummary(checks, totalDurationMs: totalDurationMs),
             headline: computeHeadline(checks: checks, status: status),
-            fixPlan: computeFixPlan(checks)
+            fixPlan: computeFixPlan(checks),
+            doctorProfile: doctorProfile,
+            doctorProfileBasis: doctorProfileBasis,
+            clientProfile: clientProfile,
+            clientProfileBasis: clientProfileBasis,
+            capabilities: capabilities(for: checks, profile: doctorProfile)
         )
     }
 
@@ -424,7 +437,8 @@ enum SetupDoctor {
         remediationType: RemediationType,
         remediationValueOverride: String? = nil,
         optional: Bool = false,
-        blockedBy: String? = nil
+        blockedBy: String? = nil,
+        skipReason: String? = nil
     ) -> Check {
         let value = remediationValueOverride ?? defaultRemediationValue(for: id, type: remediationType)
         // category/severity are DERIVED here (single chokepoint) so no check can be
@@ -443,21 +457,37 @@ enum SetupDoctor {
             severity: severity(for: status),
             durationMs: 0,
             blockedBy: blockedBy,
+            skipReason: skipReason,
             optional: optional
         )
     }
 
-    private static func sanitizedEvidence(_ evidence: [String: String]) -> [String: String] {
+    static func sanitizedEvidence(_ evidence: [String: String]) -> [String: String] {
         Dictionary(uniqueKeysWithValues: evidence.map { key, value in
+            let lowerKey = key.lowercased()
+            let lowerValue = value.lowercased()
             if key == "stdout" || key == "stderr" {
                 if value == "empty" || value == "present" {
                     return (key, value)
                 }
                 return (key, value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "empty" : "present")
             }
-            let home = FileManager.default.homeDirectoryForCurrentUser.path
-            return (key, value.replacingOccurrences(of: home, with: "~"))
+            if isSensitiveEvidenceLabel(lowerKey) || isSensitiveEvidenceValue(lowerValue) {
+                return (key, renderEvidenceValue(.sensitive))
+            }
+            if lowerKey == "path" || lowerKey.hasSuffix("_path") || lowerKey.contains("path_") {
+                return (key, renderEvidenceValue(.path(value, .homeRelative)))
+            }
+            return (key, homeRelativePath(value))
         })
+    }
+
+    private static func isSensitiveEvidenceLabel(_ value: String) -> Bool {
+        ["token", "secret", "password", "api_key", "apikey", "authorization"].contains { value.contains($0) }
+    }
+
+    private static func isSensitiveEvidenceValue(_ value: String) -> Bool {
+        ["bearer ", "api_key=", "apikey=", "password=", "secret=", "token="].contains { value.contains($0) }
     }
 
     /// Maps the v1 free-string `domain` to the closed v2 `Category`. Complete table —
@@ -558,11 +588,12 @@ enum SetupDoctor {
             .map(\.element.id)
     }
 
-    static let blockedByDependencies: [String: [String]] = [
-        "mcp.registration_target": ["mcp.claude_code_registration"],
-        "logic.version_support": ["logic.installation"],
-        "logic.blocking_dialog": ["logic.application_state", "permissions.accessibility"],
-    ]
+    static let blockedByDependencies: [String: [String]] = Dictionary(
+        uniqueKeysWithValues: checkDefinitions.compactMap { definition in
+            guard !definition.dependencies.isEmpty else { return nil }
+            return (definition.id.rawValue, definition.dependencies.map(\.rawValue))
+        }
+    )
 
     static func status(of id: String, in checks: [Check]) -> CheckStatus? {
         checks.first { $0.id == id }?.status

@@ -1,7 +1,7 @@
 # T3: Relative / PATH-Dependent Registration Resolver
 
 **Priority**: P1
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T2
 
 ## Objective

@@ -124,7 +124,8 @@ extension SetupDoctor {
                 status: .skipped,
                 summary: "Cross-context TCC enrichment could not answer; live permission probes remain authoritative.",
                 evidence: ["tcc_db_readable": readable, "full_disk_access": readable, "reason": reason],
-                remediationType: .docs
+                remediationType: .docs,
+                skipReason: reason
             )
         }
     }

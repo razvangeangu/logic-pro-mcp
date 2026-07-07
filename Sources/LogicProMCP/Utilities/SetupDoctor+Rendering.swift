@@ -23,6 +23,9 @@ extension SetupDoctor {
         lines.append("status: \(report.status.rawValue)")
         lines.append("version: \(report.version)")
         lines.append("install_source: \(report.installSource.rawValue)")
+        lines.append("profile: \(report.doctorProfile.rawValue) (\(report.doctorProfileBasis))")
+        lines.append("client: \(report.clientProfile.rawValue) (\(report.clientProfileBasis))")
+        appendCapabilitySummary(report, to: &lines)
         appendFixPlan(report, to: &lines, useColor: useColor)
         lines.append("")
         for check in report.checks {
@@ -37,10 +40,33 @@ extension SetupDoctor {
                 for key in check.evidence.keys.sorted() {
                     lines.append("    \(key)=\(check.evidence[key] ?? "")")
                 }
+                if let skipReason = check.skipReason {
+                    lines.append("    skip_reason: \(skipReason)")
+                }
                 lines.append("    duration_ms: \(formatDuration(check.durationMs))")
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func appendCapabilitySummary(_ report: Report, to lines: inout [String]) {
+        let ordered = [
+            "core_transport",
+            "track_management",
+            "midi_import",
+            "mixer_ax",
+            "mixer_mcu",
+            "project_lifecycle",
+            "keycmd_only_ops",
+            "legacy_scripter",
+            "verified_plugin_applyback",
+        ]
+        let rendered = ordered.compactMap { id -> String? in
+            guard let capability = report.capabilities[id] else { return nil }
+            return "\(id)=\(capability.status.rawValue)"
+        }
+        guard !rendered.isEmpty else { return }
+        lines.append("capabilities: \(rendered.joined(separator: ", "))")
     }
 
     private static func appendFixPlan(_ report: Report, to lines: inout [String], useColor: Bool) {

@@ -1,7 +1,7 @@
 # T5: Manual Validation Decision Store
 
 **Priority**: P1
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T4
 
 ## Objective

@@ -1,7 +1,7 @@
 # T4: Profile-Aware Manual Channel Checks
 
 **Priority**: P1
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T2
 
 ## Objective

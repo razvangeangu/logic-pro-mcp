@@ -1,7 +1,7 @@
 # T9: Evidence Builder / Privacy Hardening
 
 **Priority**: P0
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T8
 
 ## Objective

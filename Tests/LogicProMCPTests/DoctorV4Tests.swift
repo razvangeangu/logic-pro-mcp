@@ -1,0 +1,273 @@
+import Foundation
+import Testing
+@testable import LogicProMCP
+
+private func doctorV4Runtime(
+    executablePath: String? = "/opt/homebrew/bin/LogicProMCP",
+    registration: SetupDoctor.ClaudeRegistration = .registered(command: "/opt/homebrew/bin/LogicProMCP"),
+    desktopRegistration: SetupDoctor.ClaudeRegistration = .registered(command: "/Applications/Claude.app/Contents/MacOS/Claude"),
+    launchContext: SetupDoctor.LaunchContextInfo = .init(context: "terminal", responsibleHint: "Terminal"),
+    macOSVersion: OperatingSystemVersion? = OperatingSystemVersion(majorVersion: 14, minorVersion: 0, patchVersion: 0),
+    commandHandler: @escaping (String, [String]) -> SetupDoctor.CommandOutput? = { executable, arguments in
+        if executable == "/usr/bin/codesign" {
+            return .init(exitCode: 0, stdout: "", stderr: "")
+        }
+        if executable == "/usr/bin/xattr" {
+            return .init(exitCode: 1, stdout: "", stderr: "No such xattr")
+        }
+        if executable == "/usr/bin/lipo" {
+            return .init(exitCode: 0, stdout: "arm64\n", stderr: "")
+        }
+        if executable == "/usr/bin/strings", arguments.count == 2 {
+            return .init(exitCode: 0, stdout: "\(ServerConfig.versionMarker)\n", stderr: "")
+        }
+        if executable == "/opt/homebrew/bin/brew" || executable == "/usr/local/bin/brew",
+           arguments == ["list", "--versions", "logic-pro-mcp"] {
+            return .init(exitCode: 0, stdout: "logic-pro-mcp \(ServerConfig.serverVersion)\n", stderr: "")
+        }
+        return nil
+    }
+) -> SetupDoctor.Runtime {
+    var runtime = SetupDoctor.Runtime(
+        resolveExecutablePath: { _ in executablePath },
+        fileExists: { _ in true },
+        isExecutableFile: { _ in true },
+        logicProRunning: { true },
+        logicProHasVisibleWindow: { true },
+        runCommand: commandHandler,
+        readClaudeRegistration: { registration }
+    )
+    runtime.macOSVersion = { macOSVersion }
+    runtime.logicApps = {
+        [SetupDoctor.LogicAppInfo(path: "/Applications/Logic Pro.app", version: LogicProSupport.latestValidatedLogicVersion, bundleID: ServerConfig.logicProBundleID, readable: true)]
+    }
+    runtime.shareDirProbe = { .complete(path: "/opt/homebrew/share/logic-pro-mcp", source: "brew_pkgshare") }
+    runtime.readClaudeDesktopRegistration = { desktopRegistration }
+    runtime.keyCommandsPresetStaged = { true }
+    runtime.mcuPortReferenceFound = { true }
+    runtime.launchContext = { launchContext }
+    runtime.tccCrossContextProbe = { .granted("terminal:accessibility=granted") }
+    runtime.blockingDialogInfo = { nil }
+    runtime.fileExistsAtPath = { path in
+        path == "/opt/homebrew/bin/LogicProMCP" || path == "/usr/local/bin/LogicProMCP"
+    }
+    runtime.isRegularFile = runtime.fileExistsAtPath
+    runtime.isDirectory = { _ in true }
+    return runtime
+}
+
+private func doctorV4Permissions() -> PermissionChecker.PermissionStatus {
+    .init(accessibility: true, automationLogicPro: true, systemEventsAutomation: .granted, postEventAccess: true)
+}
+
+private func doctorV4Approvals() -> [ManualValidationChannel: ManualValidationApproval] {
+    Dictionary(uniqueKeysWithValues: ManualValidationChannel.allCases.map {
+        ($0, ManualValidationApproval(approvedAt: Date(timeIntervalSince1970: 0), note: "test"))
+    })
+}
+
+private func doctorV4Report(
+    arguments: [String] = ["LogicProMCP", "doctor", "--json"],
+    runtime: SetupDoctor.Runtime = doctorV4Runtime(),
+    approvals: [ManualValidationChannel: ManualValidationApproval] = doctorV4Approvals(),
+    storeHealth: ManualValidationStoreHealth = .ok
+) -> SetupDoctor.Report {
+    SetupDoctor.generate(
+        arguments: arguments,
+        permissionStatus: doctorV4Permissions(),
+        approvals: approvals,
+        runtime: runtime,
+        manualStoreHealth: storeHealth
+    )
+}
+
+@Test func doctorV4SchemaProfilesAndCapabilitiesAreInJSON() throws {
+    let report = doctorV4Report()
+    #expect(report.schema == "logic_pro_mcp_doctor.v4")
+    #expect(report.doctorProfile == .full)
+    #expect(report.clientProfile == .terminal)
+    #expect(Set(report.capabilities.keys) == Set([
+        "core_transport",
+        "track_management",
+        "midi_import",
+        "mixer_ax",
+        "mixer_mcu",
+        "project_lifecycle",
+        "keycmd_only_ops",
+        "legacy_scripter",
+        "verified_plugin_applyback",
+    ]))
+
+    let object = try #require(sharedJSONObject(encodeJSON(report)))
+    #expect(object["doctor_profile"] as? String == "full")
+    #expect(object["client_profile"] as? String == "terminal")
+    #expect(object["capabilities"] as? [String: Any] != nil)
+}
+
+@Test func doctorV4SkippedChecksRequireBlockedByOrSkipReason() {
+    let report = doctorV4Report(
+        runtime: doctorV4Runtime(macOSVersion: nil),
+        approvals: [:]
+    )
+    for check in report.checks where check.status == .skipped {
+        #expect(
+            check.blockedBy != nil || check.skipReason != nil,
+            "\(check.id) skipped without blocked_by or skip_reason"
+        )
+    }
+}
+
+@Test func doctorV4VerboseRendererShowsSkipReason() {
+    let report = doctorV4Report(
+        runtime: doctorV4Runtime(macOSVersion: nil)
+    )
+    let output = SetupDoctor.renderHuman(report, mode: .verbose, useColor: false)
+    #expect(output.contains("skip_reason:"))
+}
+
+@Test func doctorV4CoreProfileDoesNotRequireManualChannels() throws {
+    let report = doctorV4Report(
+        arguments: ["LogicProMCP", "doctor", "--json", "--profile", "core"],
+        approvals: [:]
+    )
+    let manual = try #require(report.checks.first { $0.id == "channels.manual_validation" })
+    #expect(manual.status == .skipped)
+    #expect(manual.optional)
+    #expect(manual.skipReason == "profile_not_required")
+    #expect(report.status == .ok)
+}
+
+@Test func doctorV4FullProfileRequiresManualChannels() throws {
+    let report = doctorV4Report(
+        arguments: ["LogicProMCP", "doctor", "--json", "--profile", "full"],
+        approvals: [:]
+    )
+    let manual = try #require(report.checks.first { $0.id == "channels.manual_validation" })
+    #expect(manual.status == .manual)
+    #expect(manual.skipReason == nil)
+    #expect(report.status == .manualActionRequired)
+}
+
+@Test func doctorV4CursorClientDoesNotRequireClaudeRegistration() throws {
+    let report = doctorV4Report(
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "cursor"],
+        runtime: doctorV4Runtime(registration: .notRegistered, desktopRegistration: .notRegistered)
+    )
+    let claude = try #require(report.checks.first { $0.id == "mcp.claude_code_registration" })
+    #expect(claude.status == .skipped)
+    #expect(claude.optional)
+    #expect(claude.skipReason == "client_not_selected")
+    #expect(report.clientProfile == .cursor)
+}
+
+@Test func doctorV4BareRegisteredCommandCanResolveThroughDoctorPath() throws {
+    var runtime = doctorV4Runtime(
+        registration: .registered(command: "logic-pro-mcp-dev"),
+        launchContext: .init(context: "claude_code", responsibleHint: "claude")
+    ) { executable, arguments in
+        if executable == "/usr/bin/which", arguments == ["logic-pro-mcp-dev"] {
+            return .init(exitCode: 0, stdout: "/tmp/LogicProMCP-dev\n", stderr: "")
+        }
+        if executable == "/usr/bin/strings", arguments.count == 2 {
+            return .init(exitCode: 0, stdout: "\(ServerConfig.versionMarker)\n", stderr: "")
+        }
+        if executable == "/usr/bin/codesign" || executable == "/usr/bin/xattr" || executable == "/usr/bin/lipo" {
+            return .init(exitCode: executable == "/usr/bin/xattr" ? 1 : 0, stdout: executable == "/usr/bin/lipo" ? "arm64\n" : "", stderr: executable == "/usr/bin/xattr" ? "No such xattr" : "")
+        }
+        if executable == "/opt/homebrew/bin/brew" || executable == "/usr/local/bin/brew" {
+            return .init(exitCode: 0, stdout: "logic-pro-mcp \(ServerConfig.serverVersion)\n", stderr: "")
+        }
+        return nil
+    }
+    runtime.fileExistsAtPath = { path in path == "/tmp/LogicProMCP-dev" }
+    runtime.isRegularFile = runtime.fileExistsAtPath
+
+    let report = doctorV4Report(runtime: runtime)
+    let target = try #require(report.checks.first { $0.id == "mcp.registration_target" })
+    #expect(target.status == .pass)
+    #expect(target.evidence["resolution_basis"] == "doctor_path")
+    #expect(target.evidence["resolved_path"] == "/tmp/LogicProMCP-dev")
+}
+
+@Test func doctorV4ManualStorePersistsIntentionalSkip() async throws {
+    let fileURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("manual-skip-\(UUID().uuidString)")
+        .appendingPathExtension("json")
+    let store = ManualValidationStore(fileURL: fileURL)
+    try await store.skip(.scripter, note: "not using legacy scripter")
+    let decisions = await store.list()
+    let scripter = try #require(decisions[.scripter])
+    #expect(scripter.kind == .intentionallySkipped)
+    #expect(!(await store.isApproved(.scripter)))
+}
+
+@Test func doctorV4ManualStoreCorruptionWarnsDoctor() {
+    let report = doctorV4Report(storeHealth: .corrupt("json_decode_failed"))
+    let manual = report.checks.first { $0.id == "channels.manual_validation" }
+    #expect(manual?.status == .warn)
+    #expect(manual?.evidence["store_health"] == "corrupt")
+}
+
+@Test func doctorV4SemanticVersionAndMarkerSniff() throws {
+    let parsed = try #require(SetupDoctor.SemanticVersion("3.9.0"))
+    #expect(parsed.major == 3)
+    #expect(SetupDoctor.SemanticVersion("v") == nil)
+    #expect(SetupDoctor.staticVersion(fromStringsOutput: "3.40.1\n\(ServerConfig.versionMarker)\n") == .version(ServerConfig.serverVersion))
+    #expect(SetupDoctor.staticVersion(fromStringsOutput: "3.40.1\n3.9.0\n") == .indeterminate(["3.40.1", "3.9.0"]))
+}
+
+@Test func doctorV4CheckRegistryIDsAreUniqueAndAnchored() {
+    let ids = SetupDoctor.checkDefinitions.map(\.id.rawValue)
+    #expect(Set(ids).count == ids.count)
+    #expect(Set(ids) == Set(SetupDoctor.DoctorCheckID.allCases.map(\.rawValue)))
+    #expect(Set(SetupDoctor.remediationAnchorsByCheckID.keys).isSubset(of: Set(ids)))
+    #expect(SetupDoctor.checkDefinitionByID["updates.latest_release"]?.optionalByDefault == true)
+}
+
+@Test func doctorV4CheckRegistryCoversRenderedChecksAndOrder() {
+    var runtime = doctorV4Runtime()
+    runtime.latestReleaseLookup = { .found(version: ServerConfig.serverVersion) }
+
+    let report = doctorV4Report(runtime: runtime)
+    let reportIDs = report.checks.map(\.id)
+    let registryIDs = Set(SetupDoctor.orderedCheckIDs)
+    let orderedRenderedIDs = SetupDoctor.orderedCheckIDs.filter { Set(reportIDs).contains($0) }
+
+    #expect(Set(reportIDs).isSubset(of: registryIDs))
+    #expect(reportIDs == orderedRenderedIDs)
+}
+
+@Test func doctorV4BlockedByTableIsDerivedFromCheckRegistry() {
+    #expect(
+        SetupDoctor.blockedByDependencies["mcp.registration_target"] == ["mcp.claude_code_registration"]
+    )
+    #expect(SetupDoctor.checkDefinitionByID["mcp.registration_target"]?.dependencies.map(\.rawValue) == [
+        "mcp.claude_code_registration",
+    ])
+}
+
+@Test func doctorV4EvidenceBuilderAppliesPrivacyPolicies() {
+    let homePath = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("secret-project")
+        .path
+    let typed = SetupDoctor.buildEvidence([
+        "hidden": .path(homePath, .hidden),
+        "basename": .path(homePath, .basenameOnly),
+        "relative": .path(homePath, .homeRelative),
+        "secret": .sensitive,
+    ])
+
+    #expect(typed["hidden"] == "hidden")
+    #expect(typed["basename"] == "secret-project")
+    #expect(typed["relative"] == "~/secret-project")
+    #expect(typed["secret"] == "redacted")
+
+    let sanitized = SetupDoctor.sanitizedEvidence([
+        "api_key": "abc123",
+        "stderr": "token=abc123",
+        "path": homePath,
+    ])
+    #expect(sanitized["api_key"] == "redacted")
+    #expect(sanitized["stderr"] == "present")
+    #expect(sanitized["path"] == "~/secret-project")
+}

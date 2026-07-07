@@ -25,12 +25,36 @@ enum ManualValidationChannel: String, Sendable, CaseIterable, Codable {
 }
 
 struct ManualValidationApproval: Sendable, Codable, Equatable {
+    enum Kind: String, Sendable, Codable {
+        case approved
+        case intentionallySkipped = "intentionally_skipped"
+    }
+
     let approvedAt: Date
     let note: String?
+    let kind: Kind
 
     enum CodingKeys: String, CodingKey {
         case approvedAt = "approved_at"
         case note
+        case kind
+    }
+
+    init(
+        approvedAt: Date,
+        note: String?,
+        kind: Kind = .approved
+    ) {
+        self.approvedAt = approvedAt
+        self.note = note
+        self.kind = kind
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        approvedAt = try container.decode(Date.self, forKey: .approvedAt)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .approved
     }
 }
 
@@ -40,6 +64,21 @@ protocol ManualValidationStoring: Actor {
     func approve(_ channel: ManualValidationChannel, note: String?) async throws
     func revoke(_ channel: ManualValidationChannel) async throws
     func list() async -> [ManualValidationChannel: ManualValidationApproval]
+}
+
+enum ManualValidationStoreHealth: Equatable, Sendable {
+    case ok
+    case corrupt(String)
+}
+
+extension ManualValidationStoring {
+    func skip(_ channel: ManualValidationChannel, note: String?) async throws {
+        throw POSIXError(.ENOTSUP)
+    }
+
+    func health() async -> ManualValidationStoreHealth {
+        .ok
+    }
 }
 
 private struct ManualValidationFile: Codable {
@@ -87,25 +126,40 @@ actor ManualValidationStore: ManualValidationStoring {
                 } else {
                     noteSuffix = ""
                 }
-                return "\(channel.rawValue): approved at \(formatter.string(from: approval.approvedAt))\(noteSuffix)"
+                let label = approval.kind == .approved ? "approved" : "intentionally skipped"
+                return "\(channel.rawValue): \(label) at \(formatter.string(from: approval.approvedAt))\(noteSuffix)"
             }
         return lines.joined(separator: "\n")
     }
 
     func isApproved(_ channel: ManualValidationChannel) async -> Bool {
-        await approval(for: channel) != nil
+        await approval(for: channel)?.kind == .approved
     }
 
     func approval(for channel: ManualValidationChannel) async -> ManualValidationApproval? {
         let file = loadFile()
-        return file.approvals[channel.rawValue]
+        guard let decision = file.approvals[channel.rawValue], decision.kind == .approved else {
+            return nil
+        }
+        return decision
     }
 
     func approve(_ channel: ManualValidationChannel, note: String?) async throws {
         try await mutateLockedFile { file in
             file.approvals[channel.rawValue] = ManualValidationApproval(
                 approvedAt: Date(),
-                note: normalized(note)
+                note: normalized(note),
+                kind: .approved
+            )
+        }
+    }
+
+    func skip(_ channel: ManualValidationChannel, note: String?) async throws {
+        try await mutateLockedFile { file in
+            file.approvals[channel.rawValue] = ManualValidationApproval(
+                approvedAt: Date(),
+                note: normalized(note),
+                kind: .intentionallySkipped
             )
         }
     }
@@ -127,19 +181,27 @@ actor ManualValidationStore: ManualValidationStoring {
         return result
     }
 
+    func health() async -> ManualValidationStoreHealth {
+        loadFileResult().health
+    }
+
     /// Lenient read for the read-only `list()`/`status()` paths: an unreadable or
     /// corrupt store degrades to "no approvals" rather than failing the query.
     private func loadFile() -> ManualValidationFile {
+        loadFileResult().file
+    }
+
+    private func loadFileResult() -> (file: ManualValidationFile, health: ManualValidationStoreHealth) {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return .init()
+            return (.init(), .ok)
         }
 
         do {
             let data = try Data(contentsOf: fileURL)
-            return try JSONDecoder().decode(ManualValidationFile.self, from: data)
+            return (try JSONDecoder().decode(ManualValidationFile.self, from: data), .ok)
         } catch {
             Log.warn("Failed to read manual validation store: \(error)", subsystem: "validation")
-            return .init()
+            return (.init(), .corrupt("json_decode_failed"))
         }
     }
 

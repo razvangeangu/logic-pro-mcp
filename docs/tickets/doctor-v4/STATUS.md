@@ -1,7 +1,7 @@
 # Pipeline Status: Doctor v4 — Intent-Aware, Source-Aware Readiness Platform
 
 **PRD**: `docs/prd/PRD-doctor-v4.md`
-**Status**: In Progress
+**Status**: Verified in working tree; not landed
 **Base**: Doctor v3 Done/PASS (`docs/tickets/doctor-v3/STATUS.md`)
 **Execution rule**: sequential landing. No ticket may weaken v3 honesty or remove v3 checks.
 
@@ -9,16 +9,16 @@
 
 | Ticket | Title | Status | Depends On |
 |--------|-------|--------|------------|
-| T1 | Safety/remediation quick fix | In Review | none |
-| T2 | `skip_reason` additive field | Todo | T1 |
-| T3 | Relative registration resolver | Todo | T2 |
-| T4 | Profile-aware manual channel checks | Todo | T2 |
-| T5 | Manual validation decision store | Todo | T4 |
-| T6 | Client profile / generic MCP client | Todo | T3 |
-| T7 | Capability readiness JSON | Todo | T2, T4, T6 |
-| T8 | Typed check registry | Todo | T2 |
-| T9 | Evidence builder/privacy hardening | Todo | T8 |
-| T10 | Static version marker / SemanticVersion | Todo | T3, T8 |
+| T1 | Safety/remediation quick fix | Verified in working tree | none |
+| T2 | `skip_reason` additive field | Verified in working tree | T1 |
+| T3 | Relative registration resolver | Verified in working tree | T2 |
+| T4 | Profile-aware manual channel checks | Verified in working tree | T2 |
+| T5 | Manual validation decision store | Verified in working tree | T4 |
+| T6 | Client profile / generic MCP client | Verified in working tree | T3 |
+| T7 | Capability readiness JSON | Verified in working tree | T2, T4, T6 |
+| T8 | Typed check registry | Verified in working tree | T2 |
+| T9 | Evidence builder/privacy hardening | Verified in working tree | T8 |
+| T10 | Static version marker / SemanticVersion | Verified in working tree | T3, T8 |
 
 ## Dependency Graph
 
@@ -67,3 +67,17 @@ T1 -> T2 -> T3 -> T6 ┐
 - Build: `swift build -c release`
 - Surface smoke: `.build/release/LogicProMCP doctor --json`
 - Diff hygiene: `git diff --check`
+
+## Working Tree Verification Evidence
+
+- Focused Doctor v4: `swift test --filter DoctorV4 --disable-xctest --parallel` (`14` tests passed)
+- Focused Doctor v3 readiness: `swift test --filter DoctorV3ProductionReadiness --disable-xctest --parallel` (`16` tests passed)
+- Focused SetupDoctor: `swift test --filter SetupDoctor --disable-xctest --parallel` (`102` tests passed)
+- Full suite: `swift test --no-parallel` (`2184` tests passed)
+- Build: `swift build -c release` (exit `0`)
+- Surface smoke: `.build/release/LogicProMCP doctor --json --profile core --client cursor` emitted `schema=logic_pro_mcp_doctor.v4`, `doctor_profile=core`, `client_profile=cursor`, `status=degraded` due local install/TCC warnings.
+- Diff hygiene: `git diff --check` (exit `0`)
+
+## Landing Note
+
+These tickets are verified in the current working tree only. They are not committed, pushed, merged, or CI-verified in this status.

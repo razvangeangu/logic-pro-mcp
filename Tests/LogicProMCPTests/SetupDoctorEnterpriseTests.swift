@@ -68,12 +68,13 @@ private func enterpriseApprovals() -> [ManualValidationChannel: ManualValidation
 }
 
 private func makeReport(
+    arguments: [String] = ["LogicProMCP", "doctor", "--json", "--client", "claude-code"],
     runtime: SetupDoctor.Runtime = enterpriseRuntime(),
     permission: PermissionChecker.PermissionStatus = granted(),
     approvals: [ManualValidationChannel: ManualValidationApproval]? = nil
 ) -> SetupDoctor.Report {
     SetupDoctor.generate(
-        arguments: ["LogicProMCP", "doctor", "--json"],
+        arguments: arguments,
         permissionStatus: permission,
         approvals: approvals ?? enterpriseApprovals(),
         runtime: runtime
@@ -86,8 +87,8 @@ private func check(_ report: SetupDoctor.Report, _ id: String) -> SetupDoctor.Ch
 
 // MARK: - T1: v2 model framework
 
-@Test func test_t1_schema_is_v3() {
-    #expect(makeReport().schema == "logic_pro_mcp_doctor.v3")
+@Test func test_t1_schema_is_v4() {
+    #expect(makeReport().schema == "logic_pro_mcp_doctor.v4")
 }
 
 @Test func test_t1_each_check_has_category_severity_duration() throws {
@@ -152,7 +153,7 @@ private func check(_ report: SetupDoctor.Report, _ id: String) -> SetupDoctor.Ch
     #expect(report.summary.failed == 0)
     #expect(report.summary.manual == 0)
     #expect(report.summary.warnings == 0)
-    #expect(report.summary.skipped == 0)
+    #expect(report.summary.skipped == 1)
 }
 
 @Test func test_t1_optional_skip_does_not_degrade_aggregate() {
@@ -279,9 +280,8 @@ private struct FrozenV1Report: Codable {
 
 @Test func test_t1_e10b_v2_decodes_with_frozen_v1_struct() throws {
     let json = encodeJSON(makeReport())
-    // A frozen v1-shaped consumer must still decode v2 output (additive superset).
     let frozen: FrozenV1Report = try decodeJSON(json)
-    #expect(frozen.schema == "logic_pro_mcp_doctor.v3")
+    #expect(frozen.schema == "logic_pro_mcp_doctor.v4")
     let ids = Set(frozen.checks.map(\.id))
     // Every original v1 check id must survive (a dropped v1 check would fail this).
     let v1Ids = [
@@ -655,8 +655,8 @@ private func runEntrypoint(
 // MARK: - T1 (doctor-v3): data-spine — blocked_by / fix_plan / schema v3 / dep-table
 
 // Case 1
-@Test func test_t1v3_schema_is_v3() {
-    #expect(makeReport().schema == "logic_pro_mcp_doctor.v3")
+@Test func test_t1v3_schema_is_v4() {
+    #expect(makeReport().schema == "logic_pro_mcp_doctor.v4")
 }
 
 // Case 2
@@ -698,6 +698,7 @@ private func runEntrypoint(
 @Test func test_t1v3_fix_plan_includes_fail_warn_manual() {
     // Force a fail (accessibility), a warn (update behind), and a manual (channels).
     let report = makeReport(
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code", "--profile", "full"],
         runtime: enterpriseRuntime(latestReleaseLookup: { .found(version: "v99.0.0") }),
         permission: granted(accessibility: false),
         approvals: [:]
@@ -711,6 +712,7 @@ private func runEntrypoint(
 @Test func test_t1v3_fix_plan_order_two_tier_and_headline_agree() {
     // (a) fail present ⇒ fail-ids first, then warn/manual in declared order (co-equal tier).
     let mixed = makeReport(
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code", "--profile", "full"],
         runtime: enterpriseRuntime(latestReleaseLookup: { .found(version: "v99.0.0") }),
         permission: granted(accessibility: false),
         approvals: [:]
@@ -725,6 +727,7 @@ private func runEntrypoint(
     // (b) OBJ-A counterexample: a MANUAL declared BEFORE a WARN, no fail. 2-tier keeps them
     // co-equal so declared order wins ⇒ the earlier manual leads, and headline embeds it.
     let counter = makeReport(
+        arguments: ["LogicProMCP", "doctor", "--json", "--client", "claude-code", "--profile", "full"],
         runtime: enterpriseRuntime(latestReleaseLookup: { .found(version: "v99.0.0") }),
         approvals: [:]
     )
@@ -786,11 +789,10 @@ private func runEntrypoint(
 }
 
 // Case 14
-@Test func test_t1v3_frozen_v1_still_decodes_from_v3() throws {
-    // G5: v3 output still decodes into a frozen v1-shaped consumer (strict superset).
+@Test func test_t1v3_frozen_v1_still_decodes_from_v4() throws {
     let json = encodeJSON(makeReport())
     let frozen: FrozenV1Report = try decodeJSON(json)
-    #expect(frozen.schema == "logic_pro_mcp_doctor.v3")
+    #expect(frozen.schema == "logic_pro_mcp_doctor.v4")
     let ids = Set(frozen.checks.map(\.id))
     let v1Ids = [
         "binary.path", "binary.executable", "binary.version", "install.source",
@@ -799,17 +801,15 @@ private func runEntrypoint(
         "logic.application_state", "channels.manual_validation",
     ]
     for id in v1Ids {
-        #expect(ids.contains(id), "v1 check id \(id) missing from v3 output")
+        #expect(ids.contains(id), "v1 check id \(id) missing from v4 output")
     }
 }
 
 // Case 15
-@Test func test_t1v3_frozen_v2_decodes_from_v3() throws {
-    // AC-7: a frozen v2-shaped consumer decodes v3 output; category/severity/duration_ms
-    // survive; the new fix_plan/blocked_by keys are absent from the struct and ignored.
+@Test func test_t1v3_frozen_v2_decodes_from_v4() throws {
     let json = encodeJSON(makeReport(permission: granted(accessibility: false)))
     let frozen: FrozenV2Report = try decodeJSON(json)
-    #expect(frozen.schema == "logic_pro_mcp_doctor.v3")
+    #expect(frozen.schema == "logic_pro_mcp_doctor.v4")
     let accessibility = try #require(frozen.checks.first { $0.id == "permissions.accessibility" })
     #expect(accessibility.status == "fail")
     #expect(accessibility.category == "permissions")

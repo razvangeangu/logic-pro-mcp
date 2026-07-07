@@ -1,7 +1,7 @@
 # T10: Static Version Marker / SemanticVersion
 
 **Priority**: P1
-**Status**: Todo
+**Status**: Verified in working tree
 **Depends On**: T3, T8
 
 ## Objective
