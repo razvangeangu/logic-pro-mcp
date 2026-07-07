@@ -1,7 +1,7 @@
 # Pipeline Status: Doctor v4 — Intent-Aware, Source-Aware Readiness Platform
 
 **PRD**: `docs/prd/PRD-doctor-v4.md`
-**Status**: Verified in working tree; not landed
+**Status**: Landed — merged to main via PR #248 (c5133aa), CI SUCCESS, 2026-07-07; CTO-review P0/P1/P2 readiness false-green fixes included.
 **Base**: Doctor v3 Done/PASS (`docs/tickets/doctor-v3/STATUS.md`)
 **Execution rule**: sequential landing. No ticket may weaken v3 honesty or remove v3 checks.
 
@@ -9,16 +9,16 @@
 
 | Ticket | Title | Status | Depends On |
 |--------|-------|--------|------------|
-| T1 | Safety/remediation quick fix | Verified in working tree | none |
-| T2 | `skip_reason` additive field | Verified in working tree | T1 |
-| T3 | Relative registration resolver | Verified in working tree | T2 |
-| T4 | Profile-aware manual channel checks | Verified in working tree | T2 |
-| T5 | Manual validation decision store | Verified in working tree | T4 |
-| T6 | Client profile / generic MCP client | Verified in working tree | T3 |
-| T7 | Capability readiness JSON | Verified in working tree | T2, T4, T6 |
-| T8 | Typed check registry | Verified in working tree | T2 |
-| T9 | Evidence builder/privacy hardening | Verified in working tree | T8 |
-| T10 | Static version marker / SemanticVersion | Verified in working tree | T3, T8 |
+| T1 | Safety/remediation quick fix | Landed via PR #248 (`c5133aa`), CI SUCCESS | none |
+| T2 | `skip_reason` additive field | Landed via PR #248 (`c5133aa`), CI SUCCESS | T1 |
+| T3 | Relative registration resolver | Landed via PR #248 (`c5133aa`), CI SUCCESS | T2 |
+| T4 | Profile-aware manual channel checks | Landed via PR #248 (`c5133aa`), CI SUCCESS | T2 |
+| T5 | Manual validation decision store | Landed via PR #248 (`c5133aa`), CI SUCCESS | T4 |
+| T6 | Client profile / generic MCP client | Landed via PR #248 (`c5133aa`), CI SUCCESS | T3 |
+| T7 | Capability readiness JSON | Landed via PR #248 (`c5133aa`), CI SUCCESS | T2, T4, T6 |
+| T8 | Typed check registry | Landed via PR #248 (`c5133aa`), CI SUCCESS | T2 |
+| T9 | Evidence builder/privacy hardening | Landed via PR #248 (`c5133aa`), CI SUCCESS | T8 |
+| T10 | Static version marker / SemanticVersion | Landed via PR #248 (`c5133aa`), CI SUCCESS | T3, T8 |
 
 ## Dependency Graph
 
@@ -80,4 +80,4 @@ T1 -> T2 -> T3 -> T6 ┐
 
 ## Landing Note
 
-These tickets are verified in the current working tree only. They are not committed, pushed, merged, or CI-verified in this status.
+These tickets are merged and CI-verified on main via PR #248 at commit `c5133aa` on 2026-07-07. The landed state includes the follow-up CTO-review fixes for the P0 selected `claude-desktop` absent-config readiness false-green, P1 dropped-required-check, and P2 registry consistency issues.

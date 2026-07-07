@@ -487,21 +487,36 @@ actor AppleScriptChannel: Channel {
                 timeout: ServerConfig.appleScriptTimeout,
                 outputLimitBytes: 128 * 1024
             )
-            guard case let .completed(output) = execution else {
+            let result = channelResult(forAppleScriptExecution: execution)
+            if case .error(let message) = result {
                 Log.error("AppleScript child process failed: \(execution)", subsystem: "appleScript")
-                return ChannelResult.error("AppleScript error: \(execution)")
-            }
-
-            let stderrOutput = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            if output.exitCode != 0 {
-                let message = stderrOutput.isEmpty ? "osascript exited with status \(output.exitCode)" : stderrOutput
                 Log.error("AppleScript error: \(message)", subsystem: "appleScript")
-                return ChannelResult.error("AppleScript error: \(message)")
+            }
+            return result
+        }.value
+    }
+
+    static func channelResult(forAppleScriptExecution execution: BoundedProcessRunner.Result) -> ChannelResult {
+        guard case let .completed(output) = execution else {
+            return .error("AppleScript error: \(execution)")
+        }
+
+        let stderrOutput = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        if output.exitCode != 0 {
+            if AppleScriptErrorClassifier.isSystemEventsAutomationDenied(output.stderr) {
+                return .error(HonestContract.encodeStateC(
+                    error: .systemEventsAutomationDenied,
+                    hint: AppleScriptErrorClassifier.systemEventsAutomationDeniedHint,
+                    extras: ["osascript_stderr": output.stderr]
+                ))
             }
 
-            let result = normalizedAppleScriptResult(output.stdout)
-            return ChannelResult.success("{\"result\":\"\(AppleScriptChannel.escapeJSON(result))\"}")
-        }.value
+            let message = stderrOutput.isEmpty ? "osascript exited with status \(output.exitCode)" : stderrOutput
+            return .error("AppleScript error: \(message)")
+        }
+
+        let result = normalizedAppleScriptResult(output.stdout)
+        return .success("{\"result\":\"\(AppleScriptChannel.escapeJSON(result))\"}")
     }
 
     // MARK: - Script templates

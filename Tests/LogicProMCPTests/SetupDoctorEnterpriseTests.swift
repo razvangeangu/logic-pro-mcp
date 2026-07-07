@@ -311,6 +311,8 @@ private struct FrozenV1Report: Codable {
     #expect(c.status == .fail)
     #expect(c.remediation.type == .systemSettings)
     #expect(c.remediation.value.contains("System Events"))
+    #expect(c.summary.localizedCaseInsensitiveContains("responsible process"))
+    #expect(c.summary.localizedCaseInsensitiveContains("Logic Pro automation is separate"))
     #expect(c.severity == .error)
 }
 

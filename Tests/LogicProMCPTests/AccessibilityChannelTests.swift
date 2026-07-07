@@ -1319,11 +1319,45 @@ private func makeSetInstrumentFixture() -> (
     #expect(!result.isSuccess)
     let obj = decodeAccessibilityJSON(result.message)
     #expect(!((obj["success"] as? Bool)!))
-    #expect(obj["error"] as? String == "permission_denied")
+    #expect(obj["error"] as? String == "system_events_automation_denied")
     #expect(obj["permission"] as? String == "automation_system_events")
     #expect(obj["failure_stage"] as? String == "preflight_system_events_permission")
     #expect(!((obj["write_attempted"] as? Bool)!))
-    #expect((obj["safe_to_retry"] as? Bool)!)
+    #expect(!((obj["safe_to_retry"] as? Bool)!))
+    let hint = try #require(obj["hint"] as? String)
+    #expect(hint == "System Events Automation is denied for the process responsible for launching this server (a launcher-permission gap, not a Logic limitation). Grant it in System Settings > Privacy & Security > Automation, or run the server/harness under a responsible app that already has it (Terminal, iTerm, or your editor). Logic Pro automation being granted is separate and not sufficient.")
+}
+
+@Test func testImportMIDIFilePropagatesSystemEventsAutomationDeniedFromOsascript() async throws {
+    let expectedHint = "System Events Automation is denied for the process responsible for launching this server (a launcher-permission gap, not a Logic limitation). Grant it in System Settings > Privacy & Security > Automation, or run the server/harness under a responsible app that already has it (Terminal, iTerm, or your editor). Logic Pro automation being granted is separate and not sufficient."
+    let tempFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LogicProMCP-se-runtime-denied-\(UUID().uuidString).mid")
+    try Data([0x4D, 0x54, 0x68, 0x64]).write(to: tempFile)
+    defer { try? FileManager.default.removeItem(at: tempFile) }
+
+    let stderr = "execution error: Not authorized to send Apple events to System Events. (-1743)"
+    let denied = HonestContract.encodeStateC(
+        error: .systemEventsAutomationDenied,
+        hint: expectedHint,
+        extras: ["osascript_stderr": stderr]
+    )
+
+    let result = await AccessibilityChannel.defaultImportMIDIFile(
+        systemEventsAuthorized: { true },
+        path: tempFile.path,
+        executeScript: { _ in .error(denied) },
+        trackCount: { 1 },
+        regionInfos: { .success([]) },
+        deltaPoll: {}
+    )
+
+    #expect(!result.isSuccess)
+    let obj = decodeAccessibilityJSON(result.message)
+    #expect(obj["error"] as? String == "system_events_automation_denied")
+    let hint = try #require(obj["hint"] as? String)
+    #expect(hint == expectedHint)
+    #expect(obj["osascript_stderr"] as? String == stderr)
+    #expect(!(hint.contains("midi.import_file osascript failed")))
 }
 
 // MARK: - #189 set_tempo slider-increment fail-closed

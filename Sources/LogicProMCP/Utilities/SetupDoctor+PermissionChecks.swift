@@ -75,8 +75,8 @@ extension SetupDoctor {
     static func launchContextCheck(runtime: Runtime) -> Check {
         let context = runtime.launchContext()
         let summary = context.context == "unknown"
-            ? "Launch context is unknown; re-run doctor from the same app that will launch the server."
-            : "This report measures the TCC principal of \(context.context); re-verify under a different app if it spawns the server."
+            ? "Launch context is unknown; TCC follows the responsible process that launches the server. Re-run doctor from that app, or run under Terminal, iTerm, or your editor if it already has Automation grants."
+            : "This report measures the TCC responsible process of \(context.context); re-verify under a different app if it spawns the server, or run under Terminal, iTerm, or your editor if it already has Automation grants."
         return check(
             id: "permissions.launch_context",
             domain: "permissions",
@@ -148,7 +148,7 @@ extension SetupDoctor {
         case .granted:
             return "Automation permission for System Events is granted."
         case .notGranted:
-            return "Automation permission for System Events is not granted."
+            return "Automation permission for System Events is not granted for the responsible process that launched this server; this is a launcher-permission gap, and Logic Pro automation is separate."
         case .notVerifiable:
             return "Automation permission for System Events could not be verified."
         }

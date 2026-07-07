@@ -533,6 +533,8 @@ private func issue26RepositoryRootURL() -> URL {
     #expect(report.status == .ok)
     #expect(launch.status == .pass)
     #expect(launch.summary.localizedCaseInsensitiveContains("unknown"))
+    #expect(launch.summary.localizedCaseInsensitiveContains("responsible process"))
+    #expect(launch.summary.localizedCaseInsensitiveContains("Terminal"))
     #expect(SetupDoctor.renderHuman(report, useColor: false).contains("Launch context is unknown"))
 }
 

@@ -231,6 +231,45 @@ private func recordSequenceJSONObject(_ result: CallTool.Result) -> [String: Any
     #expect(!tempoSeen)
 }
 
+@Test func testRecordSequenceSurfacesSystemEventsAutomationDeniedImportError() async throws {
+    let expectedHint = "System Events Automation is denied for the process responsible for launching this server (a launcher-permission gap, not a Logic limitation). Grant it in System Settings > Privacy & Security > Automation, or run the server/harness under a responsible app that already has it (Terminal, iTerm, or your editor). Logic Pro automation being granted is separate and not sufficient."
+    let cache = StateCache()
+    await cache.updateDocumentState(true)
+
+    let stderr = "execution error: Not authorized to send Apple events to System Events. (-1743)"
+    let importEnvelope = HonestContract.encodeStateC(
+        error: .systemEventsAutomationDenied,
+        hint: expectedHint,
+        extras: [
+            "osascript_stderr": stderr,
+            "file_open_dialog_seen": false,
+            "tempo_dialog_seen": false,
+        ]
+    )
+
+    let router = ChannelRouter()
+    let ax = RecordingMockChannel(id: .accessibility, importResult: .error(importEnvelope))
+    await router.register(ax)
+
+    let result = await TrackDispatcher.handleRecordSequenceSMF(
+        params: ["notes": minimalNoteSpec(), "bar": .int(1)],
+        router: router,
+        cache: cache,
+        trackHeaderCount: { 0 },
+        trackNameAt: { _ in nil },
+        readRegions: { .success([]) },
+        settleReadback: {}
+    )
+
+    let object = recordSequenceJSONObject(result)
+    #expect(object["error"] as? String == "system_events_automation_denied")
+    #expect(object["import_error"] as? String == "system_events_automation_denied")
+    #expect(object["failure_stage"] as? String == "midi.import_file")
+    #expect(object["osascript_stderr"] as? String == stderr)
+    let hint = try #require(object["hint"] as? String)
+    #expect(hint == expectedHint)
+}
+
 @Test func testRecordSequenceFailsClosedOnGMDeviceImportDowngrade() async throws {
     // #128 regression: PR #150 correctly downgraded the lower-level
     // `midi.import_file` result to State B when Logic created GM Device lanes,
