@@ -51,6 +51,137 @@ func pointLabel(_ point: Point?) -> String? {
     return "\(Int(point.x)),\(Int(point.y))"
 }
 
+func expandedPath(_ path: String) -> String {
+    (path as NSString).expandingTildeInPath
+}
+
+func resolvedStandardizedPath(_ path: String) -> String {
+    URL(fileURLWithPath: expandedPath(path)).standardizedFileURL.resolvingSymlinksInPath().path
+}
+
+func isPath(_ path: String, under directory: String) -> Bool {
+    let pathComponents = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+    let directoryComponents = URL(fileURLWithPath: directory).standardizedFileURL.pathComponents
+    guard pathComponents.count > directoryComponents.count else { return false }
+    return zip(directoryComponents, pathComponents).allSatisfy { root, candidate in
+        root == candidate
+    }
+}
+
+func controlledExportScratchRoots() -> [String] {
+    var roots: [String] = []
+    for root in ["/tmp", "/private/tmp", NSTemporaryDirectory()] {
+        let resolved = resolvedStandardizedPath(root)
+        if !roots.contains(resolved) {
+            roots.append(resolved)
+        }
+    }
+    return roots
+}
+
+func isControlledExportScratchPath(_ path: String) -> Bool {
+    controlledExportScratchRoots().contains { root in
+        isPath(path, under: root)
+    }
+}
+
+func blockArmedExportDir(_ exportDir: String?, source: Point?, destination: Point?, note: String) -> Never {
+    emit(JSONRecord(
+        record_type: "region_drag_preflight",
+        status: "blocked",
+        export_dir: exportDir,
+        source: pointLabel(source),
+        destination: pointLabel(destination),
+        path: nil,
+        note: note
+    ))
+    exit(2)
+}
+
+func validatedArmedExportDirPath(_ raw: String?, source: Point?, destination: Point?) -> String {
+    guard let raw else {
+        blockArmedExportDir(
+            nil,
+            source: source,
+            destination: destination,
+            note: "Explicit --export-dir is required for a live armed drag."
+        )
+    }
+
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        blockArmedExportDir(
+            trimmed,
+            source: source,
+            destination: destination,
+            note: "--export-dir must be non-empty after trimming whitespace for a live armed drag."
+        )
+    }
+    let expanded = expandedPath(trimmed)
+    guard expanded.hasPrefix("/") else {
+        blockArmedExportDir(
+            trimmed,
+            source: source,
+            destination: destination,
+            note: "--export-dir must be an absolute path for a live armed drag."
+        )
+    }
+
+    let standardizedPath = resolvedStandardizedPath(expanded)
+    guard isControlledExportScratchPath(standardizedPath) else {
+        blockArmedExportDir(
+            standardizedPath,
+            source: source,
+            destination: destination,
+            note: "--export-dir rejected by controlled_scratch_root: must resolve under /tmp, /private/tmp, or NSTemporaryDirectory()."
+        )
+    }
+    return standardizedPath
+}
+
+let systemEventsAutomationDeniedRemediation =
+    "System Events Automation is denied for the process responsible for launching this server (a launcher-permission gap, not a Logic limitation). Grant it in System Settings > Privacy & Security > Automation, or run the server/harness under a responsible app that already has it (Terminal, iTerm, or your editor). Logic Pro automation being granted is separate and not sufficient."
+
+let systemEventsAutomationDeniedCoreMatchTokens = ["-1743", "errAEEventNotPermitted", "not authorized to send Apple events to System Events", "not allowed to send Apple events to System Events", "System Events", "systemevents"]
+
+func isSystemEventsAutomationDenied(_ output: String) -> Bool {
+    let lowercased = output.lowercased()
+    let hasPermissionCode = lowercased.contains(systemEventsAutomationDeniedCoreMatchTokens[0])
+        || lowercased.contains(systemEventsAutomationDeniedCoreMatchTokens[1].lowercased())
+    let hasCanonicalSystemEventsPermissionError = lowercased.contains(systemEventsAutomationDeniedCoreMatchTokens[2].lowercased())
+        || lowercased.contains(systemEventsAutomationDeniedCoreMatchTokens[3].lowercased())
+    let referencesSystemEvents = lowercased.contains(systemEventsAutomationDeniedCoreMatchTokens[4].lowercased())
+        || lowercased.contains(systemEventsAutomationDeniedCoreMatchTokens[5])
+    return hasCanonicalSystemEventsPermissionError || (hasPermissionCode && referencesSystemEvents)
+}
+
+func systemEventsAutomationDeniedEvidence() -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = ["-e", "tell application \"System Events\" to get name"]
+
+    let stdout = Pipe()
+    let stderr = Pipe()
+    process.standardOutput = stdout
+    process.standardError = stderr
+
+    do {
+        try process.run()
+    } catch {
+        return nil
+    }
+    process.waitUntilExit()
+
+    let stdoutText = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    let stderrText = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    guard process.terminationStatus != 0,
+          isSystemEventsAutomationDenied(stderrText) else {
+        return nil
+    }
+    let evidence = stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
+    return evidence.isEmpty ? stdoutText.trimmingCharacters(in: .whitespacesAndNewlines) : evidence
+}
+
 func midiSnapshot(in directory: URL) -> [String: UInt64] {
     let urls = (try? FileManager.default.contentsOfDirectory(
         at: directory,
@@ -136,25 +267,13 @@ func postMouseDrag(from source: Point, to destination: Point) -> Bool {
 }
 
 let exportDirArgument = argumentValue("--export-dir")
-let exportDir = URL(
-    fileURLWithPath: exportDirArgument ?? "/tmp/LogicProMCP-region-drag-spike"
-)
 let source = parsePoint(argumentValue("--source"))
 let destination = parsePoint(argumentValue("--destination"))
 let armed = ProcessInfo.processInfo.environment["LOGIC_PRO_MCP_ARM_REGION_DRAG"] == "1"
-
-if armed && exportDirArgument == nil {
-    emit(JSONRecord(
-        record_type: "region_drag_preflight",
-        status: "blocked",
-        export_dir: nil,
-        source: pointLabel(source),
-        destination: pointLabel(destination),
-        path: nil,
-        note: "Explicit --export-dir is required for a live armed drag."
-    ))
-    exit(2)
-}
+let exportDirPath = armed
+    ? validatedArmedExportDirPath(exportDirArgument, source: source, destination: destination)
+    : (exportDirArgument ?? "/tmp/LogicProMCP-region-drag-spike")
+let exportDir = URL(fileURLWithPath: exportDirPath)
 
 try? FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
 emit(JSONRecord(
@@ -179,6 +298,19 @@ guard let source, let destination else {
         destination: pointLabel(destination),
         path: nil,
         note: "Both --source x,y and --destination x,y are required."
+    ))
+    exit(2)
+}
+
+if systemEventsAutomationDeniedEvidence() != nil {
+    emit(JSONRecord(
+        record_type: "region_drag_preflight",
+        status: "blocked",
+        export_dir: exportDir.path,
+        source: pointLabel(source),
+        destination: pointLabel(destination),
+        path: nil,
+        note: systemEventsAutomationDeniedRemediation
     ))
     exit(2)
 }

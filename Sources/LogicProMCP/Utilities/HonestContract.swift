@@ -50,6 +50,7 @@ enum HonestContract {
         case axWriteFailed = "ax_write_failed"
         case elementNotFound = "element_not_found"
         case permissionDenied = "permission_denied"
+        case systemEventsAutomationDenied = "system_events_automation_denied"
         case logicNotRunning = "logic_not_running"
         case invalidParams = "invalid_params"
         case readbackUnavailable = "readback_unavailable"
@@ -293,6 +294,7 @@ enum HonestContract {
         FailureError.invalidParams.rawValue,
         FailureError.notImplemented.rawValue,
         FailureError.portUnavailable.rawValue,
+        FailureError.systemEventsAutomationDenied.rawValue,
         FailureError.readbackUnavailable.rawValue,
         FailureError.channelsExhausted.rawValue,
         // #140 — the file-open sheet never appeared; the menu route was driven

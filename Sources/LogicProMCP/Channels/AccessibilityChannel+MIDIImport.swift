@@ -150,14 +150,14 @@ extension AccessibilityChannel {
         // could otherwise look green on the Logic-Pro automation line alone).
         guard systemEventsAuthorized() else {
             return .error(HonestContract.encodeStateC(
-                error: .permissionDenied,
-                hint: "midi.import_file requires Automation access to System Events. Grant it in System Settings > Privacy & Security > Automation → allow your launcher app to control System Events, then retry.",
+                error: .systemEventsAutomationDenied,
+                hint: AppleScriptErrorClassifier.systemEventsAutomationDeniedHint,
                 extras: [
                     "permission": "automation_system_events",
                     "failure_stage": "preflight_system_events_permission",
                     "write_attempted": false,
-                    "safe_to_retry": true,
-                    "remediation": "System Settings > Privacy & Security > Automation → allow control of System Events",
+                    "safe_to_retry": false,
+                    "remediation": AppleScriptErrorClassifier.systemEventsAutomationDeniedHint,
                 ]
             ))
         }
@@ -520,6 +520,9 @@ extension AccessibilityChannel {
             }
             return .success(HonestContract.encodeStateA(extras: extras))
         case .error(let msg):
+            if HonestContract.stateCErrorCode(msg) == HonestContract.FailureError.systemEventsAutomationDenied.rawValue {
+                return .error(msg)
+            }
             return .error(HonestContract.encodeStateC(
                 error: .axWriteFailed,
                 hint: "midi.import_file osascript failed: \(msg)",

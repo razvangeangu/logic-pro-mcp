@@ -215,11 +215,17 @@ extension TrackDispatcher {
                 "hint": "record_sequence failed at midi.import_file: \(importResult.message)",
             ]
             if let inner = importMessageJSON(importResult.message) {
-                for key in ["file_open_dialog_seen", "tempo_dialog_seen", "missing_element"] {
+                for key in ["file_open_dialog_seen", "tempo_dialog_seen", "missing_element", "osascript_stderr"] {
                     if let value = inner[key] { failure[key] = value }
                 }
                 if let innerError = inner["error"] as? String {
                     failure["import_error"] = innerError
+                    if innerError == HonestContract.FailureError.systemEventsAutomationDenied.rawValue {
+                        failure["error"] = innerError
+                        if let hint = inner["hint"] as? String {
+                            failure["hint"] = hint
+                        }
+                    }
                 }
             }
             return jsonToolTextResult(failure, isError: true)

@@ -75,6 +75,15 @@ Launch Logic Pro once, then grant Automation access for the launcher app under *
 
 (Before v3.8.0 a `not_verifiable` outcome was mis-reported as a false "Automation NOT GRANTED".)
 
+### `-1743` / System Events Automation denied
+
+`-1743`, `errAEEventNotPermitted`, or "not authorized to send Apple events" from `tell application "System Events"` means the responsible process for the server or harness is denied Automation to System Events. This is a launcher-permission gap, not a Logic Pro limitation, and Logic Pro Automation being granted is separate and not sufficient.
+
+Fix it one of two ways:
+
+- Grant System Events Automation to the responsible launcher in **System Settings -> Privacy & Security -> Automation**.
+- Or run the server/harness under a responsible app that already has it, such as Terminal, iTerm, or your editor.
+
 ### PostEvent denied
 
 `permissions.post_event_access=fail` means CGEvent-family operations cannot post trusted keyboard or click events from the current launcher app. Grant Accessibility to the same app that launches LogicProMCP, then rerun:
