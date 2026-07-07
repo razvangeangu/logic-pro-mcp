@@ -191,6 +191,7 @@ struct Issue112CommandDeadlineTests {
         #expect(!((json(result)?["safe_to_retry"] as? Bool)!))
         #expect(!((json(result)?["underlying_operation_stopped"] as? Bool)!))
         #expect(try await waitUntil(timeoutNanoseconds: 1_000_000_000) { blocker.isCompleted() })
+        #expect(try await waitUntil(timeoutNanoseconds: 1_000_000_000) { gate.currentOperation() == nil })
 
         let afterDrain = await LogicProServer.runWithDeadline(
             tool: "logic_tracks",
