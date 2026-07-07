@@ -12,7 +12,7 @@ claim a State A selected-region read-back surface.
 - Script: `Scripts/spike-midi-region-drag-export.swift`
 - Default behavior: refuses to post mouse events unless
   `LOGIC_PRO_MCP_ARM_REGION_DRAG=1` is set.
-- Required armed arguments: `--source x,y`, `--destination x,y`, optional
+- Required armed arguments: `--source x,y`, `--destination x,y`, and explicit
   `--export-dir <path>`.
 - Controlled file gate: snapshots `.mid` files in the export directory before drag,
   then reports only a newly modified positive-size `.mid`.

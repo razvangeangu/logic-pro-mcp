@@ -135,12 +135,26 @@ func postMouseDrag(from source: Point, to destination: Point) -> Bool {
     return true
 }
 
+let exportDirArgument = argumentValue("--export-dir")
 let exportDir = URL(
-    fileURLWithPath: argumentValue("--export-dir") ?? "/tmp/LogicProMCP-region-drag-spike"
+    fileURLWithPath: exportDirArgument ?? "/tmp/LogicProMCP-region-drag-spike"
 )
 let source = parsePoint(argumentValue("--source"))
 let destination = parsePoint(argumentValue("--destination"))
 let armed = ProcessInfo.processInfo.environment["LOGIC_PRO_MCP_ARM_REGION_DRAG"] == "1"
+
+if armed && exportDirArgument == nil {
+    emit(JSONRecord(
+        record_type: "region_drag_preflight",
+        status: "blocked",
+        export_dir: nil,
+        source: pointLabel(source),
+        destination: pointLabel(destination),
+        path: nil,
+        note: "Explicit --export-dir is required for a live armed drag."
+    ))
+    exit(2)
+}
 
 try? FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
 emit(JSONRecord(
