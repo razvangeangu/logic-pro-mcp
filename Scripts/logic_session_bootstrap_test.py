@@ -2,6 +2,7 @@
 # noqa: SIZE_OK - bootstrap helper coverage keeps focused fake MCP/bootstrap cases in one test module.
 import json
 import logic_session_bootstrap as bootstrap_module
+import logic_variants
 import unittest
 from unittest import mock
 
@@ -343,7 +344,12 @@ class EvaluateFreshSessionTests(unittest.TestCase):
 class ActivationHelperTests(unittest.TestCase):
     def test_activate_logic_falls_back_to_open_when_osascript_fails(self):
         fallback_result = mock.Mock(returncode=0)
+        resolved = logic_variants.ResolvedLogicTarget(
+            bundle_id="com.apple.logic10",
+            process_name="Logic Pro",
+        )
         with (
+            mock.patch("logic_variants.resolve_logic_target", return_value=resolved),
             mock.patch("logic_variants.run_osascript", return_value=None) as run_osascript,
             mock.patch("logic_variants.subprocess.run", return_value=fallback_result) as run_process,
         ):

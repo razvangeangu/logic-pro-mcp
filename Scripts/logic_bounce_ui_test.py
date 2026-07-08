@@ -88,7 +88,8 @@ class LogicBounceUITests(unittest.TestCase):
                 run_jxa_fn=lambda source, **kwargs: _completed_jxa_snapshot(snapshot),
             )
         )
-        self.assertEqual(len(calls), 3)
+        # Single resolved target: one OSA attempt per label until "확인" succeeds.
+        self.assertEqual(len(calls), 2)
 
     def test_click_bounce_settings_confirm_returns_false_when_no_label_matches(self):
         snapshot = {

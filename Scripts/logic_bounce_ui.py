@@ -7,7 +7,13 @@ from ctypes import CDLL, POINTER, Structure, byref, c_bool, c_double, c_int64, c
 from collections.abc import Callable
 from typing import Final, Literal, NoReturn, Optional, TypedDict, Union
 
-from logic_variants import activate_logic, logic_process_osa, logic_process_osa_with_runner
+from logic_variants import (
+    activate_logic,
+    logic_process_osa,
+    logic_process_osa_action,
+    logic_process_osa_action_with_runner,
+    logic_process_osa_with_runner,
+)
 from logic_ui_jxa import parse_jxa_json_result, run_jxa, save_panel_snapshot_source
 
 
@@ -273,7 +279,18 @@ def osa(script: str, timeout: float = OSA_TIMEOUT_SEC) -> str:
     return result.stdout.strip()
 
 
-def _process_body(body: str, *, run_osa: RunOsa = osa, timeout_sec: float = OSA_TIMEOUT_SEC) -> str:
+def _process_body(
+    body: str,
+    *,
+    run_osa: RunOsa = osa,
+    timeout_sec: float = OSA_TIMEOUT_SEC,
+    action: bool = False,
+) -> str:
+    if action:
+        if run_osa is osa:
+            logic_process_osa_action(body, timeout_sec=timeout_sec)
+            return ""
+        return logic_process_osa_action_with_runner(body, run_osa, timeout_sec=timeout_sec)
     if run_osa is osa:
         return logic_process_osa(body, timeout_sec=timeout_sec)
     return logic_process_osa_with_runner(body, run_osa, timeout_sec=timeout_sec)
@@ -466,7 +483,7 @@ def open_bounce_dialog(
     strategies = ["key_command"]
     activate_fn()
     sleep_fn(0.8)
-    _process_body("key code 11 using {command down}", run_osa=run_osa)
+    _process_body("key code 11 using {command down}", run_osa=run_osa, action=True)
     if wait_for_bounce_dialog(run_osa=run_osa, sleep_fn=sleep_fn):
         return True, strategies
     strategies.append("file_menu")

@@ -46,6 +46,7 @@ class LogicUIJXATests(unittest.TestCase):
         source = save_panel_snapshot_source()
         self.assertNotIn('byName("Logic Pro")', source)
         self.assertIn("processNames", source)
+        self.assertIn("candidate.exists()", source)
         for process_name in logic_variants.logic_app_names():
             self.assertIn(process_name, source)
 
