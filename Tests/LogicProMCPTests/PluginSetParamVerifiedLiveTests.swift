@@ -42,6 +42,7 @@ private final class LiveFixture: @unchecked Sendable {
         pluginSlotName: String = "Compressor",
         beforeValue: Double = 51,
         pluginWindowPresent: Bool = true,
+        openWindowOnSlotPress: Bool = false,
         forcedAfterValue: Double? = nil,
         otherTracks: Int = 0,
         emptyInsertChain: Bool = false
@@ -73,6 +74,8 @@ private final class LiveFixture: @unchecked Sendable {
         // --- Mixer: one strip per track; target strip carries occupied inserts
         //     up to `insert` so audioPluginInsertSlots reports it occupied. ---
         var strips: [AXUIElement] = []
+        var targetSlot: AXUIElement?
+        var targetOpenButton: AXUIElement?
         for i in 0..<rowCount {
             let strip = b.element(1200 + i)
             b.setAttribute(strip, kAXRoleAttribute as String, kAXLayoutItemRole as String)
@@ -85,7 +88,12 @@ private final class LiveFixture: @unchecked Sendable {
                 } else {
                     var slots: [AXUIElement] = []
                     for s in 0...insert {
-                        slots.append(LiveFixture.occupiedSlot(b, 1300 + s, name: s == insert ? pluginSlotName : "Plugin \(s)"))
+                        let slot = LiveFixture.occupiedSlot(b, 1300 + s, name: s == insert ? pluginSlotName : "Plugin \(s)")
+                        if s == insert {
+                            targetSlot = slot
+                            targetOpenButton = b.element((1300 + s) * 10 + 2)
+                        }
+                        slots.append(slot)
                     }
                     b.setChildren(strip, slots)
                 }
@@ -124,6 +132,8 @@ private final class LiveFixture: @unchecked Sendable {
         // way Logic re-renders it ("X %") and an optional forced value models a
         // sticky parameter (readback != requested).
         let sliderKey = b.elementID(slider)
+        let targetSlotKey = targetSlot.map { b.elementID($0) }
+        let targetOpenButtonKey = targetOpenButton.map { b.elementID($0) }
         let forced = forcedAfterValue
         let runtime = b.makeLogicRuntime(
             appElement: app,
@@ -138,7 +148,16 @@ private final class LiveFixture: @unchecked Sendable {
                 b.setAttribute(el, kAXValueDescriptionAttribute as String, "\(Int(landed.rounded())) %")
                 return true
             },
-            performActionHandler: nil
+            performActionHandler: { [b] el, action in
+                guard openWindowOnSlotPress, action == (kAXPressAction as String) else {
+                    return true
+                }
+                let key = b.elementID(el)
+                if key == targetSlotKey || key == targetOpenButtonKey {
+                    b.setAttribute(app, kAXWindowsAttribute as String, [arrangeWindow, pluginWindow])
+                }
+                return true
+            }
         )
         self.runtime = runtime
     }
@@ -175,14 +194,23 @@ private func runLive(
     fixture: LiveFixture,
     params: [String: String],
     frontDoc: String? = expectedPath,
-    opener: @escaping AccessibilityChannel.PluginWindowOpener = { _, _ in nil }
+    opener: AccessibilityChannel.PluginWindowOpener? = nil
 ) async -> [String: Any] {
-    let result = await AccessibilityChannel.defaultSetParamVerified(
-        params: params,
-        runtime: fixture.runtime,
-        frontDocumentPath: { frontDoc },
-        pluginWindowOpener: opener
-    )
+    let result: ChannelResult
+    if let opener {
+        result = await AccessibilityChannel.defaultSetParamVerified(
+            params: params,
+            runtime: fixture.runtime,
+            frontDocumentPath: { frontDoc },
+            pluginWindowOpener: opener
+        )
+    } else {
+        result = await AccessibilityChannel.defaultSetParamVerified(
+            params: params,
+            runtime: fixture.runtime,
+            frontDocumentPath: { frontDoc }
+        )
+    }
     return try! JSONSerialization.jsonObject(
         with: result.message.data(using: .utf8)!, options: []
     ) as! [String: Any]
@@ -426,6 +454,43 @@ private func runChannelEQFixture(
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "window_open_failed")
     #expect(!((obj["write_attempted"] as? Bool)!))
+    #expect(obj["opener_action_attempted"] as? Bool == true)
+    #expect(obj["requested_window_title"] as? String == trackName)
+    #expect(obj["requested_slider_description"] as? String == "Threshold")
+    let windowCandidates = obj["window_candidates"] as? [[String: Any]]
+    #expect(windowCandidates?.first?["title"] as? String == "AcidWashBass — Tracks")
+}
+
+@Test func testProductionOpenerOpensClosedTargetSlotWindow() async {
+    let fixture = LiveFixture(
+        beforeValue: 51,
+        pluginWindowPresent: false,
+        openWindowOnSlotPress: true
+    )
+    let obj = await runLive(fixture: fixture, params: thresholdParams())
+
+    #expect(obj["state"] as? String == "A")
+    #expect(obj["observed_normalized"] as? Double == 60)
+    #expect(fixture.currentSliderValue == 60)
+}
+
+@Test func testProductionOpenerRejectsOpenedWindowWithoutRequestedSlider() async {
+    let fixture = LiveFixture(
+        thresholdDescription: "Output Gain",
+        beforeValue: 51,
+        pluginWindowPresent: false,
+        openWindowOnSlotPress: true
+    )
+    let obj = await runLive(fixture: fixture, params: thresholdParams())
+
+    #expect(obj["state"] as? String == "C")
+    #expect(obj["error"] as? String == "window_open_failed")
+    #expect(obj["write_attempted"] as? Bool == false)
+    #expect(obj["opener_action_attempted"] as? Bool == true)
+    let windowCandidates = obj["window_candidates"] as? [[String: Any]]
+    let sliders = windowCandidates?.last?["slider_descriptions"] as? [String]
+    #expect(sliders?.contains("Output Gain") == true)
+    #expect(fixture.currentSliderValue == 51)
 }
 
 @Test func testOpenerFallbackProducesStateA() async {
@@ -448,7 +513,7 @@ private func runChannelEQFixture(
     let obj = await runLive(
         fixture: fixture,
         params: thresholdParams(),
-        opener: { name, desc in
+        opener: { _, name, desc, _ in
             (name == trackName && desc == "Threshold") ? sendable : nil
         }
     )
@@ -479,7 +544,7 @@ private func runChannelEQFixture(
     let obj = await runLive(
         fixture: fixture,
         params: thresholdParams(),
-        opener: { _, _ in sendable }
+        opener: { _, _, _, _ in sendable }
     )
     #expect(obj["state"] as? String == "C")
     #expect(obj["error"] as? String == "param_control_not_found")

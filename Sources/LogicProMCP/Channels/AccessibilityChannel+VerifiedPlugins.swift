@@ -399,22 +399,23 @@ extension AccessibilityChannel {
         await AppleScriptChannel.currentDocumentPath()
     }
 
-    /// Attempt to OPEN the plugin window for `(trackName, axDescription)` when it
-    /// is not already open (R6 step 8b), returning the window element once it
-    /// exposes the matching slider, or nil when no window could be opened.
-    /// Injected so tests can deterministically drive the "must open" branch.
-    ///
-    /// Production default: returns nil. Opening a stock-effect plugin window via
-    /// the mixer is empirically brittle (T0 spike §제약 4 — the mixer virtualises
-    /// channel strips, so the insert double-click cannot be driven reliably from
-    /// AX). Until that path is hardened (a separate ticket), the verified write
-    /// only proceeds against an ALREADY-OPEN plugin window; otherwise it fails
-    /// closed with `window_open_failed`. This keeps the production envelope
-    /// honest rather than fabricating a write against a window that was never
-    /// confirmed open.
-    typealias PluginWindowOpener = @Sendable (_ trackName: String, _ axDescription: String) async -> AXUIElementSendable?
+    typealias PluginWindowOpener = @Sendable (
+        _ targetSlot: AXUIElementSendable,
+        _ trackName: String,
+        _ axDescription: String,
+        _ runtime: AXLogicProElements.Runtime
+    ) async -> AXUIElementSendable?
 
-    static let liveNoOpPluginWindowOpener: PluginWindowOpener = { _, _ in nil }
+    static let livePluginWindowOpener: PluginWindowOpener = { targetSlot, trackName, axDescription, runtime in
+        await openPluginWindowFromTargetSlot(
+            targetSlot.element,
+            trackName: trackName,
+            axDescription: axDescription,
+            runtime: runtime
+        )
+    }
+
+    static let liveNoOpPluginWindowOpener: PluginWindowOpener = { _, _, _, _ in nil }
 
     /// Steps 2-3 of the R6 precedence shared by both mutating verified ops:
     /// mode validation then the project path gate. Returns a State C envelope to
@@ -515,7 +516,7 @@ extension AccessibilityChannel {
         frontDocumentPath: FrontDocumentPathProvider = liveFrontDocumentPath,
         entryLookup: VerifiedPluginCatalog.EntryLookup = VerifiedPluginCatalog.productionEntryLookup,
         paramAliasLookup: VerifiedPluginCatalog.ParamAliasLookup = VerifiedPluginCatalog.canonicalParamKey,
-        pluginWindowOpener: PluginWindowOpener = liveNoOpPluginWindowOpener
+        pluginWindowOpener: PluginWindowOpener = livePluginWindowOpener
     ) async -> ChannelResult {
         let operation = "logic_plugins.set_param_verified"
 
@@ -749,12 +750,22 @@ extension AccessibilityChannel {
             forTrackName: trackName, matchingSliderDescription: axDescription, runtime: runtime
         ) {
             window = open
-        } else if let opened = await pluginWindowOpener(trackName, axDescription) {
+        } else if let opened = await pluginWindowOpener(
+            AXUIElementSendable(slots[insert].element),
+            trackName,
+            axDescription,
+            runtime
+        ) {
             window = opened.element
         } else {
             return .error(windowOpenFailedStateC(
                 operation, identity,
-                "no open plugin window titled '\(trackName)' exposes the '\(axDescription)' control, and one could not be opened"
+                "no open plugin window titled '\(trackName)' exposes the '\(axDescription)' control, and one could not be opened",
+                diagnostics: pluginWindowAcquisitionDiagnostics(
+                    trackName: trackName,
+                    axDescription: axDescription,
+                    runtime: runtime
+                )
             ))
         }
 
@@ -902,18 +913,148 @@ extension AccessibilityChannel {
         )
     }
 
-    private static func windowOpenFailedStateC(_ operation: String, _ identity: [String: Any], _ detail: String) -> String {
-        HonestContract.encodeV2StateC(
+    private static func windowOpenFailedStateC(
+        _ operation: String,
+        _ identity: [String: Any],
+        _ detail: String,
+        diagnostics: [String: Any] = [:]
+    ) -> String {
+        var extras: [String: Any] = [
+            "operation": operation,
+            "target_identity": identity,
+            "what_was_attempted": "acquire the plugin window before writing",
+            "what_was_observed": detail,
+            "safe_to_retry": true,
+            "write_attempted": false,
+        ]
+        extras.merge(diagnostics) { current, _ in current }
+        return HonestContract.encodeV2StateC(
             error: .windowOpenFailed,
-            extras: [
-                "operation": operation,
-                "target_identity": identity,
-                "what_was_attempted": "acquire the plugin window before writing",
-                "what_was_observed": detail,
-                "safe_to_retry": true,
-                "write_attempted": false,
-            ]
+            extras: extras
         )
+    }
+
+    private static func openPluginWindowFromTargetSlot(
+        _ targetSlot: AXUIElement,
+        trackName: String,
+        axDescription: String,
+        runtime: AXLogicProElements.Runtime
+    ) async -> AXUIElementSendable? {
+        if let alreadyOpen = AXLogicProElements.openPluginWindow(
+            forTrackName: trackName,
+            matchingSliderDescription: axDescription,
+            runtime: runtime
+        ) {
+            return AXUIElementSendable(alreadyOpen)
+        }
+
+        let rankedControls = rankedPluginSlotOpenControls(in: targetSlot, runtime: runtime.ax)
+        let attempts = rankedControls.filter { $0.rank == 0 }.map(\.element)
+            + [targetSlot]
+            + rankedControls.filter { $0.rank != 0 }.map(\.element)
+        for element in attempts {
+            guard pressOrClick(element, runtime: runtime.ax) else { continue }
+            if let window = await pollOpenPluginWindow(
+                trackName: trackName,
+                axDescription: axDescription,
+                runtime: runtime,
+                timeoutMs: 1_250
+            ) {
+                return AXUIElementSendable(window)
+            }
+        }
+        return nil
+    }
+
+    private static func rankedPluginSlotOpenControls(
+        in targetSlot: AXUIElement,
+        runtime: AXHelpers.Runtime
+    ) -> [(rank: Int, element: AXUIElement)] {
+        let children = AXHelpers.getChildren(targetSlot, runtime: runtime)
+        let buttons = children.filter {
+            (AXHelpers.getRole($0, runtime: runtime) ?? "") == (kAXButtonRole as String)
+        }
+        return buttons.compactMap { button -> (rank: Int, element: AXUIElement)? in
+            let text = AXLogicProElements.elementSearchText(button, runtime: runtime)
+            guard !AXLocalePolicy.pluginBypassControl.containsAny(in: text) else { return nil }
+            if text.range(of: "open", options: [.caseInsensitive]) != nil || text.contains("열기") {
+                return (0, button)
+            }
+            if text.range(of: "list", options: [.caseInsensitive]) != nil || text.contains("목록") {
+                return (1, button)
+            }
+            if AXLocalePolicy.pluginOpenOrListControl.containsAny(in: text) {
+                return (1, button)
+            }
+            return (2, button)
+        }
+        .sorted { lhs, rhs in lhs.rank < rhs.rank }
+    }
+
+    private static func pollOpenPluginWindow(
+        trackName: String,
+        axDescription: String,
+        runtime: AXLogicProElements.Runtime,
+        timeoutMs: Int
+    ) async -> AXUIElement? {
+        let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1_000.0)
+        repeat {
+            if let window = AXLogicProElements.openPluginWindow(
+                forTrackName: trackName,
+                matchingSliderDescription: axDescription,
+                runtime: runtime
+            ) {
+                return window
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        } while Date() < deadline
+        return nil
+    }
+
+    private static func pressOrClick(_ element: AXUIElement, runtime: AXHelpers.Runtime) -> Bool {
+        if AXHelpers.performAction(element, kAXPressAction as String, runtime: runtime) {
+            return true
+        }
+        return clickElementCenter(element, runtime: runtime)
+    }
+
+    private static func pluginWindowAcquisitionDiagnostics(
+        trackName: String,
+        axDescription: String,
+        runtime: AXLogicProElements.Runtime
+    ) -> [String: Any] {
+        guard let app = AXLogicProElements.appRoot(runtime: runtime) else {
+            return [
+                "opener_action_attempted": true,
+                "requested_window_title": trackName,
+                "requested_slider_description": axDescription,
+                "window_candidates": [],
+            ]
+        }
+        let windows: [AXUIElement] = AXHelpers.getAttribute(
+            app, kAXWindowsAttribute as String, runtime: runtime.ax
+        ) ?? []
+        let summaries = windows.prefix(12).map { window -> [String: Any] in
+            let sliders = AXHelpers.findAllDescendants(
+                of: window, role: kAXSliderRole, maxDepth: 4, runtime: runtime.ax
+            )
+            let sliderDescriptions = sliders.compactMap {
+                AXHelpers.getDescription($0, runtime: runtime.ax)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+            return [
+                "title": AXHelpers.getTitle(window, runtime: runtime.ax) ?? "",
+                "role": AXHelpers.getRole(window, runtime: runtime.ax) ?? "",
+                "slider_descriptions": Array(sliderDescriptions.prefix(8)),
+            ]
+        }
+        return [
+            "opener_action_attempted": true,
+            "requested_window_title": trackName,
+            "requested_slider_description": axDescription,
+            "window_candidates": Array(summaries),
+        ]
     }
 
     /// Confirm the header at `track` reads back as AX-selected, retrying briefly
