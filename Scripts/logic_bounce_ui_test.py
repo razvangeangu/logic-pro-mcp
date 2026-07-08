@@ -88,7 +88,7 @@ class LogicBounceUITests(unittest.TestCase):
                 run_jxa_fn=lambda source, **kwargs: _completed_jxa_snapshot(snapshot),
             )
         )
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
 
     def test_click_bounce_settings_confirm_returns_false_when_no_label_matches(self):
         snapshot = {
@@ -142,7 +142,8 @@ class LogicBounceUITests(unittest.TestCase):
 
         def fake_osa(script, timeout=logic_bounce.OSA_TIMEOUT_SEC):
             if "key code 11" in script:
-                state["strategies"].append("key_command")
+                if "key_command" not in state["strategies"]:
+                    state["strategies"].append("key_command")
                 return ""
             if 'menu item "바운스"' in script or 'menu item "Bounce"' in script:
                 state["strategies"].append("file_menu")
@@ -154,7 +155,11 @@ class LogicBounceUITests(unittest.TestCase):
                 return "Tracks"
             return ""
 
-        opened, strategies = logic_bounce.open_bounce_dialog(run_osa=fake_osa, sleep_fn=lambda _: None)
+        opened, strategies = logic_bounce.open_bounce_dialog(
+            run_osa=fake_osa,
+            sleep_fn=lambda _: None,
+            activate_fn=lambda: True,
+        )
         self.assertTrue(opened)
         self.assertEqual(strategies, ["key_command", "file_menu"])
         self.assertEqual(state["strategies"], ["key_command", "file_menu"])

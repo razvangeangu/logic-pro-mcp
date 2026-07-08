@@ -15,8 +15,11 @@ extension SetupDoctor {
         let systemDB = "/Library/Application Support/com.apple.TCC/TCC.db"
         let dbs = [userDB, systemDB].filter { FileManager.default.fileExists(atPath: $0) }
         guard !dbs.isEmpty else { return .fullDiskAccessUnavailable }
+        let logicBundleIDs = LogicProVariantPolicy.knownBundleIDs
+            .map { "'\($0)'" }
+            .joined(separator: ",")
         let sql = """
-        SELECT service,client,auth_value,indirect_object_identifier FROM access WHERE service IN ('kTCCServiceAccessibility','kTCCServiceAppleEvents','kTCCServicePostEvent') AND (service != 'kTCCServiceAppleEvents' OR indirect_object_identifier IN ('com.apple.logic10','com.apple.systemevents'));
+        SELECT service,client,auth_value,indirect_object_identifier FROM access WHERE service IN ('kTCCServiceAccessibility','kTCCServiceAppleEvents','kTCCServicePostEvent') AND (service != 'kTCCServiceAppleEvents' OR indirect_object_identifier IN (\(logicBundleIDs),'com.apple.systemevents'));
         """
         var rows: [TCCRow] = []
         var sawReadableDB = false
@@ -107,8 +110,10 @@ extension SetupDoctor {
         if service == "kTCCServiceAccessibility" { return "accessibility" }
         if service == "kTCCServicePostEvent" { return "post_event" }
         if service == "kTCCServiceAppleEvents" {
-            if indirectObjectIdentifier == "com.apple.logic10" { return "appleevents:logic10" }
             if indirectObjectIdentifier == "com.apple.systemevents" { return "appleevents:systemevents" }
+            if indirectObjectIdentifier.hasPrefix("com.apple.") {
+                return "appleevents:\(indirectObjectIdentifier.dropFirst("com.apple.".count))"
+            }
             return "appleevents"
         }
         return "unknown"

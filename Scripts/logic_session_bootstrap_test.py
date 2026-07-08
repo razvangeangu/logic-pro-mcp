@@ -325,22 +325,36 @@ class EvaluateFreshSessionTests(unittest.TestCase):
         self.assertEqual(snapshot.frontmost_app, "Logic Pro")
         self.assertEqual(snapshot.detected_language, "ko")
 
+    def test_native_ui_snapshot_payload_normalizes_creator_studio_bundle_frontmost_name(self):
+        snapshot = _ui_snapshot_from_native_payload(
+            {
+                "frontmost_app": "Logic Pro",
+                "frontmost_bundle_id": "com.apple.mobilelogic",
+                "logic_window_names": ["Untitled"],
+                "logic_menu_items": ["Apple", "Logic Pro", "File", "Edit", "Track"],
+                "error": None,
+            }
+        )
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.frontmost_app, "Logic Pro Creator Studio")
+
 
 class ActivationHelperTests(unittest.TestCase):
     def test_activate_logic_falls_back_to_open_when_osascript_fails(self):
         fallback_result = mock.Mock(returncode=0)
         with (
-            mock.patch("logic_session_bootstrap._run_osascript", return_value=None) as run_osascript,
-            mock.patch("logic_session_bootstrap.subprocess.run", return_value=fallback_result) as run_process,
+            mock.patch("logic_variants.run_osascript", return_value=None) as run_osascript,
+            mock.patch("logic_variants.subprocess.run", return_value=fallback_result) as run_process,
         ):
             self.assertTrue(bootstrap_module._activate_logic())
 
-        run_osascript.assert_called_once_with(
-            [f'tell application "{bootstrap_module.LOGIC_APP_NAME}" to activate'],
+        run_osascript.assert_any_call(
+            ['tell application id "com.apple.logic10" to activate'],
             timeout_sec=2.0,
         )
-        run_process.assert_called_once_with(
-            ["/usr/bin/open", "-a", bootstrap_module.LOGIC_APP_NAME],
+        run_process.assert_any_call(
+            ["/usr/bin/open", "-b", "com.apple.logic10"],
             capture_output=True,
             text=True,
             timeout=2.0,

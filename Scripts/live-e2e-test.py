@@ -642,6 +642,7 @@ def ui_stop_logic_transport():
             capture_output=True,
             text=True,
             timeout=5.0,
+            check=False,
         )
         if native.returncode == 0:
             return True

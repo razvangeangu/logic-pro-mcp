@@ -369,9 +369,10 @@ extension AccessibilityChannel {
     }
 
     static func runTempoFallbackScript(tempo: String) -> Bool {
+        let logicProAppleScript = LogicProTarget.appleScriptTarget()
         let script = """
         tell application "System Events"
-            tell process "Logic Pro"
+            tell \(logicProAppleScript.systemEventsProcessTarget)
                 set frontmost to true
                 delay 0.2
                 -- Open Tempo & Project Settings (⌥+⌘+T)
@@ -646,13 +647,14 @@ extension AccessibilityChannel {
     }
 
     private static func runCycleRangeFallbackScript(startPos: String, endPos: String) -> Bool {
+        let logicProAppleScript = LogicProTarget.appleScriptTarget()
         // Strategy: use Logic's "Go To > Go To Beginning" (not ideal) — we instead
         // rely on the menu path "Navigate > Set Locators…" which opens a dialog
         // with start/end text fields. Keystroke start, Tab, end, Return.
         // Menu path (Logic 12, ko): "탐색 > 로케이터 설정…"; (en): "Navigate > Set Locators…"
         let script = """
         tell application "System Events"
-            tell process "Logic Pro"
+            tell \(logicProAppleScript.systemEventsProcessTarget)
                 set frontmost to true
                 delay 0.2
                 -- Attempt Korean menu first
@@ -822,11 +824,12 @@ extension AccessibilityChannel {
         // Poll for the dialog's presence instead of relying on a fixed delay.
         // Without this guard, a slow machine (>500ms to render the dialog) would
         // send Cmd+A to the arrange area, selecting all regions unexpectedly.
+        let logicProAppleScript = LogicProTarget.appleScriptTarget()
         let script = """
-        tell application "Logic Pro" to activate
+        \(logicProAppleScript.activateByBundleID)
         delay 0.2
         tell application "System Events"
-            tell process "Logic Pro"
+            tell \(logicProAppleScript.systemEventsProcessTarget)
                 try
                     set mi to menu item "위치…" of menu 1 of menu item "이동" of menu 1 of menu bar item "탐색" of menu bar 1
                 on error errMsg

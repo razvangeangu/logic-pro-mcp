@@ -37,23 +37,24 @@ extension SetupDoctor {
 
 
     static func logicInstallationCheck(logicApps apps: [LogicAppInfo]) -> Check {
-        guard !apps.isEmpty else {
+        let supported = supportedLogicApps(apps)
+        guard !supported.isEmpty else {
             return check(
                 id: "logic.installation",
                 domain: "logic",
                 status: .fail,
-                summary: "Logic Pro.app was not found in /Applications or ~/Applications.",
+                summary: "Logic Pro.app was not found in /Applications or ~/Applications (desktop or Creator Studio).",
                 evidence: ["path": "not_found"],
                 remediationType: .docs
             )
         }
-        guard let primary = Self.preferredReadableLogicApp(apps), let version = primary.version else {
+        guard let primary = preferredReadableLogicApp(supported), let version = primary.version else {
             return check(
                 id: "logic.installation",
                 domain: "logic",
                 status: .skipped,
                 summary: "Logic Pro.app exists but its version could not be read.",
-                evidence: ["reason": "bundle_unreadable", "path": apps.map(\.path).joined(separator: ",")],
+                evidence: ["reason": "bundle_unreadable", "path": supported.map(\.path).joined(separator: ",")],
                 remediationType: .docs,
                 skipReason: "bundle_unreadable"
             )
@@ -63,7 +64,14 @@ extension SetupDoctor {
             "bundle_id": primary.bundleID ?? "",
             "path": primary.path,
         ]
-        if apps.count > 1 { evidence["second_copy"] = "present" }
+        if let variant = logicVariantLabel(for: primary.bundleID) {
+            evidence["variant"] = variant
+        }
+        let additional = supported.filter { $0.path != primary.path || $0.bundleID != primary.bundleID }
+        if !additional.isEmpty {
+            evidence["second_copy"] = "present"
+            evidence["additional_variants"] = additional.compactMap(\.bundleID).joined(separator: ",")
+        }
         return check(
             id: "logic.installation",
             domain: "logic",

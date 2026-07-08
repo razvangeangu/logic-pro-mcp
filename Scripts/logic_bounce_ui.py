@@ -7,7 +7,8 @@ from ctypes import CDLL, POINTER, Structure, byref, c_bool, c_double, c_int64, c
 from collections.abc import Callable
 from typing import Final, Literal, NoReturn, Optional, TypedDict, Union
 
-from logic_ui_jxa import SAVE_PANEL_SNAPSHOT_SOURCE, parse_jxa_json_result, run_jxa
+from logic_variants import activate_logic, logic_process_osa, logic_process_osa_with_runner
+from logic_ui_jxa import parse_jxa_json_result, run_jxa, save_panel_snapshot_source
 
 
 RunJxa = Callable[..., subprocess.CompletedProcess[str]]
@@ -272,21 +273,21 @@ def osa(script: str, timeout: float = OSA_TIMEOUT_SEC) -> str:
     return result.stdout.strip()
 
 
+def _process_body(body: str, *, run_osa: RunOsa = osa, timeout_sec: float = OSA_TIMEOUT_SEC) -> str:
+    if run_osa is osa:
+        return logic_process_osa(body, timeout_sec=timeout_sec)
+    return logic_process_osa_with_runner(body, run_osa, timeout_sec=timeout_sec)
+
+
 def _logic_front_container_name(container: str, run_osa: RunOsa = osa) -> str:
-    return run_osa(
-        f'''
-        tell application "System Events"
-            tell process "Logic Pro"
-                try
-                    return name of {container}
-                on error
-                    return ""
-                end try
-            end tell
-        end tell
-        ''',
-        OSA_TIMEOUT_SEC,
-    ).strip()
+    return _process_body(
+        f"""try
+    return name of {container}
+on error
+    return ""
+end try""",
+        run_osa=run_osa,
+    )
 
 
 def logic_front_window_name(run_osa: RunOsa = osa) -> str: return _logic_front_container_name("front window", run_osa)
@@ -346,7 +347,7 @@ def _coerce_save_panel_snapshot(raw_snapshot) -> SavePanelSnapshot:
 
 def save_panel_snapshot(run_jxa_fn: RunJxa = run_jxa) -> SavePanelSnapshot:
     try:
-        result = run_jxa_fn(SAVE_PANEL_SNAPSHOT_SOURCE)
+        result = run_jxa_fn(save_panel_snapshot_source())
     except (FileNotFoundError, subprocess.TimeoutExpired) as error:
         return {"status": "error", "reason": "jxa_probe_failed", "stderr": str(error)}
     return _coerce_save_panel_snapshot(parse_jxa_json_result(result))
@@ -404,26 +405,20 @@ def wait_for_bounce_dialog(run_osa: RunOsa = osa, sleep_fn: Callable[[float], No
 
 
 def open_bounce_dialog_via_menu(run_osa: RunOsa = osa) -> bool:
-    result = run_osa(
-        '''
-        tell application "System Events"
-            tell process "Logic Pro"
-                set frontmost to true
-                try
-                    click menu item 1 of menu 1 of menu item "바운스" of menu 1 of menu bar item "파일" of menu bar 1
-                    return "ok"
-                on error
-                    try
-                        click menu item 1 of menu 1 of menu item "Bounce" of menu 1 of menu bar item "File" of menu bar 1
-                        return "ok"
-                    on error
-                        return ""
-                    end try
-                end try
-            end tell
-        end tell
-        ''',
-        OSA_TIMEOUT_SEC,
+    result = _process_body(
+        """set frontmost to true
+try
+    click menu item 1 of menu 1 of menu item "바운스" of menu 1 of menu bar item "파일" of menu bar 1
+    return "ok"
+on error
+    try
+        click menu item 1 of menu 1 of menu item "Bounce" of menu 1 of menu bar item "File" of menu bar 1
+        return "ok"
+    on error
+        return ""
+    end try
+end try""",
+        run_osa=run_osa,
     )
     return result == "ok"
 
@@ -432,20 +427,14 @@ def bounce_focus_diagnostics(
     run_osa: RunOsa = osa,
     run_jxa_fn: RunJxa = run_jxa,
 ) -> BounceFocusDiagnostics:
-    logic_window_names = run_osa(
-        '''
-        tell application "System Events"
-            tell process "Logic Pro"
-                try
-                    set AppleScript's text item delimiters to linefeed
-                    return name of windows as text
-                on error
-                    return ""
-                end try
-            end tell
-        end tell
-        ''',
-        OSA_TIMEOUT_SEC,
+    logic_window_names = _process_body(
+        """try
+    set AppleScript's text item delimiters to linefeed
+    return name of windows as text
+on error
+    return ""
+end try""",
+        run_osa=run_osa,
     )
     frontmost_app = run_osa(
         '''
@@ -468,11 +457,16 @@ def bounce_focus_diagnostics(
     }
 
 
-def open_bounce_dialog(run_osa: RunOsa = osa, sleep_fn: Callable[[float], None] = time.sleep) -> tuple[bool, list[str]]:
+def open_bounce_dialog(
+    run_osa: RunOsa = osa,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    *,
+    activate_fn: Callable[[], bool] = activate_logic,
+) -> tuple[bool, list[str]]:
     strategies = ["key_command"]
-    run_osa('tell application "Logic Pro" to activate')
+    activate_fn()
     sleep_fn(0.8)
-    run_osa('tell application "System Events" to tell process "Logic Pro" to key code 11 using {command down}')
+    _process_body("key code 11 using {command down}", run_osa=run_osa)
     if wait_for_bounce_dialog(run_osa=run_osa, sleep_fn=sleep_fn):
         return True, strategies
     strategies.append("file_menu")
@@ -492,20 +486,14 @@ def click_bounce_settings_confirm(
         for label in labels:
             if not bounce_settings_present(run_jxa_fn=run_jxa_fn):
                 return False
-            result = run_osa(
-                f'''
-                tell application "System Events"
-                    tell process "Logic Pro"
-                        try
-                            click button "{label}" of {container}
-                            return "ok"
-                        on error
-                            return ""
-                        end try
-                    end tell
-                end tell
-                ''',
-                OSA_TIMEOUT_SEC,
+            result = _process_body(
+                f"""try
+    click button "{label}" of {container}
+    return "ok"
+on error
+    return ""
+end try""",
+                run_osa=run_osa,
             )
             if result == "ok":
                 return True

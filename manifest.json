@@ -13,6 +13,20 @@
   "min_logic_pro_version": "12.0.1",
   "latest_logic_pro_version": "12.3",
   "latest_logic_pro_requires_macos": "15.6",
+  "supported_logic_pro_variants": [
+    {
+      "name": "desktop",
+      "bundle_id": "com.apple.logic10",
+      "process_name": "Logic Pro",
+      "default_install_path": "/Applications/Logic Pro.app"
+    },
+    {
+      "name": "creator_studio",
+      "bundle_id": "com.apple.mobilelogic",
+      "process_name": "Logic Pro Creator Studio",
+      "default_install_path": "/Applications/Logic Pro Creator Studio.app"
+    }
+  ],
   "keywords": [
     "logic-pro",
     "logic-pro-x",

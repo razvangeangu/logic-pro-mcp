@@ -191,14 +191,15 @@ extension AccessibilityChannel {
         // 250ms granularity = 20 attempts. A sheet on a Logic process is a
         // `window whose subrole is "AXSheet"` (file chooser) — fall back to the
         // standard window if no sheet subrole is exposed on this build.
+        let logicProAppleScript = LogicProTarget.appleScriptTarget()
         let script = """
         on importMIDI()
-            tell application "Logic Pro" to activate
+            \(logicProAppleScript.activateByBundleID)
             delay 0.3
             tell application "System Events"
                 -- Self-heal: dismiss a stale Import open-panel left by a prior
                 -- failed run so repeated imports never stack file-open dialogs.
-                tell process "Logic Pro"
+                tell \(logicProAppleScript.systemEventsProcessTarget)
                     repeat 4 times
                         if (exists (first window whose name is "Import")) or (exists (first window whose name is "가져오기")) then
                             key code 53
@@ -208,7 +209,7 @@ extension AccessibilityChannel {
                         end if
                     end repeat
                 end tell
-                tell process "Logic Pro"
+                tell \(logicProAppleScript.systemEventsProcessTarget)
                     try
                         click menu item "MIDI 파일…" of menu 1 of menu item "가져오기" of menu 1 of menu bar item "파일" of menu bar 1
                     on error
@@ -225,7 +226,7 @@ extension AccessibilityChannel {
                 -- standalone window with a chooser-style name instead.
                 set fileOpenSeen to false
                 repeat 20 times
-                    tell process "Logic Pro"
+                    tell \(logicProAppleScript.systemEventsProcessTarget)
                         try
                             if (exists sheet 1 of window 1) then
                                 set fileOpenSeen to true
@@ -253,13 +254,13 @@ extension AccessibilityChannel {
                 -- and stacked dialogs on the next call. Poll the field into
                 -- existence across both window topologies Logic exposes
                 -- (sheet-on-window-1 vs standalone AXDialog) and assign AXValue.
-                tell process "Logic Pro" to set frontmost to true
+                tell \(logicProAppleScript.systemEventsProcessTarget) to set frontmost to true
                 delay 0.15
                 keystroke "/"
                 delay 0.4
                 set goToSet to false
                 repeat 20 times
-                    tell process "Logic Pro"
+                    tell \(logicProAppleScript.systemEventsProcessTarget)
                         -- Only accept the assignment once the field actually
                         -- READS BACK our path, so a race that targets the wrong
                         -- early text field cannot exit the loop prematurely.
@@ -284,7 +285,7 @@ extension AccessibilityChannel {
                 end repeat
                 if goToSet is false then
                     -- self-clean so we never leave a stuck panel for the next call
-                    tell process "Logic Pro"
+                    tell \(logicProAppleScript.systemEventsProcessTarget)
                         try
                             key code 53
                             delay 0.2
@@ -294,7 +295,7 @@ extension AccessibilityChannel {
                     return "DIALOG_NOT_FOUND: go-to-folder field did not accept the path"
                 end if
                 delay 0.3
-                tell process "Logic Pro" to set frontmost to true
+                tell \(logicProAppleScript.systemEventsProcessTarget) to set frontmost to true
                 delay 0.15
                 keystroke return
                 -- Navigating to + selecting the file can take >1s, so poll the
@@ -303,7 +304,7 @@ extension AccessibilityChannel {
                 -- leaves the panel open). ~4s (20 x 200ms).
                 set importClicked to false
                 repeat 20 times
-                    tell process "Logic Pro"
+                    tell \(logicProAppleScript.systemEventsProcessTarget)
                         try
                             set importDlg to first window whose name is "가져오기"
                             set ib to button "가져오기" of UI element 1 of importDlg
@@ -327,7 +328,7 @@ extension AccessibilityChannel {
                     delay 0.2
                 end repeat
                 if importClicked is false then
-                    tell process "Logic Pro"
+                    tell \(logicProAppleScript.systemEventsProcessTarget)
                         repeat 3 times
                             if (exists (first window whose name is "Import")) or (exists (first window whose name is "가져오기")) then
                                 key code 53
@@ -345,7 +346,7 @@ extension AccessibilityChannel {
                 -- exclude it by name; only a genuine tempo alert counts.
                 set tempoSeen to false
                 repeat 15 times
-                    tell process "Logic Pro"
+                    tell \(logicProAppleScript.systemEventsProcessTarget)
                         try
                             if (exists (first window whose subrole is "AXDialog" and name is not "Import" and name is not "가져오기")) then
                                 set tempoSeen to true
@@ -356,7 +357,7 @@ extension AccessibilityChannel {
                     delay 0.2
                 end repeat
                 if tempoSeen then
-                    tell process "Logic Pro"
+                    tell \(logicProAppleScript.systemEventsProcessTarget)
                         try
                             set tempoDlg to first window whose subrole is "AXDialog" and name is not "Import" and name is not "가져오기"
                             try
@@ -371,7 +372,7 @@ extension AccessibilityChannel {
                 end if
                 -- Final self-heal: if an Import open-panel is somehow still up
                 -- (failed mid-flow), dismiss it so the next call starts clean.
-                tell process "Logic Pro"
+                tell \(logicProAppleScript.systemEventsProcessTarget)
                     repeat 3 times
                         if (exists (first window whose name is "Import")) or (exists (first window whose name is "가져오기")) then
                             key code 53

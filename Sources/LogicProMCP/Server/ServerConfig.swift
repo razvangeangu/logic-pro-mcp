@@ -21,8 +21,9 @@ struct ServerConfig: Sendable {
     static let appleScriptTimeout: TimeInterval = 5.0
 
     // MARK: - Logic Pro
-    static let logicProBundleID = "com.apple.logic10"
-    static let logicProProcessName = "Logic Pro"
+    /// Resolved bundle ID for the active Logic Pro variant (desktop or Creator Studio).
+    static var logicProBundleID: String { LogicProTarget.current.bundleID }
+    static var logicProProcessName: String { LogicProTarget.current.processName }
 
     // MARK: - Polling
     //

@@ -26,6 +26,7 @@ import uuid
 from typing import Optional
 
 from logic_input_source import TARGET_INPUT_SOURCE_IDS, TISRuntime, select_input_source, set_input_abc
+from logic_variants import logic_process_osa
 from logic_bounce_ui import (
     OSA_TIMEOUT_SEC,
     bounce_dialog_present,
@@ -177,8 +178,8 @@ def main() -> int:
         print(json.dumps(result)); return 1
 
     # 4. read the save-panel window frame
-    pos = osa('tell application "System Events" to tell process "Logic Pro" to get position of front window')
-    size = osa('tell application "System Events" to tell process "Logic Pro" to get size of front window')
+    pos = logic_process_osa("get position of front window", timeout_sec=OSA_TIMEOUT_SEC)
+    size = logic_process_osa("get size of front window", timeout_sec=OSA_TIMEOUT_SEC)
     try:
         ox, oy = [int(v.strip()) for v in pos.split(",")]
         w, h = [int(v.strip()) for v in size.split(",")]

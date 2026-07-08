@@ -67,6 +67,26 @@ func findButton(in element: AXUIElement, labels: [String], depth: Int = 0) -> AX
     return nil
 }
 
+let logicProKnownBundleIDs = ["com.apple.logic10", "com.apple.mobilelogic"]
+
+func resolveLogicApp() -> NSRunningApplication? {
+    let env = ProcessInfo.processInfo.environment
+    if let forced = env["LOGIC_PRO_BUNDLE_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines), !forced.isEmpty {
+        return NSRunningApplication.runningApplications(withBundleIdentifier: forced).first
+    }
+    if let frontmostID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+       logicProKnownBundleIDs.contains(frontmostID),
+       let app = NSRunningApplication.runningApplications(withBundleIdentifier: frontmostID).first {
+        return app
+    }
+    for bundleID in logicProKnownBundleIDs {
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
+            return app
+        }
+    }
+    return nil
+}
+
 let input = FileHandle.standardInput.readDataToEndOfFile()
 guard let request = try? JSONDecoder().decode(Request.self, from: input) else {
     emit(Response(ok: false, reason: "invalid_request"))
@@ -78,7 +98,7 @@ guard AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": false] as CFD
     exit(2)
 }
 
-guard let logicApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.logic10").first else {
+guard let logicApp = resolveLogicApp() else {
     emit(Response(ok: false, reason: "logic_not_running"))
     exit(3)
 }

@@ -12,8 +12,8 @@ from copy import deepcopy
 from typing import Any
 
 from logic_ui_jxa import parse_jxa_json_result, run_jxa, ui_prelude
+from logic_variants import jxa_find_process_snippet
 
-PROCESS_NAME = "Logic Pro"
 MODAL_MARKERS = (
     "Free Tempo Recording",
     "프리 템포 녹음",
@@ -193,10 +193,12 @@ class SystemEventsFreeTempoModalRunner:
         return run_jxa(source, timeout=timeout, run=self._run)
 
     def _jxa_prelude(self) -> str:
+        find_process = jxa_find_process_snippet(se_binding="systemEvents", proc_var="process")
         return ui_prelude(marker_constant="MODAL_MARKERS", markers=self.markers) + f"""
 function findModal() {{
   const systemEvents = Application("System Events");
-  const process = systemEvents.processes.byName({json.dumps(PROCESS_NAME)});
+  {find_process}
+  if (process === null) return null;
   if (!safe(() => process.exists(), false)) return null;
   const windows = safe(() => process.windows(), []);
   for (let windowIndex = 0; windowIndex < windows.length; windowIndex += 1) {{

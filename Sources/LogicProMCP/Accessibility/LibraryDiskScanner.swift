@@ -36,8 +36,10 @@ enum LibraryDiskScanner {
     static let defaultBundleRelativePath =
         "Music/Logic Pro Library.bundle/Patches/Instrument"
 
-    static let defaultAppBundlePath =
-        "/Applications/Logic Pro.app/Contents/Resources/Library.bundle/Patches/Instrument"
+    static var defaultAppBundlePath: String {
+        LogicProTarget.preferredInstalledApplicationPath()
+            + "/Contents/Resources/Library.bundle/Patches/Instrument"
+    }
 
     /// The `.patch` suffix marks a leaf patch bundle. Stripped from the
     /// display name so clients see "Acid Etched Bass", not "Acid Etched

@@ -288,11 +288,12 @@ extension AccessibilityChannel {
         // nothing is selected or the AX surface is unreadable).
         let pre = selectedRegionInfo(runtime: runtime)
 
+        let logicProAppleScript = LogicProTarget.appleScriptTarget()
         let script = """
-        tell application "Logic Pro" to activate
+        \(logicProAppleScript.activateByBundleID)
         delay 0.1
         tell application "System Events"
-            tell process "Logic Pro"
+            tell \(logicProAppleScript.systemEventsProcessTarget)
                 try
                     click menu item "재생헤드로" of menu 1 of menu item "이동" of menu 1 of menu bar item "편집" of menu bar 1
                 on error
@@ -400,11 +401,12 @@ extension AccessibilityChannel {
         executeScript: @Sendable (String) async -> ChannelResult = { await AppleScriptChannel.executeAppleScript($0) },
         settle: @Sendable () async -> Void = { try? await Task.sleep(nanoseconds: 350_000_000) }
     ) async -> ChannelResult {
+        let logicProAppleScript = LogicProTarget.appleScriptTarget()
         let script = """
-        tell application "Logic Pro" to activate
+        \(logicProAppleScript.activateByBundleID)
         delay 0.1
         tell application "System Events"
-            tell process "Logic Pro"
+            tell \(logicProAppleScript.systemEventsProcessTarget)
                 set mainWin to first window
                 set allItems to entire contents of mainWin
                 set bestY to 0

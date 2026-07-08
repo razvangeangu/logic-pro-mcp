@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 extension SetupDoctor {
@@ -30,40 +31,89 @@ extension SetupDoctor {
 
 
     static func preferredLogicApp(_ apps: [LogicAppInfo]) -> LogicAppInfo? {
-        apps.first { $0.path == "/Applications/Logic Pro.app" } ?? apps.first
+        apps.first {
+            $0.path == LogicProVariant.desktop.defaultInstallPath
+                && $0.bundleID == LogicProVariant.desktop.bundleID
+        }
+            ?? apps.first { $0.bundleID == LogicProVariant.desktop.bundleID }
+            ?? apps.first { $0.path == LogicProVariant.desktop.defaultInstallPath }
+            ?? apps.first { $0.bundleID == LogicProVariant.creatorStudio.bundleID }
+            ?? apps.first
     }
 
 
     static func preferredReadableLogicApp(_ apps: [LogicAppInfo]) -> LogicAppInfo? {
-        let readable = apps.filter { $0.readable && $0.version != nil }
+        let readable = supportedLogicApps(apps).filter { $0.readable && $0.version != nil }
         return preferredLogicApp(readable)
     }
 
 
-    static func productionLogicApps() -> [LogicAppInfo] {
-        let homeLogic = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Applications/Logic Pro.app").path
-        return ["/Applications/Logic Pro.app", homeLogic].compactMap { path -> LogicAppInfo? in
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else { return nil }
-            let infoURL = URL(fileURLWithPath: path).appendingPathComponent("Contents/Info.plist")
-            guard let data = try? Data(contentsOf: infoURL),
-                  let plist = try? PropertyListSerialization.propertyList(
-                    from: data,
-                    options: [],
-                    format: nil
-                  ) as? [String: Any] else {
-                return LogicAppInfo(path: path, version: nil, bundleID: nil, readable: false)
-            }
-            return LogicAppInfo(
-                path: path,
-                version: plist["CFBundleShortVersionString"] as? String,
-                bundleID: plist["CFBundleIdentifier"] as? String,
-                readable: plist["CFBundleShortVersionString"] as? String != nil
-            )
+    static func supportedLogicApps(_ apps: [LogicAppInfo]) -> [LogicAppInfo] {
+        apps.filter { app in
+            guard let bundleID = app.bundleID else { return app.readable }
+            return LogicProTarget.isKnownBundleID(bundleID)
         }
     }
 
 
+    static func logicVariantLabel(for bundleID: String?) -> String? {
+        guard let bundleID else { return nil }
+        return LogicProVariant.from(bundleID: bundleID)?.rawValue
+    }
+
+
+    static func productionLogicAppCandidatePaths() -> [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return LogicProVariant.knownVariants.flatMap { variant in
+            [
+                variant.defaultInstallPath,
+                "\(home)/Applications/\(URL(fileURLWithPath: variant.defaultInstallPath).lastPathComponent)",
+            ]
+        }
+    }
+
+
+    static func productionLogicApps() -> [LogicAppInfo] {
+        var byPath: [String: LogicAppInfo] = [:]
+
+        for path in productionLogicAppCandidatePaths() {
+            if let info = logicAppInfo(at: path) {
+                byPath[path] = info
+            }
+        }
+
+        for variant in LogicProTarget.knownVariants {
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: variant.bundleID) else {
+                continue
+            }
+            let path = url.path
+            if byPath[path] == nil, let info = logicAppInfo(at: path) {
+                byPath[path] = info
+            }
+        }
+
+        return byPath.values.sorted { $0.path < $1.path }
+    }
+
+
+    static func logicAppInfo(at path: String) -> LogicAppInfo? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+        let infoURL = URL(fileURLWithPath: path).appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: infoURL),
+              let plist = try? PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+              ) as? [String: Any] else {
+            return LogicAppInfo(path: path, version: nil, bundleID: nil, readable: false)
+        }
+        return LogicAppInfo(
+            path: path,
+            version: plist["CFBundleShortVersionString"] as? String,
+            bundleID: plist["CFBundleIdentifier"] as? String,
+            readable: plist["CFBundleShortVersionString"] as? String != nil
+        )
+    }
 }

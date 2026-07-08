@@ -361,7 +361,7 @@ struct ProjectDispatcher {
             }
             audit(command, phase: .executed)
             return await runLifecycleScript(
-                script: "tell application \"Logic Pro\" to activate",
+                script: LogicProTarget.appleScriptTarget().activateByBundleID,
                 successMessage: "Logic Pro launched",
                 expectedRunning: true,
                 actionLabel: "launch",
@@ -387,7 +387,7 @@ struct ProjectDispatcher {
             }
             audit(command, phase: .executed)
             return await runLifecycleScript(
-                script: "tell application \"Logic Pro\" to quit",
+                script: LogicProTarget.appleScriptTarget().quitByBundleID,
                 successMessage: "Logic Pro quit",
                 expectedRunning: false,
                 actionLabel: "quit",

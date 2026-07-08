@@ -6,7 +6,8 @@ from __future__ import annotations
 import subprocess
 import unittest
 
-from logic_ui_jxa import parse_jxa_json_result, ui_prelude
+import logic_variants
+from logic_ui_jxa import parse_jxa_json_result, save_panel_snapshot_source, ui_prelude
 
 
 class LogicUIJXATests(unittest.TestCase):
@@ -40,6 +41,13 @@ class LogicUIJXATests(unittest.TestCase):
         self.assertIn("const MARKERS", without_menu)
         self.assertNotIn("menuItems()", without_menu)
         self.assertIn("menuItems()", with_menu)
+
+    def test_save_panel_snapshot_source_uses_variant_process_lookup(self):
+        source = save_panel_snapshot_source()
+        self.assertNotIn('byName("Logic Pro")', source)
+        self.assertIn("processNames", source)
+        for process_name in logic_variants.logic_app_names():
+            self.assertIn(process_name, source)
 
 
 if __name__ == "__main__":

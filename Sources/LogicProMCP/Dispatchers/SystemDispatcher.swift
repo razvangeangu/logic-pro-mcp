@@ -101,6 +101,9 @@ struct SystemDispatcher {
         let logicProHasWindow: Bool
         let logicProHasDocument: Bool
         let logicProVersion: String
+        let logicProBundleID: String
+        let logicProVariant: String
+        let processMetadataResolved: Bool
         let mcu: MCUSection
         let channels: [ChannelSection]
         let cache: CacheSection
@@ -112,6 +115,9 @@ struct SystemDispatcher {
             case logicProHasWindow = "logic_pro_has_window"
             case logicProHasDocument = "logic_pro_has_document"
             case logicProVersion = "logic_pro_version"
+            case logicProBundleID = "logic_pro_bundle_id"
+            case logicProVariant = "logic_pro_variant"
+            case processMetadataResolved = "process_metadata_resolved"
             case mcu
             case channels
             case cache
@@ -181,11 +187,15 @@ struct SystemDispatcher {
             let logicProRunning = ProcessUtils.isLogicProRunning
             let logicProHasWindow = ProcessUtils.hasVisibleWindow()
             let logicProHasDocument = await cache.getHasDocument()
+            let resolvedTarget = LogicProTarget.current
             let health = HealthResponse(
                 logicProRunning: logicProRunning,
                 logicProHasWindow: logicProHasWindow,
                 logicProHasDocument: logicProHasDocument,
                 logicProVersion: ProcessUtils.logicProVersion() ?? "unknown",
+                logicProBundleID: resolvedTarget.bundleID,
+                logicProVariant: resolvedTarget.variantLabel,
+                processMetadataResolved: resolvedTarget.processMetadataResolved,
                 mcu: .init(
                     connected: mcu.isConnected,
                     registeredAsDevice: mcu.registeredAsDevice,

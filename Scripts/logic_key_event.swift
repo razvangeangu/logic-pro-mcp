@@ -40,6 +40,26 @@ func normalize(_ raw: String) -> String {
     return value
 }
 
+let logicProKnownBundleIDs = ["com.apple.logic10", "com.apple.mobilelogic"]
+
+func resolveLogicApp() -> NSRunningApplication? {
+    let env = ProcessInfo.processInfo.environment
+    if let forced = env["LOGIC_PRO_BUNDLE_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines), !forced.isEmpty {
+        return NSRunningApplication.runningApplications(withBundleIdentifier: forced).first
+    }
+    if let frontmostID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+       logicProKnownBundleIDs.contains(frontmostID),
+       let app = NSRunningApplication.runningApplications(withBundleIdentifier: frontmostID).first {
+        return app
+    }
+    for bundleID in logicProKnownBundleIDs {
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
+            return app
+        }
+    }
+    return nil
+}
+
 let rawArgs = Array(CommandLine.arguments.dropFirst())
 let helpTokens: Set<String> = ["-h", "--help", "--list", "help"]
 
@@ -82,7 +102,7 @@ guard CGPreflightPostEventAccess() else {
     exit(2)
 }
 
-if let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.logic10").first {
+if let app = resolveLogicApp() {
     app.activate()
     usleep(120_000)
 }
