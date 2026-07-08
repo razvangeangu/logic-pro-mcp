@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ---
 
+## [3.10.0] — 2026-07-08
+
+Feature release for Logic Pro Creator Studio support. The public MCP surface remains **10 tools / 18 resources / 11 templates**.
+
+### Added
+
+- **Logic Pro Creator Studio is now a first-class supported target.** The server can target desktop **Logic Pro** (`com.apple.logic10`) or Apple Creator Studio **Logic Pro Creator Studio** (`com.apple.mobilelogic`) from one binary. Variant metadata is exposed in `manifest.json`; Swift server identity, setup doctor checks, Python helper scripts, and macOS Automation guidance now share the same desktop/Creator Studio policy. Set `LOGIC_PRO_BUNDLE_ID` to force a variant when both are installed. ([#269](https://github.com/MongLong0214/logic-pro-mcp/issues/269), [#270](https://github.com/MongLong0214/logic-pro-mcp/pull/270))
+
+### Fixed
+
+- **UI automation resolves one real Logic target before sending actions.** Python/JXA helpers now verify System Events process object specifiers with `.exists()`, prefer explicit overrides, then frontmost/running/installed known variants, and treat empty stdout action successes as successful sends. This prevents a missing desktop Logic object specifier from shadowing Creator Studio, and prevents successful mutating key-event actions from falling through to a second running Logic variant. ([#270](https://github.com/MongLong0214/logic-pro-mcp/pull/270))
+
 ## [3.9.2] — 2026-07-08
 
 Patch release for the verified plugin parameter write path. The public MCP surface remains **10 tools / 18 resources / 11 templates**.
