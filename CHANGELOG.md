@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ---
 
+## [3.9.2] — 2026-07-08
+
+Patch release for the verified plugin parameter write path. The public MCP surface remains **10 tools / 18 resources / 11 templates**.
+
+### Fixed
+
+- **`logic_plugins.set_param_verified` now opens a closed target plugin editor before writing.** Production previously had a no-op plugin-window opener: if the requested Compressor window was not already open, `set_param_verified` failed closed with `window_open_failed` even though inventory and exact-slot plugin insertion worked. The write path now opens the requested insert slot, waits for the resulting plugin window, requires the requested AX slider before crossing the write boundary, and verifies the value through the plugin window before returning State A. Wrong or incomplete windows remain State C with `write_attempted:false` and bounded window/slider diagnostics. Verified by same-scenario A/B live replay on Logic Pro 12.3: v3.9.1 reproduced `window_open_failed`; the v3.9.2 branch returned State A for Compressor `threshold` from a closed-window precondition. ([#268](https://github.com/MongLong0214/logic-pro-mcp/issues/268), [#271](https://github.com/MongLong0214/logic-pro-mcp/pull/271))
+
 ## [3.9.1] — 2026-07-08
 
 Docs + demo release. **No functional or runtime changes from v3.9.0** — the 10-tool / 18-resource / 11-template surface, every contract, and binary behavior are identical. Only the version string, packaging metadata, documentation, and README demo assets change.

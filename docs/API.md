@@ -1,6 +1,6 @@
 # API Reference
 
-Current surface: Logic Pro MCP exposes 10 tools, 18 static resources, and 11 resource templates. The published stable release is v3.9.1. It keeps the 10-tool / 18-resource / 11-template surface and adds the additive `transport.toggle_autopunch` command plus new MCP capabilities (resource subscriptions, workflow prompts, and per-tool `outputSchema` / `structuredContent`). `logic_midi` send-only successes and `logic_tracks.arm_only` now return Honest Contract JSON envelopes (BREAKING response shape — see CHANGELOG).
+Current surface: Logic Pro MCP exposes 10 tools, 18 static resources, and 11 resource templates. The published stable release is v3.9.2. It keeps the 10-tool / 18-resource / 11-template surface, includes the v3.9.0 MCP capability additions (resource subscriptions, workflow prompts, and per-tool `outputSchema` / `structuredContent`), and patches verified plugin parameter writes so a closed target Compressor plugin window can be opened from the requested insert slot before write/readback. `logic_midi` send-only successes and `logic_tracks.arm_only` return Honest Contract JSON envelopes (BREAKING response shape — see CHANGELOG).
 
 Use tools for actions. Use resources for state. Treat every mutating result as one of:
 
@@ -122,6 +122,7 @@ Important constraints:
 
 - `insert_verified` requires a confirmation gate named `duplicate_applyback` when the operation can mutate an existing session.
 - `set_param_verified` currently verifies Compressor `threshold` only, normalized 0..100, tolerance 1.0.
+- `set_param_verified` can open the target insert's plugin editor when it is closed, but it writes only after the requested AX slider is present in the acquired window.
 - Arbitrary plugin parameters fail closed with `unsupported_param_readback`.
 - The legacy Scripter `set_plugin_param` path is a legacy unverified State B path. Use `logic_plugins.set_param_verified` for verified apply-back.
 
@@ -171,7 +172,7 @@ Send-only success responses return an Honest Contract State B JSON envelope beca
 
 `create_virtual_port` reuses same-name/same-mode ports. Reusing a name across modes fails closed with State C `port_unavailable` and includes `port_name`, `existing_mode`, and `requested_mode`.
 
-No MIDI read-back command is shipped in v3.9.1: `read_selection_notes` and `record_sequence verify_notes` are deferred.
+No MIDI read-back command is shipped in v3.9.2: `read_selection_notes` and `record_sequence verify_notes` are deferred.
 
 ### `logic_edit`
 
