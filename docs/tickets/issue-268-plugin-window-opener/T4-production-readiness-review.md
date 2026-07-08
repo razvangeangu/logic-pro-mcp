@@ -8,14 +8,17 @@ Ship the fix as a reviewable PR with evidence.
 
 - [x] Diff contains only PRD, tickets, implementation, tests, and evidence.
 - [x] Relevant tests and build pass.
-- [ ] Live E2E evidence is summarized in the PR.
-- [ ] PR links and closes #268.
-- [ ] #268 receives a short status comment pointing to the PR.
+- [x] Live E2E evidence is summarized in the PR.
+- [x] PR links and closes #268.
+- [x] #268 receives a short status comment pointing to the PR.
 
 ## Verification
 
 - `git diff --stat`
 - `gh pr view`
+- PR: https://github.com/MongLong0214/logic-pro-mcp/pull/271
+- Issue comment:
+  https://github.com/MongLong0214/logic-pro-mcp/issues/268#issuecomment-4910876825
 - `swift test --filter PluginSetParamVerifiedLiveTests` passed 19/19.
 - `swift test --no-parallel` passed 2214/2214.
 - `swift build -c release` passed.
