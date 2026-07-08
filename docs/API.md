@@ -1,6 +1,6 @@
 # API Reference
 
-Current surface: Logic Pro MCP exposes 10 tools, 18 static resources, and 11 resource templates. The published stable release is v3.9.2. It keeps the 10-tool / 18-resource / 11-template surface, includes the v3.9.0 MCP capability additions (resource subscriptions, workflow prompts, and per-tool `outputSchema` / `structuredContent`), and patches verified plugin parameter writes so a closed target Compressor plugin window can be opened from the requested insert slot before write/readback. `logic_midi` send-only successes and `logic_tracks.arm_only` return Honest Contract JSON envelopes (BREAKING response shape — see CHANGELOG).
+Current surface: Logic Pro MCP exposes 10 tools, 18 static resources, and 11 resource templates. The published stable release is v3.10.0. It keeps the 10-tool / 18-resource / 11-template surface, includes the v3.9.0 MCP capability additions (resource subscriptions, workflow prompts, and per-tool `outputSchema` / `structuredContent`), keeps the v3.9.2 verified plugin closed-window fix, and supports both desktop Logic Pro and Apple Creator Studio Logic Pro Creator Studio as first-class targets. `logic_midi` send-only successes and `logic_tracks.arm_only` return Honest Contract JSON envelopes (BREAKING response shape — see CHANGELOG).
 
 Use tools for actions. Use resources for state. Treat every mutating result as one of:
 
@@ -172,7 +172,7 @@ Send-only success responses return an Honest Contract State B JSON envelope beca
 
 `create_virtual_port` reuses same-name/same-mode ports. Reusing a name across modes fails closed with State C `port_unavailable` and includes `port_name`, `existing_mode`, and `requested_mode`.
 
-No MIDI read-back command is shipped in v3.9.2: `read_selection_notes` and `record_sequence verify_notes` are deferred.
+No MIDI read-back command is shipped in v3.10.0: `read_selection_notes` and `record_sequence verify_notes` are deferred.
 
 ### `logic_edit`
 
