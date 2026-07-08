@@ -10,8 +10,7 @@ from copy import deepcopy
 from typing import Any
 
 from logic_ui_jxa import parse_jxa_json_result, run_jxa, ui_prelude
-
-PROCESS_NAME = "Logic Pro"
+from logic_variants import jxa_find_process_snippet
 
 DEFAULT_CONTROLLER_LEARN_MODE_POLICY: dict[str, Any] = {
     "policy_id": "controller_assignments_learn_mode_guard",
@@ -161,6 +160,7 @@ class SystemEventsControllerLearnModeRunner:
         return run_jxa(source, timeout=timeout, run=self._run)
 
     def _jxa_source(self) -> str:
+        find_process = jxa_find_process_snippet(se_binding="systemEvents", proc_var="process")
         return ui_prelude(
             marker_constant="CANDIDATE_MARKERS",
             markers=self.policy["candidate_markers"],
@@ -191,7 +191,8 @@ function labelsFor(candidate) {{
 
 function findCandidate() {{
   const systemEvents = Application("System Events");
-  const process = systemEvents.processes.byName({json.dumps(PROCESS_NAME)});
+  {find_process}
+  if (process === null) return {{ status: "not_present", reason: "logic_not_running" }};
   if (!safe(() => process.exists(), false)) return {{ status: "not_present", reason: "logic_not_running" }};
   const windows = safe(() => process.windows(), []);
   for (let windowIndex = 0; windowIndex < windows.length; windowIndex += 1) {{

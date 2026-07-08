@@ -13,10 +13,10 @@ from unittest import mock
 import logic_bounce
 
 
-def _window_metrics_osa(script, timeout=logic_bounce.OSA_TIMEOUT_SEC):
-    if "position of front window" in script:
+def _window_metrics_logic_process(body: str, timeout_sec=logic_bounce.OSA_TIMEOUT_SEC):
+    if "position of front window" in body:
         return "100, 200"
-    if "size of front window" in script:
+    if "size of front window" in body:
         return "800, 600"
     return ""
 
@@ -53,7 +53,7 @@ class LogicBounceMainTests(unittest.TestCase):
                 mock.patch.object(logic_bounce, "bounce_dialog_present", return_value=False),
                 mock.patch.object(logic_bounce, "bounce_focus_diagnostics", return_value={"frontmost_app": "Logic Pro"}),
                 mock.patch.object(logic_bounce, "save_panel_present", return_value=False),
-                mock.patch.object(logic_bounce, "osa", side_effect=_window_metrics_osa),
+                mock.patch.object(logic_bounce, "logic_process_osa", side_effect=_window_metrics_logic_process),
                 mock.patch.object(logic_bounce, "send_ui_events", return_value=None),
                 mock.patch.object(logic_bounce.time, "sleep", lambda _: None),
                 mock.patch.object(logic_bounce.time, "time", lambda: 1000.0),
@@ -83,7 +83,7 @@ class LogicBounceMainTests(unittest.TestCase):
                 mock.patch.object(logic_bounce, "click_bounce_settings_confirm", return_value=True),
                 mock.patch.object(logic_bounce, "bounce_dialog_present", return_value=True),
                 mock.patch.object(logic_bounce, "save_panel_present", return_value=True),
-                mock.patch.object(logic_bounce, "osa", side_effect=_window_metrics_osa),
+                mock.patch.object(logic_bounce, "logic_process_osa", side_effect=_window_metrics_logic_process),
                 mock.patch.object(logic_bounce, "send_ui_events", side_effect=_ui_events_with_staged_artifact(staging_dir, typed_name)),
                 mock.patch.object(logic_bounce.time, "sleep", lambda _: None),
                 mock.patch.object(logic_bounce.time, "time", lambda: 1000.0),
@@ -114,7 +114,7 @@ class LogicBounceMainTests(unittest.TestCase):
                 mock.patch.object(logic_bounce, "click_bounce_settings_confirm", return_value=True),
                 mock.patch.object(logic_bounce, "bounce_dialog_present", return_value=False),
                 mock.patch.object(logic_bounce, "save_panel_present", return_value=True),
-                mock.patch.object(logic_bounce, "osa", side_effect=_window_metrics_osa),
+                mock.patch.object(logic_bounce, "logic_process_osa", side_effect=_window_metrics_logic_process),
                 mock.patch.object(logic_bounce, "send_ui_events", side_effect=_ui_events_with_staged_artifact(staging_dir, typed_name)),
                 mock.patch.object(logic_bounce.time, "sleep", lambda _: None),
                 mock.patch.object(logic_bounce.time, "time", lambda: 1000.0),
@@ -146,7 +146,7 @@ class LogicBounceMainTests(unittest.TestCase):
                 mock.patch.object(logic_bounce, "open_bounce_dialog", return_value=(True, ["key_command"])),
                 mock.patch.object(logic_bounce, "click_bounce_settings_confirm", return_value=True),
                 mock.patch.object(logic_bounce, "save_panel_present", return_value=True),
-                mock.patch.object(logic_bounce, "osa", side_effect=_window_metrics_osa),
+                mock.patch.object(logic_bounce, "logic_process_osa", side_effect=_window_metrics_logic_process),
                 mock.patch.object(logic_bounce, "send_ui_events", side_effect=fake_ui_events),
                 mock.patch.object(logic_bounce.time, "sleep", lambda _: None),
                 mock.patch.object(logic_bounce.time, "time", lambda: 1000.0),

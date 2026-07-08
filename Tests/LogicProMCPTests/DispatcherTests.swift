@@ -2692,7 +2692,7 @@ private actor SelectiveFailChannel: Channel {
 
     #expect(!result.isError!)
     #expect(dispatcherText(result).contains("Logic Pro launched"))
-    #expect(harness.scripts == ["tell application \"Logic Pro\" to activate"])
+    #expect(harness.scripts == [LogicProTarget.appleScriptTarget().activateByBundleID])
 }
 
 @Test func testProjectDispatcherLifecycleRunnerSurfacesExecutionErrorsAndTimeouts() async {

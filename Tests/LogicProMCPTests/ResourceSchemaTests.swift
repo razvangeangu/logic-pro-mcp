@@ -455,6 +455,9 @@ private func normalizedHealthJSON(_ text: String) throws -> [String: Any] {
     let json = try! sharedParseJSON(toolText(result)) as! [String: Any]
     #expect(json["logic_pro_running"] as? Bool != nil)
     #expect(json["logic_pro_version"] as? String != nil)
+    #expect(json["logic_pro_bundle_id"] as? String != nil)
+    #expect(json["logic_pro_variant"] as? String != nil)
+    #expect(json["process_metadata_resolved"] as? Bool != nil)
     #expect(json["mcu"] as? [String: Any] != nil)
     #expect(json["channels"] as? [[String: Any]] != nil)
     #expect(json["cache"] as? [String: Any] != nil)

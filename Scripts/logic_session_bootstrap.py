@@ -18,6 +18,18 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from logic_variants import (
+    activate_logic as _activate_logic,
+    blocking_dialog_subrole_jxa,
+    is_logic_frontmost_app,
+    jxa_find_process_snippet,
+    known_bundle_ids,
+    logic_document_open_probe as _logic_document_open_probe,
+    logic_menu_items_probe as _logic_menu_items_probe,
+    logic_window_names_probe as _logic_window_names_probe,
+    process_name_for_bundle_id,
+)
+
 LOGIC_APP_NAME = "Logic Pro"
 PROJECT_PICKER_MARKERS = (
     "choose a project",
@@ -344,7 +356,7 @@ def evaluate_fresh_session(
             "blocking_dialog_present",
             "Dismiss the blocking Logic dialog or sheet before continuing.",
         )
-    if ui.frontmost_app != LOGIC_APP_NAME:
+    if not is_logic_frontmost_app(ui.frontmost_app):
         return FreshSessionAssessment(
             False,
             "logic_not_frontmost",
@@ -486,22 +498,6 @@ def _split_lines(output: str | None) -> list[str]:
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
-def _activate_logic() -> bool:
-    if _run_osascript([f'tell application "{LOGIC_APP_NAME}" to activate'], timeout_sec=2.0) is not None:
-        return True
-    try:
-        result = subprocess.run(
-            ["/usr/bin/open", "-a", LOGIC_APP_NAME],
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
-
-
 def _hide_application(name: str) -> bool:
     escaped = name.replace("\\", "\\\\").replace('"', '\\"')
     output = _run_osascript(
@@ -571,6 +567,7 @@ def _click_dialog_button(window_markers: Sequence[str], button_labels: Sequence[
 
     window_markers_json = json.dumps(list(window_markers), ensure_ascii=False)
     button_labels_json = json.dumps(list(button_labels), ensure_ascii=False)
+    find_process = jxa_find_process_snippet(se_binding="se", proc_var="proc")
     script = f"""
 const windowMarkers = {window_markers_json};
 const buttonLabels = {button_labels_json};
@@ -610,7 +607,10 @@ function findButton(node, depth) {{
 }}
 
 const se = Application("System Events");
-const proc = se.processes.byName("Logic Pro");
+{find_process}
+if (proc === null) {{
+  JSON.stringify({{ ok: false, reason: "no_process" }});
+}} else {{
 const windows = safe(() => proc.windows(), []);
 let targetWindow = null;
 for (let index = 0; index < windows.length; index += 1) {{
@@ -631,6 +631,7 @@ if (targetWindow === null) {{
     delay(0.5);
     JSON.stringify({{ ok: true }});
   }}
+}}
 }}
 """
     _activate_logic()
@@ -683,60 +684,11 @@ def _frontmost_application_probe() -> tuple[str | None, str | None]:
     return result.output, result.error
 
 
-def _logic_document_open_probe(timeout_sec: float = 2.0) -> tuple[bool | None, str | None]:
-    result = _run_osascript_probe(
-        [
-            f'tell application "{LOGIC_APP_NAME}"',
-            "return count of documents as text",
-            "end tell",
-        ],
-        timeout_sec=timeout_sec,
-    )
-    if result.error:
-        return None, result.error
-    raw = (result.output or "").strip()
-    try:
-        return int(raw) > 0, None
-    except ValueError:
-        return None, f"document_count_invalid:{raw!r}"
-
-
 def _remaining_timeout(deadline: float, cap: float, floor: float = 0.1) -> float:
     remaining = deadline - time.time()
     if remaining <= floor:
         return floor
     return min(cap, remaining)
-
-
-def _logic_window_names_probe() -> tuple[list[str], str | None]:
-    result = _run_osascript_probe(
-        [
-            'tell application "System Events"',
-            f'if not (exists application process "{LOGIC_APP_NAME}") then return ""',
-            f'tell application process "{LOGIC_APP_NAME}"',
-            "set AppleScript's text item delimiters to linefeed",
-            "return (name of windows) as text",
-            "end tell",
-            "end tell",
-        ],
-        timeout_sec=2.0,
-    )
-    return _split_lines(result.output), result.error
-
-
-def _logic_menu_items_probe() -> tuple[list[str], str | None]:
-    result = _run_osascript_probe(
-        [
-            'tell application "System Events"',
-            f'tell application process "{LOGIC_APP_NAME}"',
-            "set AppleScript's text item delimiters to linefeed",
-            "return (name of menu bar items of menu bar 1) as text",
-            "end tell",
-            "end tell",
-        ],
-        timeout_sec=2.0,
-    )
-    return _split_lines(result.output), result.error
 
 
 def _ui_snapshot_from_native_payload(payload: Any) -> UISnapshot | None:
@@ -753,8 +705,8 @@ def _ui_snapshot_from_native_payload(payload: Any) -> UISnapshot | None:
         return None
     if not isinstance(blocking_dialog_present, bool):
         return None
-    if frontmost_bundle_id == "com.apple.logic10":
-        frontmost_app = LOGIC_APP_NAME
+    if frontmost_bundle_id in known_bundle_ids():
+        frontmost_app = process_name_for_bundle_id(frontmost_bundle_id)
     if not isinstance(window_names, list) or not all(isinstance(item, str) for item in window_names):
         return None
     if not isinstance(menu_items, list) or not all(isinstance(item, str) for item in menu_items):
@@ -804,22 +756,7 @@ def _native_ui_snapshot() -> tuple[UISnapshot | None, str | None]:
     return snapshot, None
 
 
-_BLOCKING_DIALOG_SUBROLE_JXA = "\n".join([
-    'function safe(fn, fallback) { try { return fn(); } catch (e) { return fallback; } }',
-    'function str(v) { return v === undefined || v === null ? "" : String(v); }',
-    'const se = Application("System Events");',
-    'const proc = safe(() => se.processes.byName("Logic Pro"), null);',
-    'if (!proc) { JSON.stringify({status: "no_process"}); }',
-    'else {',
-    '  const wins = safe(() => proc.windows(), []);',
-    '  let blocking = false;',
-    '  for (let i = 0; i < wins.length; i += 1) {',
-    '    const sr = str(safe(() => wins[i].subrole(), ""));',
-    '    if (sr === "AXDialog" || sr === "AXSystemDialog") { blocking = true; break; }',
-    '  }',
-    '  JSON.stringify({status: "ok", blocking: blocking});',
-    '}',
-])
+_BLOCKING_DIALOG_SUBROLE_JXA = blocking_dialog_subrole_jxa()
 
 
 def _jxa_blocking_dialog_probe() -> bool | None:
@@ -1196,7 +1133,7 @@ def bootstrap_fresh_logic_session(
             deadline = min(max_deadline, time.time() + config.timeout_sec)
 
         while time.time() < deadline:
-            if ui_local.frontmost_app != LOGIC_APP_NAME and (
+            if not is_logic_frontmost_app(ui_local.frontmost_app) and (
                 ui_local.project_picker_visible
                 or ui_local.new_track_dialog_visible
                 or ui_local.blocking_dialog_present
@@ -1205,7 +1142,7 @@ def bootstrap_fresh_logic_session(
                 if activated:
                     actions.append("activate:Logic Pro")
                     extend_deadline()
-                if ui_local.frontmost_app != LOGIC_APP_NAME:
+                if not is_logic_frontmost_app(ui_local.frontmost_app):
                     time.sleep(config.poll_interval_sec)
                     _, latest_health = fetch_health()
                     if latest_health is not None:
@@ -1242,7 +1179,7 @@ def bootstrap_fresh_logic_session(
                 if activated:
                     actions.append("activate:Logic Pro")
                     extend_deadline()
-                if ui_local.frontmost_app != LOGIC_APP_NAME:
+                if not is_logic_frontmost_app(ui_local.frontmost_app):
                     time.sleep(config.poll_interval_sec)
                     _, latest_health = fetch_health()
                     if latest_health is not None:
@@ -1274,7 +1211,7 @@ def bootstrap_fresh_logic_session(
                 if activated:
                     actions.append("activate:Logic Pro")
                     extend_deadline()
-                if ui_local.frontmost_app != LOGIC_APP_NAME:
+                if not is_logic_frontmost_app(ui_local.frontmost_app):
                     time.sleep(config.poll_interval_sec)
                     _, latest_health = fetch_health()
                     if latest_health is not None:
@@ -1354,7 +1291,7 @@ def bootstrap_fresh_logic_session(
         ui_local: UISnapshot,
         health_local: dict[str, Any],
     ) -> tuple[UISnapshot, dict[str, Any]] | BootstrapResult:
-        if ui_local.frontmost_app != LOGIC_APP_NAME and (
+        if not is_logic_frontmost_app(ui_local.frontmost_app) and (
             ui_local.project_picker_visible
             or ui_local.new_track_dialog_visible
             or ui_local.blocking_dialog_present
@@ -1385,7 +1322,7 @@ def bootstrap_fresh_logic_session(
             ui_local, activated = ensure_logic_frontmost(force_activate=True)
             if activated:
                 actions.append("activate:Logic Pro")
-            if ui_local.frontmost_app != LOGIC_APP_NAME:
+            if not is_logic_frontmost_app(ui_local.frontmost_app):
                 return ui_local, health_local
             permissions = health_local.get("permissions", {})
             if permissions.get("post_event_access") is not True:
@@ -1410,7 +1347,7 @@ def bootstrap_fresh_logic_session(
             ui_local, activated = ensure_logic_frontmost(force_activate=True)
             if activated:
                 actions.append("activate:Logic Pro")
-            if ui_local.frontmost_app != LOGIC_APP_NAME:
+            if not is_logic_frontmost_app(ui_local.frontmost_app):
                 return ui_local, health_local
             permissions = health_local.get("permissions", {})
             if permissions.get("post_event_access") is not True:
@@ -1457,7 +1394,7 @@ def bootstrap_fresh_logic_session(
         force_activate: bool = False,
     ) -> tuple[UISnapshot, bool]:
         ui_local = collect_ui_snapshot()
-        if ui_local.frontmost_app == LOGIC_APP_NAME and not force_activate:
+        if is_logic_frontmost_app(ui_local.frontmost_app) and not force_activate:
             return ui_local, False
 
         deadline = time.time() + timeout_sec
@@ -1471,7 +1408,7 @@ def bootstrap_fresh_logic_session(
                 break
             time.sleep(min(focus_settle_sec, remaining))
             ui_local = collect_ui_snapshot()
-            if ui_local.frontmost_app == LOGIC_APP_NAME:
+            if is_logic_frontmost_app(ui_local.frontmost_app):
                 return ui_local, activated
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -1530,7 +1467,7 @@ def bootstrap_fresh_logic_session(
     time.sleep(min(0.2, max(0.05, config.poll_interval_sec)))
 
     ui = collect_ui_snapshot()
-    if ui.frontmost_app != LOGIC_APP_NAME:
+    if not is_logic_frontmost_app(ui.frontmost_app):
         ui, activated = ensure_logic_frontmost()
         if activated:
             actions.append("activate:Logic Pro")
@@ -1731,7 +1668,7 @@ def bootstrap_fresh_logic_session(
                 if activated:
                     actions.append("activate:Logic Pro")
                     extend_deadline()
-                if ui.frontmost_app != LOGIC_APP_NAME:
+                if not is_logic_frontmost_app(ui.frontmost_app):
                     continue
                 permissions = health.get("permissions", {})
                 if permissions.get("post_event_access") is not True:
@@ -1765,7 +1702,7 @@ def bootstrap_fresh_logic_session(
                 if activated:
                     actions.append("activate:Logic Pro")
                     extend_deadline()
-                if ui.frontmost_app != LOGIC_APP_NAME:
+                if not is_logic_frontmost_app(ui.frontmost_app):
                     continue
                 permissions = health.get("permissions", {})
                 if permissions.get("post_event_access") is not True:
@@ -1862,7 +1799,7 @@ def bootstrap_fresh_logic_session(
         ui, activated = ensure_logic_frontmost()
         if activated:
             actions.append("activate:Logic Pro")
-        if ui.frontmost_app != LOGIC_APP_NAME:
+        if not is_logic_frontmost_app(ui.frontmost_app):
             return blocked(
                 "logic_not_frontmost",
                 "Could not restore Logic Pro to the foreground before creating the first track.",
@@ -1879,7 +1816,7 @@ def bootstrap_fresh_logic_session(
                 ui, activated = ensure_logic_frontmost()
                 if activated:
                     actions.append("activate:Logic Pro")
-                if ui.frontmost_app != LOGIC_APP_NAME:
+                if not is_logic_frontmost_app(ui.frontmost_app):
                     return blocked(
                         "logic_not_frontmost",
                         "Could not restore Logic Pro to the foreground before creating the first track.",

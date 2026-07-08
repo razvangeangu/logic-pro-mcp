@@ -5,7 +5,7 @@ Minimal install and Logic Pro integration guide for Logic Pro MCP v3.9.2.
 ## Requirements
 
 - macOS 14+
-- Logic Pro — **latest release prioritized (currently 12.3)**; works down to the 12.0.1 floor on a best-effort basis. Logic Pro MCP targets and validates against the newest Logic Pro version first, since Logic's Accessibility tree changes between releases.
+- Logic Pro — **latest release prioritized (currently 12.3)**; works down to the 12.0.1 floor on a best-effort basis. Supported Mac variants: desktop **Logic Pro** (`com.apple.logic10`, `/Applications/Logic Pro.app`) and Apple Creator Studio **Logic Pro Creator Studio** (`com.apple.mobilelogic`, `/Applications/Logic Pro Creator Studio.app`). They use different process names for System Events automation.
 - Claude Code, Claude Desktop, Cursor, or another MCP client
 - Homebrew, or Xcode/Swift if building from source
 
@@ -58,6 +58,8 @@ Open **System Settings -> Privacy & Security**:
 1. **Accessibility**: enable the app that launches `LogicProMCP` (Claude Code, Terminal, Cursor, or Claude Desktop).
 2. **Automation**: allow that app to control **Logic Pro** and **System Events**.
 
+If you use **Apple Creator Studio** Logic Pro (`com.apple.mobilelogic`), grant Automation separately from desktop Logic Pro (`com.apple.logic10`). macOS treats them as distinct apps even though both appear as "Logic Pro".
+
 `--check-permissions` and doctor readiness cover Accessibility, Automation for Logic Pro, Automation for System Events, and trusted PostEvent access. PostEvent is granted through the same launcher-app Accessibility control, but is reported separately because CGEvent fallback paths need it.
 
 Verify:
@@ -66,6 +68,16 @@ Verify:
 LogicProMCP --check-permissions
 LogicProMCP doctor
 ```
+
+### Forcing a Logic Pro variant
+
+When both desktop Logic Pro and Creator Studio Logic Pro are installed, the server auto-detects the frontmost running instance, otherwise prefers the desktop install. To force a specific variant:
+
+```bash
+LOGIC_PRO_BUNDLE_ID=com.apple.mobilelogic LogicProMCP
+```
+
+Valid values: `com.apple.logic10` (desktop), `com.apple.mobilelogic` (Creator Studio).
 
 ## Logic Pro Setup
 

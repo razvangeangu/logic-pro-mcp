@@ -60,8 +60,28 @@ func isBlockingDialogWindow(_ element: AXUIElement) -> Bool {
     return !isKeyboardLayoutOverlayWindow(element)
 }
 
+let logicProKnownBundleIDs = ["com.apple.logic10", "com.apple.mobilelogic"]
+
+func resolveLogicApp() -> NSRunningApplication? {
+    let env = ProcessInfo.processInfo.environment
+    if let forced = env["LOGIC_PRO_BUNDLE_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines), !forced.isEmpty {
+        return NSRunningApplication.runningApplications(withBundleIdentifier: forced).first
+    }
+    if let frontmostID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+       logicProKnownBundleIDs.contains(frontmostID),
+       let app = NSRunningApplication.runningApplications(withBundleIdentifier: frontmostID).first {
+        return app
+    }
+    for bundleID in logicProKnownBundleIDs {
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
+            return app
+        }
+    }
+    return nil
+}
+
 let frontmost = NSWorkspace.shared.frontmostApplication
-let logicApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.logic10").first
+let logicApp = resolveLogicApp()
 
 var error: String?
 var windowNames: [String] = []

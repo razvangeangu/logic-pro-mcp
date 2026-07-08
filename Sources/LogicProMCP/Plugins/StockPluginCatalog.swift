@@ -377,7 +377,7 @@ struct StockPluginCensus: Sendable, Equatable {
 
     static func production(now: Date = Date()) -> Self {
         let observedAt = ISO8601DateFormatter.cacheFormatter.string(from: now)
-        let appPath = "/Applications/Logic Pro.app"
+        let appPath = LogicProTarget.preferredInstalledApplicationPath()
         let appPresent = FileManager.default.fileExists(atPath: appPath)
         let bundle = appPresent ? Bundle(path: appPath) : nil
         let version = bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String

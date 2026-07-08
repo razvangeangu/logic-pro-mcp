@@ -522,12 +522,11 @@ actor AppleScriptChannel: Channel {
     // MARK: - Script templates
 
     private func newProjectScript() -> String {
-        """
-        tell application "Logic Pro"
-            activate
-        end tell
+        let logicProAppleScript = LogicProTarget.appleScriptTarget()
+        return """
+        \(logicProAppleScript.activateByBundleID)
         tell application "System Events"
-            tell process "Logic Pro"
+            tell \(logicProAppleScript.systemEventsProcessTarget)
                 click menu item 1 of menu 1 of menu bar item 3 of menu bar 1
                 repeat 20 times
                     delay 0.2
@@ -606,7 +605,7 @@ actor AppleScriptChannel: Channel {
     private func closeProjectScript(saving: String) -> String {
         let saveClause = closeProjectSaveClause(saving: saving)
         return """
-        tell application "Logic Pro"
+        \(LogicProTarget.appleScriptTarget().tellApplicationByBundleID)
             close front document \(saveClause)
         end tell
         """
@@ -615,7 +614,7 @@ actor AppleScriptChannel: Channel {
     private func closeCurrentProjectIfAnyScript(saving: String) -> String {
         let saveClause = closeProjectSaveClause(saving: saving)
         return """
-        tell application "Logic Pro"
+        \(LogicProTarget.appleScriptTarget().tellApplicationByBundleID)
             if (count of documents) > 0 then
                 close front document \(saveClause)
             end if
@@ -625,7 +624,7 @@ actor AppleScriptChannel: Channel {
 
     static func currentDocumentPathScript() -> String {
         """
-        tell application "Logic Pro"
+        \(LogicProTarget.appleScriptTarget().tellApplicationByBundleID)
             if (count of documents) > 0 then
                 try
                     return path of front document as text
@@ -640,7 +639,7 @@ actor AppleScriptChannel: Channel {
 
     static func currentDocumentIdentityScript() -> String {
         """
-        tell application "Logic Pro"
+        \(LogicProTarget.appleScriptTarget().tellApplicationByBundleID)
             if (count of documents) > 0 then
                 set docPath to ""
                 set docName to ""
@@ -761,7 +760,7 @@ actor AppleScriptChannel: Channel {
 
     private func saveProjectScript() -> String {
         """
-        tell application "Logic Pro"
+        \(LogicProTarget.appleScriptTarget().tellApplicationByBundleID)
             save front document
         end tell
         """
@@ -769,7 +768,7 @@ actor AppleScriptChannel: Channel {
 
     private func readinessProbeScript() -> String {
         """
-        tell application "Logic Pro"
+        \(LogicProTarget.appleScriptTarget().tellApplicationByBundleID)
             return name
         end tell
         """
@@ -784,7 +783,7 @@ actor AppleScriptChannel: Channel {
             .replacingOccurrences(of: "\n", with: "")
             .replacingOccurrences(of: "\r", with: "")
         return """
-        tell application "Logic Pro"
+        \(LogicProTarget.appleScriptTarget().tellApplicationByBundleID)
             repeat 25 times
                 if (count of documents) > 0 then
                     try
@@ -813,14 +812,14 @@ actor AppleScriptChannel: Channel {
             .replacingOccurrences(of: "\n", with: "")
             .replacingOccurrences(of: "\r", with: "")
         return """
-        tell application "Logic Pro"
+        \(LogicProTarget.appleScriptTarget().tellApplicationByBundleID)
             save front document in (POSIX file "\(escapedPath)")
         end tell
         """
     }
 
     private static func transportScript(action: String) -> String {
-        "tell application id \"\(ServerConfig.logicProBundleID)\" to \(action)"
+        "\(LogicProTarget.appleScriptTarget().tellApplicationByBundleID) to \(action)"
     }
 
     // MARK: - Helpers

@@ -234,8 +234,8 @@ enum PermissionChecker {
     private static func runAutomationProbeViaShell() -> CheckState {
         // Tri-state (P1 honesty, G6-a): a timeout / spawn failure surfaces as
         // .notVerifiable, not a false denial. See `probeState`.
-        let escapedBundleID = AppleScriptSafety.escapeForScript(ServerConfig.logicProBundleID)
-        let script = "tell application id \"\(escapedBundleID)\" to return name"
+        let appleScriptTarget = LogicProTarget.appleScriptTarget()
+        let script = "\(appleScriptTarget.tellApplicationByBundleID) to return name"
         return probeState(
             from: BoundedProcessRunner.run(
                 executable: "/usr/bin/osascript",
@@ -243,7 +243,7 @@ enum PermissionChecker {
                 timeout: 1.0,
                 outputLimitBytes: 4 * 1024
             ),
-            expectedName: ServerConfig.logicProProcessName
+            expectedName: LogicProTarget.current.processName
         )
     }
 

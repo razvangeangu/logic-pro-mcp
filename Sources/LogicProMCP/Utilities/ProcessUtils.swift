@@ -26,7 +26,9 @@ enum ProcessUtils {
                     || ProcessUtils.logicProPIDViaProcessList() != nil
             },
             activateLogicPro: {
-                guard let app = ProcessUtils.logicProApp() else { return false }
+                guard let app = ProcessUtils.logicProApp() else {
+                    return ProcessUtils.activateLogicProViaAppleScript()
+                }
                 return ProcessUtils.activateLogicProWithFallback(
                     appKitActivate: {
                         ProcessUtils.runAppKit {
@@ -44,8 +46,7 @@ enum ProcessUtils {
                 // `NSWorkspace.urlForApplication(withBundleIdentifier:)` are
                 // launch-services queries with no runloop dependency, so the
                 // prior `runAppKit` guard forced a false-nil under stdio.
-                ProcessUtils.logicProApp()?.bundleURL
-                    ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: ServerConfig.logicProBundleID)
+                LogicProTarget.installedBundleURL()
             }
         )
     }
@@ -93,11 +94,12 @@ enum ProcessUtils {
     }
 
     private static func activateLogicProViaAppleScript() -> Bool {
+        let logicProAppleScript = LogicProTarget.current.appleScriptTarget()
         let script = """
-        tell application "Logic Pro" to activate
+        \(logicProAppleScript.activateByBundleID)
         try
             tell application "System Events"
-                tell process "Logic Pro" to set frontmost to true
+                tell \(logicProAppleScript.systemEventsProcessTarget) to set frontmost to true
             end tell
         end try
         return "ok"
@@ -119,9 +121,30 @@ enum ProcessUtils {
     /// database; no runloop dependency). Calling it directly removes
     /// the false negative without losing safety.
     private static func logicProApp() -> NSRunningApplication? {
-        NSRunningApplication.runningApplications(
-            withBundleIdentifier: ServerConfig.logicProBundleID
-        ).first
+        LogicProTarget.runningApplication()
+    }
+
+    static func bundleIDForPID(_ pid: pid_t) -> String? {
+        NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+    }
+
+    static func isKnownLogicPID(_ pid: pid_t) -> Bool {
+        guard let bundleID = bundleIDForPID(pid) else { return true }
+        return LogicProTarget.isKnownBundleID(bundleID)
+    }
+
+    static func preferredLogicPID(from candidates: [pid_t]) -> pid_t? {
+        guard !candidates.isEmpty else { return nil }
+        let target = LogicProTarget.current
+        if let match = candidates.first(where: { bundleIDForPID($0) == target.bundleID }) {
+            return match
+        }
+        if let frontmostID = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+           candidates.contains(frontmostID),
+           isKnownLogicPID(frontmostID) {
+            return frontmostID
+        }
+        return candidates.first(where: isKnownLogicPID(_:))
     }
 
     /// Returns the PID of Logic Pro if running, nil otherwise.
@@ -177,7 +200,6 @@ enum ProcessUtils {
         runtime.activateLogicPro()
     }
 
-    /// Best-effort Logic Pro version lookup from the installed bundle.
     static func logicProVersion() -> String? {
         logicProVersion(runtime: .production)
     }
@@ -191,11 +213,10 @@ enum ProcessUtils {
     }
 
     private static func logicProPIDViaSystemEvents() -> pid_t? {
-        let escapedName = AppleScriptSafety.escapeForScript(ServerConfig.logicProProcessName)
         let script = """
         tell application "System Events"
             try
-                return unix id of first application process whose name is "\(escapedName)"
+                return unix id of first application process whose name is "\(AppleScriptSafety.escapeForScript(LogicProTarget.current.processName))"
             on error
                 return ""
             end try
@@ -203,13 +224,15 @@ enum ProcessUtils {
         """
         guard let output = runAppleScript(script) else { return nil }
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let rawPID = Int32(trimmed), rawPID > 0 else {
+        guard let rawPID = Int32(trimmed), rawPID > 0, isKnownLogicPID(rawPID) else {
             return nil
         }
         return rawPID
     }
 
     static func parseLogicProPID(fromProcessList output: String) -> pid_t? {
+        var candidates: [pid_t] = []
+        let installPathMarkers = LogicProVariantPolicy.macOSExecutablePathMarkers
         for rawLine in output.split(whereSeparator: \.isNewline) {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty else { continue }
@@ -220,21 +243,21 @@ enum ProcessUtils {
             }
 
             let command = String(parts[1])
-            if command.contains("/Logic Pro.app/Contents/MacOS/Logic Pro")
-                || command == "Logic Pro"
-                || command.hasSuffix("/Logic Pro")
+            if LogicProTarget.knownProcessNames.contains(where: { command.contains($0) })
+                || installPathMarkers.contains(where: { command.contains($0) })
             {
-                return rawPID
+                candidates.append(rawPID)
             }
         }
 
-        return nil
+        return preferredLogicPID(from: candidates)
     }
 
     static func logicProPID(fromWindowList windowList: [[String: Any]]) -> pid_t? {
+        var candidates: [pid_t] = []
         for info in windowList {
             guard let ownerName = info[kCGWindowOwnerName as String] as? String,
-                  ownerName == ServerConfig.logicProProcessName,
+                  LogicProTarget.isLogicProcessName(ownerName),
                   let ownerPID = pidValue(from: info[kCGWindowOwnerPID as String]),
                   ownerPID > 0 else {
                 continue
@@ -244,14 +267,14 @@ enum ProcessUtils {
                let width = (bounds["Width"] as? NSNumber)?.doubleValue,
                let height = (bounds["Height"] as? NSNumber)?.doubleValue {
                 if width > 0, height > 0 {
-                    return ownerPID
+                    candidates.append(ownerPID)
                 }
             } else {
-                return ownerPID
+                candidates.append(ownerPID)
             }
         }
 
-        return nil
+        return preferredLogicPID(from: candidates)
     }
 
     private static func pidValue(from value: Any?) -> pid_t? {
@@ -292,13 +315,19 @@ enum ProcessUtils {
             arguments: ["-axo", "pid=,comm="],
             timeout: subprocessTimeout
         )
-        let pgrepOutput = psOutput.flatMap(parseLogicProPID(fromProcessList:)) == nil
-            ? runProcessAndCaptureStdout(
-                executablePath: "/usr/bin/pgrep",
-                arguments: ["-fl", ServerConfig.logicProProcessName],
-                timeout: subprocessTimeout
-            )
-            : nil
+        var pgrepOutput: String?
+        if psOutput.flatMap(parseLogicProPID(fromProcessList:)) == nil {
+            for processName in LogicProTarget.knownProcessNames {
+                pgrepOutput = runProcessAndCaptureStdout(
+                    executablePath: "/usr/bin/pgrep",
+                    arguments: ["-fl", processName],
+                    timeout: subprocessTimeout
+                )
+                if pgrepOutput.flatMap(parseLogicProPID(fromProcessList:)) != nil {
+                    break
+                }
+            }
+        }
         let pid = psOutput.flatMap(parseLogicProPID(fromProcessList:))
             ?? pgrepOutput.flatMap(parseLogicProPID(fromProcessList:))
 
@@ -328,9 +357,6 @@ enum ProcessUtils {
         executablePath: String,
         arguments: [String],
         timeout: TimeInterval,
-        // Process-table probes (`ps -axo`, `pgrep`) can be large on busy hosts;
-        // use a generous cap so a Logic line never lands past a truncation
-        // boundary and makes PID parsing silently miss it.
         outputLimitBytes: Int = 8_388_608
     ) -> String? {
         guard case let .completed(output) = BoundedProcessRunner.run(
@@ -350,7 +376,6 @@ enum ProcessUtils {
         return output.stdout
     }
 
-    /// Lightweight server-process metrics for diagnostics.
     static func currentProcessMetrics() -> ProcessMetrics {
         let uptime = max(Date().timeIntervalSince(processStartDate), 0)
 

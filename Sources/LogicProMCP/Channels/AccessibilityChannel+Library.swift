@@ -206,9 +206,7 @@ extension AccessibilityChannel {
     /// This AX probe is preserved for `{mode:"ax"}` (legacy clients and diff
     /// mode) and still carries its 2-level limitation.
     static func buildLiveTreeProbe(runtime: AXLogicProElements.Runtime) -> TreeProbe {
-        let logicPID = NSWorkspace.shared.runningApplications.first(where: {
-            $0.bundleIdentifier == "com.apple.logic10"
-        })?.processIdentifier
+        let logicPID = LogicProTarget.runningApplication()?.processIdentifier
         let detector = MutationDetector(runtime: runtime)
         return TreeProbe(
             childrenAt: { path in
