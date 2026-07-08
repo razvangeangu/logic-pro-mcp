@@ -1500,6 +1500,16 @@ class BootstrapFreshSessionActionTests(unittest.TestCase):
             "created_before_picker_handled": False,
         }
 
+        class FakeClock:
+            def __init__(self):
+                self.now = 0.0
+
+            def time(self):
+                return self.now
+
+            def sleep(self, duration):
+                self.now += duration
+
         def make_ui_snapshot():
             if state["created"] and not state["track_created"]:
                 if state["send_return_calls"] > 0:
@@ -1595,7 +1605,12 @@ class BootstrapFreshSessionActionTests(unittest.TestCase):
             state["project_picker_visible"] = False
             return True
 
-        with mock.patch("logic_session_bootstrap._send_return_key", side_effect=send_return_key):
+        fake_clock = FakeClock()
+        with (
+            mock.patch("logic_session_bootstrap._send_return_key", side_effect=send_return_key),
+            mock.patch("logic_session_bootstrap.time.sleep", side_effect=fake_clock.sleep),
+            mock.patch("logic_session_bootstrap.time.time", side_effect=fake_clock.time),
+        ):
             result = run_force_new_bootstrap(
                 call_tool=call_tool,
                 document_probe=lambda timeout_sec: (False, None),
